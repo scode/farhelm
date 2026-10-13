@@ -196,6 +196,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   agent put a URL in front of the user's browser; which ones (asking first, showing the full URL, restricting schemes,
   and so on) is to be worked out.
 
+- **Support Codex wrappers for the conversation hook.** A Codex session launched through a wrapper command loses its
+  conversation hook reports: the supervisor only accepts a Codex report whose process chain from the pane down to
+  `codex` has no launch wrapper in between (SPEC_impl.md, "Codex attribution and exact-record validation"), so Farhelm
+  never learns which conversation such a session is in. Claude already tolerates a one-level wrapper. Make the hook work
+  for Codex wrappers too. The maintainer knows the details of the wrapper case this needs to cover.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
