@@ -153,7 +153,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the top of the sidebar has grown (host choices, checkout folder, post-clone command, and more) until it runs past the
   bottom of the window, and its close button only appears once you scroll down to it. Give it a header and footer that
   stay in the same place and are always visible, with only the settings between them scrolling, and an × close button at
-  the top like the host settings dialog has.
+  the top like the host settings dialog has. Plan: `plans/queue/app-settings-pinned.md`.
 
 - **Spruce up the feedback window.** The "send feedback" dialog works but looks unfinished. From a screenshot of it: the
   message and contact fields are bright white boxes on the dark dialog, unlike the dark fields everywhere else in the
