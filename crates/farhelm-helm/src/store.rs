@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 44;
+const SCHEMA_VERSION: i64 = 45;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -639,6 +639,12 @@ pub struct HostRow {
     /// without asking the user (SPEC.md, Agent-spawned sessions). `false` (asks first) for
     /// every host until [`HelmStore::set_commands_without_asking`] says otherwise.
     pub commands_without_asking: bool,
+    /// Permission for sessions on this host to open public web addresses without a full approval.
+    /// Local-network addresses have their own permission; neither grants command authority.
+    pub links_without_asking: bool,
+    /// Permission to open addresses on the user's own machine or network. Kept separate because
+    /// this exposes a different boundary than opening a public site.
+    pub local_links_without_asking: bool,
     /// Durable decorative identity. Null columns decode to cloud/default;
     /// the local host cannot be assigned either field.
     pub icon: farhelm_proto::host_appearance::HostIcon,
@@ -666,7 +672,29 @@ type RawHostRow = (
     bool,
     Option<String>,
     Option<String>,
+    bool,
+    bool,
 );
+
+/// The independent browser permissions a host may receive.
+///
+/// A public-link grant must never authorize a link to the user's local network, and neither
+/// grant authorizes other agent commands. The caller classifies an admitted URL before choosing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserPermission {
+    Public,
+    LocalNetwork,
+}
+
+impl BrowserPermission {
+    /// A closed set of column names, safe to interpolate into the store's SQL.
+    fn column(self) -> &'static str {
+        match self {
+            Self::Public => "links_without_asking",
+            Self::LocalNetwork => "local_links_without_asking",
+        }
+    }
+}
 
 /// One decodable row of the session cache as [`HelmStore::cached_rows`]
 /// reads it: which host filed it and its payload.
@@ -1793,6 +1821,8 @@ pub struct HelmStore {
 /// - 43: the nullable feedback contact joins the shared preferences row.
 /// - 44: nullable stable icon/color words on hosts; null preserves cloud/default
 ///   and the local host keeps both null.
+/// - 45: independent public and local-network browser permissions, both off for every host.
+///   A previous command or YOLO grant never supplies either permission.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1879,6 +1909,9 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- fresh path and the migration ladder retain column order.
                  icon TEXT CHECK (kind = 'ssh' OR icon IS NULL),
                  color TEXT CHECK (kind = 'ssh' OR color IS NULL),
+                 -- Browser permissions are independent of command authority and start asking.
+                 links_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (links_without_asking IN (0, 1)),
+                 local_links_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (local_links_without_asking IN (0, 1)),
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -2089,7 +2122,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 44;",
+              PRAGMA user_version = 45;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3076,6 +3109,28 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("PRAGMA user_version = 44;")
             .context("migrating helm.db to schema version 44")?;
         version = 44;
+    }
+    if version == 44 {
+        // Rewound ladder fixtures may already have these columns. A genuine schema-44
+        // database acquires two separate, default-off grants; old trust is never copied.
+        for column in ["links_without_asking", "local_links_without_asking"] {
+            let present: bool = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name = ?1",
+                    [column],
+                    |row| row.get::<_, i64>(0),
+                )
+                .context("checking browser permission columns")?
+                > 0;
+            if !present {
+                tx.execute_batch(&format!(
+                    "ALTER TABLE hosts ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0 CHECK ({column} IN (0, 1));"
+                )).context("migrating browser permissions")?;
+            }
+        }
+        tx.execute_batch("PRAGMA user_version = 45;")
+            .context("migrating helm.db to schema version 45")?;
+        version = 45;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -4358,7 +4413,8 @@ impl HelmStore {
                     let mut stmt = conn
                 .prepare(
                     "SELECT id, kind, destination, alias, remote_farhelm, remote_state_dir, \
-                     host_identity, cache_truncated, yolo_without_asking, commands_without_asking, icon, color \
+                     host_identity, cache_truncated, yolo_without_asking, commands_without_asking, icon, color, \
+                     links_without_asking, local_links_without_asking \
                      FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
@@ -4377,6 +4433,8 @@ impl HelmStore {
                                 r.get(9)?,
                                 r.get(10)?,
                                 r.get(11)?,
+                                r.get(12)?,
+                                r.get(13)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -4397,6 +4455,8 @@ impl HelmStore {
                                 commands_without_asking,
                                 icon,
                                 color,
+                                links_without_asking,
+                                local_links_without_asking,
                             )| {
                                 Ok(HostRow {
                                     id,
@@ -4409,6 +4469,8 @@ impl HelmStore {
                                     cache_truncated,
                                     yolo_without_asking,
                                     commands_without_asking,
+                                    links_without_asking,
+                                    local_links_without_asking,
                                     icon: icon.as_deref().unwrap_or("cloud").parse()
                                         .map_err(anyhow::Error::msg)?,
                                     color: color.as_deref().unwrap_or("default").parse()
@@ -5088,6 +5150,79 @@ impl HelmStore {
             .await
     }
 
+    /// Change one browser permission without affecting the other or command authority.
+    ///
+    /// Returns whether the value changed; an unknown host is an error. This is the user's
+    /// settings write. An approval's identity-bound grant uses [`Self::allow_browser_for_identity`].
+    pub async fn set_browser_permission(
+        &self,
+        host: HostId,
+        permission: BrowserPermission,
+        allowed: bool,
+    ) -> anyhow::Result<bool> {
+        self.conn
+            .call(
+                "set browser permission task panicked",
+                move |conn: &mut Connection| {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning browser permission write")?;
+                    let column = permission.column();
+                    let current: Option<bool> = tx
+                        .query_row(
+                            &format!("SELECT {column} FROM hosts WHERE id = ?1"),
+                            [host],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .context("looking up host browser permission")?;
+                    let Some(current) = current else {
+                        return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+                    };
+                    if current != allowed {
+                        tx.execute(
+                            &format!("UPDATE hosts SET {column} = ?2 WHERE id = ?1"),
+                            rusqlite::params![host, allowed],
+                        )
+                        .context("saving browser permission")?;
+                    }
+                    tx.commit().context("committing browser permission")?;
+                    Ok(current != allowed)
+                },
+            )
+            .await
+    }
+
+    /// Grant only the link category approved for the install that asked.
+    ///
+    /// The identity comparison and grant share a statement, so an adoption cannot give a new
+    /// install the old card's trust. Returns false when the host or recorded identity no longer
+    /// matches, including a missing host; an already-granted matching row still returns true.
+    pub async fn allow_browser_for_identity(
+        &self,
+        host: HostId,
+        identity: Option<String>,
+        permission: BrowserPermission,
+    ) -> anyhow::Result<bool> {
+        self.conn
+            .call(
+                "allow browser for identity task panicked",
+                move |conn: &mut Connection| {
+                    let changed = conn
+                        .execute(
+                            &format!(
+                                "UPDATE hosts SET {} = 1 WHERE id = ?1 AND host_identity IS ?2",
+                                permission.column()
+                            ),
+                            rusqlite::params![host, identity],
+                        )
+                        .context("allowing browser links for a host identity")?;
+                    Ok(changed == 1)
+                },
+            )
+            .await
+    }
+
     pub async fn update_alias(&self, host: HostId, alias: Option<&str>) -> anyhow::Result<bool> {
         let alias = validate_alias(alias).map_err(anyhow::Error::new)?;
         self.conn
@@ -5329,8 +5464,8 @@ impl HelmStore {
     /// The host's "start YOLO sessions without asking" setting
     /// (`yolo_without_asking`) is cleared in the same statement, so the adopted
     /// install asks before YOLO launches again, and so is its "run farhelm
-    /// commands without asking" setting (`commands_without_asking`), for the
-    /// same reason. Sensitivity is a property of the machine, and a
+    /// commands without asking" setting (`commands_without_asking`) and both browser
+    /// permissions, for the same reason. These grants belong to one install, and a
     /// new identity at this destination means a different machine or a fresh
     /// install the user has not judged yet (SPEC.md: the host settings
     /// paragraph). Only adoption resets it; a stale settings dialog, and a
@@ -5400,12 +5535,13 @@ impl HelmStore {
                     // purged below, and an empty successor cache marked incomplete
                     // would show the notice indefinitely if the first refresh under
                     // the new identity failed. `yolo_without_asking` and
-                    // `commands_without_asking` are reset too: the user's "without
+                    // `commands_without_asking` and both browser permissions are reset too: the user's "without
                     // asking" choices were judgments about the install being replaced,
                     // not this one.
                     tx.execute(
                         "UPDATE hosts SET host_identity = ?2, cache_truncated = 0, yolo_without_asking = 0, \
-                         commands_without_asking = 0 WHERE id = ?1",
+                         commands_without_asking = 0, links_without_asking = 0, \
+                         local_links_without_asking = 0 WHERE id = ?1",
                         rusqlite::params![host, new],
                     )
                     .context("adopting new host identity")?;
@@ -7386,6 +7522,10 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
+                 -- Future columns must leave this rewind too: otherwise older
+                 -- migrations append their columns after these and change schema order.
+                 ALTER TABLE hosts DROP COLUMN links_without_asking;
+                 ALTER TABLE hosts DROP COLUMN local_links_without_asking;
                  PRAGMA user_version = 27;",
             )
             .unwrap();
@@ -9432,6 +9572,176 @@ mod tests {
         );
     }
 
+    /// Link grants start off and changing one never changes the other or command authority.
+    ///
+    /// Public sites and the user's network are separate trust boundaries. Exercise each write
+    /// in both directions, including no-op and unknown-host results, so a settings toggle cannot
+    /// accidentally widen the host's authority.
+    #[farhelm_testtrace::test]
+    async fn browser_permissions_are_independent_and_default_off() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "browser@fixture", "identity-a").await;
+        let row = |rows: Vec<HostRow>| rows.into_iter().find(|row| row.id == host).unwrap();
+        assert!(
+            store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .all(|row| !row.links_without_asking && !row.local_links_without_asking)
+        );
+        for permission in [BrowserPermission::Public, BrowserPermission::LocalNetwork] {
+            assert!(
+                store
+                    .set_browser_permission(host, permission, true)
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !store
+                    .set_browser_permission(host, permission, true)
+                    .await
+                    .unwrap()
+            );
+            let current = row(store.list_hosts().await.unwrap());
+            assert_eq!(
+                current.links_without_asking,
+                permission == BrowserPermission::Public
+            );
+            assert_eq!(
+                current.local_links_without_asking,
+                permission == BrowserPermission::LocalNetwork
+            );
+            assert!(!current.commands_without_asking && !current.yolo_without_asking);
+            assert!(
+                store
+                    .set_browser_permission(host, permission, false)
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !store
+                    .set_browser_permission(host, permission, false)
+                    .await
+                    .unwrap()
+            );
+        }
+        assert!(
+            store
+                .set_browser_permission(9_999, BrowserPermission::Public, true)
+                .await
+                .unwrap_err()
+                .downcast_ref::<HostStoreError>()
+                .is_some()
+        );
+    }
+
+    /// An approval grant belongs only to the identity that asked, and adoption erases both grants.
+    ///
+    /// A stale card must not authorize a successor install at the same address. Checking the
+    /// grant's category and the final adopted row also catches a public grant leaking into the
+    /// more powerful local-network permission.
+    #[farhelm_testtrace::test]
+    async fn browser_permissions_are_identity_bound_and_reset_on_adoption() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "browser@adoption", "identity-a").await;
+        let row = |rows: Vec<HostRow>| rows.into_iter().find(|row| row.id == host).unwrap();
+        for permission in [BrowserPermission::Public, BrowserPermission::LocalNetwork] {
+            assert!(
+                !store
+                    .allow_browser_for_identity(host, Some("identity-b".into()), permission)
+                    .await
+                    .unwrap()
+            );
+            let before = row(store.list_hosts().await.unwrap());
+            assert!(!before.local_links_without_asking);
+            assert_eq!(
+                before.links_without_asking,
+                permission == BrowserPermission::LocalNetwork
+            );
+            assert!(
+                store
+                    .allow_browser_for_identity(host, Some("identity-a".into()), permission)
+                    .await
+                    .unwrap()
+            );
+        }
+        let before = row(store.list_hosts().await.unwrap());
+        assert!(before.links_without_asking && before.local_links_without_asking);
+        assert!(!before.commands_without_asking);
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-a",
+                "identity-b",
+            )
+            .await
+            .unwrap();
+        let after = row(store.list_hosts().await.unwrap());
+        assert_eq!(after.host_identity.as_deref(), Some("identity-b"));
+        assert!(!after.links_without_asking && !after.local_links_without_asking);
+        assert!(
+            !store
+                .allow_browser_for_identity(
+                    host,
+                    Some("identity-a".into()),
+                    BrowserPermission::Public
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .allow_browser_for_identity(9_999, None, BrowserPermission::Public)
+                .await
+                .unwrap()
+        );
+    }
+
+    /// A schema-44 upgrade adds two default-off grants without inheriting existing command trust.
+    ///
+    /// Remove the columns and verify the fixture really lacks them before upgrading. A later
+    /// close/reopen proves that an explicit public grant persists without turning on local access.
+    #[farhelm_testtrace::test]
+    async fn schema_45_adds_durable_default_off_browser_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        let host = host_with_identity(&store, "browser@migration", "identity-a").await;
+        store.set_commands_without_asking(host, true).await.unwrap();
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE hosts DROP COLUMN links_without_asking;
+            ALTER TABLE hosts DROP COLUMN local_links_without_asking; PRAGMA user_version = 44;",
+        )
+        .unwrap();
+        let columns: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name IN ('links_without_asking', 'local_links_without_asking')",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            columns, 0,
+            "premise: schema 44 has neither browser permission"
+        );
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let row = |rows: Vec<HostRow>| rows.into_iter().find(|row| row.id == host).unwrap();
+        let upgraded = row(store.list_hosts().await.unwrap());
+        assert!(upgraded.commands_without_asking);
+        assert!(!upgraded.links_without_asking && !upgraded.local_links_without_asking);
+        store
+            .set_browser_permission(host, BrowserPermission::Public, true)
+            .await
+            .unwrap();
+        drop(store);
+        let store = HelmStore::open(&path).await.unwrap();
+        let reopened = row(store.list_hosts().await.unwrap());
+        assert!(reopened.links_without_asking && reopened.commands_without_asking);
+        assert!(!reopened.local_links_without_asking);
+    }
+
     /// The 501st seed evicts the OLDEST cached row rather than growing the
     /// slice or refusing the new one, and records the cut on the host.
     ///
@@ -10770,6 +11080,10 @@ mod tests {
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+                 -- Keep the host-column order faithful to the older schema;
+                 -- migration 45 must append browser permissions after the older columns.
+                 ALTER TABLE hosts DROP COLUMN links_without_asking;
+                 ALTER TABLE hosts DROP COLUMN local_links_without_asking;
                  PRAGMA user_version = 22;",
             )
             .expect("replace current history with the schema-22 shape");
