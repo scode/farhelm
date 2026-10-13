@@ -75,3 +75,33 @@ test-contract issue after inspecting the diff, plan, mockup, screenshots and ver
 separate fresh cold reader accepted the commit and PR wording. The implementation was done by the executor; only
 independent reviews were delegated. The eight touched files received a separate documentation pass. No PR was marked
 ready or merged by the executor.
+
+### Landing
+
+Landed on 2026-10-13 (UTC) as #1949. The rebase met no conflicts.
+
+#### Review before merging
+
+No blocker or should-fix findings. Settings now uses the same pinned frame as host settings and feedback, so only the
+body scrolls and a focused field cannot slip under the header or footer; the checkout folder and post-clone fields,
+their save buttons and errors stay in the scrolling body at phone width; the new × closes exactly as the footer does,
+returning focus to the gear; the page-wide focus ring is untouched; and the shared header's new optional tile changes
+none of the other dialogs. The new test proves the body overflows before checking that the header and footer stay put.
+Notes left as they are:
+
+- One CSS selector, `.app-settings-dialog > .host-settings-help`, now matches nothing.
+- An older alignment test still measures sideways overflow on the dialog rather than its scrolling body; the new test
+  covers the body at both widths.
+- The × reuses the footer's tooltip "close: changes are already saved", which is not true for a typed but unsaved
+  checkout folder or post-clone command; the wording predates this plan.
+
+#### Checks
+
+- Run now: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the test-delay checker,
+  `cargo clippy --all-targets -- -D warnings` and `cargo check -p farhelm-ui --features desktop`; the UI unit tests
+  through the recorder (run `3c11c03a`, 457 of 457); the UI JavaScript tests (238 of 238); and on Chromium and WebKit
+  with one worker and no retries the settings, modal-layout, tooltip-coverage, feedback and terminal-multihost specs
+  (run `3f6f4f1b`, 168 passed).
+- Between those runs and the merge, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
