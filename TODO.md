@@ -187,6 +187,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the same inline progress and outcome beside the readout. Clicking it while an update waits keeps opening its menu.
   Where there is no updater (the web UI, a build from main), the readout stays plain text.
 
+- **Make failed automatic updates visible.** The desktop app's automatic update checks and background installs (at
+  startup and daily) stay invisible unless the user started or joined the check, so when one fails nothing says so, and
+  the user can sit on an old version without knowing updates have stopped working. Show a failed automatic check or
+  install somewhere the user will notice, with the reason. SPEC.md currently says automatic checks no user joins "stay
+  invisible", so this needs a SPEC change alongside it.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
