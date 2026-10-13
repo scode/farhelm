@@ -56,3 +56,38 @@ The required single fresh-context gpt-6.1-sol review at high effort found no pro
 scrolling proof. That test could pass when fields were clipped rather than scrollable. Added assertions for
 user-scrollable overflow and actual scroll-offset movement; the same reviewer rechecked the correction and found no
 remaining issue. The commit/PR wording also passed its independent cold read.
+
+### Landing
+
+Landed on 2026-10-13 (UTC) as #1946. The rebase met no conflicts.
+
+#### Fixes made while landing
+
+Both in #1946, before it merged:
+
+- The new focus style for the dialog's text fields set `outline: none`, which overrode the app's sheet-wide keyboard
+  focus ring (the one rule meant to keep every control visibly focusable) and left only a 1px border colour change. The
+  plan asked for the accent outline on focus. The fields now keep the shared ring, with the accent border as extra
+  emphasis.
+- The layout test's check that a disabled Send keeps full opacity never confirmed Send was disabled; it now does first.
+
+#### Review before merging
+
+No other findings. Every new rule is scoped to the feedback dialog; it uses the shared modal margins and the host
+dialogs' pinned header and footer; both fields keep corrections off, with email autofill on the contact field; the ×
+closes only when Cancel would; and the tests measure real layout. Notes left as they are:
+
+- The docs page "Send feedback" still bolds **Re-use for future feedback** where the UI now says "re-use for future
+  feedback".
+- Two comment lines run past the file's usual wrap.
+
+#### Checks
+
+- Run now, after the fixes: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the test-delay checker,
+  `cargo clippy --all-targets -- -D warnings` and `cargo check -p farhelm-ui --features desktop`; the UI unit tests
+  through the recorder (run `81851dc5`, 457 of 457); the UI JavaScript tests (238 of 238); and on Chromium and WebKit
+  with one worker and no retries the feedback, tooltip-coverage, modal-layout and settings specs (run `c7b3f801`, 66
+  passed).
+- Between those runs and the merge, main changed only plan bookkeeping.
+
+Nothing in the report above was made untrue by the landing.
