@@ -825,6 +825,16 @@ are large mostly because of their tests.
   does not work around non-security bugs in the vendored bundle (SPEC_impl.md, decided 2026-10-10), so when the bundle
   is next upgraded, check whether upstream fixed these and remove this entry.
 
+- **Investigate harness-native notifications.** Claude Code and Codex can raise desktop notifications themselves, by
+  writing terminal escape codes that a supporting terminal turns into a system notification. Claude Code picks the
+  channel with its `preferredNotifChannel` setting (in `/config`; values such as `iterm2`, `ghostty`, `kitty` or
+  `terminal_bell`) and fires when it needs the user: a permission prompt, or sitting idle waiting for input. Codex does
+  it with `notifications = true` under `[tui]` in `~/.codex/config.toml`, and fires when a turn finishes and on approval
+  requests. Inside Farhelm those codes reach tmux, which drops them unless `allow-passthrough` is on (Farhelm does not
+  set it), and past that they would land in Farhelm's terminal rather than a native terminal app. Investigate what
+  Farhelm could do with them: surface them as client notifications, use them as a status signal, or nothing. Related to
+  the ntfy.sh entry under Near term.
+
 ## Unbucketized
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
