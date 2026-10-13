@@ -10,6 +10,29 @@ pub(super) fn desktop_state_dir() -> anyhow::Result<PathBuf> {
     }
 }
 
+/// The operator-staged provisioning payload directory for the embedded
+/// helm, read from the same `FARHELM_HELM_PAYLOAD_DIR` the standalone
+/// `farhelm helm run` takes.
+///
+/// This is what lets an app built from a working copy update remote hosts
+/// at all: such a build reports the development version, has no release to
+/// download payloads from, and otherwise refuses Update. With this set it
+/// pushes whatever Linux binaries `scripts/devbuild-mac.sh` staged, with no
+/// signature check, exactly as `--payload-dir` does for the standalone helm
+/// on any build (SPEC_impl.md, the provisioning payload paragraphs under
+/// D2/D3). An installed app launched from Finder or the Dock never sees the
+/// variable, its updater strips every `FARHELM_*` variable before running
+/// the installer, and the managed supervisor is spawned without it, so it
+/// is opt-in per launch and stays inside this process.
+///
+/// An empty value counts as unset, as clap treats it for the standalone
+/// helm, rather than selecting the app's working directory.
+pub(super) fn helm_payload_dir() -> Option<PathBuf> {
+    std::env::var_os("FARHELM_HELM_PAYLOAD_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 /// Locate the `farhelm` CLI this app spawns its supervisor from.
 ///
 /// D6 ships two bare binaries that install side by side, so "next to me" is
