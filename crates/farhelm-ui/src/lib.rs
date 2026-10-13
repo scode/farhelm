@@ -1768,6 +1768,17 @@ fn PreferencesGate(children: Element) -> Element {
         use_context_provider(|| list::SharedPreferences(Signal::new(api::Preferences::default())));
     use_context_provider(|| list::DeleteNotice(Signal::new(None)));
     let mut loaded = use_signal(|| false);
+    // Retained JS terminal islands outlive tab renders. Publish one page-wide
+    // choice from the authenticated shared snapshot; every gesture reads it
+    // afresh, so changing settings never remounts or reattaches a terminal.
+    use_effect(move || {
+        let mode =
+            api::TerminalLinkClick::from_key(preferences.0.read().terminal_link_click.as_deref());
+        document::eval(&format!(
+            "window.farhelmTerminalLinkClickMode = {};",
+            serde_json::to_string(mode.key()).expect("serializing a static preference word"),
+        ));
+    });
     use_future(move || {
         let base = base.clone();
         async move {

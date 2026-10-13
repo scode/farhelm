@@ -32,7 +32,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await expect(dialog.getByRole("checkbox")).toHaveCount(5);
     await page.evaluate(() => document.fonts.ready);
     expect(await body.locator(":scope > section > h3").allTextContents()).toEqual([
-      "hosts", "managed checkouts", "sounds",
+      "hosts", "terminal links", "managed checkouts", "sounds",
     ]);
     await expect(body.locator('section[aria-label="updates"]')).toHaveCount(0);
     await expect(dismiss).toHaveAttribute("data-tooltip", "close: changes are already saved");
@@ -554,8 +554,9 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
       await page.setViewportSize({ width, height: 800 });
       await dialog.screenshot({ path: testInfo.outputPath(`settings-switches-${width}.png`) });
       // Measure rendered text independently of the label's full-width box:
-      // a checkbox above or before its caption must fail this contract.
-      const rows = await dialog.locator(".app-settings-choice").evaluateAll((labels) => labels.map((label) => {
+      // a checkbox above or before its caption must fail this contract. Radios
+      // share the label layout but retain native geometry, unlike these switches.
+      const rows = await dialog.locator('.app-settings-choice:has(input[type="checkbox"])').evaluateAll((labels) => labels.map((label) => {
         const input = label.querySelector("input")!;
         const range = document.createRange();
         const text = Array.from(label.childNodes).find((node) => node !== input && node.textContent?.trim())!;

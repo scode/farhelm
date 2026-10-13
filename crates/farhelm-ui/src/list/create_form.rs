@@ -6357,6 +6357,7 @@ mod tests {
             skip_host_remove_confirmation: None,
             skip_host_setup_confirmation: None,
             feedback_contact: None,
+            terminal_link_click: None,
         };
         assert_eq!(
             super::initial_structured_permissions(&with(Some("yolo"))),

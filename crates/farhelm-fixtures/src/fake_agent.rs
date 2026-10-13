@@ -2319,6 +2319,7 @@ fn mouse_escape(word: &str) -> Option<&'static str> {
     match word {
         "legacy" => Some("\x1b[?1006l\x1b[?1000h"),
         "sgr" => Some("\x1b[?1000h\x1b[?1006h"),
+        "drag" => Some("\x1b[?1002h\x1b[?1006h"),
         _ => None,
     }
 }
@@ -2329,7 +2330,7 @@ fn mouse_escape(word: &str) -> Option<&'static str> {
 /// one must bump it, or the new word could never complete.
 const MAX_CUE_WORD_LEN: usize = 6;
 
-/// Recognizes the plain-word cues (`legacy`, `sgr`) `mouse_modes` reads
+/// Recognizes the bounded plain-word cues `mouse_modes` reads
 /// while correctly ignoring every byte that is part of a MOUSE REPORT
 /// instead of a typed command — the reason this needs a state machine
 /// rather than a bare "accumulate until CR" scan. A report's own data
@@ -2349,6 +2350,10 @@ const MAX_CUE_WORD_LEN: usize = 6;
 struct CueScanner {
     state: CueScanState,
     word: String,
+    /// Completed reports, counted across raw-read boundaries. A sync cue
+    /// publishes this program-observed count after all earlier input, so
+    /// absence assertions do not depend on a quiet-time sleep or UI echo timing.
+    reports: usize,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -2384,6 +2389,9 @@ enum CueScanState {
 }
 
 impl CueScanner {
+    /// Consume input without mistaking a mouse coordinate for a cue word.
+    /// Reports are counted before a later sync cue acknowledges them, even
+    /// when the wire splits a report across several raw reads.
     fn feed(&mut self, byte: u8) -> Option<String> {
         match self.state {
             CueScanState::Normal => match byte {
@@ -2423,6 +2431,9 @@ impl CueScanner {
                 };
             }
             CueScanState::LegacyBody(remaining) => {
+                if remaining <= 1 {
+                    self.reports += 1;
+                }
                 self.state = if remaining <= 1 {
                     CueScanState::Normal
                 } else {
@@ -2431,6 +2442,7 @@ impl CueScanner {
             }
             CueScanState::SgrBody => {
                 if byte == b'M' || byte == b'm' {
+                    self.reports += 1;
                     self.state = CueScanState::Normal;
                 }
             }
@@ -2484,6 +2496,10 @@ impl CueScanner {
 /// mode to actually be live before clicking, instead of racing the hex
 /// echo of the cue's own bytes (which, split across reads one keystroke
 /// at a time, has no single line a test could reliably wait for).
+/// `drag` selects button-motion tracking, `links` emits live plain/OSC/file
+/// candidates, and `sync` acknowledges complete reports already consumed.
+/// These cues let link tests prove withheld input without a timer and wait
+/// for fresh output rather than matching an older identical row.
 fn mouse_modes() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
 
@@ -2496,11 +2512,40 @@ fn mouse_modes() -> anyhow::Result<()> {
     out.flush()?;
 
     let mut scanner = CueScanner::default();
+    let mut sync_sequence = 0;
+    let mut link_sequence = 0;
     hex_echo_loop(&mut out, |out, chunk| {
         for &byte in chunk {
-            if let Some(word) = scanner.feed(byte)
-                && let Some(escape) = mouse_escape(&word)
-            {
+            if let Some(word) = scanner.feed(byte) {
+                // Live link output and ordered acknowledgements share the
+                // exact program input path whose mouse reports tests measure.
+                if word == "links" {
+                    link_sequence += 1;
+                    // Mouse echoes and sync acknowledgements must not move a
+                    // link away after the browser establishes pointer ownership.
+                    // Keep the candidates above a separate scrolling log region;
+                    // only this opt-in cue changes the normal hex-echo layout.
+                    write!(out, "\x1b[r\x1b[2J\x1b[H")?;
+                    writeln!(out, "PLAIN https://example.test/link-click\r")?;
+                    writeln!(
+                        out,
+                        "\x1b]8;;https://example.test/osc-click\x07OSC-LINK\x1b]8;;\x07\r"
+                    )?;
+                    writeln!(out, "FILE relative/report.txt\r")?;
+                    writeln!(out, "LINKS-READY:{link_sequence}\r")?;
+                    write!(out, "\x1b[6;r\x1b[6;1H")?;
+                    out.flush()?;
+                    continue;
+                }
+                if word == "sync" {
+                    sync_sequence += 1;
+                    writeln!(out, "INPUT-SYNC:{sync_sequence}:{}\r", scanner.reports)?;
+                    out.flush()?;
+                    continue;
+                }
+                let Some(escape) = mouse_escape(&word) else {
+                    continue;
+                };
                 write!(out, "{escape}")?;
                 // A plain, VISIBLE marker — distinct from the hex echo
                 // below, which cannot tell a test "the cue byte arrived"
@@ -3305,8 +3350,34 @@ mod tests {
     fn mouse_escape_selects_the_exact_decset_sequence() {
         assert_eq!(mouse_escape("legacy"), Some("\x1b[?1006l\x1b[?1000h"));
         assert_eq!(mouse_escape("sgr"), Some("\x1b[?1000h\x1b[?1006h"));
+        assert_eq!(mouse_escape("drag"), Some("\x1b[?1002h\x1b[?1006h"));
         assert_eq!(mouse_escape("quit"), None);
         assert_eq!(mouse_escape(""), None);
+    }
+
+    /// The acknowledgement counts only complete reports across arbitrary read
+    /// boundaries; a partial release must not inflate an absence assertion.
+    #[farhelm_testtrace::test]
+    fn cue_scanner_counts_complete_mouse_reports_before_sync() {
+        let mut scanner = CueScanner::default();
+        for byte in b"\x1b[M !" {
+            scanner.feed(*byte);
+        }
+        assert_eq!(scanner.reports, 0);
+        scanner.feed(b'!');
+        assert_eq!(scanner.reports, 1);
+        for byte in b"\x1b[<0;3;3" {
+            scanner.feed(*byte);
+        }
+        assert_eq!(scanner.reports, 1);
+        scanner.feed(b'm');
+        assert_eq!(scanner.reports, 2);
+        let cues: Vec<_> = b"sync\r"
+            .iter()
+            .filter_map(|byte| scanner.feed(*byte))
+            .collect();
+        assert_eq!(cues, ["sync"]);
+        assert_eq!(scanner.reports, 2);
     }
 
     /// The scenario the review that added `legacy`'s DECRST prefix was

@@ -16,7 +16,7 @@
 
 use dioxus::prelude::*;
 
-use crate::api::{PreferenceValue, store_preference};
+use crate::api::{PreferenceValue, TerminalLinkClick, store_preference};
 use crate::app_updater::use_app_updater;
 use crate::hosts::settings_dialog::{HostDialogHeader, install_dialog_with_selector};
 use crate::list::SharedPreferences;
@@ -46,7 +46,7 @@ fn restore_automatic_checkbox(in_force: bool) {
     ));
 }
 
-/// Expose host choices, device sounds, updates and all-hosts checkout settings.
+/// Expose host choices, terminal link ownership, sounds and checkout settings.
 ///
 /// Writes use the ordinary preference queue and its silent failure behavior.
 /// Controls stay enabled: preferences have no host-operation lock or outcome
@@ -168,6 +168,29 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                     }
                     section {
                         class: "host-settings-section",
+                        aria_label: "terminal links",
+                        h3 { class: "host-settings-section-title", "terminal links" }
+                        p { class: "host-settings-help",
+                            "Clicking a web link in a terminal: this choice applies to every client of this helm. Other open clients pick it up when they reload. File downloads are unchanged."
+                        }
+                        TerminalLinkChoice {
+                            value: TerminalLinkClick::Intercept,
+                            label: "open in Farhelm, don't pass the click on",
+                            help: "Farhelm opens the link once. The program does not receive that click or a drag starting there.",
+                        }
+                        TerminalLinkChoice {
+                            value: TerminalLinkClick::Both,
+                            label: "open in Farhelm and also pass the click on",
+                            help: "Use this when the program needs link clicks. A program that opens links itself may open a second tab.",
+                        }
+                        TerminalLinkChoice {
+                            value: TerminalLinkClick::Program,
+                            label: "pass the click on only",
+                            help: "Let the program handle links. Farhelm does not open them; without mouse reporting, clicking a link does nothing.",
+                        }
+                    }
+                    section {
+                        class: "host-settings-section",
                         aria_label: "managed checkouts",
                         h3 { class: "host-settings-section-title", "managed checkouts" }
                         crate::checkout_root::CheckoutRootField {
@@ -245,6 +268,41 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+/// One radio choice writes only terminal link ownership, through the shared queue.
+/// Its mounted terminals see the optimistic choice immediately; closing settings
+/// cannot cancel the write or leave only the selected terminal using the new rule.
+#[component]
+fn TerminalLinkChoice(
+    value: TerminalLinkClick,
+    label: &'static str,
+    help: &'static str,
+) -> Element {
+    let base = use_context::<ApiBase>().0;
+    let mut preferences = use_context::<SharedPreferences>();
+    let selected = TerminalLinkClick::from_key(preferences.0.read().terminal_link_click.as_deref());
+    let help_id = format!("terminal-link-{}-help", value.key());
+    rsx! {
+        div {
+            label {
+                class: "app-settings-choice",
+                span { "{label}" }
+                input {
+                    r#type: "radio",
+                    name: "terminal-link-click",
+                    value: value.key(),
+                    checked: selected == value,
+                    aria_describedby: help_id.clone(),
+                    onchange: move |_| {
+                        preferences.0.write().terminal_link_click = Some(value.key().into());
+                        store_preference(&base, PreferenceValue::TerminalLinkClick(value));
+                    },
+                }
+            }
+            p { id: help_id, class: "host-settings-help", "{help}" }
         }
     }
 }

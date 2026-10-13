@@ -99,6 +99,27 @@
     return true;
   }
 
+  /** Decide whether this press belongs to Farhelm's web link gesture.
+   * Forced local selection keeps xterm's own path. File links never qualify:
+   * their broad path detection must not steal ordinary transcript input.
+   * The press is withheld as a whole, including any drag and release it owns;
+   * no later motion replays a press the program never received.
+   */
+  function interceptLinkPress({ button, tracking, forced, webLink, mode }) {
+    return button === 0 && tracking && !forced && webLink && mode === 'intercept';
+  }
+
+  /** Suppress only a complete mouse report emitted during its owned DOM event.
+   * xterm emits one report synchronously through its public output callbacks.
+   * A captured event remains in dispatch until eventPhase becomes NONE (0);
+   * unlike a microtask, that boundary cannot expire between native listeners.
+   * Stale events, focus reports, keyboard input and pasted lookalikes pass.
+   */
+  function suppressMouseReport(data, dispatch) {
+    return !!(dispatch && dispatch.withheld && dispatch.event.eventPhase !== 0 &&
+      (/^\x1b\[M[\s\S]{3}$/.test(data) || /^\x1b\[<\d+;\d+;\d+[Mm]$/.test(data)));
+  }
+
   /**
    * The parts of an OSC 8 link target to show on hover, host flagged for
    * emphasis.
@@ -438,6 +459,8 @@
   const api = {
     openTerminalUrl,
     isPlainWebUrl,
+    interceptLinkPress,
+    suppressMouseReport,
     linkTargetParts,
     linkTextMismatch,
     linkRowText,

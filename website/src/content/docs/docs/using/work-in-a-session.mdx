@@ -43,7 +43,12 @@ Pasted text has hidden control characters removed, so a paste cannot type keystr
 To give the agent a screenshot or a file, paste it or drop it onto the terminal. Farhelm uploads it to the session's
 host and types its path at the prompt, so it works the same on a remote host as on your Mac.
 
-Links in the terminal open in your browser. Some programs print a link under text of their own; hovering over one of
+Clicking a web link in the terminal opens it once in your browser. Farhelm keeps that click from reaching the program,
+so an agent that opens links itself does not open a second tab. If a program needs those clicks, change
+[terminal links in settings](/docs/using/session-list/#terminal-links). File downloads keep working the same way under
+every choice.
+
+Some programs print a link under text of their own; hovering over one of
 those shows where it really goes, and Farhelm warns you when the text is itself a web address that names a different
 place.
 
