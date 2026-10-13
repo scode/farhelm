@@ -160,6 +160,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   app; the field labels ("message", "how to reach you (optional)") are in larger type than the dialog's own heading;
   "send" and "cancel" sit flush against each other with no gap, and a disabled "send" barely reads as a button; and
   there is no × close at the top. Give it a general pass so it looks like the rest of the app. Details to be worked out.
+  Plan: `plans/queue/feedback-dialog-polish.md`.
 
 - **Check that "not YOLO" is true in practice.** Farhelm decides and shows whether a session runs with approval prompts
   from the flags it passed, but an agent's own configuration can make it run without them anyway. Observed 2026-10-11:
@@ -194,7 +195,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   in BROWSER environment variable". Proxy `BROWSER` so that such a request is forwarded to the user's Farhelm client and
   opened in the browser on the machine the user is sitting at. This must come with safety precautions, since it lets an
   agent put a URL in front of the user's browser; which ones (asking first, showing the full URL, restricting schemes,
-  and so on) is to be worked out.
+  and so on) is to be worked out. Plan: `plans/queue/open-links-in-browser.md`.
 
 - **Support Codex wrappers for the conversation hook.** A Codex session launched through a wrapper command loses its
   conversation hook reports: the supervisor only accepts a Codex report whose process chain from the pane down to
