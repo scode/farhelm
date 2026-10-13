@@ -110,3 +110,75 @@ review finding remains open. Each commit and PR message had a fresh cold read; t
 includes Claude Code's limitation after its first reader identified that omission. All touched files received a separate
 documentation pass. Implementation and validation were local; only the required reviews were delegated. All PRs remain
 drafts; none was marked ready or merged.
+
+### Landing
+
+Landed on 2026-10-13 (UTC) as #1944, #1948 and #1950. The rebase met no conflicts.
+
+#### For the release
+
+This stack raises the helm's database to schema version 45 and the helm–supervisor protocol version from 45 to 47. A
+helm that has run it cannot be downgraded in place, and every remote host must be updated together with the helm; the
+release needs the fixed "requires you to update your remote hosts" entry.
+
+Not verified: the desktop app's native link opener (the `webbrowser` crate) was never run against a real browser; the
+executor opened none, and the desktop runtime checks run only in the release gate. One manual check on a Mac build is
+worth doing before release: Allow on a link card, and a host set to open links without asking, each open the default
+browser.
+
+#### Fixes made while landing
+
+- In #1948: the approval card showed only the raw URL. Credentials before an `@`
+  (`https://accounts.google.com@evil.example/`), a backslash ending the host, or a look-alike Unicode host make it read
+  as a different site than the one the browser contacts. The card now shows a "site" row above the full URL: the host as
+  the browser parses it, in ASCII, rendered like a host identity. A unit test covers each case.
+- In #1948: the desktop opener now enables `webbrowser`'s `hardened` feature, so it refuses anything but http(s) even if
+  a future caller skips the helm's validation (the crate otherwise opens an unparseable string as a file path); and the
+  web UI opens an approved link with `noopener,noreferrer`, so the destination an agent chose does not learn the helm's
+  address.
+- In #1944: the checkout-configuration tests' rewind to schema 26 did not drop the two new host permission columns, so
+  two tests failed against the frozen historical schema (run `40b313f5`).
+- In #1948: the end-to-end test `the_shipped_agent_lifecycle_commands_act_through_the_real_helm` stopped its target
+  before the agent had launched. That is a flake already present on main (1 of 3 there), which this stack made frequent
+  (5 of 5); the test now waits for the target to be live, and FLAKES.md records it.
+- In #1948: the multi-host test of the host settings "commands without asking" toggle matched every help paragraph in
+  that section once the link permissions' help joined it, failing on both engines (run `31d07d6d`); it now takes the
+  commands setting's own help.
+
+#### Review before merging
+
+No blockers. Only absolute http(s) URLs with a host get through, checked before and after parsing, so `file:`,
+`javascript:`, `data:`, custom and OS settings schemes are refused and a leading `-` is impossible; no shell is involved
+in opening; link permissions are separate from command permissions and from each other, start off, return to off when a
+host is adopted, and only the user can change them; a remote session's forwarding is set by the helm only after the
+host's identity is accepted and is refused on a session's own connection; and mismatched helm and supervisor versions
+refuse each other. Notes left as they are:
+
+- Possible follow-up: GitHub's `gh` appends the URL to `BROWSER` rather than substituting `%s`, so
+  `gh auth login --web`, `gh browse` and other `--web` commands fail with the forwarded value. They failed on headless
+  hosts before too; documenting it, or having `open-url` tolerate a literal leading `%s`, would fix it.
+- `farhelm agent instructions` does not yet mention `open-url`, which the docs suggest for Claude Code on Linux.
+- The local-network classification misses a few rare IPv6 forms (site-local `fec0::/10`, IPv4-compatible and NAT64
+  addresses with private embedded IPv4).
+- With a host allowed to open links without asking, an agent can open several tabs without a click, up to four in flight
+  per host; the accepted denial-of-service rule covers this.
+- One test comment says the link opens "after answer admission" where it opens before the answer is sent, the intended
+  order.
+
+#### Checks
+
+- Run now, on the stack after the fixes: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the
+  test-delay checker (297 delays, none without a reason), `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop` and
+  `cargo check -p farhelm-desktop`; the desktop build's UI tests (run `3d75d555`, 571 of 571); the helm, protocol and
+  CLI doctests (run `bcf71c6b`); the UI JavaScript tests (238 of 238); the docs website build; and on Chromium and
+  WebKit with one worker and no retries the approval-layout, settings, agent-relay, terminal-multihost and provisioning
+  specs (run `31d07d6d`: 254 of 256, the two multi-host failures above) and, after their fix, the terminal-multihost
+  spec again (run `095ba9de`, 100 passed).
+- The supervisor, helm, UI, protocol and CLI unit tests with the agent-relay, agent-listing, hook-identity,
+  session-lifecycle and restart-with-resume end-to-end tests ran once before the last three fixes (run `40b313f5`: 3077
+  of 3080, the three failures above); after those fixes, the checkout-configuration tests and the lifecycle test (run
+  `7612ace8`, 17 of 17) and the lifecycle test five more times (all passed).
+- Not run: macOS, a real browser opened by the desktop app, and a real remote host forwarding a link.
+
+Nothing in the report above was made untrue by the landing.
