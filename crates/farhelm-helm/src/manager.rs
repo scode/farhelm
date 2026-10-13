@@ -3562,23 +3562,46 @@ impl HostActor {
     /// behave exactly as they do for a refused connection, which is the
     /// whole point — a peer that accepts a connection and then says nothing
     /// must cost this actor no more than one that refuses outright. The
-    /// message says which of the two happened, since "connection refused"
-    /// and "connected, never spoke" send an operator to different places.
+    /// diagnostic describes incomplete setup without claiming which phase
+    /// stalled: dialing, hello and the placement acknowledgement share this budget.
     async fn deadlined_attempt(&self, row: &HostRow) -> AttemptOutcome {
         match tokio::time::timeout(self.cadence.attempt_timeout, self.attempt(row)).await {
             Ok(outcome) => outcome,
             Err(_) => AttemptOutcome::Failed {
                 // Never the local-supervisor classification: a timeout
-                // means something ANSWERED the dial and then stalled, which
-                // is not the "nothing is listening" case that hint exists
-                // for.
+                // does not prove "nothing is listening", the case that hint
+                // exists for. Dial, hello or placement can consume the budget.
                 cause: UnreachableCause::TransportFailure,
                 error: format!(
-                    "the connection attempt did not complete within {:?} (the transport opened \
-                     but the supervisor's hello never arrived, or the dial itself never returned)",
+                    "the connection attempt did not complete within {:?} (dial, supervisor hello \
+                     or browser-forwarding setup did not finish)",
                     self.cadence.attempt_timeout
                 ),
             },
+        }
+    }
+
+    /// Apply remote/local placement only after the identity outcome permits connection.
+    /// Both recorded and identity-less peers use this acknowledgement boundary. A failed
+    /// configuration stays unpublished and follows the ordinary connection retry path.
+    async fn accepted_connection(
+        &self,
+        row: &HostRow,
+        client: Arc<SupervisorClient>,
+        identity: Option<String>,
+        build_version: String,
+    ) -> AttemptOutcome {
+        let enabled = match row.kind {
+            HostKind::Local => false,
+            HostKind::Ssh => true,
+        };
+        if let Err(error) = client.set_browser_forwarding(enabled).await {
+            return failure(row, error);
+        }
+        AttemptOutcome::Connected {
+            client,
+            identity,
+            build_version,
         }
     }
 
@@ -3733,11 +3756,9 @@ impl HostActor {
                 destination = %self.destination(),
                 "the host's supervisor reported no identity; connecting without a session cache"
             );
-            return AttemptOutcome::Connected {
-                client,
-                identity: None,
-                build_version,
-            };
+            return self
+                .accepted_connection(row, client, None, build_version)
+                .await;
         };
 
         // Duplicate detection is the STORE's answer, resolved in the same
@@ -3766,11 +3787,8 @@ impl HostActor {
                     destination = %self.destination(),
                     "host identity confirmed at hello"
                 );
-                AttemptOutcome::Connected {
-                    client,
-                    identity: Some(identity),
-                    build_version,
-                }
+                self.accepted_connection(row, client, Some(identity), build_version)
+                    .await
             }
             Ok(FirstContactOutcome::Mismatch { recorded, reported }) => {
                 // Nothing was written — the store's API guarantees that,
@@ -5107,6 +5125,7 @@ mod tests {
                 requests: Arc::new(Mutex::new(Vec::new())),
                 closures: watch::Sender::new(Vec::new()),
                 id: 1,
+                browser_requests: watch::Sender::new(Vec::new()),
             },
             kill_rx,
         ));
@@ -5149,6 +5168,7 @@ mod tests {
                 requests: Arc::new(Mutex::new(Vec::new())),
                 closures: watch::Sender::new(Vec::new()),
                 id: 1,
+                browser_requests: watch::Sender::new(Vec::new()),
             },
             kill_rx,
         ));
@@ -5219,6 +5239,11 @@ mod tests {
         /// per-attempt deadline exists for, because it is indistinguishable
         /// from a healthy but slow host until a clock says otherwise.
         silent_hello: bool,
+        /// The accepted peer receives placement but never acknowledges it. This must
+        /// expire under the connection deadline before any usable client is published.
+        silent_browser: bool,
+        /// Refuse placement explicitly, preserving the normal retry/failure contract.
+        browser_error: Option<String>,
         /// The peer completes the handshake and then never answers a
         /// `ListSessions`. The connected counterpart of `silent_hello`, and
         /// the failure the refresh deadline exists for.
@@ -5262,6 +5287,8 @@ mod tests {
                 truncated: false,
                 list_error: None,
                 silent_hello: false,
+                silent_browser: false,
+                browser_error: None,
                 silent_list: false,
                 close_on_list: false,
                 panic_on_dial: false,
@@ -5317,6 +5344,9 @@ mod tests {
         /// `req_id`, so the host is all there is to record, beside when the
         /// peer received it (for pacing tests).
         requests: Arc<Mutex<Vec<(HostId, std::time::Instant)>>>,
+        /// Accepted placement requests, independent of lists so rejection tests can
+        /// prove no configuration was sent and success tests can pin both bool values.
+        browser_requests: watch::Sender<Vec<(HostId, bool)>>,
         origin: tokio::time::Instant,
         /// Broadcast to every live peer, which then drops its half of the
         /// duplex — the client sees EOF, exactly as it would when an ssh
@@ -5340,6 +5370,7 @@ mod tests {
                 scripts: Arc::new(Mutex::new(HashMap::new())),
                 attempts,
                 requests: Arc::new(Mutex::new(Vec::new())),
+                browser_requests: watch::Sender::new(Vec::new()),
                 origin: tokio::time::Instant::now(),
                 kill,
                 closures: watch::Sender::new(Vec::new()),
@@ -5462,6 +5493,7 @@ mod tests {
                     scripts: Arc::clone(&self.scripts),
                     requests: Arc::clone(&self.requests),
                     closures: self.closures.clone(),
+                    browser_requests: self.browser_requests.clone(),
                     id,
                 };
                 tokio::spawn(run_peer(theirs, script, peer, kill));
@@ -5500,6 +5532,7 @@ mod tests {
         scripts: Arc<Mutex<HashMap<HostId, Script>>>,
         requests: Arc<Mutex<Vec<(HostId, std::time::Instant)>>>,
         closures: watch::Sender<Vec<HostId>>,
+        browser_requests: watch::Sender<Vec<(HostId, bool)>>,
         id: HostId,
     }
 
@@ -5586,6 +5619,31 @@ mod tests {
             let Ok(msg) = parse_control(&frame) else {
                 return;
             };
+            if let ControlMsg::SetBrowserForwarding { req_id, enabled } = msg {
+                peer.browser_requests
+                    .send_modify(|log| log.push((id, enabled)));
+                let current = scripts
+                    .lock()
+                    .expect("script mutex")
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_default();
+                if current.silent_browser {
+                    continue;
+                }
+                let reply = match current.browser_error {
+                    Some(message) => ControlMsg::Error {
+                        req_id,
+                        message,
+                        kind: ErrorKind::Internal,
+                    },
+                    None => ControlMsg::BrowserForwardingSet { req_id },
+                };
+                if writer.write_control(&reply).await.is_err() {
+                    return;
+                }
+                continue;
+            }
             if let ControlMsg::ListSessions { req_id } = msg {
                 requests
                     .lock()
@@ -6448,6 +6506,128 @@ mod tests {
             Some("fresh-identity".to_string()),
             "first contact must reach durable storage, not just the in-memory state"
         );
+        assert_eq!(
+            &*fixture.transport.browser_requests.borrow(),
+            &[(host, true)],
+            "a remote connection configures forwarding before it becomes connected"
+        );
+    }
+
+    /// This-machine connects explicitly disable remote policy, including after a reconnect.
+    /// Distinct identities keep the test about placement rather than duplicate detection.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn browser_forwarding_is_explicitly_disabled_on_local_connections() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            transport.set_script(
+                local_id(&store).await,
+                Script {
+                    identity: Some("local-identity".into()),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = local_id(&fixture.store).await;
+        fixture
+            .manager
+            .wait_for_state(host, HostState::is_connected)
+            .await
+            .expect("connected");
+        assert_eq!(
+            &*fixture.transport.browser_requests.borrow(),
+            &[(host, false)]
+        );
+        fixture.transport.kill_connections();
+        let mut requests = fixture.transport.browser_requests.subscribe();
+        requests.wait_for(|log| log.len() >= 2).await.unwrap();
+        fixture
+            .manager
+            .wait_for_state(host, HostState::is_connected)
+            .await
+            .expect("reconnected");
+        assert_eq!(&*requests.borrow(), &[(host, false), (host, false)]);
+    }
+
+    /// A placement acknowledgement is part of connection readiness. A silent peer
+    /// advances the ordinary attempt deadline/ladder without publishing a usable client.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn browser_forwarding_acknowledgement_is_required_before_connection() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("silent-browser.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    silent_browser: true,
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        let mut requests = fixture.transport.browser_requests.subscribe();
+        requests.wait_for(|log| !log.is_empty()).await.unwrap();
+        assert!(
+            status_client(&fixture.manager, host).is_none(),
+            "no client before acknowledgement"
+        );
+        assert!(
+            fixture.transport.requests(host).is_empty(),
+            "no lists before placement is applied"
+        );
+        let attempts = fixture.transport.wait_for_attempts(host, 7).await;
+        assert_eq!(seconds(&attempts), vec![0, 21, 43, 67, 95, 130, 180]);
+        let state = fixture
+            .manager
+            .wait_for_state(host, |s| matches!(s, HostState::Unreachable { .. }))
+            .await
+            .unwrap();
+        assert!(
+            matches!(state, HostState::Unreachable { last_error, .. } if last_error.contains("did not complete"))
+        );
+        assert!(status_client(&fixture.manager, host).is_none());
+    }
+
+    /// An explicit placement refusal is not a healthy connection. Retrying after the
+    /// peer accepts must send configuration again rather than retaining a failed client.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn browser_forwarding_refusal_fails_connection_and_recovers() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("refused-browser.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    browser_error: Some("placement refused".into()),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |s| matches!(s, HostState::Unreachable { .. }))
+            .await
+            .unwrap();
+        assert!(status_client(&fixture.manager, host).is_none());
+        assert!(fixture.transport.requests(host).is_empty());
+        let before = fixture.transport.browser_requests.borrow().len();
+        assert!(before > 0, "the fixture actually refused placement");
+        fixture
+            .transport
+            .edit(host, |script| script.browser_error = None);
+        fixture.manager.retry_now(host).await.unwrap();
+        fixture
+            .manager
+            .wait_for_state(host, HostState::is_connected)
+            .await
+            .unwrap();
+        assert!(fixture.transport.browser_requests.borrow().len() > before);
     }
 
     /// A destination reporting a DIFFERENT identity than the one on record
@@ -6497,6 +6677,10 @@ mod tests {
             recorded_identity(&fixture.store, host).await,
             Some("identity-original".to_string()),
             "a mismatch must leave the registry exactly as the user last left it"
+        );
+        assert!(
+            fixture.transport.browser_requests.borrow().is_empty(),
+            "a rejected identity cannot configure the supervisor"
         );
         assert!(
             status_client(&fixture.manager, host).is_none(),
@@ -8148,6 +8332,10 @@ mod tests {
             None,
             "a duplicate must not record the identity; that would make the collision durable"
         );
+        assert!(
+            fixture.transport.browser_requests.borrow().is_empty(),
+            "a duplicate cannot configure the other host's supervisor"
+        );
     }
 
     /// Removing the other entry and pressing Retry resolves a duplicate,
@@ -9186,6 +9374,11 @@ mod tests {
             "{state:?}"
         );
         assert_eq!(recorded_identity(&fixture.store, host).await, None);
+        assert_eq!(
+            &*fixture.transport.browser_requests.borrow(),
+            &[(host, true)],
+            "identity-less accepted peers still need remote browser placement"
+        );
         assert!(
             fixture
                 .store
@@ -10901,6 +11094,7 @@ mod tests {
                 requests: Arc::new(Mutex::new(Vec::new())),
                 closures: watch::Sender::new(Vec::new()),
                 id: 1,
+                browser_requests: watch::Sender::new(Vec::new()),
             },
             kill_rx,
         ));
@@ -10950,6 +11144,7 @@ mod tests {
                     requests: Arc::new(Mutex::new(Vec::new())),
                     closures: watch::Sender::new(Vec::new()),
                     id: 1,
+                    browser_requests: watch::Sender::new(Vec::new()),
                 },
                 kill_rx,
             ));

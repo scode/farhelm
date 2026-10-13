@@ -2351,6 +2351,13 @@ fn handle_abort_upload(upload_routes: &mut HashMap<u32, UploadRoute>, channel: u
 /// for why the bundle stops at this function.
 pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: ConnectionCtx<'_>) {
     match msg {
+        ControlMsg::SetBrowserForwarding { req_id, enabled } => {
+            // Admission separated full-authority peers from session credentials before
+            // reaching this dispatcher. Apply before acknowledging: the helm will not
+            // offer creates, relaunches or tabs until this reply arrives.
+            sup.set_browser_forwarding(enabled);
+            send_reply(ctx.tx, &ControlMsg::BrowserForwardingSet { req_id }).await;
+        }
         ControlMsg::CreateSession {
             req_id,
             parent,
@@ -5752,10 +5759,13 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let auth = authenticated_parent(&sup, state.path(), "parent-session").await;
 
-        // File access belongs to the helm, even for the authenticated session's
-        // own directory. Pin both operations so a future allowlist expansion
-        // cannot accidentally give an agent a filesystem-read side channel.
+        // Placement and file access belong to the helm. A session credential must
+        // neither change forwarding for other sessions nor acquire a file-read side channel.
         for request in [
+            ControlMsg::SetBrowserForwarding {
+                req_id: 38,
+                enabled: true,
+            },
             ControlMsg::StatFile {
                 req_id: 39,
                 session_id: "parent-session".into(),
@@ -5775,6 +5785,11 @@ mod tests {
                 matches!(reply, ControlMsg::Error { req_id: id, kind: ErrorKind::Unauthorized, .. } if id == req_id)
             );
         }
+
+        assert!(
+            sup.browser_command().is_none(),
+            "a session peer cannot enable browser forwarding"
+        );
 
         handle_restricted_control(&sup, ControlMsg::ListSessions { req_id: 41 }, &tx, &auth).await;
         let unauthorized: ControlMsg =
@@ -6451,6 +6466,28 @@ mod tests {
             ),
             "{reply:?}"
         );
+    }
+
+    /// A success reply certifies applied placement, not queued work. Both true and false
+    /// must take effect before the helm can publish this accepted connection as usable.
+    #[farhelm_testtrace::test]
+    async fn browser_forwarding_is_applied_before_its_acknowledgement() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        for (req_id, enabled) in [(81, true), (82, false)] {
+            let (_tasks, mut rx) =
+                dispatch_for_test(&sup, ControlMsg::SetBrowserForwarding { req_id, enabled }).await;
+            let reply: ControlMsg =
+                serde_json::from_slice(&rx.recv().await.expect("acknowledgement").body).unwrap();
+            assert_eq!(reply, ControlMsg::BrowserForwardingSet { req_id });
+            assert_eq!(
+                sup.browser_command().is_some(),
+                enabled,
+                "the policy must already be applied when acknowledgement is observed"
+            );
+        }
     }
 
     /// An identity this build will not store is refused as an INVALID

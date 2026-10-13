@@ -1840,6 +1840,20 @@ labelled data on the approval card. The command waits and exits zero after a web
 native browser opener accepts the request, not after the destination loads. Denial, dismissal, refusal, timeout and a
 native opener failure exit nonzero with a short message.
 
+On remote hosts only, Farhelm supplies `BROWSER=<absolute-session-farhelm> agent open-url -- %s` to agents at their next
+launch and to new terminal tabs immediately. Existing agents and tabs keep their environments. This is a conditional
+convenience, not part of the guaranteed injected environment above: any BROWSER already supplied by the inherited
+environment or shell startup wins, including an empty value. The helm's own machine receives no new BROWSER, and
+checkout preparation receives none. A path containing whitespace, colon, percent, quotes, backslash or glob characters
+is omitted with a diagnostic, because common readers cannot agree on a quoting convention.
+
+Callers that wait for that command, such as Python's webbrowser and xdg-open, observe its exit result. Rust's webbrowser
+crate launches it in the background and reports success before a user answers; Codex's browser-login path uses that
+crate and cannot report a later refusal. Not every harness reads BROWSER as a command template: Claude Code 2.1.296 on
+Linux passes its entire value as an executable name, so this template does not forward its native opener; an agent can
+still invoke `farhelm agent open-url` directly. A login redirect to localhost on the remote host still cannot complete
+from the user's local browser; forwarding a link does not forward its callback server.
+
 **Open links without asking** covers public addresses. **Open local-network links without asking** covers literal
 loopback, private and link-local IPv4/IPv6, IPv4 0/8, CGNAT and multicast/reserved high ranges, unspecified and
 multicast IPv6, mapped local IPv4, single-label names, and localhost, .localhost, .local, .internal, .lan, .home and

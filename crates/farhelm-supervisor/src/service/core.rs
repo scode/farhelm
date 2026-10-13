@@ -4276,6 +4276,10 @@ pub struct Supervisor {
     /// hooks embed this one; this is either that path or one derived from it
     /// by replacing ASCII components, so it is valid UTF-8 too.
     session_farhelm_exe_str: String,
+    /// Placement configured by the accepted helm, not inferred from transport or OS.
+    /// One helm is supported. Keep this process-local policy on disconnect: the agent
+    /// relay still refuses without an attachment, and reconnect explicitly sets both values.
+    browser_forwarding: std::sync::atomic::AtomicBool,
     /// Admission control for the management requests spawned by
     /// `handle_control` (`StopSession`/`DeleteSession` and the rest — see
     /// `HANDLER_ADMISSION_PERMITS`'s own docs, including why a full cap
@@ -5469,6 +5473,7 @@ impl Supervisor {
             versioned_program,
             session_farhelm_exe,
             session_farhelm_exe_str,
+            browser_forwarding: std::sync::atomic::AtomicBool::new(false),
             admission: Arc::new(tokio::sync::Semaphore::new(HANDLER_ADMISSION_PERMITS)),
             list_admission: Arc::new(tokio::sync::Semaphore::new(LIST_ADMISSION_PERMITS)),
             directory_browse_workers: Arc::new(tokio::sync::Semaphore::new(
@@ -12337,7 +12342,30 @@ impl Supervisor {
         session_token: &str,
         tab_id: &str,
     ) -> Vec<(String, String)> {
+        let inherited = std::env::var_os("BROWSER");
+        self.tab_environment_with_browser(session_id, session_token, tab_id, inherited.as_deref())
+    }
+
+    /// Keep inherited browser selection explicit at the environment boundary so tests
+    /// are independent of the agent session running them and never edit process globals.
+    fn tab_environment_with_browser(
+        &self,
+        session_id: &str,
+        session_token: &str,
+        tab_id: &str,
+        inherited_browser: Option<&std::ffi::OsStr>,
+    ) -> Vec<(String, String)> {
         let mut env = self.seams.launch_env.clone();
+        if self
+            .browser_forwarding
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            crate::launch::append_tab_browser(
+                &mut env,
+                inherited_browser,
+                self.browser_command().as_deref(),
+            );
+        }
         // The id, token, and socket are one spawn authority. Keeping their
         // construction together prevents a tab-only change from restoring
         // the pre-upgrade state where the id existed but spawn still failed.
@@ -12360,6 +12388,21 @@ impl Supervisor {
                 .into_owned(),
         ));
         env
+    }
+
+    /// The helm applies this before publishing an accepted connection. It changes only
+    /// future environment assembly; an already-running agent or shell is not rewritten.
+    pub(crate) fn set_browser_forwarding(&self, enabled: bool) {
+        self.browser_forwarding
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Use the same absolute Farhelm executable for agents and tabs, without changing tab PATH.
+    pub(crate) fn browser_command(&self) -> Option<String> {
+        self.browser_forwarding
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .then(|| crate::launch::browser_forwarding_command(&self.session_farhelm_exe))
+            .flatten()
     }
 
     /// Open and publish a shell window after its complete environment is fixed.
@@ -13441,6 +13484,7 @@ impl Supervisor {
             session_token: session_token.to_string(),
             supervisor_sock: Self::socket_path(&self.state_dir),
             farhelm_bin_dir: self.session_bin_dir().to_path_buf(),
+            browser_command: self.browser_command(),
             // The session-terminal checkout preparation for a fresh GitHub
             // checkout (Design D): the shim clones, runs the post-clone
             // hook, and only then execs the agent — all inside this
@@ -28249,6 +28293,37 @@ exit 0
             Some(socket.to_string_lossy().as_ref())
         );
         assert!(socket.is_absolute());
+    }
+
+    /// Placement changes affect the next agent assembly and new tabs together. Local
+    /// reconnects explicitly clear forwarding; inherited and empty browser values win.
+    #[farhelm_testtrace::test]
+    async fn browser_forwarding_is_remote_only_and_preserves_tab_environment() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let browser = |inherited: Option<&std::ffi::OsStr>| {
+            sup.tab_environment_with_browser("s", "t", "tab", inherited)
+                .into_iter()
+                .find(|(key, _)| key == "BROWSER")
+                .map(|(_, value)| value)
+        };
+        assert!(sup.browser_command().is_none());
+        assert_eq!(browser(None), None);
+        sup.set_browser_forwarding(true);
+        let expected = format!("{} agent open-url -- %s", sup.session_farhelm_exe.display());
+        assert_eq!(sup.browser_command(), Some(expected.clone()));
+        assert_eq!(browser(None), Some(expected));
+        for inherited in ["", "custom-browser %s"] {
+            assert_eq!(browser(Some(inherited.as_ref())), Some(inherited.into()));
+        }
+        sup.set_browser_forwarding(false);
+        assert_eq!(sup.browser_command(), None);
+        assert_eq!(browser(None), None);
+        let mut env = vec![("BROWSER".into(), "fixture-browser".into())];
+        crate::launch::append_tab_browser(&mut env, Some("ambient".as_ref()), Some("fallback"));
+        assert_eq!(env, vec![("BROWSER".into(), "fixture-browser".into())]);
     }
 
     // -----------------------------------------------------------------

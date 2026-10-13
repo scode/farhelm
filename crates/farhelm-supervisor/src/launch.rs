@@ -163,6 +163,11 @@ pub struct LaunchSpec {
     /// so an agent invoking `farhelm` by name reaches Farhelm's own CLI
     /// before considering any ambient installation.
     pub farhelm_bin_dir: PathBuf,
+    /// A remote-host browser fallback, separate from harness reporter settings. The final
+    /// agent assembly uses it only when login-shell startup supplied no BROWSER. Any inherited
+    /// value, including empty, wins. Preparation git and the post-clone hook receive no fallback.
+    #[serde(default)]
+    pub browser_command: Option<String>,
     /// When present, the shim must prepare a git working copy inside this
     /// session's terminal — clone, run the post-clone hook, and only then
     /// exec the agent — before launching anything. `None` (the serde
@@ -960,6 +965,16 @@ pub fn exec_launch_spec_with_seam(
 /// contract and the truecolor capability agents need to match the browser.
 /// The inherited environment remains untouched outside this child process.
 fn agent_command(spec: &LaunchSpec) -> std::process::Command {
+    let inherited = std::env::var_os("BROWSER");
+    agent_command_with_browser(spec, inherited.as_deref())
+}
+
+/// Preserve the environment established by shell startup, with presence rather than
+/// nonempty text deciding precedence. The explicit input is also the no-global-mutation seam.
+fn agent_command_with_browser(
+    spec: &LaunchSpec,
+    inherited_browser: Option<&std::ffi::OsStr>,
+) -> std::process::Command {
     let mut command = launch_child_command(&spec.argv[0], spec);
     command
         .args(&spec.argv[1..])
@@ -968,7 +983,52 @@ fn agent_command(spec: &LaunchSpec) -> std::process::Command {
         // After `launch_child_command`'s scrub of inherited reporter
         // settings, so this launch's own values are the ones that survive.
         .envs(spec.env.iter().map(|(name, value)| (name, value)));
+    if inherited_browser.is_none()
+        && !spec.env.iter().any(|(name, _)| name == "BROWSER")
+        && let Some(browser) = &spec.browser_command
+    {
+        command.env("BROWSER", browser);
+    }
     command
+}
+
+/// BROWSER readers split on colon and whitespace, and substitute percent placeholders.
+/// No quoting works for all of them. Omit an unsafe fallback instead of naming a different
+/// executable after their parsing; a user-supplied BROWSER still wins independently.
+pub(crate) fn browser_forwarding_command(exe: &std::path::Path) -> Option<String> {
+    let path = exe.to_str()?;
+    if !exe.is_absolute()
+        || path.chars().any(|c| {
+            c.is_whitespace() || matches!(c, ':' | '%' | '\\' | '\'' | '"' | '*' | '?' | '[' | ']')
+        })
+    {
+        tracing::warn!(
+            "not forwarding BROWSER: the Farhelm executable path cannot be represented safely in common BROWSER readers"
+        );
+        return None;
+    }
+    Some(format!("{path} agent open-url -- %s"))
+}
+
+/// Tabs inherit the supervisor's environment through tmux, then run shell startup. An
+/// explicit fixture value wins first, then any inherited value (even empty), then fallback.
+/// A non-UTF-8 inherited value cannot be represented by tmux's string argv; leave it ambient
+/// rather than replacing it with a generated command. The local-host path does not call this.
+pub(crate) fn append_tab_browser(
+    env: &mut Vec<(String, String)>,
+    inherited: Option<&std::ffi::OsStr>,
+    fallback: Option<&str>,
+) {
+    if env.iter().any(|(name, _)| name == "BROWSER") {
+        return;
+    }
+    let browser = match inherited {
+        Some(value) => value.to_str(),
+        None => fallback,
+    };
+    if let Some(browser) = browser {
+        env.push(("BROWSER".into(), browser.into()));
+    }
 }
 
 /// The environment and PATH contract every child process the launch shim
@@ -1928,6 +1988,83 @@ mod tests {
         assert_eq!(result, None);
     }
 
+    /// Common readers disagree about quoting. Forward only paths whose literal spelling
+    /// survives colon splitting, word splitting, printf substitution and shell globbing.
+    #[farhelm_testtrace::test]
+    fn browser_forwarding_uses_a_literal_absolute_executable_or_omits_it() {
+        assert_eq!(
+            browser_forwarding_command(Path::new("/opt/farhelm/bin/farhelm")),
+            Some("/opt/farhelm/bin/farhelm agent open-url -- %s".into())
+        );
+        for path in [
+            "farhelm",
+            "/opt/far helm",
+            "/opt/far:helm",
+            "/opt/far%helm",
+            "/opt/far\\helm",
+            "/opt/far'helm",
+            "/opt/far\"helm",
+            "/opt/far*helm",
+            "/opt/far?helm",
+            "/opt/far[helm]",
+        ] {
+            assert_eq!(browser_forwarding_command(Path::new(path)), None, "{path}");
+        }
+    }
+
+    /// Forwarding is a fallback evaluated after shell startup, never a harness setting.
+    /// Empty user values are intentional too, and preparation children receive no fallback.
+    #[farhelm_testtrace::test]
+    fn browser_forwarding_preserves_agent_environment_and_excludes_preparation() {
+        let spec = LaunchSpec {
+            argv: vec!["agent".into()],
+            status_file: PathBuf::from("/tmp/status"),
+            session_id: "session".into(),
+            session_token: "token".into(),
+            supervisor_sock: PathBuf::from("/tmp/sock"),
+            farhelm_bin_dir: PathBuf::from("/opt/bin"),
+            browser_command: Some("/opt/bin/farhelm agent open-url -- %s".into()),
+            preparation: None,
+            env: Vec::new(),
+        };
+        let browser_override = |command: &std::process::Command| {
+            command
+                .get_envs()
+                .find(|(key, _)| *key == "BROWSER")
+                .map(|(_, value)| value.map(|v| v.to_owned()))
+        };
+        assert_eq!(
+            browser_override(&agent_command_with_browser(&spec, None)),
+            Some(Some(std::ffi::OsString::from(
+                spec.browser_command.as_ref().unwrap()
+            )))
+        );
+        for inherited in ["", "custom-browser --private %s"] {
+            assert_eq!(
+                browser_override(&agent_command_with_browser(&spec, Some(inherited.as_ref()))),
+                None,
+                "an inherited value must stay ambient without an overriding command.env"
+            );
+        }
+        assert_eq!(browser_override(&launch_child_command("git", &spec)), None);
+        let mut explicit = spec.clone();
+        explicit
+            .env
+            .push(("BROWSER".into(), "fixture-browser".into()));
+        assert_eq!(
+            browser_override(&agent_command_with_browser(&explicit, None)),
+            Some(Some("fixture-browser".into()))
+        );
+        let mut legacy = serde_json::to_value(&spec).unwrap();
+        legacy.as_object_mut().unwrap().remove("browser_command");
+        assert!(
+            serde_json::from_value::<LaunchSpec>(legacy)
+                .unwrap()
+                .browser_command
+                .is_none()
+        );
+    }
+
     /// The reader's whole reason to exist: surfacing exactly what
     /// [`exec_launch_spec`] left behind, at the SAME path
     /// [`spec_path_for_session`]/[`status_path_for_spec`] derive
@@ -1948,6 +2085,7 @@ mod tests {
             session_token: "test-token".to_string(),
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
+            browser_command: None,
             preparation: None,
             env: Vec::new(),
         };
@@ -2057,6 +2195,7 @@ mod tests {
             session_token: "test-token".to_string(),
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
+            browser_command: None,
             preparation: None,
             env: Vec::new(),
         };
@@ -2109,6 +2248,7 @@ mod tests {
             session_token: "test-token".to_string(),
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
+            browser_command: None,
             preparation: None,
             env: Vec::new(),
         };
@@ -2186,6 +2326,7 @@ mod tests {
             session_token: "test-token".to_string(),
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
+            browser_command: None,
             preparation: None,
             env: Vec::new(),
         };
@@ -2220,6 +2361,7 @@ mod tests {
             session_token: "test-token".to_string(),
             supervisor_sock: PathBuf::from("/tmp/supervisor.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
+            browser_command: None,
             preparation: None,
             env: Vec::new(),
         };
@@ -2346,6 +2488,7 @@ mod tests {
             session_token: "private-token".to_string(),
             supervisor_sock: PathBuf::from("/run/user/1000/farhelm.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
+            browser_command: None,
             preparation: None,
             env: vec![(
                 PI_REPORTER_EXE_ENV_VAR.to_string(),
@@ -2381,6 +2524,7 @@ mod tests {
             session_token: "private-token".to_string(),
             supervisor_sock: PathBuf::from("/run/user/1000/farhelm.sock"),
             farhelm_bin_dir: PathBuf::from("/opt/farhelm/bin"),
+            browser_command: None,
             preparation: None,
             env: Vec::new(),
         };
@@ -2878,6 +3022,7 @@ exec sleep 60
                 session_token: "prep-token".to_string(),
                 supervisor_sock: self.tmp.path().join("supervisor.sock"),
                 farhelm_bin_dir: self.bin_dir(),
+                browser_command: None,
                 preparation: Some(self.preparation.clone()),
                 env: Vec::new(),
             };
