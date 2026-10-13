@@ -4355,6 +4355,29 @@ handler checks the live arm state and answer-in-flight guard, then calls the sha
 `noopener` can return null even on success, so that return value cannot establish whether a pop-up was blocked. A native
 UI answers the card without opening in its page. The approval region installs the shared URL predicate when mounted.
 
+Protocol 47 adds `SetBrowserForwarding` and its operation-specific `BrowserForwardingSet` acknowledgement. The
+connection manager sends true for SSH rows and false for Local rows only after identity acceptance, including accepted
+identity-less peers, and awaits the reply before publishing Connected. Mismatched and duplicate identities never
+configure. A refusal or missing acknowledgement follows the existing connection attempt deadline and retry path. The
+supervisor applies a process-local boolean before acknowledging; disconnect leaves it in place, while each accepted
+reconnect sets it explicitly. Actual link requests still require the ordinary attached helm. No schema or per-session
+placement field is needed: every next launch and new tab reads the current policy.
+
+`LaunchSpec::browser_command` is optional with a serde default for private specs already written on disk. It carries the
+absolute `session_farhelm_exe` plus `agent open-url -- %s`, separate from harness reporter environment. The shim adds it
+only in final agent assembly after login-shell startup, preserving any inherited BROWSER, even empty; git and the
+post-clone command use the common child assembly and get no fallback. Tabs pass it through tmux `-e` without a PATH
+change; explicit launch seams and the supervisor's inherited BROWSER win, then shell startup can override it. Tests pass
+inherited browser state explicitly rather than editing or depending on their process environment.
+
+Common BROWSER readers split on colon and whitespace; Python also removes shell quotes/backslashes, and xdg-open's word
+expansion and printf interpret glob characters and backslashes. The generator therefore rejects relative paths,
+whitespace, colon, percent, quotes, backslash and glob metacharacters, logging a generic reason without exposing the
+path. Python's command-template controller and xdg-open wait for the child, whereas Rust webbrowser runs non-text
+browsers in the background (Codex's login server uses it). Inspection of Claude Code 2.1.296's Linux bundle found its
+native opener passes BROWSER as one executable to an argv-based child helper, not as a template; automatic forwarding
+does not work there. The explicit Farhelm verb remains usable. No localhost callback tunnel is supplied.
+
 Deleting a session refuses its waiting requests first and keeps refusing new ones until the delete finishes
 (`Approvals::deny_session`, held for the delete and for a replacement's teardown), so a card for a session that is going
 away cannot be allowed into acting for it.

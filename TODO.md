@@ -177,13 +177,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   "Decisions for you", and getting there from today's installer (older releases' tools, the old lock folder), which the
   design deliberately leaves out. FAT, ExFAT and network volumes are out of scope.
 
-- **Let agents open URLs in the user's browser.** An agent in a session that tries to open a link fails, because the
-  session's host has no browser: "Failed to open browser for https://…: No valid browsers detected. You can specify one
-  in BROWSER environment variable". Proxy `BROWSER` so that such a request is forwarded to the user's Farhelm client and
-  opened in the browser on the machine the user is sitting at. This must come with safety precautions, since it lets an
-  agent put a URL in front of the user's browser; which ones (asking first, showing the full URL, restricting schemes,
-  and so on) is to be worked out. Plan: `plans/queue/open-links-in-browser.md`.
-
 - **Consider matching Claude's conversation capture to Codex's.** Codex's conversation capture changed recently;
   consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
   this refers to and what matching it would mean; ask before starting.

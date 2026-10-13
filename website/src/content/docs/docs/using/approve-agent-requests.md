@@ -1,6 +1,6 @@
 ---
 title: Approve what agents do
-description: How Farhelm asks you before an agent starts, stops, or changes sessions, and how to stop it asking for a host.
+description: How Farhelm asks before an agent changes sessions or opens links, and how to stop it asking for a host.
 sidebar:
   order: 9
 ---
@@ -39,8 +39,8 @@ The card has three buttons:
 
 - **allow** lets this one request go ahead.
 - **always allow from** the host lets this request go ahead and turns on that host's **Run farhelm commands without
-  asking** setting, so agents there stop asking (see below). Other cards from that host that are already waiting stay up
-  until you answer them.
+  asking** setting for a session or template change, so agents there stop asking (see below). A link card turns on only
+  that link's permission instead. Other cards from that host that are already waiting stay up until you answer them.
 - **deny** refuses it, and the agent is told you declined.
 
 The oldest waiting request opens first. Other requests appear as headers below it; click one to read and answer that
@@ -72,7 +72,34 @@ that host's sessions start, stop, restart, rename, and copy sessions on any of y
 asking you. Turn it on only for a host whose agents you would let do that unsupervised.
 
 If you **adopt** a host that was reinstalled or replaced at the same address, the setting goes back to off, like the
-YOLO setting: you have not decided about the new installation yet.
+YOLO setting and both link settings: you have not decided about the new installation yet.
+
+## Open links from a remote session
+
+When an agent or a command in a remote session tries to open a web link through `BROWSER`, Farhelm asks to open it on
+your machine. The card names the session and host and shows the full URL. Only HTTP and HTTPS links are accepted.
+**allow** opens it in your default browser from the Mac app, or in a new tab from Farhelm's web UI. **deny** opens
+nothing. Commands can also ask directly with `farhelm agent open-url -- https://example.com`.
+
+The host settings have two separate permissions, both off initially. **Open links without asking** covers public
+addresses. **Open local-network links without asking** covers addresses on your own machine or private network; those
+cards explain why they ask separately. **always allow from** turns on only the permission that link needs. The commands
+permission above covers neither. Classification uses the address in the URL, without looking up where a name points, so
+a public-looking name can still lead to your private network.
+
+With the matching permission on, the Mac app opens the link immediately. Farhelm's web UI still shows an **open** button
+because your browser requires a click; **dismiss** refuses the request. Turning on the local-network permission lets
+agents on that remote host make your browser load addresses on your machine or network without another approval.
+
+A running agent gets forwarding at its next launch; new terminal tabs get it immediately. Sessions on **this machine**
+keep their existing browser behavior. Your own `BROWSER` setting wins, even when empty. Unusual Farhelm install paths
+that common browser tools cannot read safely get no forwarding. A command that waits for Farhelm learns whether you
+allowed or refused; a caller that starts it in the background can report success before you answer. Codex's browser
+login does that. Claude Code 2.1.296 on Linux expects a single program name rather than this command template, so its
+own opener does not forward; use the explicit Farhelm command instead.
+
+A login that redirects to `localhost` on the remote host still cannot finish in your local browser. Opening the link
+does not connect that remote login callback to your machine.
 
 ## YOLO sessions and custom commands
 

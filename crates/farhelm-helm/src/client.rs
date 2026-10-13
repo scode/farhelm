@@ -2565,6 +2565,19 @@ impl SupervisorClient {
         self.next_req.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Configure placement before this connection may launch any agent or terminal tab.
+    /// A success reply means the supervisor applied the policy, not merely queued it.
+    pub(crate) async fn set_browser_forwarding(&self, enabled: bool) -> anyhow::Result<()> {
+        let req_id = self.req_id();
+        match self
+            .request(req_id, ControlMsg::SetBrowserForwarding { req_id, enabled })
+            .await?
+        {
+            ControlMsg::BrowserForwardingSet { .. } => Ok(()),
+            other => Err(wrong_reply("SetBrowserForwarding", &other)),
+        }
+    }
+
     /// What the supervisor said about itself at handshake time — in
     /// particular its host identity, which PLAN_M6.md item 4's connection
     /// manager runs every first-contact/mismatch/duplicate decision from.

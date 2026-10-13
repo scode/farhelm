@@ -199,7 +199,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_46` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_47` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -210,7 +210,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 46;
+pub const PROTOCOL_VERSION: u32 = 47;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -2436,6 +2436,12 @@ pub struct SessionDeleteOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControlMsg {
+    /// Configure future agent/tab browser forwarding after the helm accepts this host.
+    /// Full-authority peers only; the transport cannot infer whether this is the helm's
+    /// own machine. Explicit false on a local reconnect clears a previous remote policy.
+    SetBrowserForwarding { req_id: u64, enabled: bool },
+    /// The policy has been applied, so the helm may publish this connection as usable.
+    BrowserForwardingSet { req_id: u64 },
     /// Resolve and inspect a path on the session's host. Only full-authority
     /// helm connections may ask; relative paths use the recorded session cwd.
     StatFile {
@@ -3588,7 +3594,8 @@ impl ControlMsg {
     /// caller holding the pending-request table can answer the second.
     pub fn reply_req_id(&self) -> Option<u64> {
         match self {
-            ControlMsg::FileStat { req_id, .. }
+            ControlMsg::BrowserForwardingSet { req_id }
+            | ControlMsg::FileStat { req_id, .. }
             | ControlMsg::DownloadStarted { req_id, .. }
             | ControlMsg::SessionCreated { req_id, .. }
             | ControlMsg::GithubCheckoutReconciled { req_id, .. }
@@ -3618,7 +3625,8 @@ impl ControlMsg {
             // wildcard: each is a message a hostile or confused peer could
             // echo back, and this `None` is what stops that echo from being
             // delivered as an answer.
-            ControlMsg::StatFile { .. }
+            ControlMsg::SetBrowserForwarding { .. }
+            | ControlMsg::StatFile { .. }
             | ControlMsg::BeginDownload { .. }
             | ControlMsg::CreateSession { .. }
             | ControlMsg::ReconcileGithubCheckout { .. }
@@ -3668,7 +3676,8 @@ impl ControlMsg {
     /// request waiting forever.
     pub fn request_req_id(&self) -> Option<u64> {
         match self {
-            ControlMsg::StatFile { req_id, .. }
+            ControlMsg::SetBrowserForwarding { req_id, .. }
+            | ControlMsg::StatFile { req_id, .. }
             | ControlMsg::BeginDownload { req_id, .. }
             | ControlMsg::CreateSession { req_id, .. }
             | ControlMsg::ReconcileGithubCheckout { req_id, .. }
@@ -3691,7 +3700,8 @@ impl ControlMsg {
             // correlate its refusal — an uncorrelated one would leave the
             // asking `farhelm agent` waiting on a reply that never comes.
             | ControlMsg::AgentRequest { req_id, .. } => Some(*req_id),
-            ControlMsg::FileStat { .. }
+            ControlMsg::BrowserForwardingSet { .. }
+            | ControlMsg::FileStat { .. }
             | ControlMsg::DownloadStarted { .. }
             | ControlMsg::DownloadAck { .. }
             | ControlMsg::AbortDownload { .. }
@@ -3750,6 +3760,8 @@ impl ControlMsg {
     /// identifier is what they will grep for.
     pub fn variant_name(&self) -> &'static str {
         match self {
+            ControlMsg::SetBrowserForwarding { .. } => "SetBrowserForwarding",
+            ControlMsg::BrowserForwardingSet { .. } => "BrowserForwardingSet",
             ControlMsg::StatFile { .. } => "StatFile",
             ControlMsg::FileStat { .. } => "FileStat",
             ControlMsg::BeginDownload { .. } => "BeginDownload",
@@ -4731,8 +4743,30 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_46() {
-        assert_eq!(PROTOCOL_VERSION, 46);
+    fn protocol_version_is_pinned_at_47() {
+        assert_eq!(PROTOCOL_VERSION, 47);
+    }
+
+    /// Placement setup has its own acknowledgement. Request echoes cannot settle it,
+    /// and the acknowledgement is applied state rather than an uncorrelated hint.
+    #[farhelm_testtrace::test]
+    fn browser_forwarding_has_distinct_request_and_reply_wire_directions() {
+        let request = ControlMsg::SetBrowserForwarding {
+            req_id: 71,
+            enabled: false,
+        };
+        let reply = ControlMsg::BrowserForwardingSet { req_id: 71 };
+        assert_eq!(request.request_req_id(), Some(71));
+        assert_eq!(request.reply_req_id(), None);
+        assert_eq!(reply.request_req_id(), None);
+        assert_eq!(reply.reply_req_id(), Some(71));
+        for message in [request, reply] {
+            assert_eq!(
+                serde_json::from_str::<ControlMsg>(&serde_json::to_string(&message).unwrap())
+                    .unwrap(),
+                message
+            );
+        }
     }
 
     /// A browser wait must receive the approval budget without holding the session's change fence.

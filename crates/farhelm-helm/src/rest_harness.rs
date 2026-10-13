@@ -516,7 +516,22 @@ async fn run_standalone(
             frame = reader.read_frame() => frame,
         };
         let Ok(Some(frame)) = frame else { return };
-        let Ok(ControlMsg::ListSessions { req_id, .. }) = parse_control(&frame) else {
+        let Ok(msg) = parse_control(&frame) else {
+            continue;
+        };
+        if let ControlMsg::SetBrowserForwarding { req_id, .. } = msg {
+            // Placement is connection setup, not a session operation. Scripted peers
+            // must acknowledge it before the manager starts their list/REST exchange.
+            if writer
+                .write_control(&ControlMsg::BrowserForwardingSet { req_id })
+                .await
+                .is_err()
+            {
+                return;
+            }
+            continue;
+        }
+        let ControlMsg::ListSessions { req_id, .. } = msg else {
             // Everything else is ignored rather than refused: a standalone
             // host exists to be listed, and a test that needs a session
             // operation answered splices its own peer instead.
@@ -587,6 +602,20 @@ async fn run_spliced(
         let mut reader = FrameReader::new(helm_r);
         let mut writer = FrameWriter::new(peer_w);
         while let Ok(Some(frame)) = reader.read_frame().await {
+            if let Ok(ControlMsg::SetBrowserForwarding { req_id, .. }) = parse_control(&frame) {
+                // Keep the test's operation-specific peer independent of connection
+                // setup, just as this relay already owns the periodic list replies.
+                if to_helm
+                    .send(farhelm_proto::Frame::control(
+                        &ControlMsg::BrowserForwardingSet { req_id },
+                    ))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                continue;
+            }
             if let Ok(ControlMsg::ListSessions { req_id, .. }) = parse_control(&frame) {
                 // Built when the REQUEST arrives, not when the reply is
                 // sent: that is what makes a held reply genuinely describe

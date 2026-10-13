@@ -65,6 +65,13 @@ Your answer to **runs without approval prompts** covers the resume command too.
 Each agent's own page notes anything its custom commands need beyond this, such as Grok's `--no-leader` and Goose's
 `session`.
 
+## Opening links
+
+Commands in remote sessions also receive browser-link forwarding when they use the usual `BROWSER` command template.
+Your own browser setting wins; see
+[Open links from a remote session](/docs/using/approve-agent-requests/#open-links-from-a-remote-session) for approvals
+and the limitations of remote login callbacks. A command can ask explicitly with `farhelm agent open-url -- <url>`.
+
 ## Reusing a command
 
 Save a command and its fields as a [launch template](/docs/using/launch-templates/) to start it again without typing it,
