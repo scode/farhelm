@@ -245,6 +245,28 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
 4. Make the changelog PR: the approved `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, every fragment under
    `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), any guidance gathered in
    step 3, `dprint fmt`, and `python3 releasing/check-changelog.py format` passing. Merge it before going on.
+
+   The moment it merges, start a subagent to give the release's notes their screenshots on the docs website, and go on
+   to step 5 without waiting for it. The maintainer asked for this on 2026-10-13: the screenshot work used to start only
+   once the release was ready to sign, which left a separate wait for it after everything else was done. Started here,
+   it runs while the tag builds and the release is signed and brick tested, so its draft PR is ready by the time the
+   release is promoted. The notes' text is already on the website, built from the changelog section this step merged;
+   what the subagent adds is screenshots of the release's visible changes, following `website/AGENTS.md`, "Release
+   notes", and `website/EDITORIAL_RULES.md`. Give it this, in so many words:
+   - Work in a new jj workspace based on the latest `main`, under a subdirectory of your scratch directory, never in the
+     release checkout, which is busy with the release branch. Do not run `cargo clean` or touch tags, the release
+     branch, or anything on get.farhelm.io.
+   - Read the `## vX.Y.Z` section of `CHANGELOG.md` and decide which entries change something a reader would see: a new
+     dialog or control, or a redesign. Most entries do not, and a release with none gets no PR; say so and stop.
+   - For each that does, add a shot to `e2e/docs-shots/release-notes.spec.ts` and an item to
+     `website/src/release-notes/vX.Y.Z.json`, run the full capture (`scripts/docs-screenshots.sh`, no `--only`), look at
+     every image it prints and fix placement, then run `scripts/publish-docs-shots.sh` and confirm the website builds.
+   - Open the result as a draft PR per the `jjstack` skill, with its commit message cold-read per the
+     `scode-commit-msg-reviewer` skill, and do not merge it. It starts no preview server, being unattended.
+
+   The PR stays a draft until the maintainer asks for it to land; nothing in this procedure merges it. Pass its link on
+   to the maintainer when the subagent reports it, with a note that the website changes only when someone deploys it.
+   The subagent's result holds up no step of the release.
 5. Start a `release-X.Y.Z` branch at the changelog PR's merge commit EXACTLY, not at whatever main has become since:
    anything merged after it would ship in X.Y.Z without notes and leave its fragment behind as `STALE`. Confirm
    `releasing/changelog.d/` holds only `README.md` at that commit. Then bump the version to `X.Y.Z` in the root
@@ -271,24 +293,8 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    `https://get.farhelm.io/vX.Y.Z/SHA256SUMS`, its `.minisig` and `install.sh` answer, and
    `https://get.farhelm.io/latest` still names the previous stable release.
 
-   When you tell the maintainer the release is ready to sign, start a subagent in that same turn to give the release's
-   notes their screenshots on the docs website, so they are ready by the time the release is promoted. Do not wait for
-   the signing. The notes' text is already there, built from the changelog section step 4 merged; what the subagent adds
-   is screenshots of the release's visible changes, following `website/AGENTS.md`, "Release notes", and
-   `website/EDITORIAL_RULES.md`. Give it this, in so many words:
-   - Work in a new jj workspace based on the latest `main`, under a subdirectory of your scratch directory, never in the
-     release checkout, which is busy with the release branch. Do not run `cargo clean` or touch tags, the release
-     branch, or anything on get.farhelm.io.
-   - Read the `## vX.Y.Z` section of `CHANGELOG.md` and decide which entries change something a reader would see: a new
-     dialog or control, or a redesign. Most entries do not, and a release with none gets no PR; say so and stop.
-   - For each that does, add a shot to `e2e/docs-shots/release-notes.spec.ts` and an item to
-     `website/src/release-notes/vX.Y.Z.json`, run the full capture (`scripts/docs-screenshots.sh`, no `--only`), look at
-     every image it prints and fix placement, then run `scripts/publish-docs-shots.sh` and confirm the website builds.
-   - Open the result as a draft PR per the `jjstack` skill, with its commit message cold-read per the
-     `scode-commit-msg-reviewer` skill, and do not merge it. It starts no preview server, being unattended.
-
-   Pass the PR link on to the maintainer when the subagent reports it, with a note that the website changes only when
-   someone deploys it. The subagent's result does not hold up the steps below.
+   If the screenshot subagent from step 4 has reported by now, include its PR link (or its finding that the release
+   needs no screenshots) when telling the maintainer the release is ready to sign.
 8. Stop for the brick test. The release is now staged: anyone can install it by naming its version, and nothing installs
    it by default. Tell the maintainer it is ready to brick test, and give them the line to hand the agent on the Mac
    test host: `brick test release vX.Y.Z` (`releasing/mac-vm-test/BRICK-TEST.md`). That test runs on the maintainer's
@@ -456,6 +462,13 @@ Then continue from step 5 at the new changelog PR's merge commit. A `release-X.Y
 pushed a tag is replaced, since nothing points at it; one whose tag was pushed is left as it is. The maintainer reviews
 the unapproved text at step 7 instead: when telling them the release is ready to sign, list every entry added without
 their review and every fragment left out, so they can stop before signing or have the wording corrected.
+
+The screenshot work from step 4 follows the notes it was based on. When the re-cut's changelog PR merges, bring it up to
+date in the same way step 4 starts it: continue the screenshot subagent if it is still working, or start a new one with
+step 4's instructions that updates the existing draft PR (or opens one, if there was none) rather than opening a second.
+Tell it what changed: a new version means renaming `website/src/release-notes/vX.Y.Z.json` and the shots' version, and
+new entries need the same decision about whether a reader would see them. Then continue from step 5 as above without
+waiting for it.
 
 # The release risk report
 
