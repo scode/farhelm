@@ -202,6 +202,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   never learns which conversation such a session is in. Claude already tolerates a one-level wrapper. Make the hook work
   for Codex wrappers too. The maintainer knows the details of the wrapper case this needs to cover.
 
+- **Consider matching Claude's conversation capture to Codex's.** Codex's conversation capture changed recently;
+  consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
+  this refers to and what matching it would mean; ask before starting.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
