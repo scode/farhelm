@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-11T19:52:16Z",
-  "captured_from": "99f88127bf872db8729ffde18f2ca45ca9828ac9",
-  "commit": "af6d22263ce42beaf9063539296422e7d3a565e9",
+  "captured_at": "2026-10-13T16:41:11Z",
+  "captured_from": "7b09de0c974a81a3b7ec4dc7077d7049feeff173",
+  "commit": "b1ace6cdbefba5a95d03234937abdb48303b6df3",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
@@ -58,7 +58,7 @@
       "width": 996
     },
     "manage-hosts/app-settings": {
-      "height": 1932,
+      "height": 2676,
       "width": 1594
     },
     "manage-hosts/details": {
@@ -70,7 +70,7 @@
       "width": 1830
     },
     "manage-hosts/host-settings": {
-      "height": 1772,
+      "height": 1864,
       "width": 1594
     },
     "manage-hosts/remove-dialog": {
@@ -129,6 +129,14 @@
       "height": 1416,
       "width": 1424
     },
+    "release-notes/v0-28-0-app-settings": {
+      "height": 1572,
+      "width": 1642
+    },
+    "release-notes/v0-28-0-link-permissions": {
+      "height": 834,
+      "width": 1544
+    },
     "session-list/controls": {
       "height": 696,
       "width": 1392
@@ -158,7 +166,7 @@
       "width": 1562
     },
     "start-a-session/destination": {
-      "height": 1240,
+      "height": 1244,
       "width": 1562
     },
     "start-a-session/effort-permissions-trust": {
@@ -174,7 +182,7 @@
       "width": 1830
     },
     "start-a-session/host-yolo-setting": {
-      "height": 490,
+      "height": 798,
       "width": 1544
     },
     "start-a-session/launch-button": {

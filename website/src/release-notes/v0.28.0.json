@@ -1,0 +1,14 @@
+{
+  "screenshots": [
+    {
+      "entry": 1948,
+      "name": "release-notes/v0-28-0-link-permissions",
+      "alt": "The Permissions section of a remote host's settings, with the open links without asking and open local-network links without asking switches explained."
+    },
+    {
+      "entry": 1949,
+      "name": "release-notes/v0-28-0-app-settings",
+      "alt": "The Settings dialog in a short window: its heading and close button explained as staying in view while the settings scroll, and its sections explained."
+    }
+  ]
+}
