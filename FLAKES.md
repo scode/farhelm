@@ -1947,3 +1947,26 @@ assertion failed: matches!(reconcile_archive(&conn, &row.id),
 Class: fixture-premise
 
 Cause: hypothesis
+
+## 2026-10-13: `the_shipped_agent_lifecycle_commands_act_through_the_real_helm` stops its target before the agent launched
+
+`crates/farhelm/tests/e2e/agent_listing_real_stack.rs`. The test creates a target session through the helm and stops it
+with `farhelm agent stop` without waiting for the target's agent to start. Session creation returns once the pane
+exists, not once the agent has passed Farhelm's exec shim, so a stop that lands in between ends the session in the error
+state "the agent was never started: the launch never reached farhelm's exec shim", and the assertion that the stopped
+session has exited fails about 1.4 s in, against a pass of about 2 s. Observed while landing the open-links-in-browser
+stack on a shared x86_64 Linux development machine (load average about 2.5): it failed in the combined Rust run
+(`40b313f5`, alone among the end-to-end tests; the two other failures there were an unrelated fixture problem), then 5
+of 5 times run on its own on the stack (`3917070d`, `d3e9d6ce`, `9cc8d303`, `4d04049c`, `9461222b`), and 1 of 3 times on
+the main commit the stack was based on (`c5909582` failed; `4e5ab86c` and `51dddf44` passed). Each was the exact-test
+nextest selection with four slots and no retries, pinned tmux 3.7c (SHA256 prefix `1f51ad46eb731a90`), clean trees, no
+`FARHELM_*` variables kept; locale unavailable. That the stack failed more often fits it adding a connect-time exchange
+before the local host counts as connected, which shifts the launch's timing; it does not change what stop does. The test
+now waits for the target to report a live status before stopping it; after that it passed 5 of 5 on the stack
+(`80413f72`, `1115c6bf`, `d9a61e36`, `a0779d33`, `1930de58`).
+
+Class: fixture-premise
+
+Cause: confirmed: the stop raced the target's launch; the error state on early stop is correct product behaviour.
+
+Disposition: fixed in #1948.

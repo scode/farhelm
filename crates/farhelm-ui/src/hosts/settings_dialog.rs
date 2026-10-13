@@ -68,6 +68,8 @@ pub(super) enum SettingsField {
     Alias,
     YoloWithoutAsking,
     CommandsWithoutAsking,
+    LinksWithoutAsking,
+    LocalLinksWithoutAsking,
     Appearance,
 }
 
@@ -333,19 +335,21 @@ fn focus_edit_button(field: EditField) {
     ));
 }
 
-/// JavaScript, run with `dialog` in scope, that sets both checkboxes' shown
+/// JavaScript, run with `dialog` in scope, that sets all permission checkboxes' shown
 /// state back to the settings the page currently renders.
 ///
 /// Each value is read from its input's `data-` attribute when the script
 /// runs, not baked in when it is built: a host-list refresh landing in
 /// between (another client toggling the same host) must win over a reset that
-/// was queued against the older value. Both boxes are reset whichever one was
+/// was queued against the older value. All boxes are reset whichever one was
 /// refused, because resetting one that already shows its setting is a no-op.
 fn reset_checkboxes_js() -> String {
     "const yolo = dialog.querySelector('.host-yolo-without-asking-toggle'); \
      if (yolo) yolo.checked = yolo.dataset.yoloWithoutAsking === 'true'; \
      const commands = dialog.querySelector('.host-commands-without-asking-toggle'); \
-     if (commands) commands.checked = commands.dataset.commandsWithoutAsking === 'true';"
+     if (commands) commands.checked = commands.dataset.commandsWithoutAsking === 'true'; \
+     for (const input of dialog.querySelectorAll('[data-browser-permission]')) \
+         input.checked = input.dataset.browserPermission === 'true';"
         .to_string()
 }
 
@@ -492,6 +496,8 @@ pub(super) fn HostSettingsDialog(
     on_edit_cancel: EventHandler<()>,
     on_yolo_without_asking: EventHandler<(HostId, bool)>,
     on_commands_without_asking: EventHandler<(HostId, bool)>,
+    /// Category and value travel together; the handler attributes failures to that exact toggle.
+    on_browser_permission: EventHandler<(HostId, bool, bool)>,
     on_appearance: EventHandler<(HostId, AppearanceChoice)>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -511,7 +517,12 @@ pub(super) fn HostSettingsDialog(
     let checkbox_refused = matches!(
         &outcome,
         Some((
-            Some(SettingsField::YoloWithoutAsking | SettingsField::CommandsWithoutAsking),
+            Some(
+                SettingsField::YoloWithoutAsking
+                    | SettingsField::CommandsWithoutAsking
+                    | SettingsField::LinksWithoutAsking
+                    | SettingsField::LocalLinksWithoutAsking
+            ),
             FieldOutcome::Error(_)
         ))
     );
@@ -737,6 +748,31 @@ pub(super) fn HostSettingsDialog(
                     }
                     p { class: "host-settings-help", "{commands_help(host.commands_without_asking)}" }
                     {outcome_for(Some(SettingsField::CommandsWithoutAsking))}
+                    for (local_network, allowed, label, help, field) in [
+                        (false, host.links_without_asking, "Open links without asking",
+                         "Agents on this host may open public web addresses. Local-network addresses still need their own permission.",
+                         SettingsField::LinksWithoutAsking),
+                        (true, host.local_links_without_asking, "Open local-network links without asking",
+                         "Agents on this host may make your browser load addresses on your own machine or private network without an approval question.",
+                         SettingsField::LocalLinksWithoutAsking),
+                    ] {
+                        label {
+                            class: "host-settings-choice",
+                            "data-tooltip": help,
+                            span { "{label}" }
+                            input {
+                                r#type: "checkbox",
+                                class: if local_network { "host-local-links-without-asking-toggle host-settings-switch" }
+                                    else { "host-links-without-asking-toggle host-settings-switch" },
+                                checked: allowed,
+                                "data-browser-permission": "{allowed}",
+                                disabled: busy || editing.is_some(),
+                                onchange: move |event| on_browser_permission.call((id, local_network, event.checked())),
+                            }
+                        }
+                        p { class: "host-settings-help", "{help}" }
+                        {outcome_for(Some(field))}
+                    }
                 }
                 }
                 }

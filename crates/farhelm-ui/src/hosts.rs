@@ -1387,6 +1387,36 @@ pub(crate) fn HostsPanel(
         }
     };
 
+    // Browser grants share the ordinary settings-write lifecycle, but never the
+    // commands route: the local-network grant must remain independently revocable.
+    let browser_base = base.clone();
+    let on_browser_permission = move |(host, local_network, allowed): (HostId, bool, bool)| {
+        let base = browser_base.clone();
+        let started = run(
+            host,
+            Box::pin(async move {
+                let outcome =
+                    crate::api::set_browser_permission(&base, host, local_network, allowed).await;
+                if outcome.is_err() {
+                    settings_dialog::reset_checkboxes();
+                }
+                outcome
+            }),
+        );
+        if started {
+            dialog_write.write().insert(
+                host,
+                if local_network {
+                    SettingsField::LocalLinksWithoutAsking
+                } else {
+                    SettingsField::LinksWithoutAsking
+                },
+            );
+        } else {
+            settings_dialog::reset_checkboxes();
+        }
+    };
+
     // Save only the explicit choice from the event. The unchanged word is
     // read at handler entry, and success publishes both before `run` releases
     // the token. This closes the POST-to-refresh gap without a second cache.
@@ -1882,6 +1912,7 @@ pub(crate) fn HostsPanel(
                     on_edit_cancel,
                     on_yolo_without_asking: on_yolo_without_asking.clone(),
                     on_commands_without_asking: on_commands_without_asking.clone(),
+                    on_browser_permission,
                     on_appearance,
                     on_close: on_settings_close,
                     host,
@@ -4179,6 +4210,8 @@ mod tests {
             incarnation: 1,
             yolo_without_asking: false,
             commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
         }
@@ -5326,6 +5359,8 @@ mod tests {
             incarnation: 1,
             yolo_without_asking: false,
             commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
         }

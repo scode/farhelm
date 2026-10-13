@@ -81,6 +81,9 @@ pub(crate) struct HostView {
     /// without asking the user; `false` (ask first) until the user changes it. A row missing
     /// from the registry read reports that asking is required, like the YOLO setting.
     pub(crate) commands_without_asking: bool,
+    /// Browser permissions are independent of command authority and each other.
+    pub(crate) links_without_asking: bool,
+    pub(crate) local_links_without_asking: bool,
     /// Helm-owned identity choices, independent of the actor's connection.
     pub(crate) icon: farhelm_proto::host_appearance::HostIcon,
     /// Identity tint only; connection and permission colors stay separate.
@@ -425,6 +428,9 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                 remote_state_dir: registry.and_then(|row| row.remote_state_dir.clone()),
                 yolo_without_asking: registry.is_some_and(|row| row.yolo_without_asking),
                 commands_without_asking: registry.is_some_and(|row| row.commands_without_asking),
+                links_without_asking: registry.is_some_and(|row| row.links_without_asking),
+                local_links_without_asking: registry
+                    .is_some_and(|row| row.local_links_without_asking),
                 icon: registry.map(|row| row.icon).unwrap_or_default(),
                 color: registry.map(|row| row.color).unwrap_or_default(),
                 state: (&snapshot.state).into(),
@@ -574,7 +580,9 @@ pub(crate) async fn set_appearance(
             .set_appearance(host, spec.icon, spec.color)
             .await
         {
-            Ok(true) => state.manager.events().bump(),
+            Ok(true) => {
+                state.manager.events().bump();
+            }
             Ok(false) => {}
             Err(error) => return http_error(error),
         }
@@ -647,6 +655,70 @@ pub(crate) async fn set_commands_without_asking_for(
         "host commands-without-asking setting changed"
     );
     Ok(())
+}
+
+/// A browser permission's explicit new value; an absent field is never a silent reset.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct BrowserPermissionSpec {
+    allowed: bool,
+}
+
+/// Change the public-link grant without authorizing local-network links or commands.
+pub(crate) async fn set_links_without_asking(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+    axum::Json(spec): axum::Json<BrowserPermissionSpec>,
+) -> impl IntoResponse {
+    set_browser_permission(
+        state,
+        host,
+        crate::store::BrowserPermission::Public,
+        spec.allowed,
+    )
+    .await
+}
+
+/// Change only the separate grant for addresses on the user's machine or network.
+pub(crate) async fn set_local_links_without_asking(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+    axum::Json(spec): axum::Json<BrowserPermissionSpec>,
+) -> impl IntoResponse {
+    set_browser_permission(
+        state,
+        host,
+        crate::store::BrowserPermission::LocalNetwork,
+        spec.allowed,
+    )
+    .await
+}
+
+/// Own the settings write through its event announcement, even if the client goes away.
+async fn set_browser_permission(
+    state: Arc<AppState>,
+    host: HostId,
+    permission: crate::store::BrowserPermission,
+    allowed: bool,
+) -> axum::response::Response {
+    crate::run_owned(async move {
+        let serialized = state.manager.host_write_lock(host).await;
+        match state
+            .store
+            .set_browser_permission(host, permission, allowed)
+            .await
+        {
+            Ok(true) => state.manager.events().bump(),
+            Ok(false) => {}
+            Err(error) => return http_error(error),
+        }
+        drop(serialized);
+        match host_view(&state, host).await {
+            Ok(view) => axum::Json(view).into_response(),
+            Err(error) => http_error(error),
+        }
+    })
+    .await
 }
 
 /// The body of `POST /api/hosts/{id}/alias`.
@@ -1874,6 +1946,70 @@ mod tests {
         )
         .await;
         assert_eq!(events.revision(), after_set, "a repeat must not bump again");
+    }
+
+    /// Browser settings routes change and publish only their named grant. Invalid bodies
+    /// cannot silently clear trust, repeats do not churn the feed, and command authority stays off.
+    #[farhelm_testtrace::test]
+    async fn browser_permission_routes_publish_only_the_selected_setting() {
+        let harness = lone_local_helm().await;
+        let host = crate::rest_harness::local_id(&harness.store).await;
+        let events = harness.manager.events();
+        for (route, field, other) in [
+            (
+                "links-without-asking",
+                "links_without_asking",
+                "local_links_without_asking",
+            ),
+            (
+                "local-links-without-asking",
+                "local_links_without_asking",
+                "links_without_asking",
+            ),
+        ] {
+            let url = format!("/api/hosts/{host}/{route}");
+            let (status, _, _) = call(&harness, "POST", &url, Some(serde_json::json!({}))).await;
+            assert_eq!(
+                status,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "a missing value cannot mean reset"
+            );
+            let before = events.revision();
+            let (status, view, text) = call(
+                &harness,
+                "POST",
+                &url,
+                Some(serde_json::json!({"allowed": true})),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{text}");
+            assert_eq!(view[field], true);
+            assert_eq!(view[other], false);
+            assert_eq!(view["commands_without_asking"], false);
+            let changed = events.revision();
+            assert!(changed > before);
+            call(
+                &harness,
+                "POST",
+                &url,
+                Some(serde_json::json!({"allowed": true})),
+            )
+            .await;
+            assert_eq!(
+                events.revision(),
+                changed,
+                "a repeat does not publish a false change"
+            );
+            let (status, view, _) = call(
+                &harness,
+                "POST",
+                &url,
+                Some(serde_json::json!({"allowed": false})),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(view[field], false);
+        }
     }
 
     /// Spec: `POST /api/hosts/{id}/commands-without-asking` stores the setting, answers

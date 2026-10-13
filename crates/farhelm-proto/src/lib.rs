@@ -199,7 +199,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_45` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_46` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -210,7 +210,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 45;
+pub const PROTOCOL_VERSION: u32 = 46;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -1714,6 +1714,9 @@ pub enum AgentVerb {
     /// text of a command line or resume command (SPEC.md: "listed as set
     /// without their text").
     Templates {},
+    /// Ask to open an absolute web URL on the user's machine. Waits for the user's answer
+    /// but takes no session mutation fence: a pending link must not hold lifecycle work.
+    OpenUrl { url: String },
     /// Change a session's title — SPEC.md's rename verb, reached through
     /// the same routing and recording the REST `/rename` route uses.
     /// Answered with [`AgentReply::Session`], the session's freshly
@@ -1878,7 +1881,7 @@ impl AgentVerb {
     /// the whole point of centralizing it.
     pub fn is_mutating(&self) -> bool {
         match self {
-            AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => false,
+            AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} | AgentVerb::OpenUrl { .. } => false,
             // The creating verbs sit on this side for a stronger reason
             // than the lifecycle four: what they leave behind is a session
             // that did not exist, running an agent process on some host. A
@@ -1906,8 +1909,8 @@ impl AgentVerb {
     /// The relay's supervisor half reads it to give such a verb an answer
     /// budget of [`approvals::APPROVAL_WAIT`] beyond its ordinary one, so the
     /// helm's own expiry answer always arrives before the relay gives up. It
-    /// is a separate question from [`Self::is_mutating`] even though the two
-    /// sets are equal today: one decides what a lost answer means, the other
+    /// is a separate question from [`Self::is_mutating`]: opening a link waits
+    /// without holding a session change fence. One decides what a lost answer means, the other
     /// how long an answer can take, and a future mutation that never asks
     /// (or a question that does) must be able to answer them differently.
     ///
@@ -1922,7 +1925,8 @@ impl AgentVerb {
             | AgentVerb::Clone { .. }
             | AgentVerb::TemplateCreate { .. }
             | AgentVerb::TemplateEdit { .. }
-            | AgentVerb::TemplateDelete { .. } => true,
+            | AgentVerb::TemplateDelete { .. }
+            | AgentVerb::OpenUrl { .. } => true,
         }
     }
 }
@@ -2015,6 +2019,9 @@ pub enum AgentOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "reply", rename_all = "snake_case")]
 pub enum AgentReply {
+    /// The user opened or allowed the link, or the desktop's native opener returned success.
+    /// A web browser does not expose whether its popup blocker accepted the new window.
+    UrlOpened {},
     Hosts {
         hosts: Vec<AgentHost>,
         /// Host discovery is all-or-error; a partial catalog could make a
@@ -4724,8 +4731,24 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_45() {
-        assert_eq!(PROTOCOL_VERSION, 45);
+    fn protocol_version_is_pinned_at_46() {
+        assert_eq!(PROTOCOL_VERSION, 46);
+    }
+
+    /// A browser wait must receive the approval budget without holding the session's change fence.
+    /// Round-trip the new tags as well: Rust-only enum tests cannot catch a drifting wire spelling.
+    #[farhelm_testtrace::test]
+    fn browser_requests_wait_without_mutating_session_state() {
+        let verb = AgentVerb::OpenUrl {
+            url: "https://example.test/".into(),
+        };
+        assert!(!verb.is_mutating());
+        assert!(verb.may_wait_for_user());
+        let encoded = serde_json::to_string(&verb).unwrap();
+        assert_eq!(serde_json::from_str::<AgentVerb>(&encoded).unwrap(), verb);
+        let reply = AgentReply::UrlOpened {};
+        let encoded = serde_json::to_string(&reply).unwrap();
+        assert_eq!(serde_json::from_str::<AgentReply>(&encoded).unwrap(), reply);
     }
 
     /// Why this matters: a create the user makes must keep its

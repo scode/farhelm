@@ -116,11 +116,13 @@ mod auth;
 /// the `webview_console` target (PLAN_desktop_web_bug_triage.md).
 mod client_log;
 
+mod browser;
 /// `POST /api/clipboard` — the desktop webview's route to a REAL system
 /// clipboard write, because WKWebView gives the `dioxus://` page no
 /// `navigator.clipboard` at all (not a secure context). Enabled only when
 /// an embedding shell registered a [`ClipboardSink`].
 mod clipboard;
+pub use browser::LinkOpener;
 
 /// The web UI tree a release build compiles into this binary (D12/D13) —
 /// `build.rs`'s counterpart. Public so `farhelm-desktop` (Step 4) can reach
@@ -512,6 +514,8 @@ struct AppState {
     /// `clipboard.rs` for why this channel exists at all (the webview's own
     /// clipboard API does not).
     clipboard_sink: Option<ClipboardSink>,
+    /// A desktop-only capability; standalone helms never open links on their server machine.
+    link_opener: Option<LinkOpener>,
     /// Native saves are an embedded-app capability, never a server-helm flag.
     /// The desktop resolves its account's Downloads folder at startup; tests
     /// inject a private directory without changing the process environment.
@@ -598,6 +602,7 @@ impl AppState {
                 std::time::Instant::now(),
             )),
             clipboard_sink: None,
+            link_opener: None,
             downloads_dir: None,
             clipboard_admission: clipboard::ClipboardAdmission::new(),
             // Test-built helms never reach the production endpoint; a
@@ -761,6 +766,14 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/hosts/{id}/commands-without-asking",
             axum::routing::post(hosts::set_commands_without_asking),
+        )
+        .route(
+            "/api/hosts/{id}/links-without-asking",
+            axum::routing::post(hosts::set_links_without_asking),
+        )
+        .route(
+            "/api/hosts/{id}/local-links-without-asking",
+            axum::routing::post(hosts::set_local_links_without_asking),
         )
         .route("/api/approvals", get(approvals::list_approvals))
         .route(
@@ -1864,7 +1877,7 @@ mod embedded_ui_tests {
 /// none is needed: SPEC.md's whole durability promise is that killing the
 /// helm does nothing to any session.
 pub async fn run(args: HelmArgs) -> anyhow::Result<()> {
-    run_with_ready(args, None, None, None, None, ServingMode::Standalone).await
+    run_with_ready(args, None, None, None, None, None, ServingMode::Standalone).await
 }
 
 /// What an embedded helm hands the desktop process that owns it once every
@@ -1904,6 +1917,7 @@ pub struct EmbeddedReady {
 pub async fn run_embedded(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
+    link_opener: Option<LinkOpener>,
     downloads_dir: Option<PathBuf>,
     ready: std::sync::mpsc::Sender<EmbeddedReady>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
@@ -1911,6 +1925,7 @@ pub async fn run_embedded(
     run_with_ready(
         args,
         clipboard_sink,
+        link_opener,
         downloads_dir,
         Some(ready),
         Some(shutdown),
@@ -1929,6 +1944,7 @@ pub async fn run_embedded(
 async fn run_with_ready(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
+    link_opener: Option<LinkOpener>,
     downloads_dir: Option<PathBuf>,
     ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
     shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
@@ -1985,6 +2001,7 @@ async fn run_with_ready(
         mode,
     )?;
     app.clipboard_sink = clipboard_sink;
+    app.link_opener = link_opener;
     app.downloads_dir = downloads_dir;
     let state = Arc::new(app);
     // The manager was started before this state existed — it is one of the

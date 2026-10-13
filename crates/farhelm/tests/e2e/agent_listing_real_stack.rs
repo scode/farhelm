@@ -63,6 +63,12 @@ pub(crate) async fn attach_terminal(
     secret: &str,
     session: &str,
 ) -> tokio::net::TcpStream {
+    hold_gui_socket(helm, secret, &format!("/api/sessions/{session}/term")).await
+}
+
+/// Hold one authenticated GUI channel without consuming its frames. Terminal channels
+/// route agent requests; the events channel establishes the separate approval-window premise.
+async fn hold_gui_socket(helm: &HelmProcess, secret: &str, path: &str) -> tokio::net::TcpStream {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let addr = helm.addr();
@@ -72,7 +78,7 @@ pub(crate) async fn attach_terminal(
     // A fixed key is fine: the accept hash defends against caching proxies,
     // and nothing here verifies it.
     let request = format!(
-        "GET /api/sessions/{session}/term HTTP/1.1\r\nHost: {addr}\r\nConnection: Upgrade\r\n\
+        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: Upgrade\r\n\
          Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n\
          Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\n\
          Sec-WebSocket-Protocol: farhelm, farhelm-device-{secret}\r\n\r\n"
@@ -96,7 +102,7 @@ pub(crate) async fn attach_terminal(
     let response = String::from_utf8_lossy(&head).into_owned();
     assert!(
         response.starts_with("HTTP/1.1 101"),
-        "the terminal upgrade was refused: {response}"
+        "the GUI upgrade for {path} was refused: {response}"
     );
     stream
 }
@@ -172,6 +178,177 @@ fn agent_command_builder(
         .env(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR, token)
         .env(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR, socket);
     command
+}
+
+/// The link CLI must wait for approval without fencing other commands from its session.
+/// Exercise both relay hops and the shipped CLI's exit status: Allow succeeds; Deny,
+/// the preapproved card's Dismiss (the same wire answer), and absence of a GUI fail.
+#[farhelm_testtrace::test]
+async fn browser_link_cli_waits_without_fencing_and_reports_each_answer() {
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let supervisor = supervisor_process().await;
+    let helm = helm_process(supervisor.state.path(), None).await;
+    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let client = client_with_secret(&secret);
+    await_local_host(&client, &helm.base).await;
+    let work = farhelm_teststate::tempdir().expect("link requester workdir");
+    let (status, body) = post(
+        &client,
+        &format!("{}/api/sessions", helm.base),
+        serde_json::json!({
+            "cwd": work.path(),
+            "command": {"command": fixture_cmd("fake-agent --script basic"), "yolo": false},
+            "title": "link requester",
+        }),
+    )
+    .await;
+    assert!(status.is_success(), "session creation failed: {body}");
+    let session: SessionInfo = serde_json::from_str(&body).unwrap();
+    let _terminal = attach_terminal(&helm, &secret, &session.id).await;
+    let token = session_token(supervisor.state.path(), &session.id).await;
+    let socket = supervisor.state.path().join("supervisor.sock");
+    hosts_until_attached(&session.id, &token, &socket).await;
+    let url = "https://example.test/path?full=1#part";
+    let mut command = tokio::process::Command::from(agent_command_builder(
+        &["open-url", "--", url],
+        &session.id,
+        &token,
+        &socket,
+    ));
+    command.kill_on_drop(true);
+    let refused = tokio::time::timeout(REAL_STACK_SETTLE, command.output())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("no Farhelm window"));
+    assert_eq!(
+        get_json(&client, &format!("{}/api/approvals", helm.base)).await["approvals"],
+        serde_json::json!([])
+    );
+
+    // The event route admits its GUI seat before returning 101, unlike the terminal
+    // attachment whose routing readiness was separately proved above.
+    let _gui = hold_gui_socket(&helm, &secret, "/api/events").await;
+    let hosts = get_json(&client, &format!("{}/api/hosts", helm.base)).await;
+    let host = hosts["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["kind"] == "local")
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    for (answer, preapproved) in [("allow", false), ("deny", false), ("deny", true)] {
+        if preapproved {
+            let (status, body) = post(
+                &client,
+                &format!("{}/api/hosts/{host}/links-without-asking", helm.base),
+                serde_json::json!({"allowed": true}),
+            )
+            .await;
+            assert!(status.is_success(), "grant public links: {body}");
+        }
+        let mut command = tokio::process::Command::from(agent_command_builder(
+            &["open-url", "--", url],
+            &session.id,
+            &token,
+            &socket,
+        ));
+        command
+            .kill_on_drop(true)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = command.spawn().expect("spawn link CLI");
+        let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
+        let pending = loop {
+            let cards = get_json(&client, &format!("{}/api/approvals", helm.base)).await;
+            if let Some(card) = cards["approvals"].as_array().unwrap().first() {
+                break card.clone();
+            }
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "link CLI ended before its approval appeared"
+            );
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "live link CLI never produced a card: {cards}"
+            );
+            // sleep-ok: poll the named approval-table oracle while checking the owned CLI's liveness.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+        assert_eq!(pending["action"]["url"], url);
+        assert_eq!(pending["action"]["preapproved"], preapproved);
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "premise: approval holds the CLI"
+        );
+        // Rename takes the per-session mutation lock. It must finish while the link
+        // remains pending, which distinguishes a non-fencing request from a fast reply.
+        allow_agents_without_asking(&client, &helm.base).await;
+        let current = get_json(
+            &client,
+            &format!("{}/api/sessions/{}", helm.base, session.id),
+        )
+        .await;
+        let expected_title = current["title"].as_str().unwrap();
+        let rename = command_output_before_deadline(
+            agent_command_builder(
+                &[
+                    "rename",
+                    "--session",
+                    &session.id,
+                    "--expected-title",
+                    expected_title,
+                    "--",
+                    "renamed while waiting",
+                ],
+                &session.id,
+                &token,
+                &socket,
+            ),
+            deadline,
+        )
+        .await
+        .expect("rename blocked by a waiting link");
+        assert!(
+            rename.status.success(),
+            "rename failed: {}",
+            String::from_utf8_lossy(&rename.stderr)
+        );
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "rename must not settle the link"
+        );
+        let (status, body) = post(
+            &client,
+            &format!(
+                "{}/api/approvals/{}",
+                helm.base,
+                pending["id"].as_str().unwrap()
+            ),
+            serde_json::json!({"answer": answer}),
+        )
+        .await;
+        assert!(status.is_success(), "answer failed: {body}");
+        let output = tokio::time::timeout_at(deadline, child.wait_with_output())
+            .await
+            .expect("answered CLI did not finish")
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            answer == "allow",
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if answer == "deny" {
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("declined"),
+                "denial must preserve the helm's refusal: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 }
 
 /// Run one built `farhelm agent <verb...>` as an agent inside `session`
@@ -593,6 +770,27 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
         controller_detail["title"], "renamed-controller",
         "the rename must be visible through the same read a browser uses: {controller_detail}"
     );
+
+    // The stop below must find a launched agent: creating a session returns
+    // once its pane exists, not once the agent has passed Farhelm's exec
+    // shim, and a stop that lands in between ends the session as "never
+    // started" instead of exited, failing the assertion after the stop for
+    // a reason that has nothing to do with `farhelm agent stop`.
+    let launch_deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
+    loop {
+        let detail = get_json(&client, &target_url).await;
+        let info: SessionInfo = serde_json::from_value(detail.clone())
+            .expect("the session detail decodes as a SessionInfo");
+        if info.status.is_live() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < launch_deadline,
+            "the target's agent never started before the stop: {detail}"
+        );
+        // sleep-ok: poll the helm's view of the target's launch, bounded by REAL_STACK_SETTLE.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 
     // `stop`, with an explicit `--session` naming the
     // TARGET — see the module docs for why acting on a different session

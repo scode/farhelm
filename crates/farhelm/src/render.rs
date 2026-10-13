@@ -140,6 +140,7 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
         | AgentReply::Stopped {}
         | AgentReply::Created { .. }
         | AgentReply::TemplateWritten { .. }
+        | AgentReply::UrlOpened {}
         | AgentReply::TemplateDeleted {} => {
             anyhow::bail!("only discovery listings are rendered as a table")
         }

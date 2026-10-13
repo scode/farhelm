@@ -691,6 +691,11 @@ pub struct Host {
     /// card's "Always allow" turns it on.
     #[serde(default)]
     pub commands_without_asking: bool,
+    /// Independent link grants; older host listings default to asking for both categories.
+    #[serde(default)]
+    pub links_without_asking: bool,
+    #[serde(default)]
+    pub local_links_without_asking: bool,
     /// Durable remote identity read from the helm; defaults preserve an
     /// untouched host's cloud and ordinary foreground.
     #[serde(default)]

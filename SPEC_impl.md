@@ -4318,7 +4318,9 @@ the wait, not a guaranteed ordering: the approval wait starts only once the helm
 whose resolution is slow (a clone reading its source from a busy supervisor, say) can still time out at the relay, and
 the CLI then reports the outcome as unknown rather than as unanswered. The supervisor still serializes a session's
 acting requests behind its delete fence, so a second change from one session while the first waits is refused once that
-fence's ordinary wait runs out.
+fence's ordinary wait runs out. `OpenUrl` is non-mutating but may wait for the user: neither the supervisor's delete
+fence nor the helm's per-session change lock is held while its card waits. Protocol version 46 adds the tagged
+`AgentVerb::OpenUrl` and `AgentReply::UrlOpened` variants.
 
 The helm admits at most four agent answer tasks per host connection (`client::AGENT_ANSWER_SLOTS`), and a waiting
 request holds one. A host therefore has at most four cards up at once, and while it does, every other agent request from
@@ -4334,6 +4336,24 @@ lock), so a card raised by a replaced installation cannot grant its successor th
 can race: when the request expires between the setting being stored and the request being taken, the answer gets 410 and
 the setting stays on, and the GUI's notice says the answer did not take effect and, after an "Always allow", that the
 host's setting may still have been turned on.
+
+Link requests use the same approval table, presence check, wait and answers, with `ApprovalAction::OpenUrl` carrying the
+full URL, its local-network category and whether the card is preapproved. `browser::permission_for_url` applies the
+terminal link predicate's raw-string exclusions before WHATWG parsing, with a 4096-byte cap. It keeps the original
+string; the parsed host is used only for classification. No DNS lookup is performed. The two default-off schema-45
+columns, `hosts.links_without_asking` and `hosts.local_links_without_asking`, are independent of command authority and
+each other. Their settings routes accept an explicit `allowed` boolean. Always allow selects only the card's category
+through `allow_browser_for_identity`, using the live connection and identity preconditions of command grants; adoption
+clears both columns.
+
+Only `run_embedded` receives `LinkOpener`, registered by the desktop shell through `webbrowser::open`; no HTTP route
+exposes that callback. The helm validates and approves before calling it on a blocking worker, then returns the native
+opener's result without exposing its error details. A matching grant skips the card only with this native capability. A
+standalone helm instead offers a preapproved Open/Dismiss card, because a browser needs a click. The web Rust click
+handler checks the live arm state and answer-in-flight guard, then calls the shared `isPlainWebUrl` and
+`window.open(url, '_blank', 'noopener')` synchronously through wasm bindings, before spawning the answer request.
+`noopener` can return null even on success, so that return value cannot establish whether a pop-up was blocked. A native
+UI answers the card without opening in its page. The approval region installs the shared URL predicate when mounted.
 
 Deleting a session refuses its waiting requests first and keeps refusing new ones until the delete finishes
 (`Approvals::deny_session`, held for the delete and for a replacement's teardown), so a card for a session that is going

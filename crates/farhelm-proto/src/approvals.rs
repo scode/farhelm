@@ -73,6 +73,13 @@ pub struct ApprovalSession {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ApprovalAction {
+    /// A browser request, shown as exact peer-controlled URL data. A preapproved request
+    /// still needs an Open click in a web client; desktop opens through the helm's native sink.
+    OpenUrl {
+        url: String,
+        local_network: bool,
+        preapproved: bool,
+    },
     /// A new session: `farhelm spawn`, `farhelm agent create`, or
     /// `farhelm agent clone`.
     Launch {

@@ -773,6 +773,7 @@ impl Harness {
         );
         state.event_subscriber_cap = old_state.event_subscriber_cap;
         state.clipboard_sink = old_state.clipboard_sink.clone();
+        state.link_opener = old_state.link_opener.clone();
         state.downloads_dir = old_state.downloads_dir.clone();
         state.feedback = old_state.feedback.clone();
         let state = Arc::new(state);
@@ -1057,6 +1058,8 @@ pub(crate) struct FleetBuilder {
     /// 404; clipboard.rs's tests inject one to observe what the handler
     /// forwards.
     clipboard_sink: Option<crate::ClipboardSink>,
+    /// A stand-in for the desktop-only admitted link opener; tests never open a real browser.
+    link_opener: Option<crate::LinkOpener>,
     /// Where `POST /api/feedback` sends, when a test points it at a
     /// stand-in endpoint; `None` gives the helm an offline forwarder whose
     /// every send fails, never the production one.
@@ -1100,6 +1103,7 @@ impl FleetBuilder {
             refresh: None,
             event_subscriber_cap: None,
             clipboard_sink: None,
+            link_opener: None,
             feedback: None,
             approval_wait: None,
         }
@@ -1120,6 +1124,12 @@ impl FleetBuilder {
     /// so `POST /api/clipboard` has something observable to land on.
     pub(crate) fn clipboard_sink(mut self, sink: crate::ClipboardSink) -> FleetBuilder {
         self.clipboard_sink = Some(sink);
+        self
+    }
+
+    /// Observe native opening after admission without reaching the operating system's browser.
+    pub(crate) fn link_opener(mut self, opener: crate::LinkOpener) -> FleetBuilder {
+        self.link_opener = Some(opener);
         self
     }
 
@@ -1233,6 +1243,7 @@ impl FleetBuilder {
                 .event_subscriber_cap
                 .unwrap_or(crate::events::MAX_SUBSCRIBERS),
             clipboard_sink: self.clipboard_sink,
+            link_opener: self.link_opener,
             // Offline unless a test injected a stand-in, like every
             // test-built helm (`AppState::with_provisioning`).
             feedback: self
@@ -1302,6 +1313,25 @@ pub(crate) async fn spliced_helm(peer: DuplexStream) -> Harness {
 /// router with no hosts would answer differently for the wrong reason.
 pub(crate) async fn idle_helm() -> Harness {
     helm_listing(vec![session("sess-1", 1_700_000_000)]).await
+}
+
+/// An idle, connected local fixture with an injected native opener. The callback is the
+/// observation oracle: successful admission must reach it, and refusals must leave it untouched.
+pub(crate) async fn idle_helm_with_link_opener(opener: crate::LinkOpener) -> Harness {
+    let harness = FleetBuilder::new()
+        .await
+        .link_opener(opener)
+        .local(HostScript {
+            identity: Some("local-identity".to_string()),
+            sessions: vec![session("sess-1", 1_700_000_000)],
+            ..HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let local = local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+    harness
 }
 
 /// [`idle_helm`] on a helm that carries a clipboard sink, as the desktop's

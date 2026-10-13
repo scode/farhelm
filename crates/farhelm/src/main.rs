@@ -185,6 +185,11 @@ enum Cmd {
 /// sentences that stand alone, because that is where they are read.
 #[derive(Subcommand)]
 enum AgentCmd {
+    /// Open a web link in the user's browser through Farhelm, subject to the host's link permissions.
+    OpenUrl {
+        /// Absolute http or https URL. Use -- before a URL beginning with a hyphen.
+        url: String,
+    },
     /// List the hosts the helm knows, marking this session's own.
     Hosts {
         /// Print the versioned machine-readable discovery envelope.
@@ -480,6 +485,9 @@ impl AgentCmd {
             AgentCmd::Hosts { .. } => Some(farhelm_proto::AgentVerb::Hosts {}),
             AgentCmd::Sessions { .. } => Some(farhelm_proto::AgentVerb::Sessions {}),
             AgentCmd::Templates { .. } => Some(farhelm_proto::AgentVerb::Templates {}),
+            AgentCmd::OpenUrl { url } => {
+                Some(farhelm_proto::AgentVerb::OpenUrl { url: url.clone() })
+            }
             // Refused in `run_agent` before this is asked; answering
             // `None` here would print the instructions instead.
             AgentCmd::Profiles { .. } => unreachable!("run_agent refuses agent profiles first"),
@@ -1528,6 +1536,13 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
     }
     let (_asking, reply) = runtime()?.block_on(agent_request(&SessionEnv::from_env(), verb))?;
     match command {
+        AgentCmd::OpenUrl { .. } => {
+            let AgentReply::UrlOpened {} = reply else {
+                anyhow::bail!(
+                    "the helm answered open-url with something other than an opened link"
+                );
+            };
+        }
         // The four lifecycle verbs print one confirmation line
         // rather than a table — there is exactly one row to
         // report, and a script capturing stdout wants the plain

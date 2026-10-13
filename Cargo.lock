@@ -2035,10 +2035,12 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
  "wasm-bindgen",
  "web-sys",
  "web-time",
+ "webbrowser",
  "windows-sys 0.61.2",
 ]
 
