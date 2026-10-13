@@ -2,6 +2,50 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.28.0 - 2026-10-13
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#1948, #1950)
+
+### 🚀 Added
+
+- On remote hosts, agents and new terminal tabs now get a `BROWSER` setting, so programs that open web links through it open them in your browser once you approve the link. Agents already running get it at their next launch. Login flows that call back to `localhost` on the remote host still need another way to reach it. (#1950)
+- Agents can also ask to open a link with `farhelm agent open-url`. Host settings can allow public links without asking, with a separate permission for links to your own machine or network. (#1948)
+
+### 🔄 Changed
+
+- Adding or updating a host, checking for app updates and sending feedback now trust the certificates your operating system trusts and, on macOS, follow its proxy settings, so they work behind a proxy with its own certificate. On Linux, the helm does not start unless its machine has CA certificates installed (usually the `ca-certificates` package). (#1909)
+- In the Mac app, checking for updates shows its progress beside the version number. A failed check stays until you dismiss it, with the reason on hover; automatic checks stay quiet. (#1889)
+- App settings keeps its heading and close button in view while you scroll, and groups its settings into sections for hosts, managed checkouts, sounds and, in the Mac app, updates. (#1949)
+
+### 🔧 Fixes worth highlighting
+
+- After the helm is updated, a window you have not reloaded no longer takes terminals away from your other windows; new terminals wait for you to take control. (#1932)
+- Codex sessions started through your own `codex` wrapper, or another launcher that keeps running alongside Codex, now have their conversation tracked, so Restart resumes them. Before, Farhelm never learned which conversation such a session was in, and Restart was unavailable. (#1945)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- Retrying Replace or a launch after a lost reply no longer starts a second agent. (#1936, #1908)
+- When a paste leaves out an image because it looks like the clipboard's copy of another file, the terminal now says which item it left out and why. (#1936)
+- The session launcher's `tl:` search shows a template that failed to load with a **Retry** button, instead of an empty list or a claim that the template was deleted. (#1908)
+- Selecting text in a terminal snapshot kept after a failed reconnection copies it again. (#1908)
+- After the helm is updated, Restart and Replace at the top of an open session refresh the session list. (#1932)
+- Marking a session read or unread always saves your latest choice. (#1932)
+- Host menus stay reachable in a narrow sidebar, and ended-session actions in a narrow window. (#1932)
+- Repeated failures to refresh sessions now say that what is shown may be out of date. (#1932)
+- Host settings waits while an uninstall plan is being prepared, and puts a switch back when a permission change is refused. (#1932)
+- Rename shows hidden characters in a title without changing an untouched one. Saving a template whose session name contains hidden characters, including joined emoji, is now refused; existing templates still launch. (#1932)
+- Approvals-only templates keep every approval choice without an agent type, and deleting a template waits for its saved version to finish reloading. (#1932)
+- While the reload notice is showing, closing a session's notification list turns its bell grey, **Clear** removes the bell, and mark read / mark unread update the row without a reload. (#1907)
+- Session status stays current while Farhelm cleans up a terminal tab whose programs have exited. (#1933)
+- When reading Pi's conversation fails, Farhelm's reporter inside Pi skips that report quietly instead of passing the error to Pi. The helm also closes its host connections cleanly when it shuts down. (#1934)
+- The Mac installer refuses to update the app when a file it replaces has become a folder, instead of reporting success with a broken app. An install without a pinned version refuses an incomplete answer about the latest version, instead of possibly installing an older release. (#1906)
+- The web UI and Mac app now include the full license texts for the bundled terminal font and clipboard add-on. (#1906)
+- The send feedback window matches the rest of the app, and its buttons stay in view in short windows. (#1946)
+
 ## v0.27.0 - 2026-10-11
 
 ### 🚀 Added
