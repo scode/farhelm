@@ -11,6 +11,65 @@ use super::{
 
 pub(crate) const PREFIX: &str = "codex:";
 
+/// One launch's admitted reporting process and its recorded Codex ancestors.
+/// Stored separately from the locator because a conversation survives relaunch,
+/// while process authority does not. PID plus start token fences PID reuse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CodexReportPin {
+    pub(crate) process: crate::procs::ProcessIdentity,
+    pub(crate) ancestors: Vec<crate::procs::ProcessIdentity>,
+}
+
+/// How a new attribution relates to an existing launch pin.
+/// Correction verifies the ancestor's record independently; ordinary admission
+/// retains the existing conversation's persistent-thread constraints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PinDecision {
+    Accept,
+    Correct,
+    Refuse,
+}
+
+impl CodexReportPin {
+    /// Preserve the recorded ancestry of the report that actually wins admission.
+    pub(crate) fn from_attribution(attribution: &crate::procs::CodexAttribution) -> Self {
+        Self {
+            process: attribution.emitter,
+            ancestors: attribution.ancestors.clone(),
+        }
+    }
+
+    /// Release a dead pin only when the report is not from its descendant.
+    /// Recorded ancestors get first consideration even after the pinned child
+    /// exits: their verified report corrects the earlier mistaken selection.
+    /// Release checks all recorded identities, since exec changes an image
+    /// without changing PID/start; Codex-only ancestry is correction authority,
+    /// not enough evidence to prove that a report is outside the old chain.
+    /// Liveness is supplied by admission so this policy is testable without
+    /// changing the test process's environment or inventing live synthetic PIDs.
+    pub(crate) fn judge(
+        &self,
+        attribution: &crate::procs::CodexAttribution,
+        alive: bool,
+        chain: &[crate::procs::ChainLink],
+    ) -> PinDecision {
+        if self.process == attribution.emitter {
+            PinDecision::Accept
+        } else if self.ancestors.contains(&attribution.emitter) {
+            PinDecision::Correct
+        } else if !alive
+            && !chain
+                .iter()
+                .any(|link| link.pid == self.process.pid && link.start == self.process.start)
+        {
+            PinDecision::Accept
+        } else {
+            PinDecision::Refuse
+        }
+    }
+}
+
 /// The vendor's own foreground-transition vocabulary: the hook `source`
 /// values a genuine foreground Codex lifecycle event carries.
 ///
@@ -24,7 +83,9 @@ pub(crate) fn is_foreground_source(source: &str) -> bool {
     matches!(source, "startup" | "resume" | "clear" | "compact")
 }
 
-/// Selecting reports name a foreground transition; Stop only enriches its binding.
+/// Recognize selection and confirmation callbacks before checking process authority.
+/// Stop normally enriches its binding; stateful admission may instead use a
+/// recorded ancestor's Stop to correct a child-first process pin.
 /// Codex supplies no source on Stop. The event must therefore be checked beside
 /// source, rather than admitting every source-less callback as a transition.
 pub(crate) fn is_foreground_report(source: &str, event: Option<&str>) -> bool {

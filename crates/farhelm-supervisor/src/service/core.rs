@@ -14234,8 +14234,9 @@ impl Supervisor {
     /// restart's whole-process-tree sweep before the replacement runs.
     /// Every report arrives with the hook's recorded process chain already
     /// anchored at the session's current pane process, which ties it to the
-    /// current launch (`report_files`). Codex and Grok additionally require
-    /// that chain to run through the pane's one native runtime, and OMP
+    /// current launch (`report_files`). Codex attributes the innermost native
+    /// emitter and applies its durable launch pin; Grok requires one native
+    /// runtime in that chain, and OMP
     /// through its launched runtime; Claude requires the hook to have been
     /// run by the pane process or its direct child, checked before the
     /// capture claim.
@@ -19537,6 +19538,356 @@ pub(crate) mod tests {
             .expect("insert codex fixture row");
     }
 
+    /// Supply an already-anchored Codex chain to exercise admission, not walking.
+    /// The identities are explicit so tests can distinguish PID reuse, dead
+    /// pins and recorded ancestors without altering the process environment.
+    fn codex_pin_chain(
+        processes: &[crate::procs::ProcessIdentity],
+    ) -> Vec<crate::procs::ChainLink> {
+        let mut links = vec![crate::procs::ChainLink {
+            pid: 900_001,
+            ppid: processes[0].pid,
+            start: 1,
+            exe: b"/opt/test/farhelm".to_vec(),
+            argv: Some(
+                ["/opt/test/farhelm", "internal", "hook", "--vendor", "codex"]
+                    .iter()
+                    .map(|s| s.as_bytes().to_vec())
+                    .collect(),
+            ),
+            cwd: None,
+        }];
+        links.extend(processes.iter().map(|process| crate::procs::ChainLink {
+            pid: process.pid,
+            ppid: 0,
+            start: process.start,
+            exe: b"/opt/test/codex".to_vec(),
+            argv: Some(vec![b"codex".to_vec()]),
+            cwd: None,
+        }));
+        links
+    }
+
+    /// A valid exact root record makes process authority the admission variable.
+    /// Each runtime gets a distinct file and persistent thread, so correction
+    /// must adopt the ancestor's own evidence rather than merge the child's.
+    fn codex_pin_report(
+        root: &Path,
+        runtime: &str,
+        processes: &[crate::procs::ProcessIdentity],
+        event: &str,
+    ) -> ReportedConversation {
+        let path = root.join(format!("{runtime}.jsonl"));
+        let record = serde_json::json!({"type":"session_meta", "timestamp":"2026-01-01T00:00:00Z", "payload":{
+            "id": format!("thread-{runtime}"), "session_id":runtime, "source":"cli", "cwd":root
+        }});
+        std::fs::write(&path, format!("{record}\n")).expect("write valid root record");
+        ReportedConversation {
+            vendor: farhelm_proto::ReportVendor::Codex,
+            conversation: runtime.to_owned(),
+            source: if event == "Stop" { "" } else { "startup" }.to_owned(),
+            transcript_path: Some(serde_json::json!(path)),
+            hook_event_name: Some(serde_json::json!(event)),
+            ancestry: Some(codex_pin_chain(processes)),
+            launch_generation: Some(0),
+        }
+    }
+
+    /// Both selecting callbacks and source-less Stops correct child-first capture.
+    /// A rejected ancestor record must leave binding and pin byte-identical;
+    /// repeated correction in one launch posts only one durable notification.
+    #[farhelm_testtrace::test]
+    async fn codex_pin_ancestor_correction_is_verified_and_notified_once() {
+        for event in ["SessionStart", "Stop"] {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let id = "pin-correction";
+            seed_codex_row(&sup, id, None, None, 0).await;
+            let root = crate::procs::ProcessIdentity::read(std::process::id()).unwrap();
+            let child = crate::procs::ProcessIdentity {
+                pid: 900_002,
+                start: 2,
+            };
+            let higher = crate::procs::ProcessIdentity {
+                pid: 900_003,
+                start: 3,
+            };
+            sup.report_codex_conversation(
+                id,
+                codex_pin_report(
+                    state.path(),
+                    "child",
+                    &[child, root, higher],
+                    "SessionStart",
+                ),
+                AgentKind::Codex,
+                0,
+                None,
+            )
+            .await
+            .unwrap();
+            let before = sup.store.session(id).await.unwrap().unwrap();
+            let before_pin = sup.store.codex_report_pin(id).await.unwrap();
+            let mut bad = codex_pin_report(state.path(), "ancestor", &[root, higher], event);
+            std::fs::write(state.path().join("ancestor.jsonl"), "not json\n").unwrap();
+            assert!(
+                sup.report_codex_conversation(id, bad, AgentKind::Codex, 0, None)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                sup.store
+                    .session(id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .captured_conversation,
+                before.captured_conversation
+            );
+            assert_eq!(sup.store.codex_report_pin(id).await.unwrap(), before_pin);
+            let unchanged = sup.store.session(id).await.unwrap().unwrap();
+            assert_eq!(
+                unchanged.capture_ownership_version,
+                before.capture_ownership_version
+            );
+            assert_eq!(unchanged.conversation_source, before.conversation_source);
+            if event == "Stop" {
+                let pending = codex_pin_report(state.path(), "ancestor", &[root, higher], event);
+                std::fs::remove_file(state.path().join("ancestor.jsonl")).unwrap();
+                sup.report_codex_conversation(id, pending, AgentKind::Codex, 0, None)
+                    .await
+                    .unwrap();
+                assert_eq!(sup.store.codex_report_pin(id).await.unwrap(), before_pin);
+                assert_eq!(
+                    sup.store
+                        .session(id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .captured_conversation,
+                    before.captured_conversation
+                );
+            }
+            assert!(
+                sup.store
+                    .session_notifications(id)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            bad = codex_pin_report(state.path(), "ancestor", &[root, higher], event);
+            sup.report_codex_conversation(id, bad, AgentKind::Codex, 0, None)
+                .await
+                .unwrap();
+            let after = sup.store.session(id).await.unwrap().unwrap();
+            let locator = crate::agent_kind::codex::CodexLocator::parse(
+                after.captured_conversation.as_deref().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(locator.runtime_session_id, "ancestor");
+            assert_eq!(locator.thread_id.as_deref(), Some("thread-ancestor"));
+            let pin: crate::agent_kind::codex::CodexReportPin = serde_json::from_str(
+                sup.store
+                    .codex_report_pin(id)
+                    .await
+                    .unwrap()
+                    .as_deref()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(pin.process, root);
+            assert_eq!(pin.ancestors, [higher]);
+            sup.report_codex_conversation(
+                id,
+                codex_pin_report(state.path(), "higher", &[higher], event),
+                AgentKind::Codex,
+                0,
+                None,
+            )
+            .await
+            .unwrap();
+            let notifications = sup.store.session_notifications(id).await.unwrap();
+            assert_eq!(notifications.len(), 1);
+            assert_eq!(
+                notifications[0].text,
+                crate::service::notifications::CODEX_PIN_CORRECTED_TEXT
+            );
+            assert!(!notifications[0].resolved);
+        }
+    }
+
+    /// Pinning fences rivals while alive and descendants after exit, then releases
+    /// for a fresh Codex outside the old chain. A Stop acknowledged without effect
+    /// must not pin, even for an older row that already holds a ready conversation.
+    #[farhelm_testtrace::test]
+    async fn codex_pin_blocks_rivals_and_releases_only_outside_a_dead_chain() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let id = "pin-liveness";
+        seed_codex_row(&sup, id, None, None, 0).await;
+        let root = crate::procs::ProcessIdentity::read(std::process::id()).unwrap();
+        let other = crate::procs::ProcessIdentity {
+            pid: 900_004,
+            start: 4,
+        };
+        sup.report_codex_conversation(
+            id,
+            codex_pin_report(state.path(), "root", &[root], "SessionStart"),
+            AgentKind::Codex,
+            0,
+            None,
+        )
+        .await
+        .unwrap();
+        let before = sup.store.session(id).await.unwrap().unwrap();
+        let pin = sup.store.codex_report_pin(id).await.unwrap();
+        for processes in [vec![other, root], vec![other]] {
+            let error = sup
+                .report_codex_conversation(
+                    id,
+                    codex_pin_report(state.path(), "rival", &processes, "SessionStart"),
+                    AgentKind::Codex,
+                    0,
+                    None,
+                )
+                .await
+                .unwrap_err();
+            assert!(error.message.contains("pinned process"));
+            assert_eq!(
+                sup.store
+                    .session(id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .captured_conversation,
+                before.captured_conversation
+            );
+            assert_eq!(sup.store.codex_report_pin(id).await.unwrap(), pin);
+            let unchanged = sup.store.session(id).await.unwrap().unwrap();
+            assert_eq!(
+                unchanged.capture_ownership_version,
+                before.capture_ownership_version
+            );
+            assert_eq!(unchanged.conversation_source, before.conversation_source);
+        }
+        // A stale start token makes this pin provably gone, even though its PID
+        // is reused by this live test process. The recorded descendant chain
+        // still forbids release; a separate fresh process may select afterwards.
+        let dead = crate::procs::ProcessIdentity {
+            start: root.start.wrapping_add(1),
+            ..root
+        };
+        let dead_pin = serde_json::to_string(&crate::agent_kind::codex::CodexReportPin {
+            process: dead,
+            ancestors: vec![],
+        })
+        .unwrap();
+        assert!(
+            sup.store
+                .admit_codex_conversation(
+                    &before,
+                    pin.as_deref(),
+                    before.captured_conversation.as_deref().unwrap(),
+                    &dead_pin,
+                    None,
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            sup.report_codex_conversation(
+                id,
+                codex_pin_report(state.path(), "descendant", &[other, dead], "SessionStart"),
+                AgentKind::Codex,
+                0,
+                None
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            sup.store.codex_report_pin(id).await.unwrap().as_deref(),
+            Some(dead_pin.as_str())
+        );
+        let mut changed_image = codex_pin_report(
+            state.path(),
+            "changed-image-child",
+            &[other, dead],
+            "SessionStart",
+        );
+        let links = changed_image.ancestry.as_mut().unwrap();
+        // exec preserves PID/start. That identity still fences descendants
+        // even when its recorded executable is no longer named codex.
+        links[2].exe = b"/bin/sh".to_vec();
+        links[2].argv = Some(vec![b"sh".to_vec()]);
+        assert!(
+            sup.report_codex_conversation(id, changed_image, AgentKind::Codex, 0, None)
+                .await
+                .is_err()
+        );
+        let unchanged = sup.store.session(id).await.unwrap().unwrap();
+        assert_eq!(
+            unchanged.captured_conversation,
+            before.captured_conversation
+        );
+        assert_eq!(
+            unchanged.capture_ownership_version,
+            before.capture_ownership_version
+        );
+        assert_eq!(unchanged.conversation_source, before.conversation_source);
+        assert_eq!(
+            sup.store.codex_report_pin(id).await.unwrap().as_deref(),
+            Some(dead_pin.as_str())
+        );
+        sup.report_codex_conversation(
+            id,
+            codex_pin_report(state.path(), "fresh", &[other], "SessionStart"),
+            AgentKind::Codex,
+            0,
+            None,
+        )
+        .await
+        .unwrap();
+        let fresh = sup.store.session(id).await.unwrap().unwrap();
+        let fresh_pin = sup.store.codex_report_pin(id).await.unwrap();
+        let parsed: crate::agent_kind::codex::CodexReportPin =
+            serde_json::from_str(fresh_pin.as_deref().unwrap()).unwrap();
+        assert_eq!(parsed.process, other);
+        let old_id = "old-unpinned";
+        seed_codex_row(
+            &sup,
+            old_id,
+            fresh.captured_conversation.as_deref(),
+            Some("hook"),
+            1,
+        )
+        .await;
+        sup.report_codex_conversation(
+            old_id,
+            codex_pin_report(state.path(), "fresh", &[other], "Stop"),
+            AgentKind::Codex,
+            0,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(sup.store.codex_report_pin(old_id).await.unwrap(), None);
+        sup.report_codex_conversation(
+            old_id,
+            codex_pin_report(state.path(), "fresh", &[other], "SessionStart"),
+            AgentKind::Codex,
+            0,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(sup.store.codex_report_pin(old_id).await.unwrap().is_some());
+    }
+
     /// Seed the durable result of an ownership-proven Grok report without
     /// manufacturing a process ancestry. Corridor tests own that proof;
     /// service tests use this seam to exercise reload and publication after
@@ -24561,10 +24912,10 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                30,
+                31,
                 "the v17 fixture migrates through scan-column, profile-snapshot, launch-kind, \
-                 session-notification, notification-resolution, launch-hook and boot-finality \
-                 changes too"
+                 session-notification, notification-resolution, launch-hook, boot-finality and \
+                 Codex-pin changes too"
             );
             assert_eq!(
                 conn.query_row(

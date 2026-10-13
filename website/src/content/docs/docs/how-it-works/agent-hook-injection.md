@@ -124,9 +124,9 @@ a session of another kind before consulting any vendor state. It reads one callb
 conversation id, the vendor's `source`, and any transcript path and event name (a report naming a sub-agent is dropped
 instead; see below). Claude uses the source for diagnostics. Codex requires `SessionStart` with source `startup`,
 `resume`, `clear`, or `compact` to select a conversation; its source-less `Stop` can confirm that same conversation
-after a pending `/clear`. Both require foreground attribution and exact-record validation. Grok requires `SessionStart`,
-`UserPromptSubmit`, or `Stop`; its selecting event also carries source `new` or `load` and a timestamp used to reject
-delayed replacement reports.
+after a pending `/clear`, or correct an earlier conversation reported by a Codex process it started. Both require
+process attribution and exact-record validation. Grok requires `SessionStart`, `UserPromptSubmit`, or `Stop`; its
+selecting event also carries source `new` or `load` and a timestamp used to reject delayed replacement reports.
 
 The hook does not talk to the supervisor. It saves the report as a small file under `hook-reports/<session id>/` in the
 supervisor's state directory, together with a record of which processes it was started by, and exits 0 — always,
@@ -167,11 +167,14 @@ and Farhelm gains no exact Codex resume target.
 
 Codex's native executable must be named `codex`; a wrapper may launch it, but renaming the native executable makes
 foreground attribution unavailable. Farhelm verifies the exact root transcript named by the hook, including when
-`CODEX_HOME` points somewhere else. A nested persistent or ephemeral invocation cannot replace its parent's target.
-After an attributed `/clear`, an unwritten transcript means no resume offer yet, not permission to resume the discarded
-conversation. Farhelm waits for that exact file rather than searching for another one. Historical bare captured IDs
-remain stored but are not treated as verified resume targets; no transcript is deleted or automatically selected
-instead.
+`CODEX_HOME` points somewhere else. Farhelm follows the first Codex process whose conversation it accepts, even through
+launchers that stay running above it. A nested invocation cannot replace a conversation already reported by its parent.
+If the nested invocation reports first, a verified report from the Codex process that started it switches Farhelm to
+that conversation, with a session notification explaining what **restart** would have resumed before the switch. If the
+followed Codex exits, a fresh Codex in the same terminal can report its own conversation. After an attributed `/clear`,
+an unwritten transcript means no resume offer yet, not permission to resume the discarded conversation. Farhelm waits
+for that exact file rather than searching for another one. Historical bare captured IDs remain stored but are not
+treated as verified resume targets; no transcript is deleted or automatically selected instead.
 
 NOTE: with the bypass flag in place, any hook you have configured in Codex's active configuration home (`$CODEX_HOME`
 when it is set, `~/.codex` otherwise) but have not trusted will also run during farhelm-launched Codex sessions. If that
