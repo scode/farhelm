@@ -12,6 +12,8 @@
       "remote_state_dir": null,
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
       "icon": "cloud",
       "color": "default",
       "state": {
@@ -38,6 +40,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
       "icon": "cloud",
       "color": "default",
       "state": {
@@ -58,6 +62,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
       "icon": "cloud",
       "color": "default",
       "state": {
@@ -78,6 +84,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
       "icon": "cloud",
       "color": "default",
       "state": {
@@ -101,6 +109,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
       "icon": "cloud",
       "color": "default",
       "state": {
@@ -121,6 +131,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
       "icon": "cloud",
       "color": "default",
       "state": {
@@ -140,6 +152,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
       "icon": "cloud",
       "color": "default",
       "state": {
@@ -160,6 +174,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
       "icon": "cloud",
       "color": "default",
       "state": {
@@ -179,6 +195,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
       "icon": "cloud",
       "color": "default",
       "state": {
@@ -205,6 +223,8 @@
       "remote_state_dir": "~/.local/state/farhelm",
       "yolo_without_asking": false,
       "commands_without_asking": false,
+      "links_without_asking": false,
+      "local_links_without_asking": false,
       "icon": "cloud",
       "color": "default",
       "state": {

@@ -33,8 +33,8 @@
 //! waiting on.
 //!
 //! The connection has to be watched rather than left to cancellation: every
-//! verb that asks is a mutation, and the helm deliberately never aborts a
-//! started mutation's answer task when its connection is torn down
+//! command mutation that asks must retain its answer task during teardown;
+//! the helm deliberately never aborts a started mutation's answer task
 //! (`SupervisorClient::spawn_agent_answer`). Without the watch, a card would
 //! outlive its connection by up to the whole wait, and "Always allow" on it
 //! could grant the setting to whatever install held the host row by then.
@@ -166,12 +166,18 @@ impl Approvals {
 
     /// The origin and recorded identity of the entry `id`, if it is still
     /// waiting, without settling it.
-    fn origin_of(&self, id: &str) -> Option<(AgentOrigin, Option<String>)> {
+    fn origin_of(&self, id: &str) -> Option<(AgentOrigin, Option<String>, ApprovalAction)> {
         self.lock()
             .pending
             .values()
             .find(|entry| entry.view.id == id)
-            .map(|entry| (entry.origin, entry.identity.clone()))
+            .map(|entry| {
+                (
+                    entry.origin,
+                    entry.identity.clone(),
+                    entry.view.action.clone(),
+                )
+            })
     }
 
     /// Deny every request `session_id` has waiting, and refuse new ones, for
@@ -275,8 +281,10 @@ fn gui_connected(state: &AppState) -> bool {
 /// host connection `origin`, and wait for the answer.
 ///
 /// `Ok(())` means carry it out: the user allowed it (directly, or by turning
-/// on the host's setting from the card), or the host's "run farhelm commands
-/// from this host without asking" setting is on. Every `Err` means nothing
+/// on the matching host setting from the card), or that action's host setting
+/// is on. Public links, local-network links and commands have independent grants.
+/// A trusted web link still waits for an Open click; a trusted native link does not.
+/// Every `Err` means nothing
 /// may be carried out, and its message is what the asking CLI shows:
 ///
 /// - no GUI connected: `Unavailable`, at once (see [`gui_connected`]);
@@ -292,14 +300,32 @@ pub(crate) async fn ask(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
-    action: ApprovalAction,
+    mut action: ApprovalAction,
 ) -> anyhow::Result<()> {
     let hosts = state.store.list_hosts().await?;
     let Some(row) = hosts.iter().find(|row| row.id == origin.host) else {
         return Err(crate::sessions::no_such_host(origin.host));
     };
-    if row.commands_without_asking {
-        return Ok(());
+    match &mut action {
+        ApprovalAction::OpenUrl {
+            local_network,
+            preapproved,
+            ..
+        } => {
+            let allowed = if *local_network {
+                row.local_links_without_asking
+            } else {
+                row.links_without_asking
+            };
+            if allowed && state.link_opener.is_some() {
+                return Ok(());
+            }
+            // Web clients still need a click to preserve browser user activation. This
+            // reduced card waives the trust question, never the gesture needed to open.
+            *preapproved = allowed;
+        }
+        _ if row.commands_without_asking => return Ok(()),
+        _ => {}
     }
     if !gui_connected(state) {
         return Err(refusal(ErrorKind::Unavailable, NO_GUI_REFUSAL.to_string()));
@@ -522,7 +548,7 @@ pub(crate) async fn answer_approval(
             ApprovalAnswer::Allow => Verdict::Allow,
             ApprovalAnswer::Deny => Verdict::Deny,
             ApprovalAnswer::AlwaysAllow => {
-                let Some((origin, identity)) = state.approvals.origin_of(&id) else {
+                let Some((origin, identity, action)) = state.approvals.origin_of(&id) else {
                     return gone(&id);
                 };
                 if !crate::agent_requests::origin_is_live(&state, origin) {
@@ -532,17 +558,32 @@ pub(crate) async fn answer_approval(
                     ));
                 }
                 let serialized = state.manager.host_write_lock(origin.host).await;
-                let allowed = state
-                    .store
-                    .allow_commands_for_identity(origin.host, identity)
-                    .await;
+                let allowed = match action {
+                    ApprovalAction::OpenUrl { local_network, .. } => {
+                        let permission = if local_network {
+                            crate::store::BrowserPermission::LocalNetwork
+                        } else {
+                            crate::store::BrowserPermission::Public
+                        };
+                        state
+                            .store
+                            .allow_browser_for_identity(origin.host, identity, permission)
+                            .await
+                    }
+                    _ => {
+                        state
+                            .store
+                            .allow_commands_for_identity(origin.host, identity)
+                            .await
+                    }
+                };
                 drop(serialized);
                 match allowed {
                     Ok(true) => {
                         state.manager.events().bump();
                         tracing::info!(
                             host = origin.host,
-                            "host commands-without-asking turned on from an approval card"
+                            "host request permission turned on from an approval card"
                         );
                     }
                     Ok(false) => {
@@ -675,9 +716,20 @@ mod tests {
         origin: AgentOrigin,
         asking: &str,
     ) -> (tokio::task::JoinHandle<anyhow::Result<()>>, String) {
+        waiting_for_action(harness, origin, asking, stop_action()).await
+    }
+
+    /// Use the same card/readiness and owned-task ending boundaries for every approval action.
+    /// A link waits without a session mutation fence, but its visible card follows this lifecycle.
+    async fn waiting_for_action(
+        harness: &rest_harness::Harness,
+        origin: AgentOrigin,
+        asking: &str,
+        action: ApprovalAction,
+    ) -> (tokio::task::JoinHandle<anyhow::Result<()>>, String) {
         let state = Arc::clone(&harness.state);
         let asker = asking.to_string();
-        let task = tokio::spawn(async move { ask(&state, origin, &asker, stop_action()).await });
+        let task = tokio::spawn(async move { ask(&state, origin, &asker, action).await });
         let mut changes = harness.state.manager.events().subscribe();
         let found = tokio::time::timeout(STEP, async {
             loop {
@@ -768,6 +820,280 @@ mod tests {
         let refused = refusal_of(ask(&harness.state, origin, "asker", stop_action()).await);
         assert_eq!(refused.kind, ErrorKind::Unavailable);
         assert_eq!(refused.message, NO_GUI_REFUSAL);
+        assert!(harness.state.approvals.list().is_empty());
+    }
+
+    /// Native links consult only their matching browser grant, never command permission.
+    /// Without a grant and GUI, refusal must leave the native callback untouched; with the
+    /// grant, the exact admitted URL reaches it. Browser grants must not waive command approval.
+    #[farhelm_testtrace::test]
+    async fn browser_native_opening_uses_only_the_matching_host_permission() {
+        let opened = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let observed = Arc::clone(&opened);
+        let harness = rest_harness::idle_helm_with_link_opener(Arc::new(move |url: &str| {
+            observed.lock().unwrap().push(url.to_string());
+            Ok(())
+        }))
+        .await;
+        let origin = local_origin(&harness).await;
+        assert_eq!(
+            harness.state.manager.events().subscriber_count(),
+            0,
+            "premise: no GUI is connected"
+        );
+        harness
+            .store
+            .set_commands_without_asking(origin.host, true)
+            .await
+            .unwrap();
+        for url in ["https://example.test/path?q=1", "http://127.0.0.1:8765/"] {
+            assert!(
+                crate::browser::open_url(&harness.state, origin, "sess-1", url.into())
+                    .await
+                    .is_err()
+            );
+        }
+        assert!(
+            opened.lock().unwrap().is_empty(),
+            "command permission must open neither category"
+        );
+        harness
+            .store
+            .set_browser_permission(origin.host, crate::store::BrowserPermission::Public, true)
+            .await
+            .unwrap();
+        crate::browser::open_url(
+            &harness.state,
+            origin,
+            "sess-1",
+            "https://example.test/path?q=1".into(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *opened.lock().unwrap(),
+            vec!["https://example.test/path?q=1"]
+        );
+        assert!(
+            crate::browser::open_url(
+                &harness.state,
+                origin,
+                "sess-1",
+                "http://127.0.0.1:8765/".into()
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            opened.lock().unwrap().len(),
+            1,
+            "public trust must not open a local-network link"
+        );
+        harness
+            .store
+            .set_browser_permission(
+                origin.host,
+                crate::store::BrowserPermission::LocalNetwork,
+                true,
+            )
+            .await
+            .unwrap();
+        crate::browser::open_url(
+            &harness.state,
+            origin,
+            "sess-1",
+            "http://127.0.0.1:8765/".into(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(opened.lock().unwrap().len(), 2);
+        harness
+            .store
+            .set_commands_without_asking(origin.host, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            refusal_of(ask(&harness.state, origin, "sess-1", stop_action()).await).message,
+            NO_GUI_REFUSAL,
+            "neither browser grant grants command authority"
+        );
+        assert!(harness.state.approvals.list().is_empty());
+    }
+
+    /// Web permission removes the trust question but still produces a one-click card.
+    /// AlwaysAllow grants only the card's category; a denied preapproved request still fails.
+    #[farhelm_testtrace::test]
+    async fn browser_web_cards_keep_category_grants_independent_and_wait_for_a_click() {
+        let harness = rest_harness::idle_helm().await;
+        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let origin = local_origin(&harness).await;
+        let action = |local_network| ApprovalAction::OpenUrl {
+            url: if local_network {
+                "http://127.0.0.1/"
+            } else {
+                "https://example.test/"
+            }
+            .into(),
+            local_network,
+            preapproved: false,
+        };
+        let (task, id) = waiting_for_action(&harness, origin, "sess-1", action(false)).await;
+        assert!(
+            !task.is_finished(),
+            "premise: the public request waits for its card"
+        );
+        assert!(matches!(
+            harness.state.approvals.list()[0].action,
+            ApprovalAction::OpenUrl {
+                preapproved: false,
+                ..
+            }
+        ));
+        assert_eq!(
+            answer(&harness, &id, "always_allow").await.0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        ended(task).await.unwrap();
+        let row = local_row(&harness).await;
+        assert!(
+            row.links_without_asking
+                && !row.local_links_without_asking
+                && !row.commands_without_asking
+        );
+        let (task, id) = waiting_for_action(&harness, origin, "sess-1", action(true)).await;
+        assert!(matches!(
+            harness.state.approvals.list()[0].action,
+            ApprovalAction::OpenUrl {
+                local_network: true,
+                preapproved: false,
+                ..
+            }
+        ));
+        assert_eq!(
+            answer(&harness, &id, "deny").await.0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert_eq!(refusal_of(ended(task).await).kind, ErrorKind::Unauthorized);
+        assert!(!local_row(&harness).await.local_links_without_asking);
+        let (task, id) = waiting_for_action(&harness, origin, "sess-1", action(false)).await;
+        assert!(
+            !task.is_finished(),
+            "preapproved web links still wait for a real Open click"
+        );
+        assert!(matches!(
+            harness.state.approvals.list()[0].action,
+            ApprovalAction::OpenUrl {
+                preapproved: true,
+                ..
+            }
+        ));
+        assert_eq!(
+            answer(&harness, &id, "deny").await.0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert_eq!(refusal_of(ended(task).await).kind, ErrorKind::Unauthorized);
+    }
+
+    /// A link card cannot grant trust to a replacement install even while its old
+    /// connection is still live. Refusing AlwaysAllow keeps the card answerable by Deny.
+    #[farhelm_testtrace::test]
+    async fn browser_always_allow_refuses_a_changed_identity_for_either_category() {
+        for local_network in [false, true] {
+            let harness = rest_harness::idle_helm().await;
+            let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+            let origin = local_origin(&harness).await;
+            let row = local_row(&harness).await;
+            let (task, id) = waiting_for_action(
+                &harness,
+                origin,
+                "sess-1",
+                ApprovalAction::OpenUrl {
+                    url: if local_network {
+                        "http://localhost/"
+                    } else {
+                        "https://example.test/"
+                    }
+                    .into(),
+                    local_network,
+                    preapproved: false,
+                },
+            )
+            .await;
+            harness
+                .store
+                .adopt_identity(
+                    origin.host,
+                    &crate::store::DialedAs::of(&row),
+                    row.host_identity.as_deref().unwrap(),
+                    "replacement-identity",
+                )
+                .await
+                .unwrap();
+            assert!(
+                crate::agent_requests::origin_is_live(&harness.state, origin),
+                "premise: connection liveness alone would allow the stale grant"
+            );
+            let (status, body) = answer(&harness, &id, "always_allow").await;
+            assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+            let row = local_row(&harness).await;
+            assert!(
+                !row.links_without_asking
+                    && !row.local_links_without_asking
+                    && !row.commands_without_asking
+            );
+            assert!(
+                !task.is_finished(),
+                "a refused grant must leave the card answerable"
+            );
+            assert_eq!(
+                answer(&harness, &id, "deny").await.0,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            assert_eq!(refusal_of(ended(task).await).kind, ErrorKind::Unauthorized);
+        }
+    }
+
+    /// Success means the native opener accepted the admitted URL. Its failure must
+    /// reach the CLI as a short error, while an invalid URL never reaches the capability.
+    #[farhelm_testtrace::test]
+    async fn browser_native_failure_is_reported_and_invalid_urls_never_reach_the_opener() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = Arc::clone(&calls);
+        let harness = rest_harness::idle_helm_with_link_opener(Arc::new(move |_| {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err("private opener details".into())
+        }))
+        .await;
+        let origin = local_origin(&harness).await;
+        harness
+            .store
+            .set_browser_permission(origin.host, crate::store::BrowserPermission::Public, true)
+            .await
+            .unwrap();
+        assert!(
+            crate::browser::open_url(
+                &harness.state,
+                origin,
+                "sess-1",
+                "javascript:alert(1)".into()
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let error = crate::browser::open_url(
+            &harness.state,
+            origin,
+            "sess-1",
+            "https://example.test/".into(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "the default browser could not open the link"
+        );
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert!(harness.state.approvals.list().is_empty());
     }
 

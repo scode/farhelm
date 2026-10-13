@@ -326,3 +326,87 @@ test("approval remains answerable while the quick switcher is open", async ({ pa
   await expect(dialog).toBeVisible();
   expect(staged.answers).toEqual([{ id: "dialog", answer: "allow" }]);
 });
+
+/** A link's classification and permission variant are supplied by the helm, never inferred by the UI. */
+function linkRequest(id: string, url: string, preapproved = false, localNetwork = false): Approval {
+  return { ...launchRequest(id), action: { kind: "open_url", url, preapproved, local_network: localNetwork } };
+}
+
+/** Record user activation at the real synchronous browser call, without opening an external site. */
+async function installLinkOpenProbe(page: Page) {
+  await page.addInitScript(() => {
+    const opened: Array<{ url: string; active: boolean }> = [];
+    Object.assign(window, { __farhelmOpenedLinks: opened });
+    window.open = (url) => {
+      opened.push({ url: String(url), active: navigator.userActivation.isActive });
+      return null;
+    };
+  });
+}
+
+/** Read the bounded observations owned by this page's opener stand-in. */
+async function openedLinks(page: Page) {
+  return page.evaluate(() =>
+    (window as unknown as { __farhelmOpenedLinks: Array<{ url: string; active: boolean }> }).__farhelmOpenedLinks
+  );
+}
+
+/** Allow must open inside the click, after answer admission, while full peer URL text stays escaped. */
+test("a link approval opens synchronously with user activation and displays the entire URL as data", async ({ page }) => {
+  const url = "https://example.test/path?note=<b>&next=%2Faccount#section";
+  await installLinkOpenProbe(page);
+  const staged = await stageApprovals(page, [linkRequest("link-allow", url)]);
+  await openSelected(page);
+  const card = page.locator(".approval-card");
+  await expect(card).toContainText(url);
+  await expect(card.locator(".approval-card-rows b"), "URL markup must remain text").toHaveCount(0);
+  await card.getByRole("button", { name: "allow", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  expect(staged.answers).toEqual([{ id: "link-allow", answer: "allow" }]);
+  expect(await openedLinks(page)).toEqual([{ url, active: true }]);
+});
+
+for (const preapproved of [false, true]) {
+  /** Deny and the preapproved variant's Dismiss settle the request without reaching the opener. */
+  test(`a ${preapproved ? "preapproved link dismiss" : "link denial"} opens nothing`, async ({ page }) => {
+    await installLinkOpenProbe(page);
+    const staged = await stageApprovals(page, [linkRequest("link-deny", "http://127.0.0.1:8765/", preapproved, true)]);
+    await openSelected(page);
+    const card = page.locator(".approval-card");
+    if (preapproved) {
+      await expect(card.getByRole("button", { name: "open", exact: true })).toBeEnabled();
+      await expect(card.locator(".approval-always-allow")).toHaveCount(0);
+    } else {
+      await expect(card).toContainText("It needs its own host permission, even when public links are allowed.");
+    }
+    await card.getByRole("button", { name: preapproved ? "dismiss" : "deny", exact: true }).click();
+    await expect(card).toHaveCount(0);
+    expect(staged.answers).toEqual([{ id: "link-deny", answer: "deny" }]);
+    expect(await openedLinks(page)).toEqual([]);
+  });
+}
+
+/** A host grant still needs a web click; a double click may not open a second request now under the pointer. */
+test("a preapproved link opens on click and a double click cannot open the next link", async ({ page }) => {
+  await installLinkOpenProbe(page);
+  const first = "https://example.test/first";
+  const staged = await stageApprovals(page, [linkRequest("link-first", first, true), linkRequest("link-second", "https://example.test/second", true)]);
+  await openSelected(page);
+  await page.locator(".approval-card .approval-allow").dblclick();
+  await expect(page.locator(".approval-card")).toHaveAttribute("data-approval-id", "link-second");
+  expect(staged.answers).toEqual([{ id: "link-first", answer: "allow" }]);
+  expect(await openedLinks(page)).toEqual([{ url: first, active: true }]);
+  await page.locator(".approval-card .approval-deny").click();
+});
+
+/** Recheck immediately before opening even if a malformed card somehow bypassed the helm's validator. */
+test("an invalid URL on a card is neither opened nor answered as allowed", async ({ page }) => {
+  await installLinkOpenProbe(page);
+  const staged = await stageApprovals(page, [linkRequest("link-invalid", "javascript:alert(1)")]);
+  await openSelected(page);
+  await page.locator(".approval-card .approval-allow").click();
+  await expect(page.locator(".approval-card [role=alert]")).toContainText("could not be opened safely");
+  expect(staged.answers).toEqual([]);
+  expect(await openedLinks(page)).toEqual([]);
+  await page.locator(".approval-card .approval-deny").click();
+});

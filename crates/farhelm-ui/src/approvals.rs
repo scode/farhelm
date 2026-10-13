@@ -152,6 +152,9 @@ pub(crate) fn ApprovalCards() -> Element {
             // waiting on a card must not wait on the dialog too.
             "data-modal-exempt": "true",
             onmounted: move |_| {
+                // Approval can appear before any terminal was mounted. Install the shared
+                // URL predicate here too, so that first click does not depend on terminal setup.
+                document::eval(include_str!("../assets/terminal-links.js"));
                 // The region stays outside the shell for modal exemption;
                 // its geometry follows the actual pane instead of assuming
                 // a sidebar width or a fixed-height session header.
@@ -162,7 +165,7 @@ pub(crate) fn ApprovalCards() -> Element {
                     p {
                         "Your answer arrived after its request had stopped waiting, so it did not take effect."
                         if always {
-                            " The host may still have been set to run farhelm commands without asking; its settings show whether it was."
+                            " The host's permission for this kind of request may still have been turned on; its settings show whether it was."
                         }
                     }
                     button {
@@ -185,8 +188,19 @@ pub(crate) fn ApprovalCards() -> Element {
                         let base = base.clone();
                         let request = request.clone();
                         let mut answering = answering;
+                        let action = card.action.clone();
                         move |(id, answer): (String, ApprovalAnswer)| {
-                            if !answering.write().insert(id.clone()) {
+                            // DOM disabling follows rendering. Check the live pause and claim the
+                            // answer before a queued click can open anything on the user's machine.
+                            if !*armed.peek() || !answering.write().insert(id.clone()) {
+                                return;
+                            }
+                            if answer != ApprovalAnswer::Deny
+                                && let ApprovalAction::OpenUrl { url, .. } = &action
+                                && !open_approved_web_url(url)
+                            {
+                                answering.write().remove(&id);
+                                errors.write().insert(id, "this link could not be opened safely in this browser".into());
                                 return;
                             }
                             let base = base.clone();
@@ -237,6 +251,50 @@ pub(crate) fn ApprovalCards() -> Element {
     }
 }
 
+/// Open in the same browser event that allowed the request, after the shared answer guards.
+///
+/// An asynchronous eval or a future loses user activation and gets blocked as a popup. The
+/// wasm renderer calls the existing URL predicate and Window API synchronously. A null window
+/// result is not evidence of a block: noopener deliberately hides the new browsing context.
+#[cfg(target_arch = "wasm32")]
+fn open_approved_web_url(url: &str) -> bool {
+    use wasm_bindgen::prelude::*;
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(catch, js_namespace = ["window", "farhelmTerminalLinks"], js_name = isPlainWebUrl)]
+        fn is_plain_web_url(raw: &str) -> Result<bool, JsValue>;
+    }
+    if !is_plain_web_url(url).unwrap_or(false) {
+        return false;
+    }
+    web_sys::window().is_some_and(|window| {
+        window
+            .open_with_url_and_target_and_features(url, "_blank", "noopener,noreferrer")
+            .is_ok()
+    })
+}
+
+/// Desktop answers first; only the embedded helm's admitted native capability opens the link.
+#[cfg(not(target_arch = "wasm32"))]
+fn open_approved_web_url(_url: &str) -> bool {
+    true
+}
+
+/// A permanent answer grants only this action's category, never a broader host permission.
+fn always_allow_tooltip(action: &ApprovalAction) -> &'static str {
+    match action {
+        ApprovalAction::OpenUrl {
+            local_network: true,
+            ..
+        } => "always allow: stop asking about local-network links from this host",
+        ApprovalAction::OpenUrl {
+            local_network: false,
+            ..
+        } => "always allow: stop asking about public links from this host",
+        _ => "always allow: stop asking about farhelm commands from this host",
+    }
+}
+
 /// Preserve a chosen request by identity, falling back to the oldest waiting.
 ///
 /// The list is already ordered by the helm. A vanished selection must not
@@ -272,6 +330,13 @@ fn ApprovalCard(
     error: Option<String>,
     on_answer: EventHandler<(String, ApprovalAnswer)>,
 ) -> Element {
+    let preapproved = matches!(
+        &card.action,
+        ApprovalAction::OpenUrl {
+            preapproved: true,
+            ..
+        }
+    );
     // Long rows follow the short facts, so a full-width folder or command
     // cannot split the compact grid into several mostly empty rows.
     let (full, facts): (Vec<_>, Vec<_>) = action_rows(&card.action)
@@ -314,6 +379,11 @@ fn ApprovalCard(
                     CardDetail { key: "{index}", row }
                 }
             }
+            if matches!(&card.action, ApprovalAction::OpenUrl { local_network: true, preapproved: false, .. }) {
+                p { class: "approval-card-note",
+                    "This link addresses your own machine or local network. It needs its own host permission, even when public links are allowed."
+                }
+            }
             if let Some(error) = error {
                 p { class: "approval-card-error", role: "alert", "{display_peer(&error)}" }
             }
@@ -324,16 +394,18 @@ fn ApprovalCard(
                     "data-tooltip": "allow: let this one request go ahead",
                     disabled: busy,
                     onclick: answer(ApprovalAnswer::Allow),
-                    "allow"
+                    if preapproved { "open" } else { "allow" }
                 }
+                if !preapproved {
                 button {
                     r#type: "button",
                     class: "btn btn-neutral approval-always-allow",
-                    "data-tooltip": "always allow: let this request go ahead, and stop asking about farhelm commands from this host",
+                    "data-tooltip": always_allow_tooltip(&card.action),
                     disabled: busy,
                     onclick: answer(ApprovalAnswer::AlwaysAllow),
                     "always allow from "
                     span { class: "peer-value", dir: "ltr", "{display_peer(&card.host_name)}" }
+                }
                 }
                 button {
                     r#type: "button",
@@ -341,7 +413,7 @@ fn ApprovalCard(
                     "data-tooltip": "deny: refuse this request; the agent is told you declined",
                     disabled: busy,
                     onclick: answer(ApprovalAnswer::Deny),
-                    "deny"
+                    if preapproved { "dismiss" } else { "deny" }
                 }
             }
         }
@@ -411,7 +483,7 @@ fn CardDetail(row: CardRow) -> Element {
 fn full_width_row(row: &CardRow) -> bool {
     matches!(
         row,
-        CardRow::Block(..) | CardRow::Identity(..) | CardRow::Value("folder", _)
+        CardRow::Block(..) | CardRow::Identity(..) | CardRow::Value("folder" | "URL", _)
     )
 }
 
@@ -453,6 +525,7 @@ enum CardRow {
 /// The action's kind, for the card's data attribute (tests and styling).
 fn action_kind(action: &ApprovalAction) -> &'static str {
     match action {
+        ApprovalAction::OpenUrl { .. } => "open_url",
         ApprovalAction::Launch { .. } => "launch",
         ApprovalAction::Rename { .. } => "rename",
         ApprovalAction::Stop { .. } => "stop",
@@ -465,6 +538,7 @@ fn action_kind(action: &ApprovalAction) -> &'static str {
 /// One line in this UI's own words saying what approving would do.
 fn action_summary(action: &ApprovalAction) -> &'static str {
     match action {
+        ApprovalAction::OpenUrl { .. } => "open a link in your browser",
         ApprovalAction::Launch {
             verb: LaunchVerb::Spawn | LaunchVerb::Create,
             ..
@@ -496,6 +570,19 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
 fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
     let mut rows = Vec::new();
     match action {
+        ApprovalAction::OpenUrl { url, .. } => {
+            // The site that will actually be contacted, parsed the way the
+            // browser parses it and shown in ASCII: credentials before an
+            // `@`, a backslash, or a look-alike Unicode host can make the
+            // full URL read as a different site than the one it opens.
+            if let Some(site) = url::Url::parse(url)
+                .ok()
+                .and_then(|parsed| parsed.host_str().map(str::to_string))
+            {
+                rows.push(CardRow::Identity("site", site));
+            }
+            rows.push(CardRow::Value("URL", url.clone()));
+        }
         ApprovalAction::Launch {
             host_name,
             cwd,
@@ -889,6 +976,44 @@ mod tests {
     /// Why: SPEC.md has the card show the template being deleted, and a
     /// pinned host is part of it; claiming the install is unknown would be
     /// false for a template pinned to a connected host.
+    /// Spec: a link card names the site the browser will contact, in ASCII,
+    /// above the full URL.
+    ///
+    /// Why: allowing a link is a trust decision about a site. Credentials
+    /// before an `@`, a backslash ending the host, or a look-alike Unicode
+    /// host make the raw URL read as a different site than the one it opens.
+    #[test]
+    fn a_link_card_names_the_site_it_opens() {
+        let site_of = |url: &str| {
+            action_rows(&ApprovalAction::OpenUrl {
+                url: url.to_string(),
+                local_network: false,
+                preapproved: false,
+            })
+            .into_iter()
+            .find_map(|row| match row {
+                CardRow::Identity("site", site) => Some(site),
+                _ => None,
+            })
+        };
+        assert_eq!(
+            site_of("https://accounts.google.com@evil.example/").as_deref(),
+            Some("evil.example")
+        );
+        assert_eq!(
+            site_of("https://evil.example\\@google.com/").as_deref(),
+            Some("evil.example")
+        );
+        assert_eq!(
+            site_of("https://\u{0430}pple.com/").as_deref(),
+            Some("xn--pple-43d.com")
+        );
+        assert_eq!(
+            site_of("https://example.com/a").as_deref(),
+            Some("example.com")
+        );
+    }
+
     #[test]
     fn a_template_delete_card_shows_its_host() {
         let fields = TemplateFields {

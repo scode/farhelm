@@ -1569,7 +1569,9 @@ test.describe("multi-host", () => {
       await row.locator(".host-settings").click();
       const dialog = page.locator(".host-settings-dialog");
       const toggle = dialog.locator(".host-commands-without-asking-toggle");
-      const help = dialog.locator(".host-settings-commands .host-settings-help");
+      // The section now also holds the browser-link permissions' help; the
+      // commands setting's own help is the first paragraph in it.
+      const help = dialog.locator(".host-settings-commands .host-settings-help").first();
       await expect(help).toContainText("Farhelm asks you first.");
       await expect(toggle).not.toBeChecked();
       await toggle.click();

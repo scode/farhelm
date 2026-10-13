@@ -175,20 +175,21 @@ install. Removing a host from the registry merely forgets it — the supervisor 
 reappear on re-registration. Registry entries are editable: an SSH destination can be corrected without touching the
 host's identity or its sessions. Every host, the local one included, has a settings dialog in the GUI that holds its
 destination (SSH hosts), its alias, a chosen icon and color (remote hosts), whether it starts YOLO sessions without
-asking, and whether it runs `farhelm` commands from its sessions without asking (see Agent-spawned sessions). The header
-and footer, including the close controls and the note that changes save as you make them, stay visible while only the
-settings between them scroll. A remote host offers fifteen icons, with the cloud as the default, and the default
-foreground or one of six identity colors: lavender, orchid, teal, steel, sand and copper. The choice is kept by the helm
-and shared with every client. It tints only the icon, never a status or the host name. The local host keeps its fixed
-red laptop and offers no appearance choice. Every host asks before YOLO launches, and before carrying out an acting
-`farhelm` command from one of its sessions, until the user explicitly turns that off, including hosts that existed
-before the settings did. Adopting a new identity for a host, described next, resets both settings to asking: each is a
-judgment about the install the user knew, and a new identity, whether a reinstall or a different machine, is one they
-have not judged. If a destination turns out to present a different identity than recorded (a wiped and reinstalled host,
-a recycled address), the helm says so and asks whether to adopt the new host or fix the destination — it never silently
-merges. An entry that reaches a machine another entry already holds connects nothing: it says which entry holds the
-machine, by name, and asks the user to remove that entry or change this one's destination and then press Retry. Farhelm
-never connects two entries to one machine and never resolves this on its own. Last-known sessions of a host that is
+asking, whether it runs `farhelm` commands from its sessions without asking, and separate permissions to open public and
+local-network links without asking (see Agent-spawned sessions). The header and footer, including the close controls and
+the note that changes save as you make them, stay visible while only the settings between them scroll. A remote host
+offers fifteen icons, with the cloud as the default, and the default foreground or one of six identity colors: lavender,
+orchid, teal, steel, sand and copper. The choice is kept by the helm and shared with every client. It tints only the
+icon, never a status or the host name. The local host keeps its fixed red laptop and offers no appearance choice. Every
+host asks before YOLO launches, and before carrying out an acting `farhelm` command from one of its sessions, and both
+link permissions start off, until the user explicitly turns them on, including hosts that existed before the settings
+did. Adopting a new identity for a host, described next, resets all four permissions to asking: each is a judgment about
+the install the user knew, and a new identity, whether a reinstall or a different machine, is one they have not judged.
+If a destination turns out to present a different identity than recorded (a wiped and reinstalled host, a recycled
+address), the helm says so and asks whether to adopt the new host or fix the destination — it never silently merges. An
+entry that reaches a machine another entry already holds connects nothing: it says which entry holds the machine, by
+name, and asks the user to remove that entry or change this one's destination and then press Retry. Farhelm never
+connects two entries to one machine and never resolves this on its own. Last-known sessions of a host that is
 permanently gone are disposed of by removing the host from the registry.
 
 Confirmed 2026-10-10: a host entry is one logical host from the user's point of view. Correcting its destination, or
@@ -199,8 +200,8 @@ stop, restart, rename, create or clone, an "Always allow" answer, a change to th
 without asking, a confirmed uninstall) may be carried out against the entry's new machine, and Farhelm adds no check of
 the installation identity to prevent that. A destination change that does not adopt a new identity keeps the host's
 settings, including on a host that was never contacted. The identity rules above still hold: adopting a new identity
-resets both settings to asking, and the New dialog's default host and recent setups stay tied to the install the user
-saw.
+resets all four permissions to asking, and the New dialog's default host and recent setups stay tied to the install the
+user saw.
 
 Exactly one helm runs at a time. Running several concurrently is unsupported in v1. The invariant supervisors enforce is
 at most one attachment per session, last attach wins — so a second helm cannot corrupt a session, but it can seize one,
@@ -1816,20 +1817,43 @@ that supervisor's own refusal, reported verbatim rather than paraphrased on the 
 refused with its state named. The new session appears in every client the way any other create does.
 
 Every acting verb of `farhelm spawn` and `farhelm agent` asks the user first. `farhelm spawn` in every form,
-`farhelm agent create`, `clone`, `rename`, `stop` and `restart`, and the template writes below are carried out only once
-the user approves them in the GUI, including when an agent acts on its own session. The read-only verbs (the hosts,
-sessions and templates listings, and `farhelm agent instructions`) never ask, and neither does Farhelm's own plumbing
-that runs in a session, such as the hooks that report a conversation's identity, which is not an agent verb. Farhelm
-cannot tell an agent from a person typing in a session's shell and does not try: whoever runs the command in a session
-asks as that session. The helm decides, because the requesting host and its supervisor are not trusted to (see Local
-authority and trust between hosts), and it decides by the host connection the request arrived on, never by anything the
-request or its supervisor claims. A request from a host whose "run farhelm commands from this host without asking"
-setting is on (see Topology) is not asked about. Spawn is the exception that proves the rule: it is the one action the
-requesting host's own supervisor carries out, and the launch `--inherit-agent` reuses comes from that supervisor, so a
-compromised supervisor could carry out a spawn without asking, show a different launch on the card than the one it
-starts, or ignore the YOLO rule below. That is accepted, because spawn acts only on its own host, which the threat model
-already trusts. Waiting for the user holds nothing other operations wait on, apart from the asking session's own next
-change, which is refused while an earlier one is still waiting.
+`farhelm agent create`, `clone`, `rename`, `stop`, `restart` and `open-url`, and the template writes below are carried
+out only once the user approves them in the GUI, including when an agent acts on its own session. The read-only verbs
+(the hosts, sessions and templates listings, and `farhelm agent instructions`) never ask, and neither does Farhelm's own
+plumbing that runs in a session, such as the hooks that report a conversation's identity, which is not an agent verb.
+Farhelm cannot tell an agent from a person typing in a session's shell and does not try: whoever runs the command in a
+session asks as that session. The helm decides, because the requesting host and its supervisor are not trusted to (see
+Local authority and trust between hosts), and it decides by the host connection the request arrived on, never by
+anything the request or its supervisor claims. A request from a host whose "run farhelm commands from this host without
+asking" setting is on (see Topology) is not asked about for commands. Opening links uses its own two permissions below;
+neither link permission grants command authority, and command authority grants neither link permission. Spawn is the
+exception that proves the rule: it is the one action the requesting host's own supervisor carries out, and the launch
+`--inherit-agent` reuses comes from that supervisor, so a compromised supervisor could carry out a spawn without asking,
+show a different launch on the card than the one it starts, or ignore the YOLO rule below. That is accepted, because
+spawn acts only on its own host, which the threat model already trusts. Waiting for the user holds nothing other
+operations wait on, apart from the asking session's own next change, which is refused while an earlier one is still
+waiting. A link request takes no session-change lock: it neither blocks another session command nor waits for one.
+
+`farhelm agent open-url -- <url>` asks to open an absolute HTTP or HTTPS URL with a host, at most 4096 bytes long. Raw
+whitespace and control characters are refused before parsing, matching terminal links; the full original URL is shown as
+labelled data on the approval card. The command waits and exits zero after a web Open/Allow click or after the desktop's
+native browser opener accepts the request, not after the destination loads. Denial, dismissal, refusal, timeout and a
+native opener failure exit nonzero with a short message.
+
+**Open links without asking** covers public addresses. **Open local-network links without asking** covers literal
+loopback, private and link-local IPv4/IPv6, IPv4 0/8, CGNAT and multicast/reserved high ranges, unspecified and
+multicast IPv6, mapped local IPv4, single-label names, and localhost, .localhost, .local, .internal, .lan, .home and
+.home.arpa names (including a trailing dot). Classification uses the parsed host without resolving DNS: a public-looking
+name may still resolve to a private address on the user's network. A local-network link always asks unless its own
+permission is on, regardless of the public permission, and its card explains that boundary. Always allow on a link card
+grants only its category, and only while the host still has the installation identity that asked.
+
+Without the matching permission, Allow and Always allow open the link after the card's ordinary pause. A web client
+rechecks the URL and opens synchronously in the click, before sending the approval; an expired or rejected answer can
+therefore arrive after the link has opened. The desktop page opens nothing itself: its embedded helm opens through the
+desktop's native callback after approval. With the matching permission on, the desktop opens immediately without a card,
+while a web client still shows the full URL with Open and Dismiss. Dismiss refuses the request. A standalone helm never
+opens a browser on the server. A web client whose pop-up is blocked cannot reliably detect that failure.
 
 While requests wait, the GUI shows one expanded card centered at the top of the main area, below the session's tabs when
 a session is open and clear of the sidebar and the terminal's prompt. The oldest request opens first. Other requests
@@ -1844,10 +1868,11 @@ source-qualified repository for a managed checkout), the agent type and its choi
 command text, and whether the launch is YOLO. For a template write it shows the whole resulting template, including the
 command and resume command text that the templates listing withholds from agents, and for a template delete the template
 being deleted. Text an agent controls (session titles, folders, command lines) is shown as labelled data, never in a way
-that could pass for Farhelm's own wording. The card offers Allow, Always allow from the requesting host, and Deny.
-Always allow turns that host's setting on and then approves the request; if turning the setting on fails, nothing is
-approved and the card stays up with the reason. It approves only the request it was answered on: other cards already
-waiting from that host stay until they are answered.
+that could pass for Farhelm's own wording. Link cards likewise show the entire URL as data. The card offers Allow,
+Always allow from the requesting host, and Deny (Open and Dismiss for a preapproved web link). Always allow turns that
+host's setting on and then approves the request; if turning the setting on fails, nothing is approved and the card stays
+up with the reason. It approves only the request it was answered on: other cards already waiting from that host stay
+until they are answered.
 
 If no Farhelm window is open to show the card (no GUI is connected to the helm), a request that needs approval is
 refused at once, with a message saying there is no Farhelm window to ask in and to open Farhelm and retry. Otherwise it
@@ -2353,6 +2378,13 @@ download it. Farhelm never opens or executes the result. The desktop app deliber
 flag on downloaded files, so these saves do not carry the "downloaded from the internet" prompt a browser save would
 carry. The click authorizes this transfer across the host boundary, including for agent-controlled files.
 
+Opening a link is another bounded effect across the host boundary. Only an admitted HTTP(S) URL may reach the user's
+browser, after an Allow/Open click or under the requesting host's matching link permission. With **Open local-network
+links without asking** on, a remote host can make the desktop user's browser load addresses on the user's own machine or
+network without a click. In a web client the permission still leaves an Open click. Neither permission authorizes other
+commands, file access or clipboard reads. Login redirects to `localhost` on the remote host still cannot complete from
+the user's local browser; forwarding those callbacks is outside this feature.
+
 A program in an attached remote terminal may write the viewer machine's system clipboard through OSC 52, without a
 separate local selection or copy gesture. This is an explicitly allowed, bounded effect across the remote-host boundary,
 including when a malicious program replaces the clipboard. Programs must not read that clipboard through Farhelm. A
@@ -2360,17 +2392,17 @@ user-initiated paste is intentional delivery of the pasted content to the select
 program-initiated clipboard reads. Clipboard writes remain best-effort as specified in Terminal experience; an opt-out
 control is not a current requirement.
 
-An agent's acting `farhelm` commands, whichever host they reach, are carried out only with the user's approval or under
-the requesting host's own "run farhelm commands from this host without asking" setting (see Agent-spawned sessions).
-That is what keeps a session on one host from gaining execution on another through Farhelm: creating, cloning, renaming,
-stopping and restarting sessions across hosts, and writing the templates any host may launch from, are authorized by the
-user, not by the request. A user who turns that setting on for a host grants that host's sessions exactly that authority
-over the fleet, including changing what later launches from those templates run anywhere. A retried create is a new
-request and is asked about like one, so how long agent-originated retry records are kept is not a security question. The
-one exception is a create into a managed checkout: a retry with the same idempotency key returns, or finishes, the
-attempt the user already approved, without asking again. That stays outside the retention question because the replay
-can only complete that exact approved request, and only for the session that asked. None of this waives correctness of
-user-initiated GUI requests.
+An agent's acting `farhelm` commands other than opening links, whichever host they reach, are carried out only with the
+user's approval or under the requesting host's own "run farhelm commands from this host without asking" setting (see
+Agent-spawned sessions). That is what keeps a session on one host from gaining execution on another through Farhelm:
+creating, cloning, renaming, stopping and restarting sessions across hosts, and writing the templates any host may
+launch from, are authorized by the user, not by the request. A user who turns that setting on for a host grants that
+host's sessions exactly that authority over the fleet, including changing what later launches from those templates run
+anywhere. A retried create is a new request and is asked about like one, so how long agent-originated retry records are
+kept is not a security question. The one exception is a create into a managed checkout: a retry with the same
+idempotency key returns, or finishes, the attempt the user already approved, without asking again. That stays outside
+the retention question because the replay can only complete that exact approved request, and only for the session that
+asked. None of this waives correctness of user-initiated GUI requests.
 
 Reading is separate from acting, and stays open for now. Any attached host may obtain any template's full contents,
 including a command line and resume command it carries: an approved spawn that applies a template, or any spawn from a

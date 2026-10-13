@@ -326,6 +326,9 @@ impl AgentRequestHandler for HelmAgentRequests {
                     })
             }
             AgentVerb::Sessions {} => session_listing(&state, origin.host, session_id).await,
+            AgentVerb::OpenUrl { url } => {
+                crate::browser::open_url(&state, origin, session_id, url).await
+            }
             AgentVerb::Rename {
                 session_id: target,
                 expected_title,
@@ -767,7 +770,10 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
             Ok(())
         }
         AgentVerb::TemplateDelete { name } => required(Some(name.as_str()), "the template name"),
-        AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => Ok(()),
+        AgentVerb::Hosts {}
+        | AgentVerb::Sessions {}
+        | AgentVerb::Templates {}
+        | AgentVerb::OpenUrl { .. } => Ok(()),
     }
 }
 
@@ -2688,6 +2694,8 @@ mod tests {
             remote_state_dir: None,
             yolo_without_asking: false,
             commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
             state,

@@ -460,6 +460,9 @@ impl DesktopBootstrap {
                             backstop_refresh_secs: None,
                         },
                         Some(native_clipboard_sink()),
+                        Some(std::sync::Arc::new(|url: &str| {
+                            webbrowser::open(url).map_err(|error| error.to_string())
+                        })),
                         // Resolve on the native side. An unavailable Downloads
                         // folder refuses a save rather than using the webview.
                         dirs::download_dir(),
@@ -1399,6 +1402,8 @@ mod tests {
             incarnation: 1,
             yolo_without_asking: false,
             commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
         };
         let skew = crate::HostPhase::VersionSkew {
             peer_protocol: 9,

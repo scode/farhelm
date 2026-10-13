@@ -3143,6 +3143,9 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
     const LIFECYCLE_FLAG: &str = "--session";
     const LIFECYCLE_REMEDY: &str = "name the asking session explicitly to act on it";
     match verb {
+        // The helm owns URL validation and link permission decisions. This relay only
+        // authenticates the session and forwards; an untrusted host cannot grant a link.
+        AgentVerb::OpenUrl { .. } => Ok(()),
         AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => Ok(()),
         AgentVerb::Rename {
             session_id,

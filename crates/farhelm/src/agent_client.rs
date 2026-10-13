@@ -631,6 +631,7 @@ fn lost_reply(cause: &str, mutating: bool) -> anyhow::Error {
 /// answered with the kind of payload that command promises.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReplyKind {
+    UrlOpened,
     Hosts,
     Sessions,
     Templates,
@@ -648,6 +649,7 @@ impl ReplyKind {
             farhelm_proto::AgentVerb::Hosts {} => ReplyKind::Hosts,
             farhelm_proto::AgentVerb::Sessions {} => ReplyKind::Sessions,
             farhelm_proto::AgentVerb::Templates {} => ReplyKind::Templates,
+            farhelm_proto::AgentVerb::OpenUrl { .. } => ReplyKind::UrlOpened,
             farhelm_proto::AgentVerb::Rename { .. } => ReplyKind::Session,
             farhelm_proto::AgentVerb::Stop { .. } => ReplyKind::Stopped,
             farhelm_proto::AgentVerb::Restart { .. } => ReplyKind::Restarted,
@@ -671,6 +673,7 @@ impl ReplyKind {
             AgentReply::Hosts { .. } => ReplyKind::Hosts,
             AgentReply::Sessions { .. } => ReplyKind::Sessions,
             AgentReply::Templates { .. } => ReplyKind::Templates,
+            AgentReply::UrlOpened {} => ReplyKind::UrlOpened,
             AgentReply::Session { .. } => ReplyKind::Session,
             AgentReply::Restarted { .. } => ReplyKind::Restarted,
             AgentReply::Stopped {} => ReplyKind::Stopped,
@@ -691,6 +694,7 @@ impl ReplyKind {
             ReplyKind::Hosts => "hosts listing",
             ReplyKind::Sessions => "sessions listing",
             ReplyKind::Templates => "templates listing",
+            ReplyKind::UrlOpened => "opened link confirmation",
             ReplyKind::Session => "session row",
             ReplyKind::Restarted => "restarted session row",
             ReplyKind::Stopped => "stop confirmation",

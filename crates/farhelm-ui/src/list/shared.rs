@@ -881,6 +881,8 @@ pub(super) mod tests {
             incarnation: 3,
             yolo_without_asking: false,
             commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
         }];
@@ -1019,6 +1021,8 @@ pub(super) mod tests {
             incarnation: 1,
             yolo_without_asking: false,
             commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
         }

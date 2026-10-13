@@ -3611,6 +3611,34 @@ pub(crate) async fn set_commands_without_asking(
     Ok(commit_of::<Host>(resp, "the hosts list below").await)
 }
 
+/// Save one browser grant and return the helm-confirmed host view.
+///
+/// The route selects the category, never a client-supplied column name. Reuse the host mutation
+/// result discipline so a committed write with an unreadable reply is not reported as refused.
+pub(crate) async fn set_browser_permission(
+    base: &str,
+    host: HostId,
+    local_network: bool,
+    allowed: bool,
+) -> Result<Commit, String> {
+    let category = if local_network {
+        "local-links-without-asking"
+    } else {
+        "links-without-asking"
+    };
+    let url = format!("{base}/api/hosts/{host}/{category}");
+    let response = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({"allowed": allowed})),
+    )
+    .await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("POST", &url, response).await);
+    }
+    Ok(commit_of::<Host>(response, "the hosts list below").await)
+}
+
 /// Every agent request waiting for the user's approval (`GET /api/approvals`),
 /// oldest first.
 pub(crate) async fn fetch_approvals(

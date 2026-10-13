@@ -102,6 +102,53 @@ async function readPostClone(request: APIRequestContext): Promise<{ command: str
   return await reply.json() as { command: string | null };
 }
 
+/** Each link switch persists its own grant without changing command or YOLO authority.
+ * An owned disconnected host keeps this proof independent of the suite's live session host. */
+test("host browser permissions persist independently through the settings switches", async ({ page, request }, testInfo) => {
+  const name = `browser-settings-${testInfo.project.name}.invalid`;
+  const created = await request.post("/api/hosts", { data: { ssh: name } });
+  expect(created.ok(), await created.text()).toBe(true);
+  const host = await created.json();
+  /** Read the stored view, so an optimistic checkbox cannot stand in for persistence. */
+  const read = async () => {
+    const response = await request.get("/api/hosts");
+    expect(response.ok(), await response.text()).toBe(true);
+    const body = await response.json();
+    return body.hosts.find((row: { id: number }) => row.id === host.id);
+  };
+  try {
+    expect(await read()).toMatchObject({ links_without_asking: false, local_links_without_asking: false, commands_without_asking: false, yolo_without_asking: false });
+    await page.goto("/");
+    const row = hostRowByName(page, name);
+    await expect(row).toBeVisible();
+    await openHostMenu(row);
+    await row.locator(".host-settings").click();
+    const dialog = page.locator(".host-settings-dialog");
+    await expect(dialog).toBeVisible();
+    const publicLinks = dialog.getByRole("checkbox", { name: "Open links without asking", exact: true });
+    const localLinks = dialog.getByRole("checkbox", { name: "Open local-network links without asking", exact: true });
+    await expect(publicLinks).not.toBeChecked();
+    await expect(localLinks).not.toBeChecked();
+    await publicLinks.check();
+    await expect.poll(read).toMatchObject({ links_without_asking: true, local_links_without_asking: false, commands_without_asking: false, yolo_without_asking: false });
+    await expect(localLinks).not.toBeChecked();
+    await localLinks.check();
+    await expect.poll(read).toMatchObject({ links_without_asking: true, local_links_without_asking: true, commands_without_asking: false });
+    await publicLinks.uncheck();
+    await expect.poll(read).toMatchObject({ links_without_asking: false, local_links_without_asking: true, commands_without_asking: false });
+    await dialog.locator(".host-settings-close").click();
+    await openHostMenu(row);
+    await row.locator(".host-settings").click();
+    await expect(publicLinks).not.toBeChecked();
+    await expect(localLinks).toBeChecked();
+    await localLinks.uncheck();
+    await expect.poll(read).toMatchObject({ links_without_asking: false, local_links_without_asking: false, commands_without_asking: false });
+  } finally {
+    const removed = await request.delete(`/api/hosts/${host.id}`);
+    expect(removed.ok(), await removed.text()).toBe(true);
+  }
+});
+
 /** Opening is read-only for all three stored states. Explicit Save preserves
  * executable spacing and newlines, refusal keeps the draft and stored value,
  * and an all-whitespace save clears rather than storing an explicit disable. */
