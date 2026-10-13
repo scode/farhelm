@@ -12,6 +12,80 @@ import {
   readPreferences,
 } from "./helpers/fleet";
 
+/** Closing must remain possible without scrolling a long settings body.
+ * Real overflow and a changed scroll offset establish the short-window premise;
+ * unchanged frame geometry and hit testing distinguish pinned controls from
+ * controls merely reported visible outside the viewport. Both exits restore
+ * focus to the gear without changing the initial focus on the first switch.
+ */
+test("settings keeps both close controls pinned around its grouped scrolling body", async ({ page }, testInfo) => {
+  await page.goto("/");
+  const gear = page.getByRole("button", { name: "settings", exact: true });
+  const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+  const body = dialog.locator(".host-settings-body");
+  const dismiss = dialog.getByRole("button", { name: "close settings", exact: true });
+  const close = dialog.getByRole("button", { name: "close", exact: true });
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 560 });
+    await gear.click();
+    await expect(dialog.getByRole("checkbox", { name: "set up new hosts without asking", exact: true })).toBeFocused();
+    await expect(dialog.getByRole("checkbox")).toHaveCount(5);
+    await page.evaluate(() => document.fonts.ready);
+    expect(await body.locator(":scope > section > h3").allTextContents()).toEqual([
+      "hosts", "managed checkouts", "sounds",
+    ]);
+    await expect(body.locator('section[aria-label="updates"]')).toHaveCount(0);
+    await expect(dismiss).toHaveAttribute("data-tooltip", "close: changes are already saved");
+    await expect(dismiss).not.toHaveClass(/app-settings-close/);
+    const overflow = await body.evaluate((el) => ({
+      content: el.scrollHeight, height: el.clientHeight, width: el.clientWidth, contentWidth: el.scrollWidth,
+    }));
+    expect(overflow.height).toBeGreaterThan(0);
+    expect(overflow.content, "premise: settings really exceed the short body").toBeGreaterThan(overflow.height);
+    expect(overflow.contentWidth).toBeLessThanOrEqual(overflow.width);
+    const header = (await dialog.locator(".host-settings-header").boundingBox())!;
+    const footer = (await dialog.locator(".host-settings-footer").boundingBox())!;
+    await dialog.screenshot({ path: testInfo.outputPath(`settings-pinned-top-${width}.png`) });
+    await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await expect.poll(() => body.evaluate((el) => el.scrollTop), {
+      message: "body must actually scroll before frame stability is meaningful",
+    }).toBeGreaterThan(0);
+    expect(await dialog.locator(".host-settings-header").boundingBox()).toEqual(header);
+    expect(await dialog.locator(".host-settings-footer").boundingBox()).toEqual(footer);
+    const bodyBox = (await body.boundingBox())!;
+    expect(header.y).toBeGreaterThanOrEqual(0);
+    expect(header.y + header.height).toBeLessThanOrEqual(bodyBox.y + 1);
+    expect(bodyBox.y + bodyBox.height).toBeLessThanOrEqual(footer.y + 1);
+    expect(footer.y + footer.height).toBeLessThanOrEqual(560);
+    expect(await dialog.evaluate((el) => el.scrollTop)).toBe(0);
+    for (const control of [dismiss, close]) {
+      expect(await control.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return Boolean(hit && el.contains(hit));
+      }), "pinned close control must take a real click in the viewport").toBe(true);
+    }
+    await dialog.screenshot({ path: testInfo.outputPath(`settings-pinned-bottom-${width}.png`) });
+    await dismiss.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(gear).toBeFocused();
+    await gear.click();
+    await expect(dialog).toBeVisible();
+    await close.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(gear).toBeFocused();
+  }
+  await page.setViewportSize({ width: 1280, height: 2000 });
+  await gear.click();
+  await expect(dialog.getByRole("checkbox")).toHaveCount(5);
+  const tall = await body.evaluate((el) => ({ content: el.scrollHeight, height: el.clientHeight }));
+  expect(tall.height).toBeGreaterThan(0);
+  expect(tall.content, "a tall window must fit the settings without scrolling").toBeLessThanOrEqual(tall.height);
+  await dialog.screenshot({ path: testInfo.outputPath("settings-pinned-tall.png") });
+  await close.click();
+  await expect(gear).toBeFocused();
+});
+
 /** Read the protected public shape to verify persistence independently of the
  * mounted field's local draft or success line. */
 async function readCheckoutRoot(request: APIRequestContext): Promise<{ root: string | null }> {

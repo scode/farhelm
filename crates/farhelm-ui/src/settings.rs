@@ -18,7 +18,7 @@ use dioxus::prelude::*;
 
 use crate::api::{PreferenceValue, store_preference};
 use crate::app_updater::use_app_updater;
-use crate::hosts::settings_dialog::install_dialog_with_selector;
+use crate::hosts::settings_dialog::{HostDialogHeader, install_dialog_with_selector};
 use crate::list::SharedPreferences;
 use crate::{ApiBase, modal_isolation};
 
@@ -53,6 +53,8 @@ fn restore_automatic_checkbox(in_force: bool) {
 /// surface, and closing the dialog must not cancel a queued preference write.
 /// The checkout fields are exceptions: their explicit saves expose validation
 /// refusals rather than treating arbitrary text like a switch preference.
+/// Only the grouped body scrolls; both dismissal paths stay outside it and
+/// share the caller's close callback and focus-return lifecycle.
 #[component]
 pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -74,120 +76,166 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             div {
-                class: "app-settings-dialog",
+                class: "app-settings-dialog host-dialog-framed",
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "settings",
                 tabindex: "-1",
                 onmounted: move |_| install_dialog_with_selector(
-                    DIALOG_SELECTOR, "input", Some(".app-settings-close"),
+                    DIALOG_SELECTOR,
+                    "input",
+                    Some(".app-settings-close"),
                 ),
                 onkeydown: move |event: KeyboardEvent| {
                     if event.key() == Key::Escape && !event.is_composing() {
                         on_close.call(());
                     }
                 },
-                h2 { class: "host-settings-title", "settings" }
-                p { class: "host-settings-help",
-                    "The host choices apply to every host on this helm. Other open clients pick them up when they reload."
+                HostDialogHeader {
+                    title: rsx! { "settings" },
+                    tile: rsx! {
+                        crate::icons::SettingsIcon {}
+                    },
+                    summary: "for every host on this helm, and for this device",
+                    dismiss_label: "close settings",
+                    dismiss_tooltip: "close: changes are already saved",
+                    on_dismiss: move |_| on_close.call(()),
                 }
-                div {
-                    label { class: "app-settings-choice",
-                        "data-tooltip": "set up a new host as soon as it has been checked, without showing the plan first",
-                        span { "set up new hosts without asking" }
-                        input {
-                            r#type: "checkbox",
-                            class: "host-settings-switch",
-                            checked: setup,
-                            aria_describedby: "host-setup-preference-help",
-                            onchange: move |event| {
-                                preferences.0.write().skip_host_setup_confirmation = Some(event.checked());
-                                store_preference(&setup_base, PreferenceValue::HostSetupConfirmation(event.checked()));
-                            },
+                div { class: "host-settings-body",
+                    section { class: "host-settings-section", aria_label: "hosts",
+                        h3 { class: "host-settings-section-title", "hosts" }
+                        p { class: "host-settings-help",
+                            "The host choices apply to every host on this helm. Other open clients pick them up when they reload."
+                        }
+                        div {
+                            label {
+                                class: "app-settings-choice",
+                                "data-tooltip": "set up a new host as soon as it has been checked, without showing the plan first",
+                                span { "set up new hosts without asking" }
+                                input {
+                                    r#type: "checkbox",
+                                    class: "host-settings-switch",
+                                    checked: setup,
+                                    aria_describedby: "host-setup-preference-help",
+                                    onchange: move |event| {
+                                        preferences.0.write().skip_host_setup_confirmation = Some(event.checked());
+                                        store_preference(
+                                            &setup_base,
+                                            PreferenceValue::HostSetupConfirmation(event.checked()),
+                                        );
+                                    },
+                                }
+                            }
+                            p {
+                                id: "host-setup-preference-help",
+                                class: "host-settings-help",
+                                if setup {
+                                    "Farhelm sets up a new host as soon as it has checked it, without asking."
+                                } else {
+                                    "Farhelm shows what setup will change on a new host and asks before doing it."
+                                }
+                            }
+                        }
+                        div {
+                            label {
+                                class: "app-settings-choice",
+                                "data-tooltip": "forget a host as soon as you choose remove, without asking; its sessions keep running",
+                                span { "remove hosts without asking" }
+                                input {
+                                    r#type: "checkbox",
+                                    class: "host-settings-switch",
+                                    checked: remove,
+                                    aria_describedby: "host-remove-preference-help",
+                                    onchange: move |event| {
+                                        preferences.0.write().skip_host_remove_confirmation = Some(event.checked());
+                                        store_preference(
+                                            &base,
+                                            PreferenceValue::HostRemoveConfirmation(event.checked()),
+                                        );
+                                    },
+                                }
+                            }
+                            p {
+                                id: "host-remove-preference-help",
+                                class: "host-settings-help",
+                                if remove {
+                                    "Farhelm forgets a host as soon as you choose remove. Its sessions keep running."
+                                } else {
+                                    "Farhelm asks before forgetting a host. Its sessions keep running."
+                                }
+                            }
                         }
                     }
-                    p { id: "host-setup-preference-help", class: "host-settings-help",
-                        if setup {
-                            "Farhelm sets up a new host as soon as it has checked it, without asking."
-                        } else {
-                            "Farhelm shows what setup will change on a new host and asks before doing it."
+                    section {
+                        class: "host-settings-section",
+                        aria_label: "managed checkouts",
+                        h3 { class: "host-settings-section-title", "managed checkouts" }
+                        crate::checkout_root::CheckoutRootField {
+                            note: "Managed checkouts are cloned into this folder on every host. ~ means each host's own home folder. A missing folder is created on first use. A host given its own folder from the command line keeps that folder. Save an empty field to clear it.",
+                            on_saved: move |_| {},
                         }
+                        crate::checkout_post_clone::CheckoutPostCloneField {}
                     }
-                }
-                div {
-                    label { class: "app-settings-choice",
-                        "data-tooltip": "forget a host as soon as you choose remove, without asking; its sessions keep running",
-                        span { "remove hosts without asking" }
-                        input {
-                            r#type: "checkbox",
-                            class: "host-settings-switch",
-                            checked: remove,
-                            aria_describedby: "host-remove-preference-help",
-                            onchange: move |event| {
-                                preferences.0.write().skip_host_remove_confirmation = Some(event.checked());
-                                store_preference(&base, PreferenceValue::HostRemoveConfirmation(event.checked()));
-                            },
-                        }
-                    }
-                    p { id: "host-remove-preference-help", class: "host-settings-help",
-                        if remove {
-                            "Farhelm forgets a host as soon as you choose remove. Its sessions keep running."
-                        } else {
-                            "Farhelm asks before forgetting a host. Its sessions keep running."
-                        }
-                    }
-                }
-                crate::checkout_root::CheckoutRootField {
-                    note: "Managed checkouts are cloned into this folder on every host. ~ means each host's own home folder. A missing folder is created on first use. A host given its own folder from the command line keeps that folder. Save an empty field to clear it.",
-                    on_saved: move |_| {},
-                }
-                crate::checkout_post_clone::CheckoutPostCloneField {}
-                crate::sounds::SoundSettings {}
-                if let Some(updater) = updater {
-                    p { class: "host-settings-help",
-                        "This one belongs to this Farhelm app on this Mac."
-                    }
-                    div {
-                        label { class: "app-settings-choice",
-                            "data-tooltip": "install updates automatically: check for a new Farhelm release when the app starts and about once a day, and install it in the background",
-                            span { "install updates automatically" }
-                            input {
-                                r#type: "checkbox",
-                                class: "host-settings-switch",
-                                checked: automatic(),
-                                aria_describedby: "automatic-updates-help",
-                                // Only a saved choice is shown as the choice: on
-                                // a failed write the box returns to the setting
-                                // still in force, with the reason beside it.
-                                onchange: move |event| {
-                                    match updater.set_automatic_updates(event.checked()) {
-                                        Ok(()) => {
-                                            automatic.set(event.checked());
-                                            automatic_error.set(None);
-                                        }
-                                        Err(reason) => {
-                                            let in_force = updater.automatic_updates();
-                                            automatic.set(in_force);
-                                            automatic_error.set(Some(reason));
-                                            restore_automatic_checkbox(in_force);
-                                        }
+                    crate::sounds::SoundSettings {}
+                    if let Some(updater) = updater {
+                        section {
+                            class: "host-settings-section",
+                            aria_label: "updates",
+                            h3 { class: "host-settings-section-title", "updates" }
+                            p { class: "host-settings-help",
+                                "This one belongs to this Farhelm app on this Mac."
+                            }
+                            div {
+                                label {
+                                    class: "app-settings-choice",
+                                    "data-tooltip": "install updates automatically: check for a new Farhelm release when the app starts and about once a day, and install it in the background",
+                                    span { "install updates automatically" }
+                                    input {
+                                        r#type: "checkbox",
+                                        class: "host-settings-switch",
+                                        checked: automatic(),
+                                        aria_describedby: "automatic-updates-help",
+                                        // Only a saved choice is shown as the choice: on
+                                        // a failed write the box returns to the setting
+                                        // still in force, with the reason beside it.
+                                        onchange: move |event| {
+                                            match updater.set_automatic_updates(event.checked()) {
+                                                Ok(()) => {
+                                                    automatic.set(event.checked());
+                                                    automatic_error.set(None);
+                                                }
+                                                Err(reason) => {
+                                                    let in_force = updater.automatic_updates();
+                                                    automatic.set(in_force);
+                                                    automatic_error.set(Some(reason));
+                                                    restore_automatic_checkbox(in_force);
+                                                }
+                                            }
+                                        },
                                     }
-                                },
+                                }
+                                p {
+                                    id: "automatic-updates-help",
+                                    class: "host-settings-help",
+                                    if automatic() {
+                                        "Farhelm checks for a new release when it starts and about once a day, and installs it in the background. Restarting Farhelm finishes the update."
+                                    } else {
+                                        "Farhelm installs a new release only when you check for updates from the ? menu or this machine's update item, or run the installer yourself."
+                                    }
+                                }
+                                if let Some(reason) = automatic_error() {
+                                    p {
+                                        class: "host-settings-help app-settings-error",
+                                        role: "alert",
+                                        "{reason}"
+                                    }
+                                }
                             }
-                        }
-                        p { id: "automatic-updates-help", class: "host-settings-help",
-                            if automatic() {
-                                "Farhelm checks for a new release when it starts and about once a day, and installs it in the background. Restarting Farhelm finishes the update."
-                            } else {
-                                "Farhelm installs a new release only when you check for updates from the ? menu or this machine's update item, or run the installer yourself."
-                            }
-                        }
-                        if let Some(reason) = automatic_error() {
-                            p { class: "host-settings-help app-settings-error", role: "alert", "{reason}" }
                         }
                     }
                 }
-                div { class: "host-settings-actions",
+                div { class: "host-settings-actions host-settings-footer",
+                    span { "switches save as you flip them" }
                     button {
                         r#type: "button",
                         class: "btn btn-neutral app-settings-close",

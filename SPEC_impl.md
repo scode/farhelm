@@ -478,9 +478,11 @@ the automatic-updates switch, which reads and writes the desktop state file inst
 switches retain native checkbox inputs for label activation and Space handling. Each host-confirmation switch reads
 `Some(true)` as without asking, updates `SharedPreferences` immediately and sends an explicit boolean through the
 existing sparse preference queue. Preference failures retain that queue's silent behavior. The dialog uses the host
-dialogs' shared focus/isolation helper with its own selector; opening focuses the first switch, Escape or `close`
-releases isolation and returns focus to the gear. The host setup and removal permanent answers each name that gear as
-the way to turn confirmation back on.
+dialogs' framed header and footer, with a gear tile and a separately named × close control. Only the body scrolls; its
+sections group hosts, managed checkouts, sounds and, when the updater is active, updates. Both close controls stay
+visible. It uses the shared focus/isolation helper with its own selector; opening focuses the first switch, Escape or
+either close control releases isolation and returns focus to the gear. The host setup and removal permanent answers each
+name that gear as the way to turn confirmation back on.
 
 The all-hosts checkout folder uses a shared explicit-save field rather than the preference queue: invalid path text must
 have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an ordinary protected route

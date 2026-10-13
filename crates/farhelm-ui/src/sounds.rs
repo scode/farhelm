@@ -195,17 +195,20 @@ pub(crate) fn SessionSounds(
 /// Device switches keep native label and keyboard behavior like host settings.
 /// Storage and the live checked properties belong to the audio asset; these
 /// controls deliberately send no helm preference writes.
+/// The section owns its label so app settings can group it alongside helm
+/// and updater choices without changing the audio asset's mount contract.
 #[component]
 pub(crate) fn SoundSettings() -> Element {
     rsx! {
         section {
+            class: "host-settings-section",
             aria_label: "sounds",
             onmounted: move |_| {
                 spawn(async move {
                     let _ = document::eval("while (!window.farhelmSounds) { await new Promise(r => setTimeout(r, 50)); } window.farhelmSounds.mountSettings();").await;
                 });
             },
-            h3 { "sounds" }
+            h3 { class: "host-settings-section-title", "sounds" }
             p { class: "host-settings-help", "These choices apply only to this device. The session open in an active window stays quiet." }
             for (kind, label, default, help) in [
                 ("waiting", "session waiting", true, "play a bell when a session starts waiting for your answer"),
