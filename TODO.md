@@ -44,6 +44,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Investigate suppressing Claude Code’s Project Trust prompt.** Determine whether a supported CLI argument exists;
+  consider whether Farhelm could update the user’s configuration on their behalf. Approach/details TBD.
+
 - **Click to open agent-provided paths.** Extend click-to-download for paths agents provide to also support
   click-to-open. How and implementation details are TBD.
 
