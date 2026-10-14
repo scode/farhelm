@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [pending] `update-check-readout.md` — Click the desktop app's version readout to check for updates (with a ↻ hint), and show automatic update failures that persist
+- [in-flight b07e14] `update-check-readout.md` — Click the desktop app's version readout to check for updates (with a ↻ hint), and show automatic update failures that persist
 - [pending] `ntfy-waiting-alerts.md` — Send an ntfy alert from the helm when a session starts waiting, with server, topic, token and priority settings
 - [pending] `release-advisories.md` — A signed advisories file on get.farhelm.io that the desktop updater reads, starting with release revocation
 - [pending] `guarded-permission-mode.md` — Rename non-YOLO to "guarded", force each agent's guarded mode with explicit flags, and explain it per agent
