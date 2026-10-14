@@ -7,5 +7,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing c0f06e] `release-notes-menu-item.md` — A "release notes" item in the ? menu that opens the release notes on the docs website
 - [in-flight 8859e1] `template-number-shortcuts.md` — Bind templates to number keys; Cmd+digit in the Mac app, Ctrl+Shift+digit elsewhere, launches directly like quick launch
 - [pending] `intro-tour.md` — A welcome card on first open per helm, pointing at Get started and Send feedback; reopened from the ? menu
-- [pending] `feedback-brick-test.md` — A P1 brick-test check that sends real feedback titled [brick-test] vX.Y.Z from the candidate app, after P0
+- [in-flight b0c680] `feedback-brick-test.md` — A P1 brick-test check that sends real feedback titled [brick-test] vX.Y.Z from the candidate app, after P0
 - [pending] `ssh-2fa-help.md` — A ? menu dialog (and add-host link) showing the ssh commands that start a 2FA host's two shared connections by hand
