@@ -197,6 +197,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   to start an agent session without working through the launcher's fields. What it skips, what it picks instead, and
   where it lives in the UI are to be worked out.
 
+- add a "custom" permission mode next to guarded/yolo
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
