@@ -60,10 +60,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (and how such sends stay out of the maintainer's inbox) or tests against a local copy of the handler.
 
 - **Test in-app feedback's failure path.** Sending feedback works end to end in production (inbox issue #1, sent from
-  the 0.23.0 desktop app on 2026-10-05), but the failure case has not been exercised against the live endpoint. Revoke
-  the inbox token, send from the app, and check that the dialog says sending failed and keeps the text; then create a
-  new token, set it as `FEEDBACK_GITHUB_TOKEN` in Vercel, and deploy again (`docs/feedback-endpoint.md`). The endpoint
-  allows five requests per IP per 10 minutes, so space test sends out.
+  the 0.23.0 desktop app on 2026-10-05), but the failure case has not been exercised against the live endpoint. The
+  inbox token is the fine-grained GitHub personal access token the endpoint uses to file each submission as an issue in
+  the private inbox repository; it lives in the Vercel project as the `FEEDBACK_GITHUB_TOKEN` environment variable and
+  is limited to that one repository's issues. Revoking it in GitHub's token settings takes effect at once, without a
+  redeploy, and makes the endpoint answer every send with a failure. Revoke it, send from the app, and check that the
+  dialog says sending failed and keeps the text. Then create a new token with the same scope, set it as
+  `FEEDBACK_GITHUB_TOKEN` in Vercel, and deploy again, since environment variables only reach new deployments
+  (`docs/feedback-endpoint.md` has the setup steps). The endpoint allows five requests per IP per 10 minutes, so space
+  test sends out.
 
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
