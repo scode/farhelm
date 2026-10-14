@@ -57,3 +57,46 @@ those controls hover text is a separate follow-up; it does not prevent release n
 A fresh gpt-6.1-sol reviewer at high effort found no actionable correctness, design or idiomatic-code issues, against
 the full plan and the changed-test authoring checklist. The commit and PR title also passed a separate fresh cold read.
 The documentation pass covered every changed file. The PR remains a draft; it has not been marked ready or merged.
+
+### Landing
+
+Landed alone in its round as #2006. While it was landing, main gained a planning PR (#2009, which adds plans for a
+brick-test feedback check and ssh second-factor help) and queue bookkeeping. Neither touches the help menu.
+
+#### Release-relevant
+
+No schema or protocol change. The item reuses the release notes address What's new already opens, through the same
+opener, so the desktop app's link handling is unchanged.
+
+#### Review and fix made while landing
+
+An independent fresh-context review found nothing blocking. It confirmed:
+
+- the address is the website's real release notes page;
+- the item opens through the shared opener without navigating the app's own page;
+- menu ordering and keyboard movement work;
+- the spec, docs and TODO bookkeeping are correct.
+
+Its one useful gap: no test pinned the desktop menu, where check for updates must follow release notes, because the
+browser suite never has an updater. The landing added a unit test of the menu's item order with and without an updater.
+
+#### Something the maintainer should know
+
+The executor's report says the browser test that checks every sidebar control has hover text fails on main independently
+of this plan. The review confirmed this. The cause is the ntfy alerts section the settings dialog has shown since #1986.
+Four of its controls have no hover text: its two switches, the priority choice and Save. This test is one the ntfy
+landing did not run.
+
+The report's list of seven controls is slightly off. Its three text fields are not part of the hover-text check. They
+would, however, fail the next check in the same test, which covers autocorrect and autocapitalization settings and the
+token field's autocomplete hint; that check is not reached today. Fixing both is a small follow-up outside this plan.
+
+#### Checks
+
+- Run now: `cargo fmt --all -- --check`, `cargo clippy -p farhelm-ui --all-targets -- -D warnings`, and the UI crate's
+  app bar unit tests through the recorder: 4 passed, including the new one, run `8dcbfd17-a615-4cc4-b4de-1a5282de4de1`.
+  The 471 skips are tests outside the selection.
+- Reused: the executor's feedback browser spec on both engines, run `d436eec5-e385-435b-b589-4caaf7db5f16`, which passed
+  the menu's order, keyboard and link cases. Its tooltip-coverage failures are the main-only problem above. The website
+  build is also reused; the rebase and the new unit test touched neither.
+- Skipped: other Rust suites, the full browser battery and the desktop smoke. Nothing outside the help menu changed.
