@@ -341,6 +341,11 @@ For each plan, run `scode-build-goal` with the entry's text (and whatever the ma
 with these overrides on top of the skill's own rules:
 
 - No-workhorse mode.
+- When the entry changes the GUI (the web UI or the desktop app), default to mocking up the proposed change as a
+  `scode-snippets` snippet and showing it to the maintainer during the up-front questions, rather than describing a
+  layout in words. Settle the design on the mockup, then write what was agreed into the goal file in words: the executor
+  cannot ask about it later, and the snippet lives outside the repository. Skip the mockup when the maintainer says to,
+  or when the change has no visible design to decide.
 - In the review gate menu, add a fresh-context Opus 5.5 agent at high effort with the skill's general review charter, as
   a pinned-model option, and present it first, as the default. The goal file records the choice as a demand for that
   model and effort, like any pinned option.
