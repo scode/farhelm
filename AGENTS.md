@@ -223,6 +223,9 @@ that its required systemd or SSH substrate ran.
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, a synthetic git
   history for the fragment sweep, synthetic dist manifests for the announcement comparison). Run the lint when
   `CHANGELOG.md` or a fragment changes, the self-test when the checker does.
+- `python3 releasing/finalize-release-notes.py --self-test` — the body swap that replaces a stable release's draft notes
+  on its GitHub release with the approved text, against bodies shaped like dist's, and the refusals that need no
+  repository or release. Run it when that script or the checker's parser changes; seconds, no network.
 
 This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, desktop
 compilation, the JS harness, the website build and its feedback endpoint tests, installer validation, and

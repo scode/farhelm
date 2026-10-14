@@ -36,14 +36,18 @@ The docs website's Release notes page is built from the same file, every release
 `website/scripts/release-notes.mjs` on each website build. Nothing extra is needed for a release to appear there, but a
 release heading the generator cannot read (anything at the `##` level other than the format below) fails the website
 build. Screenshots for a release live on the website only (`website/AGENTS.md`, "Release notes"), never in this file;
-step 7 of the stable procedure below has them added for each release.
+step 4 of the stable procedure below has them added for each release.
 
-Curated release sections are historical records. Once a section has been approved or published, do not rewrite it to
-adopt a later layout rule, wording convention, or category set. More generally, a published release's section is never
-part of a change by default, a sweep or a rename included; it changes only as a correction a task specifically targets.
-A change to this process applies to sections curated after the change; the checker must retain compatibility with older
-sections so a release in flight does not require retroactive edits. When a new format is introduced, update the checker
-and its fixtures to recognize both the new format and the older formats that remain in the file.
+Curated release sections are historical records. Once the maintainer has approved a section, do not rewrite it to adopt
+a later layout rule, wording convention, or category set. A section that still opens with the draft notice (see the
+format) has not been approved yet, even though its tag may already be public, and replacing it with the approved text is
+the procedure working as intended, not a rewrite. The same goes for a stable re-cut putting the notice back on a section
+it extends ("Re-cutting a stable release"): the approved entries in it stay word for word. More generally, a published
+release's section is never part of a change by default, a sweep or a rename included; it changes only as a correction a
+task specifically targets. A change to this process applies to sections curated after the change; the checker must
+retain compatibility with older sections so a release in flight does not require retroactive edits. When a new format is
+introduced, update the checker and its fixtures to recognize both the new format and the older formats that remain in
+the file.
 
 The current compatibility registry preserves the Highlights layout in `v0.12.0` and `v0.13.0`, and the single
 `### 🔧 Fixed` category in every section up to and including `v0.25.0`. It is a record of already-curated sections, not
@@ -60,6 +64,11 @@ sections; the checker accepts the historical formats that are already present.
   other word there hides the section from it, and everything after the version becomes part of the GitHub release name.
   There is no `Unreleased` section; pending changes live in fragments (below), which is what keeps a prerelease tag from
   picking up half-written notes.
+- While the maintainer is still reviewing a section's wording, its first line, directly under the heading, is exactly
+  `**DRAFT release notes - not yet finalized**`. The stable tag is pushed with that draft (see "Cutting a stable
+  release"), and the notice travels with it into the GitHub release, so anyone who reads the release page before it is
+  finalized knows the text will change. Only the newest section may carry it, and the approved text never does. The
+  checker holds the canonical copy.
 - Inside a release, categories appear in this order and with these emoji, each omitted when it has nothing:
 
   | Heading                           | Holds                                                                       |
@@ -174,8 +183,9 @@ guess (a PR with no description, say), say so in the body so the curator verifie
 `releasing/check-changelog.py` has three modes and a `--self-test`; none of them writes anything.
 
 - `format` lints `CHANGELOG.md` and every fragment against the current rules plus the historical section formats the
-  checker still supports. It checks structure and references; it does not rewrite, normalize, or migrate curated release
-  text. The release gate runs it on every tag, and it belongs in the validation of any PR that touches either.
+  checker still supports, including the draft notice on the newest section. It checks structure and references; it does
+  not rewrite, normalize, or migrate curated release text. The release gate runs it on every tag, and it belongs in the
+  validation of any PR that touches either.
 - `fragments` walks the commits since the merge base with the last stable `vX.Y.Z` tag (stable releases are tagged on a
   release branch that never merges, so the merge base is the honest "since"), reports each required commit as covered by
   a fragment it added or changed, or one that claims its PR, or as `MISSING`, and lists `STALE` fragments whose adding
@@ -192,7 +202,16 @@ guess (a PR with no description, say), say so in the body so the curator verifie
 # Cutting a stable release
 
 A stable release is cut from main. The changelog section lands on main FIRST, as its own PR; the release branch is cut
-after it merges, so the bump commit keeps its three-file shape and main is the only place the notes ever live.
+after it merges, so the bump commit keeps its three-file shape and main is the only place the notes ever live. The
+section lands as a draft, and the procedure does not wait for the maintainer to approve its wording: the tag builds, and
+the release can be signed and brick tested, while they review it. The approved text then replaces the draft on main and
+on the GitHub release (step 3). The maintainer asked for this on 2026-10-13. Nothing that ships reads the notes (the
+app's What's new item opens the docs website, which builds from main), so what the wait bought was that the GitHub
+release and the tag's own copy of `CHANGELOG.md` never held a draft. The draft notice covers the release page (and the
+notification GitHub sends repository watchers) until finalization; the tag's copy keeps the draft for good, which
+nothing reads. Main holds the draft too until finalization, so a docs website deployed in that window shows it on the
+Release notes page, which is where the app's What's new item lands. When asked to deploy the website while the notes are
+still a draft, say so before deploying.
 
 1. Fetch tags, then run `python3 releasing/check-changelog.py fragments`. Go through its report with the user: every
    required commit since the last stable release is included unless the user explicitly excludes it, `MISSING` ones get
@@ -224,7 +243,11 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    link. If you do not know what the `scode-snippets` skill is, stop and tell the maintainer; do not substitute another
    way of showing the draft. The maintainer asked for snippets on 2026-10-13, replacing a local file they edited by
    hand. They review the snippet and give their changes in conversation. Apply them to the scratch file and update the
-   same snippet after each round, until the maintainer approves the text.
+   same snippet after each round, until the maintainer approves the text. The scratch file and the snippet hold the
+   section as it will read once approved, without the draft notice; `CHANGELOG.md` gets the notice added in step 4.
+
+   Do not wait for approval: go on to step 4 as soon as the first snippet is published, and keep the review going
+   alongside the rest of the procedure. Step 3 says how the approved text lands.
 
    Treat any wording the maintainer supplies as authoritative. Reproduce it exactly: do not summarize, paraphrase,
    polish, reorder, or silently correct it. When the maintainer gives edits to the agent's proposed wording, apply
@@ -240,19 +263,45 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    ("X is internal jargon, use Y"), in which case record it; or the agent infers a generalization from the edits, in
    which case ASK, naming the rule it would write, and record it only on a yes. Never write an inferred rule on the
    agent's own judgment; the file is the maintainer's opinions, and a guessed one would steer every future draft. Record
-   each rule in the same changelog PR, with the example that prompted it. Feedback that only fixes the one entry is
-   applied and not recorded.
-4. Make the changelog PR: the approved `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, every fragment under
-   `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), any guidance gathered in
-   step 3, `dprint fmt`, and `python3 releasing/check-changelog.py format` passing. Merge it before going on.
+   each rule in the PR that lands the approved text (the finalization PR below, or the changelog PR in step 4 when
+   approval came first), with the example that prompted it. Feedback that only fixes the one entry is applied and not
+   recorded.
+
+   When the maintainer approves the text, finalize it. This usually happens somewhere between step 4 and step 8, and the
+   steps in between do not wait for it.
+   - Make a finalization PR on the latest main, titled as `docs:` (it is not a `fix`, and needs no fragment), that
+     replaces the `## vX.Y.Z` section of `CHANGELOG.md` with the scratch file, copied verbatim as step 2 describes, so
+     the draft notice goes away. The heading must stay exactly as step 4 landed it, date included, because dist named
+     the GitHub release after it; step 4 keeps the scratch file's heading in step with it. Add any guidance recorded
+     above and run `python3 releasing/check-changelog.py format`. When the tag's GitHub release already exists, also run
+     `python3 releasing/finalize-release-notes.py --tag vX.Y.Z --ref <the PR's head commit> --dry-run` before merging,
+     so a heading or notice slip shows up while it is still one PR to fix rather than two. Then merge it as part of this
+     procedure. It goes to main only, never to the release branch, which keeps the draft the tag was built from.
+   - Once that has merged and the tag's GitHub release exists (step 7), fetch and run
+     `python3 releasing/finalize-release-notes.py --tag vX.Y.Z`. It replaces the draft notes in the release body with
+     the section now on main, leaves the download tables and the release name alone, and refuses when the body is not
+     what dist wrote. Run it again when in doubt; once finalized, it reports so and changes nothing. A GitHub release
+     that is deleted and recreated (the recovery procedure in `dist-workspace.toml`) comes back with the tag's draft, so
+     run it again after that.
+   - If the approval changed which entries exist or which PRs they cite, bring the screenshot work from step 4 up to
+     date the way "Re-cutting a stable release" describes.
+
+   If the maintainer approves before the changelog PR in step 4 merges, that PR carries the approved section without the
+   notice instead, and there is nothing to finalize.
+4. Make the changelog PR: the drafted `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, with the draft notice
+   on the first line under the heading followed by the scratch file's categories, every fragment under
+   `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), `dprint fmt`, and
+   `python3 releasing/check-changelog.py format` passing. If `<today>` differs from the date in the scratch file's
+   heading, update the scratch file's heading to match what this PR lands, and the snippet with it, so that the
+   finalization copy keeps the heading the release is named after. Merge it before going on.
 
    The moment it merges, start a subagent to give the release's notes their screenshots on the docs website, and go on
    to step 5 without waiting for it. The maintainer asked for this on 2026-10-13: the screenshot work used to start only
    once the release was ready to sign, which left a separate wait for it after everything else was done. Started here,
    it runs while the tag builds and the release is signed and brick tested, so its draft PR is ready by the time the
-   release is promoted. The notes' text is already on the website, built from the changelog section this step merged;
-   what the subagent adds is screenshots of the release's visible changes, following `website/AGENTS.md`, "Release
-   notes", and `website/EDITORIAL_RULES.md`. Give it this, in so many words:
+   release is promoted. The notes' text is already on the website, built from the changelog section this step merged
+   (still the draft, which step 3 replaces); what the subagent adds is screenshots of the release's visible changes,
+   following `website/AGENTS.md`, "Release notes", and `website/EDITORIAL_RULES.md`. Give it this, in so many words:
    - Work in a new jj workspace based on the latest `main`, under a subdirectory of your scratch directory, never in the
      release checkout, which is busy with the release branch. Do not run `cargo clean` or touch tags, the release
      branch, or anything on get.farhelm.io.
@@ -294,17 +343,22 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    `https://get.farhelm.io/latest` still names the previous stable release.
 
    If the screenshot subagent from step 4 has reported by now, include its PR link (or its finding that the release
-   needs no screenshots) when telling the maintainer the release is ready to sign.
+   needs no screenshots) when telling the maintainer the release is ready to sign. Also say whether the notes are
+   finalized (step 3). If they are not, the maintainer decides whether to sign now or after; the agent does not hold the
+   signing line back.
 8. Stop for the brick test. The release is now staged: anyone can install it by naming its version, and nothing installs
    it by default. Tell the maintainer it is ready to brick test, and give them the line to hand the agent on the Mac
    test host: `brick test release vX.Y.Z` (`releasing/mac-vm-test/BRICK-TEST.md`). That test runs on the maintainer's
    Mac, in Tart VMs, so this session does not run it; it installs the staged release and upgrades the previous stable
    releases to it, which is the check that the release does not brick existing installations (SPEC.md, "Upgrade
    compatibility and client scale"). Give the maintainer the risk report's ranked risks and manual checks as material
-   for the test's per-release addendum. Then wait for the maintainer's verdict; do not treat silence, or a test that
-   could not run, as a pass.
-   - Pass: the maintainer moves `/latest`, which no agent does. Once they say it has moved, check that
-     `https://get.farhelm.io/latest` names `vX.Y.Z`, and go on.
+   for the test's per-release addendum. If the notes are not finalized yet, say so in the same message, since a pass
+   leads straight to promotion. Then wait for the maintainer's verdict; do not treat silence, or a test that could not
+   run, as a pass.
+   - Pass: the maintainer moves `/latest`, which no agent does. If the notes are still not finalized when they report
+     the pass, remind them before they move it, since promoting would send every ordinary install to a release whose
+     page still reads DRAFT. Once they say it has moved, check that `https://get.farhelm.io/latest` names `vX.Y.Z`, and
+     go on.
    - Fail: `/latest` stays on the previous release and the release is never promoted. Fix forward ("Fixing forward"
      below) and cut the next patch version. Whether to take the staged version off get.farhelm.io is the maintainer's
      call.
@@ -312,6 +366,10 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
      Only the maintainer decides to skip the test.
 9. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
 10. `cargo clean` again (see "Build outputs" below).
+
+The procedure is not finished until step 3's finalization has run, or the maintainer has said to leave it for later.
+When everything else is done and the notes are still a draft, say so plainly in the final report rather than reporting
+the release as complete.
 
 A failure anywhere in this procedure, from the pre-tag checks through the brick test, is fixed forward without asking
 ("Fixing forward" below). A failed tag build publishes nothing, and a release that failed its brick test was signed and
@@ -458,10 +516,15 @@ categories as step 2 does, and add the fixed remote-hosts entry if the protocol 
 Leave out `kind: none` fragments and `STALE` ones rather than stopping to ask about them. The maintainer chose this on
 2026-10-11, over stopping for wording review and over cutting from the old base with only the fix cherry-picked.
 
+The re-cut's section is therefore a draft again, whether or not the previous attempt's notes were finalized: it opens
+with the draft notice in `CHANGELOG.md`, and its review and finalization follow steps 2 and 3. The scratch file and the
+snippet still hold the section without the notice, as step 2 says: update both with the re-cut's entries rather than
+starting new ones, and in the message that hands the maintainer the updated snippet, list every entry added without
+their review and every fragment left out.
+
 Then continue from step 5 at the new changelog PR's merge commit. A `release-X.Y.Z` branch from an attempt that never
-pushed a tag is replaced, since nothing points at it; one whose tag was pushed is left as it is. The maintainer reviews
-the unapproved text at step 7 instead: when telling them the release is ready to sign, list every entry added without
-their review and every fragment left out, so they can stop before signing or have the wording corrected.
+pushed a tag is replaced, since nothing points at it; one whose tag was pushed is left as it is. A GitHub release from
+an earlier attempt keeps whatever notes it had; only the attempt being promoted gets finalized.
 
 The screenshot work from step 4 follows the notes it was based on. When the re-cut's changelog PR merges, bring it up to
 date in the same way step 4 starts it: continue the screenshot subagent if it is still working, or start a new one with
@@ -581,8 +644,8 @@ job accepts a skip; a failure inside a build job is the only kind it refuses.
 What a change to release plumbing CAN be checked locally is `dist plan` (the config parses and the asset list is what
 you expect), `dist generate --check` (the generated workflow is current), the release scripts' own `--self-test` modes
 (`scripts/check-release-archive.py`, `scripts/check-static-elf.sh`, `scripts/check-desktop-assets.sh`,
-`releasing/check-changelog.py`, `releasing/rehearse-release-gate.py`), and `shellcheck` over the scripts the workflow
-calls.
+`releasing/check-changelog.py`, `releasing/finalize-release-notes.py`, `releasing/rehearse-release-gate.py`), and
+`shellcheck` over the scripts the workflow calls.
 
 To get the gate's verdict in GitHub without cutting a release, `releasing/rehearse-release-gate.py` derives a throwaway
 workflow from `release.yml` that runs the plan and per-target build jobs on a push to a `rehearsal/release-gate/...`
