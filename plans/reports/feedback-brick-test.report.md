@@ -66,3 +66,50 @@ Implementation stayed local under no-workhorse. Required source review used gpt-
 gpt-6.1-sol/medium, accepting the revised plain-language motivation. Report delivery receives the separate required
 native own-model cold read. Private galaxy-brain records retain review evidence; native and orchestrator usage are
 unavailable, and external counters are retained without inferring exact reported model or billing totals.
+
+### Landing
+
+Landed as #2011, right after the round's other plan, launch-with-conversation-id (#2012), which does not touch
+release-test tooling. Since the stack was based, main had also gained release advisories (#2010), which added a section
+to releasing/AGENTS.md. The review checked that this plan's edits there and in the root AGENTS.md still fit the current
+files; they touch different parts and do not conflict.
+
+#### Release-relevant
+
+Nothing ships to users. This changes the release brick test's procedure and coordinator only. The first live P1 feedback
+send happens at the next authorized brick test.
+
+#### Review and fixes made while landing
+
+An independent fresh-context review found nothing blocking. It confirmed:
+
+- P1 is refused until every P0 check has valid evidence;
+- a P1 failure leaves P0's pass alone and does not block cleanup;
+- a lost P1 success blocks guest deletion;
+- stop-after-P0 sends nothing;
+- the procedure keeps every mutation in the guest and never signs, publishes or touches the host's live install;
+- the feedback carries only fixed text, a blank contact and the app's coarse version, surface and OS.
+
+The landing fixed two of its nits:
+
+- A stop-after-P0 requested late, after a P1 success was already recorded, bypassed the retention check, so cleanup
+  could delete the guests behind a P1 success whose evidence had gone missing. That check now applies whenever any P1
+  result is recorded. The existing lost-evidence test gained a case that narrows the scope to P0 after recording and
+  asserts cleanup still refuses.
+- Widening a run started as stop-after-P0 to stop-after-P1 would reach the live send without the send approval that
+  run's preflight never asked for. BRICK-TEST.md now says to obtain that approval first.
+
+#### Left as is
+
+A run started by the older coordinator labels P0 priority differently, and no test exercises that compatibility path.
+The reviewer found the code correct by inspection.
+
+#### Checks
+
+- Run now: the brick-test support suite through the recorder
+  (`python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py'`): 82 passed, run
+  `ce3887f3-eb55-429f-93fd-3290ffb07073`, and `dprint check` on the changed Markdown.
+- Reused: the executor's focused P1 runs. The landing changed only the cleanup check, its test and one paragraph of the
+  procedure.
+- Not run: Rust, browser and website checks. Nothing they cover changed.
+- The push of this PR failed once with no error detail and succeeded on the immediate retry.

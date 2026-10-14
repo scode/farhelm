@@ -28,3 +28,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`release-notes-menu-item`](reports/release-notes-menu-item.report.md) landed 2026-10-14 in #2006: A "release notes" item in the ? menu that opens the release notes on the docs website
 - [`release-advisories`](reports/release-advisories.report.md) landed 2026-10-14 in #1991, #2010: A signed advisories file on get.farhelm.io that the desktop updater reads, starting with release revocation
 - [`launch-with-conversation-id`](reports/launch-with-conversation-id.report.md) landed 2026-10-14 in #2012: Let New, Clone, Replace with and Restart with start in a conversation the user names
+- [`feedback-brick-test`](reports/feedback-brick-test.report.md) landed 2026-10-14 in #2011: A P1 brick-test check that sends real feedback titled [brick-test] vX.Y.Z from the candidate app, after P0
