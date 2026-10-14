@@ -208,6 +208,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and update `plans/AGENTS.md` to say so. It needs a connected Codex client: native spawned subagents and one-shot
   `codex exec` cannot be resumed this way, so the foreground fallback stays for those.
 
+- **Keyboard focus on confirmations.** After clicking Delete, Replace, or any other button that asks for confirmation,
+  the user should be able to press Enter to go ahead, so focus should land on the confirmation's confirm button. Today
+  the row menu's confirm-in-place prompts, the restart confirmation, and the remove-host dialog deliberately start focus
+  on Cancel, as SPEC_impl.md specifies (the row menu's code calls it a safety default). Audit every button with a
+  confirmation in the entire app: list each one, where focus goes today, and where it should go. Changing SPEC_impl.md's
+  cancel default is part of this entry; the per-button decisions get settled when the entry is planned. Related: the
+  native `<dialog>` entry under Maybe later, which would change how these dialogs manage focus.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
