@@ -3,6 +3,6 @@
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [blocked] `release-advisories.md` — A signed advisories file on get.farhelm.io that the desktop updater reads, starting with release revocation
-- [pending] `quick-launch-template.md` — Mark one template ⚡ quick launch; Cmd+P / Ctrl+Shift+P starts a session from it with no launcher
+- [in-flight cf8ec5] `quick-launch-template.md` — Mark one template ⚡ quick launch; Cmd+P / Ctrl+Shift+P starts a session from it with no launcher
 - [pending] `custom-permission-flags.md` — A "custom" permission choice that passes the user's own permission flags and always counts as YOLO (after `guarded-permission-mode.md`)
 - [pending] `launch-with-conversation-id.md` — Let New, Clone, Replace with and Restart with start in a conversation the user names
