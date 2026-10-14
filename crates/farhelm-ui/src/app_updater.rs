@@ -50,9 +50,9 @@ pub(crate) struct Readout {
     /// Activity identity, kept apart from installation and verification changes
     /// so those changes cannot restart inline expiry or undo a dismissal.
     pub(crate) activity: Activity,
-    /// Persistent identity of the user-visible request, including when watch
-    /// delivery skips its intermediate checking/installing publications.
-    pub(crate) user_check_id: u64,
+    /// Identity of a visible request or qualifying automatic failure,
+    /// including when watch delivery skips intermediate publications.
+    pub(crate) notice_id: u64,
     /// Readiness captured at successful user-check completion, so automatic or
     /// external installations do not acquire a check-completion announcement.
     pub(crate) user_update_ready: bool,
@@ -194,7 +194,7 @@ pub(crate) fn announce_update_ready(readout: &Readout) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct InlineFeedback {
     activity: Activity,
-    user_check_id: u64,
+    notice_id: u64,
     suppressed: Option<Activity>,
 }
 
@@ -202,19 +202,19 @@ impl InlineFeedback {
     /// Observe a new check/activity and request expiry only for a new success.
     /// Installation-record changes with unchanged activity must not stretch its
     /// five-second lifetime or revive a failure the user dismissed.
-    pub(crate) fn observe(&mut self, activity: &Activity, user_check_id: u64) -> bool {
-        if self.activity == *activity && self.user_check_id == user_check_id {
+    pub(crate) fn observe(&mut self, activity: &Activity, notice_id: u64) -> bool {
+        if self.activity == *activity && self.notice_id == notice_id {
             return false;
         }
         self.activity = activity.clone();
-        self.user_check_id = user_check_id;
+        self.notice_id = notice_id;
         self.suppressed = None;
         matches!(activity, Activity::UpToDate(_))
     }
 
     /// Expire the success that scheduled this callback, never a later result.
-    pub(crate) fn expire(&mut self, activity: &Activity, user_check_id: u64) {
-        if self.user_check_id == user_check_id
+    pub(crate) fn expire(&mut self, activity: &Activity, notice_id: u64) {
+        if self.notice_id == notice_id
             && self.activity == *activity
             && matches!(activity, Activity::UpToDate(_))
         {
@@ -224,8 +224,8 @@ impl InlineFeedback {
 
     /// Dismiss only the failure currently visible; progress and success do not
     /// acquire an accidental dismissal path through a stale click handler.
-    pub(crate) fn dismiss(&mut self, activity: &Activity, user_check_id: u64) {
-        if self.user_check_id == user_check_id
+    pub(crate) fn dismiss(&mut self, activity: &Activity, notice_id: u64) {
+        if self.notice_id == notice_id
             && self.activity == *activity
             && matches!(activity, Activity::Failed(_))
         {
@@ -234,7 +234,7 @@ impl InlineFeedback {
     }
 }
 
-/// Show a user-requested desktop check beside either version readout.
+/// Show a desktop check or qualifying automatic failure beside the version.
 ///
 /// The empty live region stays mounted so WebKit can announce later text. The
 /// memo filters unrelated publications before they can reset expiry. Scoped tasks
@@ -247,7 +247,7 @@ pub(crate) fn UpdateCheckStatus(updater: AppUpdater) -> Element {
     let watched = updater.clone();
     let activity = use_memo(move || {
         let readout = watched.readout();
-        (readout.activity, readout.user_check_id)
+        (readout.activity, readout.notice_id)
     });
     let mut feedback = use_signal(InlineFeedback::default);
     use_effect(move || {
@@ -279,7 +279,7 @@ pub(crate) fn UpdateCheckStatus(updater: AppUpdater) -> Element {
             // progress and the final words match. The live parent stays mounted.
             if shown.is_some() || announce_ready {
                 span {
-                    key: "{readout.user_check_id}",
+                    key: "{readout.notice_id}",
                     class: "app-update-status-content",
                     if let Some(shown) = shown {
                         if separate_progress_spinner(&readout, shown) {
@@ -292,7 +292,7 @@ pub(crate) fn UpdateCheckStatus(updater: AppUpdater) -> Element {
                                 aria_label: "check failed; dismiss update check status",
                                 "data-tooltip": "{readout.tooltip}",
                                 onclick: move |_| {
-                                    feedback.write().dismiss(&readout.activity, readout.user_check_id);
+                                    feedback.write().dismiss(&readout.activity, readout.notice_id);
                                     // Dismissing removes this focused button; without a
                                     // new target, keyboard focus falls to the page body.
                                     // The gear beside it is the natural next stop.
@@ -559,7 +559,7 @@ mod tests {
                 needs_reinstall: false,
                 tooltip: "current version".into(),
                 activity: Activity::Idle,
-                user_check_id: 0,
+                notice_id: 0,
                 user_update_ready: false,
             };
             check_readout(
@@ -643,7 +643,7 @@ mod tests {
                         needs_reinstall: warning,
                         tooltip: String::new(),
                         activity,
-                        user_check_id: 0,
+                        notice_id: 0,
                         user_update_ready: false,
                     };
                     assert_eq!(
@@ -716,7 +716,7 @@ mod tests {
             needs_reinstall: false,
             tooltip: idle_tooltip("1.2.3", true),
             activity: Activity::Idle,
-            user_check_id: 0,
+            notice_id: 0,
             user_update_ready: false,
         };
         assert_eq!(
@@ -747,7 +747,7 @@ mod tests {
             needs_reinstall,
             tooltip: String::new(),
             activity: Activity::Idle,
-            user_check_id: 0,
+            notice_id: 0,
             user_update_ready: false,
         };
         assert_eq!(readout_marks(&readout(false, false)), vec![]);
@@ -946,7 +946,7 @@ mod tests {
                         needs_reinstall: false,
                         tooltip: String::new(),
                         activity: activity.clone(),
-                        user_check_id: 1,
+                        notice_id: 1,
                         user_update_ready: captured,
                     };
                     assert_eq!(

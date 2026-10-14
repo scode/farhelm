@@ -67,6 +67,10 @@ const TICK: Duration = Duration::from_secs(60);
 /// Wall-clock time between automatic checks.
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// A failed automatic probe becomes visible only after this failure streak,
+/// rather than after an idle gap in which no probe actually failed.
+const PROBE_FAILURE_NOTICE_AFTER: Duration = Duration::from_secs(3 * 24 * 60 * 60);
+
 /// Bound on the latest-release probe, which is one small request.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -101,9 +105,10 @@ pub(crate) struct UpdaterState {
     /// read.
     pub(crate) installed: Option<String>,
     pub(crate) activity: Activity,
-    /// Identity of the last user-visible check, retained across watch coalescing.
-    /// Record refreshes and automatic work cannot make an old outcome new again.
-    pub(crate) user_check_id: u64,
+    /// Identity of the last visible check or qualifying automatic failure,
+    /// retained across watch coalescing. Record refreshes and nonqualifying
+    /// automatic work cannot make an old outcome new again.
+    pub(crate) notice_id: u64,
     /// A successful user-visible check ended with an update waiting. This is
     /// announcement provenance, not the source of truth for the red readout.
     pub(crate) user_update_ready: bool,
@@ -197,15 +202,31 @@ impl UpdaterHandle {
     }
 
     /// Turn automatic updates on or off. The worker reads the setting
-    /// before every automatic check and again before an automatic install,
-    /// so nothing else needs telling. A write that fails leaves the file as
-    /// it was and returns a short reason, so the dialog can keep showing the
+    /// before every automatic check and again before an automatic install.
+    /// Re-enabling also clears the probe-failure streak in memory and disk,
+    /// even if no worker wake observed the off period. A failed write keeps
+    /// both the saved choice and in-memory history unchanged and returns a
+    /// short reason, so the dialog can keep showing the
     /// choice that is actually in force rather than one that was not saved.
     pub(crate) fn set_automatic_updates(&self, on: bool) -> Result<(), String> {
+        // The worker uses the same status-before-file lock order. Hold it
+        // through the saved choice so an in-flight failure cannot write an
+        // old streak back over a successful re-enable.
+        let mut status = self.shared.status.lock().expect("updater status poisoned");
+        let mut reenabled = false;
         state::update_state(&self.state_path, |state| {
+            reenabled = on && !state.install_updates_automatically.unwrap_or(true);
             state.install_updates_automatically = Some(on);
+            if reenabled {
+                state.automatic_probe_failure_since = None;
+            }
         })
-        .map(|_| ())
+        .map(|_| {
+            if reenabled {
+                status.probe_failure_since = None;
+                status.last_probe_clock = None;
+            }
+        })
         .map_err(|error| {
             tracing::warn!("updater: saving the automatic-updates setting: {error:#}");
             "the choice could not be saved; the app's log has the reason".to_string()
@@ -343,7 +364,20 @@ pub(super) fn start(state_path: PathBuf) -> Option<UpdaterHandle> {
         probe: probe_with_latest_override(latest_override, Box::new(probe_latest_release)),
         install: Box::new(run_installer),
         read_installed: Box::new(move || read_installed_record(&installed_record)),
-        automatic_enabled: Box::new(move || automatic_updates_enabled(&state_path)),
+        automatic_enabled: Box::new({
+            let path = state_path.clone();
+            move || automatic_updates_enabled(&path)
+        }),
+        read_probe_failure_since: Box::new({
+            let path = state_path.clone();
+            move || read_probe_failure_since(&path)
+        }),
+        write_probe_failure_since: Box::new(move |since| {
+            state::update_state(&state_path, |state| {
+                state.automatic_probe_failure_since = since;
+            })
+            .map(|_| ())
+        }),
         now: Box::new(SystemTime::now),
     };
     let shared = Arc::new(Shared::new(running));
@@ -381,6 +415,18 @@ fn automatic_updates_enabled(state_path: &Path) -> bool {
     }
 }
 
+/// Read once at worker startup; a broken file provides no failure history.
+/// Subsequent writes are best effort, with memory remaining authoritative.
+fn read_probe_failure_since(path: &Path) -> Option<SystemTime> {
+    match state::read_state(path) {
+        Ok(state) => state.automatic_probe_failure_since,
+        Err(error) => {
+            tracing::warn!("updater: reading the probe failure streak: {error:#}");
+            None
+        }
+    }
+}
+
 /// The version an Installed record names: its first line, trimmed, or
 /// `None` when the file is missing, unreadable or blank.
 fn read_installed_record(path: &Path) -> Option<String> {
@@ -409,6 +455,12 @@ pub(super) struct Deps {
     pub(super) read_installed: Box<dyn Fn() -> Option<String> + Send>,
     /// Whether automatic updates are on now.
     pub(super) automatic_enabled: Box<dyn Fn() -> bool + Send>,
+    /// Optional persisted start, read once. File failures mean no known streak.
+    pub(super) read_probe_failure_since: Box<dyn Fn() -> Option<SystemTime> + Send>,
+    /// Best-effort storage, serialized under the shared status lock so the
+    /// saved setting's re-enable cannot race a stale streak write.
+    pub(super) write_probe_failure_since:
+        Box<dyn Fn(Option<SystemTime>) -> anyhow::Result<()> + Send>,
     /// Wall-clock now.
     pub(super) now: Box<dyn Fn() -> SystemTime + Send>,
 }
@@ -481,7 +533,7 @@ fn activity_readout(state: &UpdaterState) -> crate::app_updater::Readout {
         needs_reinstall: false,
         tooltip,
         activity: state.activity.clone(),
-        user_check_id: state.user_check_id,
+        notice_id: state.notice_id,
         user_update_ready: state.user_update_ready,
     }
 }
@@ -502,14 +554,23 @@ struct Status {
     installed: Option<String>,
     /// What the worker is doing now, published or not.
     current: Activity,
-    /// The outcome of the last run a user saw through, until the next run
-    /// starts. Published while no run is visible.
+    /// The last visible outcome, published while no user-joined run is
+    /// visible. Automatic failures survive until success or UI dismissal.
     shown_outcome: Option<Activity>,
+    /// An automatic-origin failure gives its outcome a lifetime across later
+    /// unsuccessful runs, including a manual result that takes its place.
+    /// UI dismissal is still keyed by the published identity, not this flag.
+    retain_failure: bool,
+    /// The probe streak is memory-authoritative; its optional disk record only
+    /// carries the start across launches. The last sample detects backwards
+    /// clock movement even when the clock remains later than the start.
+    probe_failure_since: Option<SystemTime>,
+    last_probe_clock: Option<SystemTime>,
     /// A user asked for a check and has not yet been shown its outcome. The
     /// run in progress (or the next one) is then visible.
     user_waiting: bool,
     /// See the published presentation bookkeeping on [`UpdaterState`].
-    user_check_id: u64,
+    notice_id: u64,
     user_update_ready: bool,
     /// A user's request has not been picked up by the worker yet.
     requested: bool,
@@ -534,6 +595,17 @@ impl Status {
             self.user_update_ready = false;
             if newer_installed(installed.as_deref(), &self.running) {
                 self.needs_reinstall = false;
+                // A retained failure said an update did not install. Once a
+                // newer version is installed by any route (the installer run
+                // from a terminal, say) it is stale, and nothing else would
+                // clear it: automatic checks hold back while an update waits,
+                // so it would sit beside the red update-ready readout until
+                // dismissed or the app restarted. A run that fails after this
+                // point still sets its own failure afterwards.
+                if self.retain_failure {
+                    self.shown_outcome = None;
+                    self.retain_failure = false;
+                }
             }
         }
         self.installed = installed;
@@ -546,7 +618,7 @@ impl Shared {
             running: running.to_string(),
             installed: None,
             activity: Activity::Idle,
-            user_check_id: 0,
+            notice_id: 0,
             user_update_ready: false,
             needs_reinstall: false,
         });
@@ -556,8 +628,11 @@ impl Shared {
                 installed: None,
                 current: Activity::Idle,
                 shown_outcome: None,
+                retain_failure: false,
+                probe_failure_since: None,
+                last_probe_clock: None,
                 user_waiting: false,
-                user_check_id: 0,
+                notice_id: 0,
                 user_update_ready: false,
                 requested: false,
                 needs_reinstall: false,
@@ -577,7 +652,7 @@ impl Shared {
     pub(super) fn check_now(&self) {
         let mut status = self.status.lock().expect("updater status poisoned");
         if !status.user_waiting {
-            status.user_check_id = status.user_check_id.wrapping_add(1);
+            status.notice_id = status.notice_id.wrapping_add(1);
             status.user_update_ready = false;
         }
         status.user_waiting = true;
@@ -598,6 +673,7 @@ impl Shared {
     fn show_outcome(&self, outcome: Activity) {
         let mut status = self.status.lock().expect("updater status poisoned");
         status.shown_outcome = Some(outcome);
+        status.retain_failure = false;
         status.user_update_ready = false;
         self.publish(&status);
     }
@@ -613,7 +689,7 @@ impl Shared {
             running: status.running.clone(),
             installed: status.installed.clone(),
             activity,
-            user_check_id: status.user_check_id,
+            notice_id: status.notice_id,
             user_update_ready: status.user_update_ready,
             needs_reinstall: status.needs_reinstall,
         };
@@ -637,8 +713,35 @@ pub(super) struct Engine {
     last_check: Option<SystemTime>,
 }
 
+/// The probe boundary determines which automatic failures may surface. A
+/// verification refusal retains its separate reinstall contract; successful
+/// probes end the offline streak even if a later install fails.
+enum CheckResult {
+    Success(Activity),
+    ProbeFailed(String),
+    InstallFailed(String),
+    VerificationFailed(String),
+}
+
+impl CheckResult {
+    /// Presentation keeps one existing activity vocabulary for both origins.
+    fn activity(&self) -> Activity {
+        match self {
+            Self::Success(activity) => activity.clone(),
+            Self::ProbeFailed(reason)
+            | Self::InstallFailed(reason)
+            | Self::VerificationFailed(reason) => Activity::Failed(reason.clone()),
+        }
+    }
+}
+
 impl Engine {
     pub(super) fn new(deps: Deps, shared: Arc<Shared>) -> Self {
+        shared
+            .status
+            .lock()
+            .expect("updater status poisoned")
+            .probe_failure_since = (deps.read_probe_failure_since)();
         Self {
             deps,
             shared,
@@ -716,48 +819,102 @@ impl Engine {
     /// One check, and the install it calls for.
     fn run_check(&mut self) {
         self.last_check = Some((self.deps.now)());
-        {
+        let automatic = {
             let mut status = self.shared.status.lock().expect("updater status poisoned");
             status.requested = false;
-            status.shown_outcome = None;
+            if !status.retain_failure {
+                status.shown_outcome = None;
+            }
             status.user_update_ready = false;
             status.current = Activity::Checking;
             self.shared.publish(&status);
-        }
+            !status.user_waiting
+        };
         let outcome = self.check_and_install();
         let installed = (self.deps.read_installed)();
         let mut status = self.shared.status.lock().expect("updater status poisoned");
+        let qualifies = match &outcome {
+            CheckResult::ProbeFailed(_) => {
+                let now = (self.deps.now)();
+                let since = status.probe_failure_since.unwrap_or(now);
+                let backwards = status.last_probe_clock.is_some_and(|last| now < last);
+                let since = if now < since || backwards { now } else { since };
+                // Only automatic failures begin a streak; a manual failure can
+                // repair an existing future/backwards timestamp but cannot
+                // invent automatic failures that never occurred.
+                let next = if !automatic && status.probe_failure_since.is_none() {
+                    None
+                } else {
+                    Some(since)
+                };
+                self.save_streak(&mut status, next);
+                status.last_probe_clock = Some(now);
+                now.duration_since(since)
+                    .is_ok_and(|elapsed| elapsed >= PROBE_FAILURE_NOTICE_AFTER)
+            }
+            CheckResult::InstallFailed(_) => true,
+            _ => false,
+        };
         status.record_installed(installed);
         status.current = Activity::Idle;
+        if matches!(outcome, CheckResult::Success(_)) {
+            status.shown_outcome = None;
+            status.retain_failure = false;
+        }
         if status.user_waiting {
             status.user_waiting = false;
             // Readiness alone can come from an automatic or external install.
             // Capture it only with a successful check the user saw through.
-            status.user_update_ready =
-                matches!(outcome, Some(Activity::Idle | Activity::UpToDate(_)))
-                    && newer_installed(status.installed.as_deref(), &status.running);
+            status.user_update_ready = matches!(outcome, CheckResult::Success(_))
+                && newer_installed(status.installed.as_deref(), &status.running);
             // A finished install needs no words of its own: the update
             // marker shows it.
-            status.shown_outcome = outcome.filter(|outcome| *outcome != Activity::Idle);
-        } else if let Some(Activity::Failed(reason)) = &outcome {
+            let activity = outcome.activity();
+            status.shown_outcome = (activity != Activity::Idle).then_some(activity);
+        } else if let Activity::Failed(reason) = outcome.activity() {
             tracing::warn!("updater: automatic update failed: {reason}");
+            if qualifies {
+                // Equal later failures must be fresh notices after dismissal,
+                // even when watch delivery coalesces all intermediate states.
+                status.notice_id = status.notice_id.wrapping_add(1);
+                status.shown_outcome = Some(Activity::Failed(reason));
+                status.retain_failure = true;
+            }
         }
         self.shared.publish(&status);
     }
 
+    /// Keep memory authoritative when durable storage is unavailable. All
+    /// callers hold the status lock, including the settings re-enable path.
+    fn save_streak(&self, status: &mut Status, since: Option<SystemTime>) {
+        if status.probe_failure_since == since {
+            return;
+        }
+        status.probe_failure_since = since;
+        if let Err(error) = (self.deps.write_probe_failure_since)(since) {
+            tracing::warn!("updater: saving the probe failure streak: {error:#}");
+        }
+    }
+
     /// Probe, compare, and install when the latest release is newer than
-    /// what is installed. The outcome is `Idle` after a successful install,
-    /// `UpToDate` or `Failed` otherwise.
-    fn check_and_install(&self) -> Option<Activity> {
+    /// what is installed. Distinct failure boundaries let the caller apply
+    /// the grace period only to an unusable `/latest` answer; successful
+    /// probes clear that streak before the slower install can fail.
+    fn check_and_install(&self) -> CheckResult {
         let latest = match (self.deps.probe)() {
             Ok(latest) => latest,
             Err(error) => {
                 tracing::info!("updater: checking for the latest release failed: {error:#}");
-                return Some(Activity::Failed(
+                return CheckResult::ProbeFailed(
                     "get.farhelm.io did not say which release is the latest".to_string(),
-                ));
+                );
             }
         };
+        {
+            let mut status = self.shared.status.lock().expect("updater status poisoned");
+            self.save_streak(&mut status, None);
+            status.last_probe_clock = Some((self.deps.now)());
+        }
         // The probe can take a while, and the user may have run the
         // installer from a terminal meanwhile, so the decision uses the
         // Installed record as it is now, not as it was when the run began.
@@ -780,13 +937,13 @@ impl Engine {
             tracing::info!(
                 "updater: {baseline} was installed during the check; nothing more to do"
             );
-            return Some(Activity::Idle);
+            return CheckResult::Success(Activity::Idle);
         }
         if !build_is_newer(&latest, &baseline) {
             tracing::info!("updater: {latest} is the latest release; {baseline} is installed");
             // Nothing newer to verify, so nothing this app cannot install.
             self.set_needs_reinstall(false);
-            return Some(Activity::UpToDate(latest));
+            return CheckResult::Success(Activity::UpToDate(latest));
         }
         // Automatic updates may have been turned off while the probe was
         // out. Off means no background install from then on, so a run no
@@ -799,7 +956,7 @@ impl Engine {
             .user_waiting;
         if !user_waiting && !(self.deps.automatic_enabled)() {
             tracing::info!("updater: automatic updates were turned off during the check");
-            return Some(Activity::Idle);
+            return CheckResult::Success(Activity::Idle);
         }
         tracing::info!("updater: installing {latest} (installed: {baseline})");
         self.set_current(Activity::Installing(latest.clone()));
@@ -811,9 +968,9 @@ impl Engine {
                 // "Installation and updates").
                 tracing::warn!("updater: refusing Farhelm {latest}: {error:#}");
                 self.set_needs_reinstall(true);
-                return Some(Activity::Failed(format!(
+                return CheckResult::VerificationFailed(format!(
                     "Farhelm {latest} could not be verified, so it was not installed"
-                )));
+                ));
             }
             tracing::warn!("updater: installing {latest} failed: {error:#}");
         }
@@ -829,17 +986,17 @@ impl Engine {
                 .clone();
             if build_is_newer(&latest, &running) {
                 // The update marker says it from here on.
-                Some(Activity::Idle)
+                CheckResult::Success(Activity::Idle)
             } else {
                 // Installed went back up to the running version (it named
                 // an older one the user pinned); no marker will appear, so
                 // the user's check needs its own answer.
-                Some(Activity::UpToDate(latest))
+                CheckResult::Success(Activity::UpToDate(latest))
             }
         } else {
-            Some(Activity::Failed(format!(
+            CheckResult::InstallFailed(format!(
                 "installing Farhelm {latest} did not finish (the app's log says why)"
-            )))
+            ))
         }
     }
 }
@@ -1809,13 +1966,34 @@ mod tests {
         now: Arc<Mutex<SystemTime>>,
         probes: Arc<AtomicUsize>,
         installs: Arc<Mutex<Vec<String>>>,
+        streak: Arc<Mutex<Option<SystemTime>>>,
     }
 
+    /// A new worker with no durable history and a controlled clock. Fake
+    /// probes/installers expose actual attempts rather than inferred timing.
     fn make_rig(
         running: &str,
         installed: Option<&str>,
         latest: Option<&str>,
         install_works: bool,
+    ) -> Rig {
+        make_rig_with_streak(
+            running,
+            installed,
+            latest,
+            install_works,
+            Arc::new(Mutex::new(None)),
+        )
+    }
+
+    /// Inject a restart's durable record without sharing a live worker. Tests
+    /// can use the real file closures instead to exercise decoding/write errors.
+    fn make_rig_with_streak(
+        running: &str,
+        installed: Option<&str>,
+        latest: Option<&str>,
+        install_works: bool,
+        streak: Arc<Mutex<Option<SystemTime>>>,
     ) -> Rig {
         let shared = Arc::new(Shared::new(running));
         let installed = Arc::new(Mutex::new(installed.map(str::to_string)));
@@ -1856,6 +2034,17 @@ mod tests {
                 let automatic = Arc::clone(&automatic);
                 move || *automatic.lock().unwrap()
             }),
+            read_probe_failure_since: Box::new({
+                let streak = Arc::clone(&streak);
+                move || *streak.lock().unwrap()
+            }),
+            write_probe_failure_since: Box::new({
+                let streak = Arc::clone(&streak);
+                move |since| {
+                    *streak.lock().unwrap() = since;
+                    Ok(())
+                }
+            }),
             now: Box::new({
                 let now = Arc::clone(&now);
                 move || *now.lock().unwrap()
@@ -1870,10 +2059,37 @@ mod tests {
             now,
             probes,
             installs,
+            streak,
         }
     }
 
     impl Rig {
+        /// Exercise the production file reader and locked writer at startup,
+        /// including a missing or broken file. Each call starts a new Engine
+        /// over the same fake network/installer, never the installed app.
+        fn with_state_file(mut self, path: &Path) -> Self {
+            self.engine.deps.automatic_enabled = Box::new({
+                let path = path.to_path_buf();
+                move || automatic_updates_enabled(&path)
+            });
+            self.engine.deps.read_probe_failure_since = Box::new({
+                let path = path.to_path_buf();
+                move || read_probe_failure_since(&path)
+            });
+            self.engine.deps.write_probe_failure_since = Box::new({
+                let path = path.to_path_buf();
+                move |since| {
+                    state::update_state(&path, |state| {
+                        state.automatic_probe_failure_since = since;
+                    })
+                    .map(|_| ())
+                }
+            });
+            let Engine { deps, shared, .. } = self.engine;
+            self.engine = Engine::new(deps, shared);
+            self
+        }
+
         fn published(&self) -> UpdaterState {
             self.shared.subscribe().borrow().clone()
         }
@@ -2065,11 +2281,12 @@ mod tests {
         assert!(rig.published().update_ready());
     }
 
-    /// Spec: nothing is installed when the latest release is not newer than
-    /// the installed version, and a failed automatic check or install shows
-    /// nothing and is tried again at the next check.
+    /// Successful automatic checks and the first offline probe stay quiet;
+    /// an install failure shows immediately without changing the daily retry.
+    /// This distinguishes a download failure after `/latest` from the probe
+    /// failure for which the user explicitly chose a three-day grace period.
     #[farhelm_testtrace::test]
-    fn automatic_failures_and_up_to_date_checks_stay_invisible() {
+    fn automatic_success_and_first_probe_failure_stay_quiet_but_install_failure_shows() {
         let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.0.0"), true);
         rig.engine.wake_once();
         assert!(rig.installs.lock().unwrap().is_empty());
@@ -2081,7 +2298,22 @@ mod tests {
 
         let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
         rig.engine.wake_once();
-        assert_eq!(rig.published().activity, Activity::Idle, "a failed install");
+        let failure = rig.published();
+        assert!(
+            matches!(failure.activity, Activity::Failed(_)),
+            "a failed download"
+        );
+        assert_eq!(failure.notice_id, 1);
+        assert!(
+            readout(&failure)
+                .tooltip
+                .contains("installing Farhelm 1.1.0 did not finish")
+        );
+        assert_eq!(
+            *rig.streak.lock().unwrap(),
+            None,
+            "a successful probe ends the offline streak"
+        );
         assert!(!rig.published().update_ready());
         rig.advance(CHECK_INTERVAL);
         rig.engine.wake_once();
@@ -2090,6 +2322,510 @@ mod tests {
             2,
             "retried at the next check"
         );
+        assert_eq!(
+            rig.published().notice_id,
+            2,
+            "a later qualifying failure is a new notice"
+        );
+    }
+
+    /// Only actual automatic probe failures start the clock. Exact elapsed
+    /// time, including subsecond precision, must distinguish just-before,
+    /// exactly-at and just-after the three-day threshold without early notice.
+    #[farhelm_testtrace::test]
+    fn automatic_probe_failures_show_at_the_exact_three_day_boundary() {
+        for (elapsed, visible) in [
+            (PROBE_FAILURE_NOTICE_AFTER - Duration::from_nanos(1), false),
+            (PROBE_FAILURE_NOTICE_AFTER, true),
+            (PROBE_FAILURE_NOTICE_AFTER + Duration::from_nanos(1), true),
+        ] {
+            let mut rig = make_rig("1.0.0", Some("1.0.0"), None, true);
+            rig.advance(Duration::from_nanos(123_456_789));
+            let start = *rig.now.lock().unwrap();
+            rig.engine.wake_once();
+            assert_eq!(rig.published().activity, Activity::Idle);
+            assert_eq!(*rig.streak.lock().unwrap(), Some(start));
+            rig.advance(elapsed);
+            rig.engine.wake_once();
+            assert_eq!(rig.probes.load(Ordering::SeqCst), 2);
+            assert_eq!(
+                matches!(rig.published().activity, Activity::Failed(_)),
+                visible,
+                "{elapsed:?}"
+            );
+            assert_eq!(rig.published().notice_id, u64::from(visible));
+        }
+    }
+
+    /// A long sleep/quit/off gap is not evidence that the site kept failing.
+    /// The first failing probe after ten quiet days starts a new streak now.
+    #[farhelm_testtrace::test]
+    fn a_long_gap_without_checks_does_not_start_an_offline_notice_clock() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.0.0"), true);
+        rig.engine.wake_once();
+        assert_eq!(*rig.streak.lock().unwrap(), None);
+        rig.advance(CHECK_INTERVAL * 10);
+        *rig.latest.lock().unwrap() = None;
+        rig.engine.wake_once();
+        assert_eq!(rig.published().activity, Activity::Idle);
+        assert_eq!(*rig.streak.lock().unwrap(), Some(*rig.now.lock().unwrap()));
+    }
+
+    /// An install failure must survive a later nonqualifying probe failure,
+    /// including its dismissed state. Only a later qualifying failure gets a
+    /// new identity; an equal reason is insufficient to distinguish the runs.
+    #[farhelm_testtrace::test]
+    fn automatic_notice_survives_failed_runs_and_dismissal_until_a_new_qualifying_failure() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
+        rig.engine.wake_once();
+        let failure = rig.published();
+        assert!(matches!(failure.activity, Activity::Failed(_)));
+        let mut feedback = crate::app_updater::InlineFeedback::default();
+        feedback.observe(&failure.activity, failure.notice_id);
+        feedback.dismiss(&failure.activity, failure.notice_id);
+        let dismissed = feedback.clone();
+        rig.advance(CHECK_INTERVAL);
+        *rig.latest.lock().unwrap() = None;
+        rig.engine.wake_once();
+        let retained = rig.published();
+        assert_eq!(retained.activity, failure.activity);
+        assert_eq!(retained.notice_id, failure.notice_id);
+        assert!(
+            !feedback.observe(&retained.activity, retained.notice_id),
+            "no new identity or activity after dismissal"
+        );
+        assert_eq!(
+            feedback, dismissed,
+            "the exact dismissal survives the failed run"
+        );
+        rig.advance(PROBE_FAILURE_NOTICE_AFTER);
+        rig.engine.wake_once();
+        let later = rig.published();
+        assert!(matches!(later.activity, Activity::Failed(_)));
+        assert_eq!(later.notice_id, failure.notice_id + 1);
+        assert!(
+            readout(&later)
+                .tooltip
+                .contains("did not say which release")
+        );
+        feedback.observe(&later.activity, later.notice_id);
+        let mut fresh = crate::app_updater::InlineFeedback::default();
+        fresh.observe(&later.activity, later.notice_id);
+        assert_eq!(feedback, fresh, "the later notice has no old suppression");
+        // Expired/dismissed old callbacks cannot hide this newly shown result.
+        feedback.dismiss(&failure.activity, failure.notice_id);
+        assert_eq!(
+            feedback, fresh,
+            "a stale click cannot dismiss the new notice"
+        );
+    }
+
+    /// Successful automatic and manual checks both end the streak and clear
+    /// the sticky failure. Manual progress/result wins over an older notice,
+    /// while ordinary manual failures do not manufacture an automatic streak.
+    #[farhelm_testtrace::test]
+    fn success_clears_automatic_notices_and_manual_failures_take_precedence() {
+        for manual in [false, true] {
+            let mut rig = make_rig("1.0.0", Some("1.0.0"), None, true);
+            rig.engine.wake_once();
+            rig.advance(PROBE_FAILURE_NOTICE_AFTER);
+            rig.engine.wake_once();
+            let first = rig.published();
+            assert!(matches!(first.activity, Activity::Failed(_)));
+            if manual {
+                rig.shared.check_now();
+            } else {
+                rig.advance(CHECK_INTERVAL);
+            }
+            let shared = Arc::clone(&rig.shared);
+            rig.engine.deps.probe = Box::new(move || {
+                assert_eq!(
+                    shared.subscribe().borrow().activity,
+                    if manual {
+                        Activity::Checking
+                    } else {
+                        first.activity.clone()
+                    }
+                );
+                Ok("1.0.0".into())
+            });
+            rig.engine.wake_once();
+            assert_eq!(*rig.streak.lock().unwrap(), None);
+            assert_eq!(
+                rig.published().activity,
+                if manual {
+                    Activity::UpToDate("1.0.0".into())
+                } else {
+                    Activity::Idle
+                }
+            );
+        }
+
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
+        rig.engine.wake_once();
+        let automatic = rig.published();
+        *rig.latest.lock().unwrap() = None;
+        rig.shared.check_now();
+        let request = rig.published().notice_id;
+        rig.engine.wake_once();
+        assert_eq!(rig.published().notice_id, request);
+        assert_eq!(request, automatic.notice_id + 1);
+        let manual_failure = rig.published();
+        assert!(matches!(manual_failure.activity, Activity::Failed(_)));
+        let mut feedback = crate::app_updater::InlineFeedback::default();
+        feedback.observe(&manual_failure.activity, manual_failure.notice_id);
+        feedback.dismiss(&manual_failure.activity, manual_failure.notice_id);
+        let dismissed = feedback.clone();
+        assert!(
+            readout(&rig.published())
+                .tooltip
+                .contains("did not say which release")
+        );
+        assert_eq!(
+            *rig.streak.lock().unwrap(),
+            None,
+            "a manual-only failure starts no automatic streak"
+        );
+        rig.advance(CHECK_INTERVAL);
+        rig.engine.wake_once();
+        assert_eq!(
+            rig.published().notice_id,
+            request,
+            "a young automatic failure preserves the user's result"
+        );
+        let retained = rig.published();
+        assert_eq!(
+            retained.activity, manual_failure.activity,
+            "identity alone cannot prove the retained message survived"
+        );
+        feedback.observe(&retained.activity, retained.notice_id);
+        assert_eq!(
+            feedback, dismissed,
+            "the dismissed replacement must stay dismissed"
+        );
+    }
+
+    /// Joining the first automatic failure gives it the user's existing
+    /// identity exactly once, even with repeated requests during the probe.
+    /// It remains an automatic attempt for failure-history accounting.
+    #[farhelm_testtrace::test]
+    fn joining_an_automatic_failure_does_not_create_two_notices() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), None, true);
+        assert_eq!(
+            *rig.streak.lock().unwrap(),
+            None,
+            "this is the first failing automatic attempt"
+        );
+        let first_failure_time = *rig.now.lock().unwrap();
+        let shared = Arc::clone(&rig.shared);
+        rig.engine.deps.probe = Box::new(move || {
+            assert_eq!(shared.subscribe().borrow().activity, Activity::Idle);
+            shared.check_now();
+            let id = shared.subscribe().borrow().notice_id;
+            shared.check_now();
+            assert_eq!(shared.subscribe().borrow().notice_id, id);
+            assert_eq!(shared.subscribe().borrow().activity, Activity::Checking);
+            bail!("offline")
+        });
+        rig.engine.wake_once();
+        assert_eq!(rig.published().notice_id, 1);
+        assert!(matches!(rig.published().activity, Activity::Failed(_)));
+        assert!(!rig.shared.status.lock().unwrap().user_waiting);
+        assert!(!rig.shared.status.lock().unwrap().requested);
+        assert_eq!(
+            rig.shared.status.lock().unwrap().probe_failure_since,
+            Some(first_failure_time)
+        );
+        assert_eq!(
+            *rig.streak.lock().unwrap(),
+            Some(first_failure_time),
+            "joining must not erase automatic origin"
+        );
+        rig.engine.deps.probe = Box::new(|| bail!("offline, now unjoined"));
+        rig.advance(PROBE_FAILURE_NOTICE_AFTER);
+        rig.engine.wake_once();
+        assert_eq!(
+            rig.published().notice_id,
+            2,
+            "the original start qualifies a later unjoined failure"
+        );
+        assert!(matches!(rig.published().activity, Activity::Failed(_)));
+        assert_eq!(*rig.streak.lock().unwrap(), Some(first_failure_time));
+    }
+
+    /// A backwards clock resets the streak, including when it remains later
+    /// than the first failure. A future timestamp loaded after restart has
+    /// the same rule; neither may trigger an immediate overdue notice.
+    #[farhelm_testtrace::test]
+    fn backwards_and_future_clocks_restart_the_failure_streak() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), None, true);
+        rig.engine.wake_once();
+        rig.advance(CHECK_INTERVAL * 2);
+        rig.engine.wake_once();
+        *rig.now.lock().unwrap() -= CHECK_INTERVAL;
+        let reset = *rig.now.lock().unwrap();
+        rig.engine.wake_once();
+        assert_eq!(*rig.streak.lock().unwrap(), Some(reset));
+        assert_eq!(rig.published().activity, Activity::Idle);
+        rig.advance(PROBE_FAILURE_NOTICE_AFTER);
+        rig.engine.wake_once();
+        assert!(matches!(rig.published().activity, Activity::Failed(_)));
+
+        let future = SystemTime::UNIX_EPOCH + Duration::from_secs(9_000_000);
+        let persisted = Arc::new(Mutex::new(Some(future)));
+        let mut rig = make_rig_with_streak("1.0.0", Some("1.0.0"), None, true, persisted);
+        rig.engine.wake_once();
+        assert_eq!(*rig.streak.lock().unwrap(), Some(*rig.now.lock().unwrap()));
+        assert_eq!(rig.published().activity, Activity::Idle);
+    }
+
+    /// The real file carries exact streak time across new workers. Missing,
+    /// malformed and unreadable files mean no history, and failed writes do
+    /// not panic or prevent the in-memory streak reaching its threshold.
+    #[farhelm_testtrace::test]
+    fn probe_failure_persistence_survives_restart_and_file_failures_remain_live() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join(state::APP_STATE_FILE);
+        let mut first = make_rig("1.0.0", Some("1.0.0"), None, true).with_state_file(&path);
+        first.advance(Duration::from_nanos(123_456_789));
+        first.engine.wake_once();
+        let start = *first.now.lock().unwrap();
+        assert_eq!(
+            state::read_state(&path)
+                .unwrap()
+                .automatic_probe_failure_since,
+            Some(start)
+        );
+        let mut restarted = make_rig("1.0.0", Some("1.0.0"), None, true).with_state_file(&path);
+        *restarted.now.lock().unwrap() = start + PROBE_FAILURE_NOTICE_AFTER;
+        restarted.engine.wake_once();
+        assert!(matches!(
+            restarted.published().activity,
+            Activity::Failed(_)
+        ));
+        *restarted.latest.lock().unwrap() = Some("1.0.0".into());
+        restarted.advance(CHECK_INTERVAL);
+        restarted.engine.wake_once();
+        assert_eq!(
+            state::read_state(&path)
+                .unwrap()
+                .automatic_probe_failure_since,
+            None
+        );
+
+        for fixture in ["missing", "missing-field", "unreadable", "malformed"] {
+            let path = root.path().join(fixture);
+            match fixture {
+                "missing-field" => {
+                    std::fs::write(&path, r#"{"webview_auth_generation":7}"#).unwrap()
+                }
+                "unreadable" => std::fs::create_dir(&path).unwrap(),
+                "malformed" => {
+                    std::fs::write(&path, r#"{"automatic_probe_failure_since":"bad"}"#).unwrap()
+                }
+                _ => assert!(!path.exists()),
+            }
+            let mut rig = make_rig("1.0.0", Some("1.0.0"), None, true).with_state_file(&path);
+            assert_eq!(
+                rig.shared.status.lock().unwrap().probe_failure_since,
+                None,
+                "{fixture}"
+            );
+            rig.engine.wake_once();
+            assert_eq!(rig.published().activity, Activity::Idle, "{fixture}");
+            rig.advance(PROBE_FAILURE_NOTICE_AFTER);
+            rig.engine.wake_once();
+            assert!(
+                matches!(rig.published().activity, Activity::Failed(_)),
+                "{fixture}"
+            );
+            assert!(!rig.shared.status.lock().unwrap().user_waiting, "{fixture}");
+            assert_eq!(rig.probes.load(Ordering::SeqCst), 2, "{fixture}");
+        }
+    }
+
+    /// Re-enabling resets both memory and disk even if no worker wake observed
+    /// the off period. Re-enabling during a probe likewise starts any new
+    /// failure now, without crediting the earlier disabled period.
+    #[farhelm_testtrace::test]
+    fn re_enabling_automatic_updates_clears_the_streak_even_during_a_probe() {
+        for during_probe in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join(state::APP_STATE_FILE);
+            let mut rig = make_rig("1.0.0", Some("1.0.0"), None, true).with_state_file(&path);
+            let handle = UpdaterHandle {
+                shared: Arc::clone(&rig.shared),
+                bundle: root.path().join("unused-test-bundle"),
+                state_path: path.clone(),
+            };
+            rig.engine.wake_once();
+            assert!(
+                state::read_state(&path)
+                    .unwrap()
+                    .automatic_probe_failure_since
+                    .is_some()
+            );
+            rig.advance(PROBE_FAILURE_NOTICE_AFTER);
+            if during_probe {
+                let path = path.clone();
+                rig.engine.deps.probe = Box::new(move || {
+                    handle.set_automatic_updates(false).unwrap();
+                    handle.set_automatic_updates(true).unwrap();
+                    assert_eq!(
+                        state::read_state(&path)
+                            .unwrap()
+                            .automatic_probe_failure_since,
+                        None
+                    );
+                    bail!("offline after re-enable")
+                });
+            } else {
+                handle.set_automatic_updates(false).unwrap();
+                assert!(!handle.automatic_updates());
+                rig.engine.wake_once();
+                assert_eq!(
+                    rig.probes.load(Ordering::SeqCst),
+                    1,
+                    "off means no automatic probe"
+                );
+                handle.set_automatic_updates(true).unwrap();
+                assert_eq!(
+                    state::read_state(&path)
+                        .unwrap()
+                        .automatic_probe_failure_since,
+                    None
+                );
+                assert_eq!(rig.shared.status.lock().unwrap().probe_failure_since, None);
+            }
+            rig.engine.wake_once();
+            assert_eq!(rig.published().activity, Activity::Idle, "{during_probe}");
+            assert_eq!(
+                state::read_state(&path)
+                    .unwrap()
+                    .automatic_probe_failure_since,
+                Some(*rig.now.lock().unwrap())
+            );
+        }
+    }
+
+    /// A failed settings write cannot pretend to re-enable or clear history.
+    /// A worker persistence failure has the opposite contract: it is logged,
+    /// but the in-memory streak and subsequent notice must still work.
+    #[farhelm_testtrace::test]
+    fn failed_streak_and_setting_writes_preserve_their_distinct_contracts() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), None, true);
+        rig.engine.deps.write_probe_failure_since = Box::new(|_| bail!("fixture write refused"));
+        rig.engine.wake_once();
+        let since = rig.shared.status.lock().unwrap().probe_failure_since;
+        assert!(since.is_some());
+        assert_eq!(
+            *rig.streak.lock().unwrap(),
+            None,
+            "durable record really was not written"
+        );
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("occupied-state");
+        std::fs::create_dir(&path).unwrap();
+        let handle = UpdaterHandle {
+            shared: Arc::clone(&rig.shared),
+            bundle: root.path().join("unused-test-bundle"),
+            state_path: path,
+        };
+        assert!(handle.set_automatic_updates(true).is_err());
+        assert_eq!(rig.shared.status.lock().unwrap().probe_failure_since, since);
+        rig.advance(PROBE_FAILURE_NOTICE_AFTER);
+        rig.engine.wake_once();
+        assert!(matches!(rig.published().activity, Activity::Failed(_)));
+        *rig.latest.lock().unwrap() = Some("1.0.0".into());
+        rig.advance(CHECK_INTERVAL);
+        rig.engine.wake_once();
+        assert_eq!(rig.shared.status.lock().unwrap().probe_failure_since, None);
+        assert_eq!(rig.published().activity, Activity::Idle);
+    }
+
+    /// Verification refusals keep only the existing reinstall warning on an
+    /// automatic run, even after a probe streak reaches its threshold. The
+    /// successful probe ends that streak; no install-failure notice is minted.
+    #[farhelm_testtrace::test]
+    fn automatic_verification_failure_keeps_only_the_reinstall_warning() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), None, true);
+        rig.engine.wake_once();
+        rig.advance(PROBE_FAILURE_NOTICE_AFTER);
+        *rig.latest.lock().unwrap() = Some("1.1.0".into());
+        rig.engine.deps.install =
+            Box::new(|_| Err(UnverifiableRelease("fixture signature refused".into()).into()));
+        rig.engine.wake_once();
+        let state = rig.published();
+        assert!(state.needs_reinstall);
+        assert_eq!(state.activity, Activity::Idle);
+        assert_eq!(state.notice_id, 0);
+        assert_eq!(*rig.streak.lock().unwrap(), None);
+        assert!(readout(&state).tooltip.ends_with(REINSTALL_COMMAND));
+    }
+
+    /// The install boundary always qualifies, even after a long offline
+    /// streak, and repeated equal failures undo a dismissal exactly once.
+    /// Successful installs clear both history and the sticky notice.
+    #[farhelm_testtrace::test]
+    fn install_failure_ends_the_probe_streak_and_equal_later_failure_reappears() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), None, false);
+        rig.engine.wake_once();
+        rig.advance(CHECK_INTERVAL);
+        *rig.latest.lock().unwrap() = Some("1.1.0".into());
+        rig.engine.wake_once();
+        let first = rig.published();
+        assert!(matches!(first.activity, Activity::Failed(_)));
+        assert_eq!(*rig.streak.lock().unwrap(), None);
+        let mut feedback = crate::app_updater::InlineFeedback::default();
+        feedback.observe(&first.activity, first.notice_id);
+        feedback.dismiss(&first.activity, first.notice_id);
+        rig.advance(CHECK_INTERVAL);
+        rig.engine.wake_once();
+        let second = rig.published();
+        assert_eq!(second.activity, first.activity);
+        assert_eq!(second.notice_id, first.notice_id + 1);
+        feedback.observe(&second.activity, second.notice_id);
+        let mut fresh = crate::app_updater::InlineFeedback::default();
+        fresh.observe(&second.activity, second.notice_id);
+        assert_eq!(feedback, fresh, "the equal later notice is shown again");
+        let installed = Arc::clone(&rig.installed);
+        rig.engine.deps.install = Box::new(move |version| {
+            *installed.lock().unwrap() = Some(version.into());
+            Ok(())
+        });
+        rig.advance(CHECK_INTERVAL);
+        rig.engine.wake_once();
+        assert_eq!(rig.published().activity, Activity::Idle);
+        assert!(rig.published().update_ready());
+        assert!(!rig.shared.status.lock().unwrap().retain_failure);
+    }
+
+    /// Spec: a retained automatic failure clears when a newer version becomes
+    /// installed outside the updater. Automatic checks stop while an update
+    /// waits, so without this the stale "did not finish" notice would sit
+    /// beside the red update-ready readout indefinitely; the very next wake
+    /// that sees the newer Installed record must clear it without a check.
+    #[farhelm_testtrace::test]
+    fn an_external_install_clears_a_retained_automatic_failure() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
+        rig.engine.wake_once();
+        assert!(
+            matches!(rig.published().activity, Activity::Failed(_)),
+            "premise: the automatic install failure is shown"
+        );
+        assert!(rig.shared.status.lock().unwrap().retain_failure);
+        let installs = rig.installs.lock().unwrap().len();
+        *rig.installed.lock().unwrap() = Some("1.1.0".into());
+        rig.engine.wake_once();
+        assert_eq!(
+            rig.installs.lock().unwrap().len(),
+            installs,
+            "premise: the wake ran no check of its own"
+        );
+        let after = rig.published();
+        assert_eq!(after.activity, Activity::Idle);
+        assert!(after.update_ready());
+        assert!(!rig.shared.status.lock().unwrap().retain_failure);
     }
 
     /// Spec: automatic checks happen about once a day of wall-clock time:
@@ -2296,15 +3032,15 @@ mod tests {
     /// checking. Repeated requests joining one visible run keep its identity;
     /// only a later request after completion starts a fresh presentation lifetime.
     #[farhelm_testtrace::test]
-    fn user_check_identity_survives_coalesced_identical_answers() {
+    fn notice_identity_survives_coalesced_identical_answers() {
         let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.0.0"), true);
         let mut receiver = rig.shared.subscribe();
-        assert_eq!(receiver.borrow_and_update().user_check_id, 0);
+        assert_eq!(receiver.borrow_and_update().notice_id, 0);
         rig.shared.check_now();
-        let first_id = rig.published().user_check_id;
+        let first_id = rig.published().notice_id;
         assert_eq!(first_id, 1);
         rig.shared.check_now();
-        assert_eq!(rig.published().user_check_id, first_id);
+        assert_eq!(rig.published().notice_id, first_id);
         rig.engine.wake_once();
         let first = receiver.borrow_and_update().clone();
         assert_eq!(first.activity, Activity::UpToDate("1.0.0".into()));
@@ -2314,10 +3050,10 @@ mod tests {
         assert!(receiver.has_changed().unwrap());
         let second = receiver.borrow_and_update().clone();
         assert_eq!(second.activity, first.activity);
-        assert_eq!(second.user_check_id, first.user_check_id + 1);
+        assert_eq!(second.notice_id, first.notice_id + 1);
         rig.advance(CHECK_INTERVAL);
         rig.engine.wake_once();
-        assert_eq!(rig.published().user_check_id, second.user_check_id);
+        assert_eq!(rig.published().notice_id, second.notice_id);
     }
 
     /// Readiness can predate a check, so only a successful user-visible outcome
@@ -2365,7 +3101,7 @@ mod tests {
         let mut automatic = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
         automatic.engine.wake_once();
         assert!(automatic.published().update_ready());
-        assert_eq!(automatic.published().user_check_id, 0);
+        assert_eq!(automatic.published().notice_id, 0);
         assert!(!automatic.published().user_update_ready);
 
         let mut external = make_rig("1.0.0", Some("1.0.0"), Some("1.0.0"), true);
@@ -2373,7 +3109,7 @@ mod tests {
         *external.installed.lock().unwrap() = Some("1.1.0".into());
         external.engine.wake_once();
         assert!(external.published().update_ready());
-        assert_eq!(external.published().user_check_id, 0);
+        assert_eq!(external.published().notice_id, 0);
         assert!(!external.published().user_update_ready);
 
         external.shared.check_now();
@@ -2419,7 +3155,7 @@ mod tests {
             assert!(!crate::app_updater::announce_update_ready(&readout(
                 &recovered
             )));
-            assert_eq!(recovered.user_check_id, completed.user_check_id);
+            assert_eq!(recovered.notice_id, completed.notice_id);
             assert_eq!(recovered.activity, completed.activity);
             assert_eq!(
                 rig.probes.load(Ordering::SeqCst),
@@ -2439,7 +3175,7 @@ mod tests {
             running: "1.0.0".to_string(),
             installed: installed.map(str::to_string),
             activity,
-            user_check_id: 0,
+            notice_id: 0,
             user_update_ready: false,
             needs_reinstall: false,
         }

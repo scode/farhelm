@@ -3577,52 +3577,72 @@ that arrives while a run is in progress joins it, and that run's outcome is then
 about once a minute, re-reads the Installed record (cheap, and how a terminal install shows up), and runs the automatic
 check when automatic updates are on and 24 hours of wall-clock time have passed since the last check, or the clock now
 reads earlier than the last check, so a corrected clock cannot postpone checks. A plain 24-hour timer would not do: the
-timers on macOS stop counting while the Mac sleeps. The last check time is kept in memory only; the check shortly after
-startup covers restarts. While Installed is newer than the running version the automatic check does nothing: it saves a
-download a day while an update waits, and it avoids a third version replacing the folder of the one still running (the
-installer keeps only Installed, the version it replaced, and Running, and Running is recorded by a supervisor this app
-may not own). A check the user asked for still installs, accepting that rare case because the user asked; with the
-default state directory the Running record still protects the version that is running.
+timers on macOS stop counting while the Mac sleeps. The scheduling last-check time is kept in memory only, distinct from
+the persisted probe-failure streak below; the check shortly after startup covers restarts. While Installed is newer than
+the running version the automatic check does nothing: it saves a download a day while an update waits, and it avoids a
+third version replacing the folder of the one still running (the installer keeps only Installed, the version it
+replaced, and Running, and Running is recorded by a supervisor this app may not own). A check the user asked for still
+installs, accepting that rare case because the user asked; with the default state directory the Running record still
+protects the version that is running.
 
 The automatic-updates setting is `install_updates_automatically` in `desktop-client.json`, through that file's locked
 read-modify-write. It is optional, and absence means on, so every existing file reads as on.
 
+The same file holds optional `automatic_probe_failure_since`, serde's `SystemTime` object with UTC `secs_since_epoch`
+and `nanos_since_epoch`. Absence means no streak; exact precision avoids showing a notice early at the three-day
+boundary. The updater reads it once at startup, retaining the in-memory value as authoritative and writing changes best
+effort through the existing atomic writer. A missing, unreadable or malformed file supplies no known streak; no
+per-field tolerance is added. Failed writes are logged without stopping checks or undoing memory. Old clients ignore the
+added field. Shared status holds the streak under its lock, and every write takes that lock before the file's lock,
+including settings saves. Successfully changing automatic updates from off to on clears both memory and disk; an
+in-flight failure cannot restore a stale start over that reset. A future-dated start or a clock moving backwards from
+the preceding probe sample resets the start to now on a failed check. Gaps without probes do not start a streak.
+
 The updater publishes one state, read by the app bar: idle, checking, installing a version, up to date, or a failed
 check with its reason, plus the version Installed names. Only a run the user started, or an automatic run that a user's
-request joined, shows its progress and outcome there; an automatic run leaves the published state idle from start to
-finish, so nothing on screen changes until the Installed record makes the update marker appear. A failed automatic check
-or install is logged, and the next check tries again. The exception is a release that fails verification (no key in the
-ring verifies its signature, its trusted comment names another version, or its `install.sh` does not match the signed
-checksum): nothing is run, and the app cannot update itself, which the user must not discover by accident. That sets a
-lasting notice in the published state, whether the check was automatic or the user's; the readout carries a warning mark
-and its hover says this Farhelm can no longer verify its updates and must be reinstalled with
-`curl -fsSL https://get.farhelm.io/install.sh | sh`. It stays while the app runs, until a later check verifies and
-installs or finds nothing newer, or the Installed record changes to a version newer than the running one (the user
-followed it, and the update marker now asks for the restart). It is held in memory only, so a relaunched app shows it
-again once a check fails the same way, which with automatic updates on is the startup check. Network and HTTP failures
-never set it. It is what an app more than one key rotation behind sees (see "Release signing key"). The outcome of a run
-the user saw (up to date, or failed with its reason) stays in the hover until the next run starts. While an update
-waits, the hover names the waiting version and that a restart finishes the update; a failed check the user started then
-names both. The readout renders it through pure functions (its class, glyph, hover text and inline status). "Update
-ready" is not a state of its own: it is Installed being newer than the running version, whatever the updater is doing.
+request joined, shows its progress there; an unjoined automatic run does not publish its working activity. It can retain
+an earlier failure notice while it works. The worker distinguishes probe, install and verification failures. A failed
+automatic probe starts the streak if none exists and shows a notice only at or after three days. Any successful probe,
+automatic or on demand, ends the streak, even if the subsequent install fails. A failed automatic install shows at once,
+including downloads after a successful probe. The next check tries again on the unchanged daily schedule. A release that
+fails verification (no key in the ring verifies its signature, its trusted comment names another version, or its
+`install.sh` does not match the signed checksum): nothing is run, and the app cannot update itself, which the user must
+not discover by accident. That sets a lasting notice in the published state, whether the check was automatic or the
+user's; the readout carries a warning mark and its hover says this Farhelm can no longer verify its updates and must be
+reinstalled with `curl -fsSL https://get.farhelm.io/install.sh | sh`. It stays while the app runs, until a later check
+verifies and installs or finds nothing newer, or the Installed record changes to a version newer than the running one
+(the user followed it, and the update marker now asks for the restart). It is held in memory only, so a relaunched app
+shows it again once a check fails the same way, which with automatic updates on is the startup check. Network and HTTP
+failures never set it. It is what an app more than one key rotation behind sees (see "Release signing key"). A
+verification refusal creates no automatic inline failure notice. The outcome of a run the user saw (up to date, or
+failed with its reason) stays in the hover until the next run starts. An automatically shown failure is retained across
+later failed runs until a check succeeds; UI dismissal hides its inline words without losing the hover reason. Manual
+progress and outcome take precedence over it. While an update waits, the hover names the waiting version and that a
+restart finishes the update; a failed check the user started then names both. The readout renders it through pure
+functions (its class, glyph, hover text and inline status). "Update ready" is not a state of its own: it is Installed
+being newer than the running version, whatever the updater is doing.
 
 The version readout also shows checking/installing inline, spinning its trailing refresh glyph when it is a check
 button, or the separate spinner when an update waits and the readout opens a menu. Both use the existing stepped
 animation and stop moving under reduced motion; the progress words remain. It then shows up to date for about five
-seconds or check failed until dismissed or another check starts. An up-to-date answer yields to a waiting update; a
-failed restart has no inline check outcome. The activity type is shared with presentation without changing the worker's
-published transitions. The published state also retains a user-check identity, incremented when a request starts or
-first joins a run, and whether its successful completion found an update waiting. Repeated requests joining that visible
-run keep the identity; automatic work and Installed-record changes do not create one. The captured success clears with a
-new request, the next run, a restart failure, or a changed Installed record; it is announcement provenance, not update
-readiness itself. Expiry and dismissal belong to the component, keyed by activity and request identity rather than every
-published change: Installed-record or reinstall-warning changes must not stretch the timer or revive hidden text. The
-same pair rejects a callback or dismissal from an earlier request, even when watch delivery skipped checking between
-identical answers. Successful readiness has hidden "update ready" words in the live region while the red toggle owns the
-visible outcome. The live-region child is keyed by request so an identical later phrase still replaces its text-bearing
-node. The status is a persistently mounted polite live region beside either version rendering, with bounded, ellipsized
-text, the existing reduced-motion-aware spinner, and a keyboard-accessible button for failure dismissal. Hover words and
-version marks are independent of this visibility state, and the web build has no updater to mount it.
+seconds or check failed until dismissed or another check starts; an automatic-origin failure instead survives
+unsuccessful runs until a successful check or dismissal. An up-to-date answer yields to a waiting update; a failed
+restart has no inline check outcome. The activity type is shared with presentation without changing the worker's
+published transitions. The published state retains a notice identity, incremented when a request starts or first joins a
+run or when an unjoined automatic failure qualifies, and whether a user's successful completion found an update waiting.
+Repeated requests joining that visible run keep the identity; its completion does not increment it again. Nonqualifying
+automatic failures and Installed-record changes do not create one or replace a retained failure's reason. A later
+qualifying automatic failure gets a new identity, even for the same reason, so it reappears after dismissal. The
+captured success clears with a new request, the next run, a restart failure, or a changed Installed record; it is
+announcement provenance, not update readiness itself. Expiry and dismissal belong to the component, keyed by activity
+and request identity rather than every published change: Installed-record or reinstall-warning changes must not stretch
+the timer or revive hidden text. The same pair rejects a callback or dismissal from an earlier request, even when watch
+delivery skipped checking between identical answers. Successful readiness has hidden "update ready" words in the live
+region while the red toggle owns the visible outcome. The live-region child is keyed by request so an identical later
+phrase still replaces its text-bearing node. The status is a persistently mounted polite live region beside either
+version rendering, with bounded, ellipsized text, the existing reduced-motion-aware spinner, and a keyboard-accessible
+button for failure dismissal. Hover words and version marks are independent of this visibility state, and the web build
+has no updater to mount it.
 
 Restart to update spawns a detached helper in its own process group: a short `/bin/sh` script that waits, bounded at
 about a minute, for the app's process to exit, then runs `/usr/bin/open` on the bundle, and gives up without opening

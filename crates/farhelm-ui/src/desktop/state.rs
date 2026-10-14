@@ -26,6 +26,13 @@ pub(super) struct PersistedState {
     /// "Session list" keeps it out of the helm's shared preferences.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) install_updates_automatically: Option<bool>,
+    /// The first failed automatic `/latest` probe in the current streak, in
+    /// serde's UTC Unix seconds/nanoseconds object. Absence means no streak,
+    /// not a last-success time:
+    /// being asleep or quit must not make the first offline check overdue.
+    /// Older clients ignore this optional field on read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) automatic_probe_failure_since: Option<std::time::SystemTime>,
 }
 /// Atomically replace the destination while retaining the old record on
 /// failure. Windows needs its replace-capable move API because
@@ -82,8 +89,8 @@ pub(super) fn read_state(path: &Path) -> anyhow::Result<PersistedState> {
 ///
 /// Locking the whole merge is what prevents two writers from reinstalling a
 /// snapshot that silently drops a field the other just committed: the
-/// webview readiness record and the automatic-updates setting share the
-/// file.
+/// webview readiness record, automatic-updates setting and probe-failure
+/// streak share the file.
 pub(super) fn update_state(
     path: &Path,
     mutate: impl FnOnce(&mut PersistedState),
@@ -289,5 +296,66 @@ mod tests {
         let state = read_state(&path).unwrap();
         assert_eq!(state.install_updates_automatically, Some(false));
         assert_eq!(state.webview_auth_generation, 2);
+    }
+
+    /// A precise optional timestamp round-trips without replacing the saved
+    /// choice or readiness record. Old readers ignore it, while old files
+    /// acquire no failure history merely by being rewritten after an upgrade.
+    #[farhelm_testtrace::test]
+    fn the_probe_failure_streak_is_optional_precise_and_compatible() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(APP_STATE_FILE);
+        let since =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1_000_000, 123_456_789);
+        update_state(&path, |state| {
+            state.webview_auth_generation = 7;
+            state.install_updates_automatically = Some(false);
+            state.automatic_probe_failure_since = Some(since);
+        })
+        .unwrap();
+        update_state(&path, |state| state.webview_auth_generation += 1).unwrap();
+        let current = read_state(&path).unwrap();
+        assert_eq!(current.automatic_probe_failure_since, Some(since));
+        assert_eq!(current.install_updates_automatically, Some(false));
+        assert_eq!(current.webview_auth_generation, 8);
+        #[derive(Deserialize)]
+        /// The preceding client's exact known fields, with serde's ordinary
+        /// unknown-field tolerance. This pins downgrade readability rather
+        /// than merely proving the current schema can read its own output.
+        struct OldState {
+            webview_auth_generation: u64,
+            install_updates_automatically: Option<bool>,
+        }
+        let old: OldState = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(old.webview_auth_generation, 8);
+        assert_eq!(old.install_updates_automatically, Some(false));
+        update_state(&path, |state| state.automatic_probe_failure_since = None).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(
+            raw.get("automatic_probe_failure_since").is_none(),
+            "absence means no streak"
+        );
+        assert_eq!(
+            read_state(&path).unwrap().automatic_probe_failure_since,
+            None
+        );
+    }
+
+    /// A bad timestamp invalidates the whole record, as other fields do.
+    /// Quietly accepting other fields would introduce a new per-field decode
+    /// policy; the updater handles this ordinary read failure at startup.
+    #[farhelm_testtrace::test]
+    fn malformed_probe_streak_refuses_the_whole_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(APP_STATE_FILE);
+        std::fs::write(
+            &path,
+            r#"{"install_updates_automatically":false,"automatic_probe_failure_since":"bad"}"#,
+        )
+        .unwrap();
+        assert!(read_state(&path).is_err());
+        assert!(update_state(&path, |state| state.webview_auth_generation += 1).is_err());
+        assert!(std::fs::read_to_string(&path).unwrap().contains("bad"));
     }
 }
