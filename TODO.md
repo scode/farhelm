@@ -65,13 +65,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   its terminal tabs running and shows the session as exited, the same as any other exit. Whether suspending also stops
   terminal tabs, what bringing a session back does, and how it looks in the list are details TBD.
 
-- **Install Claude and Codex on a host for the user.** Offer to install Claude Code and Codex (only those two) on a host
-  on the user's behalf, always through each vendor's one-line curl installer, and optionally copy the user's credentials
-  for them over to the host. Choosing to copy credentials must come with a warning that it is the user's call, including
-  the risk that a provider bans the account for use across hosts. Offer it in two places: as an action in the host's
-  pop-up menu, and as an opt-in option (off by default) when adding a host. Relatedly, adding a host should probe it
-  once Farhelm's own installation there is complete.
-
 - **Lock down the release and update trust chain.** Installs and updates now come from get.farhelm.io with signed
   checksums, and CI no longer signs. What remains: a Vercel user that holds only the get.farhelm.io project; disconnect
   the docs project from Git (its automatic deploys are off only by a setting in agent-writable `website/vercel.json`);
@@ -496,6 +489,13 @@ are large mostly because of their tests.
   changelog docstring and the cross-protocol test pruning that shared this entry are done.
 
 ## Maybe later
+
+- **Install Claude and Codex on a host for the user.** Offer to install Claude Code and Codex (only those two) on a host
+  on the user's behalf, always through each vendor's one-line curl installer, and optionally copy the user's credentials
+  for them over to the host. Choosing to copy credentials must come with a warning that it is the user's call, including
+  the risk that a provider bans the account for use across hosts. Offer it in two places: as an action in the host's
+  pop-up menu, and as an opt-in option (off by default) when adding a host. Relatedly, adding a host should probe it
+  once Farhelm's own installation there is complete.
 
 - **Guard the website's install command against a rogue change.** Add automated protection so that an agent cannot
   replace the `curl … | sh` install command on the docs website without the maintainer noticing. The command is what new
