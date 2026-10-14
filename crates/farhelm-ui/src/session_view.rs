@@ -182,7 +182,7 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
 ///
 /// - **The confirmations are POPOVERS, anchored to the button that opened
 ///   them.** They are still the confirm-in-place flow they always were —
-///   consequence sentence first, focus on cancel — but the consequence
+///   consequence sentence first, focus on the enabled confirming answer — but the consequence
 ///   ("still running — restarting stops the agent and its whole process tree
 ///   first") is a full sentence that would either wrap the header to two
 ///   lines or be truncated to uselessness if it sat in flow. Neither is
@@ -2232,8 +2232,9 @@ pub(crate) fn SessionView(
                             // The same in-page confirmation delete uses, for
                             // the same reason (SPEC.md: restart on a running
                             // agent confirms, stops, then relaunches) and with
-                            // the same safety defaults — consequence text
-                            // first, focus on cancel.
+                            // consequence text first. The enabled confirming
+                            // answer takes focus so a new Enter goes ahead;
+                            // Cancel is the disabled-target fallback.
                             //
                             // `id` pairs with the trigger's `aria-controls`
                             // above so assistive technology can identify the
@@ -2247,6 +2248,9 @@ pub(crate) fn SessionView(
                                     class: "btn btn-danger restart-confirm",
                                     "data-tooltip": "confirm restart: stop the running agent, then resume its conversation",
                                     disabled: restarting(),
+                                    autofocus: !restarting(),
+                                    onkeydown: crate::guard_confirmation_enter,
+                                    onmounted: move |_| crate::focus_confirmation(".restart-confirm", ".restart-cancel"),
                                     onclick: move |_| {
                                         if !confirming() {
                                             return;
@@ -2266,7 +2270,7 @@ pub(crate) fn SessionView(
                                     r#type: "button",
                                     class: "btn btn-neutral restart-cancel",
                                     "data-tooltip": "cancel: leave the agent running",
-                                    autofocus: true,
+                                    autofocus: restarting(),
                                     onclick: move |_| {
                                         // Only the click that closes the prompt
                                         // may release the claim. A cancel queued
@@ -2345,6 +2349,9 @@ pub(crate) fn SessionView(
                                     class: "btn btn-danger",
                                     disabled: replacing(),
                                     "data-tooltip": "replace this session now, as described",
+                                    autofocus: !replacing(),
+                                    onkeydown: crate::guard_confirmation_enter,
+                                    onmounted: move |_| crate::focus_confirmation(".header-replace-confirm .btn-danger", ".header-replace-confirm .btn-neutral"),
                                     onclick: move |_| {
                                         if let Some(claim) = confirming_header_replace.take(&()) {
                                             header_confirm_replace(
@@ -2361,7 +2368,7 @@ pub(crate) fn SessionView(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-neutral",
-                                    autofocus: true,
+                                    autofocus: replacing(),
                                     "data-tooltip": "cancel: keep this session as it is",
                                     onclick: move |_| {
                                         if confirming_header_replace.take(&()).is_some() {
@@ -2432,6 +2439,10 @@ pub(crate) fn SessionView(
                                     r#type: "button",
                                     class: "btn btn-danger header-delete-confirm-submit",
                                     "data-tooltip": "delete this session and its state now",
+                                    disabled: header_deleting,
+                                    autofocus: !header_deleting,
+                                    onkeydown: crate::guard_confirmation_enter,
+                                    onmounted: move |_| crate::focus_confirmation(".header-delete-confirm-submit", ".header-delete-confirm .btn-neutral"),
                                     onclick: {
                                         let id = shown.id.clone();
                                         move |_| {
@@ -2450,7 +2461,7 @@ pub(crate) fn SessionView(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-neutral",
-                                    autofocus: true,
+                                    autofocus: header_deleting,
                                     "data-tooltip": "cancel: keep this session",
                                     onclick: move |_| confirming_header_delete.cancel_for(&()),
                                     "cancel"
@@ -2758,6 +2769,9 @@ pub(crate) fn SessionView(
                                 class: "btn btn-danger replace-confirm-submit",
                                 "data-tooltip": "replace this session now, as described",
                                 disabled: replacing(),
+                                autofocus: !replacing(),
+                                onkeydown: crate::guard_confirmation_enter,
+                                onmounted: move |_| crate::focus_confirmation(".replace-confirm-submit", ".replace-confirm .replace-cancel"),
                                 onclick: move |_| {
                                     if let Some(claim) = confirming_replace.take(&()) {
                                         confirm_replace(
@@ -2775,7 +2789,7 @@ pub(crate) fn SessionView(
                                 r#type: "button",
                                 class: "btn btn-neutral replace-cancel",
                                 "data-tooltip": "cancel: keep this session as it is",
-                                autofocus: true,
+                                autofocus: replacing(),
                                 onclick: move |_| {
                                     if confirming_replace.take(&()).is_some() {
                                         replace_key.set(None);
@@ -2843,7 +2857,10 @@ pub(crate) fn SessionView(
                 // see `status::confirm_consequence`'s docs for why that order is
                 // the safety-critical part.
                 if let Some(tab_id) = confirming_tab {
-                    div { class: "tab-confirm",
+                    // Changing the target is a fresh question, even while the
+                    // previous one is open. Keying by tab remounts its focus
+                    // handoff instead of leaving Enter on the second close control.
+                    div { key: "{tab_id}", class: "tab-confirm",
                         span { class: "confirm-consequence", "{CLOSE_TAB_CONSEQUENCE}" }
                         span { class: "confirm-title",
                             "{confirming_label.clone().unwrap_or_default()}"
@@ -2852,6 +2869,10 @@ pub(crate) fn SessionView(
                             r#type: "button",
                             class: "btn btn-danger confirm-delete confirm-close-tab",
                             "data-tooltip": "close this tab, ending its shell and everything it started",
+                            disabled: closing_tabs.read().contains(&tab_id),
+                            autofocus: !closing_tabs.read().contains(&tab_id),
+                            onkeydown: crate::guard_confirmation_enter,
+                            onmounted: move |_| crate::focus_confirmation(".confirm-close-tab", ".tab-confirm .confirm-cancel"),
                             onclick: {
                                 let tab_id = tab_id.clone();
                                 move |_| confirm_close_tab(tab_id.clone())
@@ -2862,13 +2883,9 @@ pub(crate) fn SessionView(
                             r#type: "button",
                             class: "btn btn-neutral confirm-cancel",
                             "data-tooltip": "cancel: keep the tab open",
-                            // Safe default, exactly as the delete prompt does
-                            // it: keyboard focus lands on the way OUT of the
-                            // destructive action, via the plain HTML attribute
-                            // rather than a fallible `set_focus` whose
-                            // discarded `Result` could silently drop the
-                            // safety behavior.
-                            autofocus: true,
+                            // Confirm owns initial focus unless its request is
+                            // already running; Cancel remains a usable fallback.
+                            autofocus: closing_tabs.read().contains(&tab_id),
                             onclick: {
                                 let tab_id = tab_id.clone();
                                 move |_| confirming_close.cancel_for(&tab_id)

@@ -3920,7 +3920,7 @@ fn AddHostForm(
     });
     use_effect(move || {
         if offer.is_open() && !*auto_submit.peek() {
-            settings_dialog::focus_add_cancel();
+            settings_dialog::focus_add_confirm();
         }
     });
 

@@ -769,23 +769,14 @@ std::thread_local! {
 /// textarea through refreshes that reorder or temporarily remove this row.
 /// This row only supplies the source identity and title that seed that editor.
 ///
-/// Focus-on-open uses the plain HTML `autofocus` attribute on the cancel
-/// button (below), not Dioxus's `onmounted`/`set_focus` API: `set_focus`
-/// returns a `Result` future that can fail (`MountedError`, e.g. on a
-/// renderer that does not support it), and since focus-on-cancel is a
-/// safety default — landing keyboard focus on the SAFE action before a
-/// stray Enter/Space can reach anything — silently discarding that
-/// `Result` would let the safety behavior vanish with nothing to show for
-/// it. `autofocus` cannot fail the same way: it is applied by the browser
-/// itself at parse/insert time as a plain attribute, with no fallible
-/// async call in the UI's own control to get wrong or ignore. It fires
-/// whenever the cancel button is freshly created inside the `if
-/// confirming` branch — which, since the prompt lives in the on-demand
-/// panel, can be MORE than once per confirmation: the confirming flag
-/// survives the panel closing (see `confirming` in `ListView`), so
-/// closing and reopening the panel remounts the prompt and lands focus
-/// on cancel again. That repeat is the safe direction — every fresh
-/// appearance of the prompt starts with the escape hatch focused.
+/// Focus-on-open uses the browser's `autofocus` on the enabled confirming
+/// answer, or Cancel when the page is busy. A new Enter then performs the
+/// action the user explicitly requested; repeated Enter is consumed before
+/// native activation so holding the opening key cannot also answer it.
+/// The mount also schedules scripted focus: browsers can consume native
+/// autofocus on the document's first prompt and ignore a later insertion.
+/// Reopening the panel remounts a retained prompt, so each appearance restores
+/// the same eligible answer without the fallible `MountedData::set_focus` path.
 ///
 /// ## Keyboard
 ///
@@ -829,8 +820,8 @@ std::thread_local! {
 /// the prompt without answering it would leave the row primed to reopen
 /// straight back into the same prompt.
 ///
-/// A confirmation autofocuses its cancel button, because the risk is a stray
-/// Enter landing on a destructive action. The separate rename dialog owns its
+/// A confirmation autofocuses its enabled answer, falling back to Cancel
+/// while busy. The separate rename dialog owns its
 /// own focus, Escape, and cancellation lifecycle.
 #[component]
 #[allow(clippy::too_many_arguments)]
@@ -1941,8 +1932,8 @@ pub(super) fn SessionRow(
                             },
                         // The confirm sub-states ARE a small named exchange:
                         // one consequence sentence and its two answers,
-                        // with focus deliberately placed on the
-                        // safe one as it appears. `dialog` is the role
+                        // with focus on the confirming answer when enabled,
+                        // otherwise Cancel. `dialog` is the role
                         // that says so, and the toggle's own
                         // `aria-haspopup` above tracks it. Non-modal by
                         // omission (`aria-modal` defaults to false) —
@@ -1998,6 +1989,9 @@ pub(super) fn SessionRow(
                                 // refusal made visible. Cancel stays
                                 // enabled — backing out is always safe.
                                 disabled: busy,
+                                autofocus: !busy,
+                                onkeydown: crate::guard_confirmation_enter,
+                                onmounted: move |_| crate::focus_confirmation(".session-row-menu-panel .confirm-delete", ".session-row-menu-panel .confirm-cancel"),
                                 // The guard comes from THIS render's
                                 // snapshot, the one the consequence text
                                 // above was drawn from, so a prompt that
@@ -2012,15 +2006,9 @@ pub(super) fn SessionRow(
                                 r#type: "button",
                                 class: "btn btn-neutral confirm-cancel",
                                 "data-tooltip": "cancel: keep this session",
-                                // Safe default: land keyboard focus on
-                                // cancel, not confirm, the instant this
-                                // prompt appears — a stray Enter/Space
-                                // right after the menu's delete click backs
-                                // OUT of the destructive action instead of
-                                // into it (see the component doc for why
-                                // declarative `autofocus` over the async
-                                // focus API).
-                                autofocus: true,
+                                // A disabled confirming answer cannot receive
+                                // focus; keep a usable escape hatch instead.
+                                autofocus: busy,
                                 onclick: move |_| on_cancel_delete.call(cancel_id.clone()),
                                 "cancel"
                             }
@@ -2055,6 +2043,9 @@ pub(super) fn SessionRow(
                                 "data-tooltip": "replace this session now, as described",
                                 // See confirm-delete: refusal made visible.
                                 disabled: busy,
+                                autofocus: !busy,
+                                onkeydown: crate::guard_confirmation_enter,
+                                onmounted: move |_| crate::focus_confirmation(".session-row-menu-panel .confirm-replace", ".session-row-menu-panel .replace-cancel"),
                                 onclick: move |_| on_confirm_replace.call(confirm_replace_source.clone()),
                                 "confirm replace"
                             }
@@ -2062,7 +2053,7 @@ pub(super) fn SessionRow(
                                 r#type: "button",
                                 class: "btn btn-neutral replace-cancel",
                                 "data-tooltip": "cancel: keep this session as it is",
-                                autofocus: true,
+                                autofocus: busy,
                                 onclick: move |_| on_cancel_replace.call(cancel_replace_id.clone()),
                                 "cancel"
                             }

@@ -150,20 +150,19 @@ pub(crate) fn return_focus_to_row(id: HostId) {
 fn install_dialog() {
     // The header's quiet close button is earlier in DOM order, but opening
     // settings still starts at the first editable setting, as it did before
-    // the header existed. Removal's safe-first rule uses its own installer.
+    // the header existed. Removal's confirming focus uses its own installer.
     install_dialog_with_initial_focus(
         ".host-edit, .host-alias, .host-yolo-without-asking-toggle, .host-settings-close",
     );
 }
 
-/// Install modal isolation while putting the destructive dialog's safe escape
-/// hatch first in the focus order. The shared settings dialog focuses its
-/// first editor, but removal must start on Cancel so an accidental Enter
-/// cannot immediately forget the host.
+/// Make Enter confirm the host removal the user explicitly opened.
+/// Cancel remains the initial fallback while removal is disabled and the
+/// independent Escape target, so changing focus never changes dismissal.
 fn install_remove_dialog() {
     install_dialog_with_focus(
         DIALOG_SELECTOR,
-        ".host-settings-close",
+        ".host-remove-confirm:enabled",
         Some(".host-cancel-edit, .host-settings-close"),
         true,
     );
@@ -179,13 +178,13 @@ pub(crate) fn install_add_dialog() {
     );
 }
 
-/// Focus and isolate a row's uninstall confirmation with Cancel first, as
-/// the removal dialog does: the confirm button removes Farhelm from a host,
-/// so a stray Enter must land on the safe answer.
+/// Focus the enabled uninstall answer without opening its tooltip.
+/// The user has already requested this plan; a new Enter confirms it, while
+/// Cancel remains the disabled-target fallback and Escape action.
 pub(crate) fn install_uninstall_dialog() {
     install_dialog_with_focus(
         UNINSTALL_DIALOG_SELECTOR,
-        ".uninstall-cancel",
+        ".uninstall-confirm:enabled",
         Some(".uninstall-cancel"),
         true,
     );
@@ -200,18 +199,19 @@ pub(crate) fn return_focus_to_add_button() {
     ));
 }
 
-/// Focus the setup offer's safe answer without opening its hover help.
+/// Focus the setup offer's enabled confirming answer without hover help.
 ///
-/// Keyboard submission must retain Cancel's visible ring and safe Enter
-/// behavior. The tooltip hook suppresses only this automatic handoff, so
+/// Keyboard submission retains the visible ring; a disabled submit falls
+/// back to Cancel. The tooltip hook suppresses only this automatic handoff, so
 /// later deliberate hover or keyboard navigation still explains the answer.
-pub(crate) fn focus_add_cancel() {
+pub(crate) fn focus_add_confirm() {
     document::eval(
         r#"(() => {
-            const cancel = document.querySelector('.add-host-cancel');
-            if (!cancel) return;
-            if (window.farhelmTooltip?.focusWithoutTooltip) window.farhelmTooltip.focusWithoutTooltip(cancel);
-            else cancel.focus({ preventScroll: true });
+            const target = document.querySelector('.host-add-dialog .provisioning-confirm:enabled')
+                ?? document.querySelector('.add-host-cancel');
+            if (!target) return;
+            if (window.farhelmTooltip?.focusWithoutTooltip) window.farhelmTooltip.focusWithoutTooltip(target);
+            else target.focus({ preventScroll: true });
         })();"#,
     );
 }
@@ -241,7 +241,7 @@ pub(crate) fn install_dialog_with_selector(
 /// Choose whether a host confirmation's automatic focus also opens help.
 ///
 /// Ordinary settings and unrelated modals keep their existing focus behavior.
-/// Only removal and uninstall opt into quiet initial Cancel focus here; setup
+/// Only removal and uninstall opt into quiet initial confirming focus here; setup
 /// uses the same tooltip hook when its already-mounted form receives an offer.
 fn install_dialog_with_focus(
     dialog_selector: &str,
@@ -261,7 +261,10 @@ fn install_dialog_with_focus(
                     if (event.target !== dialog) dialog.__farhelmLastFocus = event.target;
                 }});
             }}
-            const initial = dialog.querySelector({initial_focus}) ?? dialog;
+            // Disabled confirming answers do not receive focus. Keep their
+            // Cancel fallback separate from the independent Escape selector.
+            const initial = dialog.querySelector({initial_focus})
+                ?? dialog.querySelector('.host-settings-close, .uninstall-cancel') ?? dialog;
             // Focus safety does not depend on the tooltip asset finishing load.
             // A later installation observes new events, not this past focus.
             if ({quiet_initial_focus} && window.farhelmTooltip?.focusWithoutTooltip) window.farhelmTooltip.focusWithoutTooltip(initial);
@@ -845,7 +848,7 @@ pub(super) fn HostRemoveDialog(
                             r#type: "button",
                             class: "btn btn-neutral host-settings-close",
                             "data-tooltip": "cancel: keep this host",
-                            autofocus: true,
+                            autofocus: busy,
                             onclick: move |_| {
                                 return_focus_to_row(host.id);
                                 on_cancel.call(())
@@ -858,14 +861,17 @@ pub(super) fn HostRemoveDialog(
                             "data-tooltip": "remove it, and remove hosts without asking from now on",
                             aria_describedby: "host-remove-permanent-hint",
                             disabled: busy,
+                            onkeydown: crate::guard_confirmation_enter,
                             onclick: move |_| on_remove.call(true),
                             "remove, don't ask again"
                         }
                         button {
                             r#type: "button",
-                            class: "btn btn-danger",
+                            class: "btn btn-danger host-remove-confirm",
                             "data-tooltip": "remove: forget this host; its supervisor and sessions keep running",
                             disabled: busy,
+                            autofocus: !busy,
+                            onkeydown: crate::guard_confirmation_enter,
                             onclick: move |_| on_remove.call(false),
                             "remove"
                         }

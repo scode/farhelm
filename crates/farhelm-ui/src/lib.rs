@@ -199,6 +199,32 @@ use session_view::SessionView;
 #[derive(Clone, PartialEq)]
 pub struct ApiBase(pub String);
 
+/// Keep a held Enter from answering a confirmation opened by the same key.
+///
+/// Confirm buttons retain native Enter and Space activation. Only repeated or
+/// composing Enter is consumed before the browser can synthesize its click;
+/// moving initial focus onto Confirm must still require a new deliberate press.
+pub(crate) fn guard_confirmation_enter(event: KeyboardEvent) {
+    if event.key() == Key::Enter && (event.is_auto_repeating() || event.is_composing()) {
+        event.prevent_default();
+        event.stop_propagation();
+    }
+}
+
+/// Focus each freshly mounted confirmation, including its second appearance.
+///
+/// Browsers can consume a document's native autofocus opportunity on its first
+/// prompt. The frame runs after insertion instead, and reads the real disabled
+/// state so an unavailable confirming answer falls back to Cancel. Selectors
+/// name the caller's prompt; host modals keep their own quiet focus installer.
+pub(crate) fn focus_confirmation(confirm: &str, cancel: &str) {
+    let confirm = serde_json::to_string(confirm).expect("a selector always serializes");
+    let cancel = serde_json::to_string(cancel).expect("a selector always serializes");
+    document::eval(&format!(
+        "requestAnimationFrame(() => {{ const confirm = document.querySelector({confirm}); const target = confirm && !confirm.disabled ? confirm : document.querySelector({cancel}); target?.focus({{ preventScroll: true }}); }});"
+    ));
+}
+
 /// The wire types the helm passes through to the browser unchanged, shared
 /// with the helm and supervisor rather than mirrored.
 ///

@@ -317,6 +317,11 @@ test("an interrupted legacy session offers Replace with, prefilled with its comm
  * deliberate confirmation. A successful choice must show the new session;
  * a refusal must leave an actionable error on the interrupted one.
  */
+/**
+ * The interrupted card's inline question shares Replace's guard and outcomes.
+ * Cancel leaves the source alone, while its freshly focused answer accepts a
+ * new Enter, including after reopening; a refusal remains visible for retry.
+ */
 test("Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal", async ({
   page,
 }) => {
@@ -342,7 +347,8 @@ test("Replace confirms inline, can cancel, selects the fresh session, and surfac
   expect(counter.replaceRequests).toBe(0);
 
   await replace.click();
-  await notice.locator(".replace-confirm-submit").click();
+  await expect(notice.locator(".replace-confirm-submit")).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect.poll(() => counter.replaceRequests).toBe(1);
   await expect(page.locator(".titlebar .title")).toHaveText(`${title} (replaced)`);
 
@@ -796,7 +802,8 @@ test("restarting a working agent confirms first, and only then sends the request
 
     await restartButton.click();
     await expect(restartButton).toHaveAttribute("aria-expanded", "true");
-    await page.locator(".restart-confirm").click();
+    await expect(page.locator(".restart-confirm")).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect.poll(() => bodies.length).toBe(1);
     expect(bodies[0].stop_if_running).toBe(true);
     // There is no mode: a restart always resumes the session's own

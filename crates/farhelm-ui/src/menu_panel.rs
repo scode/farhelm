@@ -84,7 +84,7 @@ const SESSION_MENU_PANEL_MIN_RESERVE_PX: f64 = 380.0;
 /// by the time a measurement can even start. `Unmeasured` is what that
 /// first render is — the panel exists in the DOM (so its own height is
 /// ready and tab order includes it, and any `autofocus` element inside it
-/// — the delete confirm's cancel button — can
+/// — the delete prompt's enabled answer or Cancel fallback — can
 /// actually RECEIVE that focus; see the placement style's own
 /// doc for why hiding via `visibility` would have silently broken that)
 /// but paints nothing, which is what keeps a still-pending measurement
@@ -484,8 +484,8 @@ impl<A: Copy, Id: 'static, const N: usize> Copy for MenuWiring<A, Id, N> {}
 // `focus_menu_toggle` call — goes through JS instead, for a reason its own
 // doc gives. All of them are fire-and-forget, discarding the `Result` that
 // `MountedData::set_focus` returns. That is the opposite of what each row
-// does for its own confirm prompt's cancel button (declarative `autofocus`
-// precisely so a dropped `Result` cannot silently lose a SAFETY default).
+// does for its own confirm prompt's initial answer (native autofocus plus
+// a scripted mount handoff for repeated appearances, without a dropped Result).
 // The difference is what failure costs. A renderer that cannot move focus
 // leaves the arrow keys inert and the menu closing without restoring
 // focus — an unimproved keyboard experience, identical to what existed

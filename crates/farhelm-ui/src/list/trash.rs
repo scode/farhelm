@@ -245,14 +245,14 @@ fn ConfirmBand(
     let partial = confirm.targets.iter().any(|target| target.partial) || unchecked > 0;
     rsx! { div { class: "checkout-trash-confirm", role: "group", aria_label: "confirm permanent checkout deletion",
         // A confirmation can name more hosts than fit in the body. Reveal the
-        // safe action and its neighbouring submit button without moving the
+        // confirming answer and its Cancel fallback without moving the
         // pinned header; the warning remains available by scrolling upwards.
-        onmounted: move |_| { document::eval("requestAnimationFrame(() => { const cancel = document.querySelector('.checkout-trash-confirm .trash-confirm-cancel'); cancel?.focus({preventScroll:true}); cancel?.closest('.checkout-trash-actions')?.scrollIntoView({block:'nearest'}); })"); },
+        onmounted: move |_| { document::eval("requestAnimationFrame(() => { const target = document.querySelector('.checkout-trash-confirm .trash-confirm-submit:enabled') ?? document.querySelector('.checkout-trash-confirm .trash-confirm-cancel:enabled'); target?.focus({preventScroll:true}); target?.closest('.checkout-trash-actions')?.scrollIntoView({block:'nearest'}); })"); },
         if count > 0 { p { "Delete {count} archived {checkouts(count)} ({space(bytes, partial)}) on " span { class: "peer-value", dir: "ltr", "{names}" } "? Work in them that was never committed or pushed is lost permanently." } }
         if unchecked > 0 { p { "Attempt cleanup of {unchecked} unchecked {unchecked_noun} on {unchecked_names}. Folders Farhelm cannot verify stay in place; unusable entries may be forgotten from the trash." } }
         div { class: "checkout-trash-actions",
             button { class: "btn btn-neutral trash-confirm-cancel", disabled: busy, onclick: move |_| oncancel.call(()), "cancel" }
-            button { class: "btn btn-danger trash-confirm-submit", disabled: submit_disabled, onclick: move |_| onsubmit.call(()), "delete permanently" }
+            button { class: "btn btn-danger trash-confirm-submit", disabled: submit_disabled, onkeydown: crate::guard_confirmation_enter, onclick: move |_| onsubmit.call(()), "delete permanently" }
         }
     } }
 }
