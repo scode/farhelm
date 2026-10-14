@@ -992,6 +992,8 @@ impl RetiredCreateFields {
 
 #[derive(Deserialize)]
 pub(crate) struct CreateReq {
+    /// A selector for this start only, never part of history or templates.
+    conversation: Option<String>,
     cwd: String,
     /// An agent launch: an agent type and its choices. The helm composes
     /// its start and resume commands before contacting a supervisor, so the
@@ -1563,11 +1565,21 @@ pub(crate) async fn create_session(
         }
         let mode =
             ordinary_mode.expect("fresh requests returned through their shared admission path");
+        let named_start = match req
+            .conversation
+            .take()
+            .map(|value| launches::named_start(&mode, value))
+            .transpose()
+        {
+            Ok(start) => start,
+            Err(message) => return http_error(invalid_request(message)),
+        };
         match do_create_session(
             &state,
             &claim,
             &client,
             CreateSpec {
+                named_start,
                 cwd: req.cwd,
                 mode,
                 title: req.title,
@@ -1643,6 +1655,7 @@ pub(crate) async fn do_create_session(
     spec: CreateSpec,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
     let CreateSpec {
+        named_start,
         cwd,
         mode,
         confirm_yolo,
@@ -1700,6 +1713,7 @@ pub(crate) async fn do_create_session(
             cols,
             rows,
             CreateExtras {
+                named_start,
                 intent_key,
                 github_checkout: github_checkout.clone(),
                 parent,
@@ -1842,6 +1856,8 @@ async fn accept_created_session(
 /// would be a second shape to keep in step with the supervisor's create
 /// message, which is the drift this function exists to prevent.
 pub(crate) struct CreateSpec {
+    /// Resolved transient argv; the mode remains the ordinary stored launch.
+    pub(crate) named_start: Option<farhelm_proto::NamedConversationStart>,
     pub(crate) cwd: String,
     pub(crate) mode: SessionLaunch,
     pub(crate) title: Option<String>,
@@ -1999,6 +2015,12 @@ async fn create_fresh_session_resolved(
     mut req: CreateReq,
     context: FreshCreateContext,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    if req.conversation.is_some() {
+        return Err(invalid_request(
+            "named conversations cannot start in a new managed checkout; choose an existing folder"
+                .into(),
+        ));
+    }
     let FreshCreateContext {
         intent_key,
         client_identity,
@@ -2085,6 +2107,7 @@ async fn create_fresh_session_resolved(
         claim,
         client,
         CreateSpec {
+            named_start: None,
             cwd: req.cwd,
             mode,
             title: req.title,
@@ -2163,6 +2186,7 @@ pub(crate) async fn create_agent_checkout(
     client_identity: String,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
     let req = CreateReq {
+        conversation: None,
         cwd: String::new(),
         launch: None,
         command: None,
@@ -2452,6 +2476,8 @@ pub(crate) async fn get_session(
 /// or hand-written body never kills a live agent by omission.
 #[derive(Deserialize)]
 pub(crate) struct RestartReq {
+    /// A one-time named target, offered only with an agent launch edit.
+    conversation: Option<String>,
     #[serde(default)]
     stop_if_running: bool,
     /// Restart with an agent launch's changed choices; the helm composes
@@ -2499,13 +2525,14 @@ pub(crate) async fn restart_session(
                 ));
             }
         };
-        match do_restart_session(
+        match do_restart_session_named(
             &state,
             &id,
             req.stop_if_running,
             with,
             req.confirm_yolo,
             None,
+            req.conversation,
         )
         .await
         {
@@ -2534,9 +2561,42 @@ pub(crate) async fn do_restart_session(
     confirm_yolo: bool,
     expected_launch: Option<farhelm_proto::SessionLaunch>,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
+    do_restart_session_named(
+        state,
+        id,
+        stop_if_running,
+        with,
+        confirm_yolo,
+        expected_launch,
+        None,
+    )
+    .await
+}
+
+/// Resolve a named restart beside its ordinary edit, preserving the agent relay's scope.
+///
+/// Only the browser supplies the selector. Agent and plain restarts continue
+/// through the value-less wrapper, with their existing identity proof gates.
+async fn do_restart_session_named(
+    state: &AppState,
+    id: &str,
+    stop_if_running: bool,
+    with: Option<LaunchRequest>,
+    confirm_yolo: bool,
+    expected_launch: Option<farhelm_proto::SessionLaunch>,
+    conversation: Option<String>,
+) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     // Resolved before routing: a malformed edit is the caller's to fix
     // wherever the session lives.
     let with = with.map(resolve_launch_request).transpose()?;
+    let named_start = conversation
+        .map(|value| {
+            let launch = with.as_ref().ok_or_else(|| {
+                invalid_request("a named restart requires Restart with an agent launch".into())
+            })?;
+            launches::named_start(launch, value).map_err(invalid_request)
+        })
+        .transpose()?;
     let (claim, client) = route_session(state, id).await?;
     // Restart WITH a new launch is a new launch choice, so it gets the
     // same YOLO check a create does; a plain restart relaunches a choice
@@ -2544,7 +2604,7 @@ pub(crate) async fn do_restart_session(
     let is_yolo = with.as_ref().is_some_and(crate::yolo_guard::create_is_yolo);
     crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
     let session = client
-        .restart_session_with(id, stop_if_running, with, expected_launch)
+        .restart_session_named(id, stop_if_running, with, expected_launch, named_start)
         .await?;
     // An ambiguity is logged and refreshed inside; this id was already
     // routed, so the reply stands.
@@ -3189,6 +3249,7 @@ pub(crate) async fn do_replace_session(
     // A plain Replace copies the source's listed settings; only a "replace
     // with" body is the user's own choice of them.
     let settings_from_source = with.is_none();
+    let conversation = with.as_mut().and_then(|body| body.conversation.take());
     let (mode, cwd, title, cols, rows) = match (with, with_mode) {
         (Some(with), Some(mode)) => (mode, with.cwd, with.title, with.cols, with.rows),
         // The two halves travel together: `with_mode` is `Some` exactly
@@ -3212,11 +3273,15 @@ pub(crate) async fn do_replace_session(
             )
         }
     };
+    let named_start = conversation
+        .map(|value| launches::named_start(&mode, value).map_err(invalid_request))
+        .transpose()?;
     let created = do_create_session(
         state,
         &claim,
         &client,
         CreateSpec {
+            named_start,
             cwd,
             mode,
             title,

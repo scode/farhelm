@@ -1832,6 +1832,8 @@ pub(crate) enum CreateAgent<'a> {
     Command(&'a CommandLaunch),
     /// Structured intent compiled by the helm into one safe invocation.
     Structured(&'a LaunchSelection),
+    /// The same reusable selection, with a selector for this request alone.
+    Named(&'a LaunchSelection, &'a str),
 }
 
 /// POST the create endpoint, returning the decoded `Session` on success or
@@ -2173,6 +2175,10 @@ fn create_body(
     match agent {
         CreateAgent::Command(command) => body["command"] = serde_json::json!(command),
         CreateAgent::Structured(selection) => body["launch"] = serde_json::json!(selection),
+        CreateAgent::Named(selection, conversation) => {
+            body["launch"] = serde_json::json!(selection);
+            body["conversation"] = serde_json::json!(conversation);
+        }
     }
     // The connection this create was prepared against: the directory and the
     // command were chosen for a machine, and a retarget or adoption would
@@ -2527,6 +2533,10 @@ fn restart_request_body(
         Some(crate::restart_with::RestartEdit::Agent(selection)) => {
             body["with"] =
                 serde_json::to_value(selection).expect("LaunchSelection is serializable");
+        }
+        Some(crate::restart_with::RestartEdit::NamedAgent(selection, conversation)) => {
+            body["with"] = serde_json::json!(selection);
+            body["conversation"] = serde_json::json!(conversation);
         }
         Some(crate::restart_with::RestartEdit::Command(command)) => {
             body["with_command"] =
@@ -4059,6 +4069,52 @@ mod http_contract_tests;
 
 #[cfg(test)]
 mod tests {
+    /// One-time selectors are request fields, never part of reusable choices.
+    /// Both create and Restart with must preserve that boundary even when
+    /// they send an otherwise unchanged selection.
+    #[test]
+    fn named_conversation_bodies_keep_the_selector_outside_launch_choices() {
+        let selection = crate::LaunchSelection {
+            harness: crate::LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+            permission_flags: None,
+        };
+        let create = create_body(
+            "/work",
+            CreateAgent::Named(&selection, "target"),
+            "",
+            "key",
+            None,
+            None,
+        );
+        assert_eq!(create["conversation"], "target");
+        assert_eq!(create["launch"], serde_json::json!(selection));
+        assert!(create["launch"].get("conversation").is_none());
+        let restart = restart_request_body(
+            false,
+            Some(&crate::restart_with::RestartEdit::NamedAgent(
+                selection.clone(),
+                "target".into(),
+            )),
+        );
+        assert_eq!(restart["conversation"], "target");
+        assert_eq!(restart["with"], serde_json::json!(selection));
+        let fresh = create_body(
+            "/work",
+            CreateAgent::Structured(&selection),
+            "",
+            "key",
+            None,
+            None,
+        );
+        assert!(
+            fresh.get("conversation").is_none(),
+            "ordinary requests remain value-less"
+        );
+    }
     /// Unknown outcomes and YOLO continuations must recover the first create;
     /// an acknowledged refusal ends the intent even if it describes partial success.
     /// Otherwise a retry either duplicates an agent or replays an intent the user ended.

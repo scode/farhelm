@@ -1923,6 +1923,35 @@ impl IntegrationSnapshot {
         fill_slots(&mut filled, CONVERSATION_PLACEHOLDER, &replacement);
         Some(filled)
     }
+
+    /// Fill a resume command with a user-entered selector, without parsing a captured locator.
+    ///
+    /// Captured Codex, Pi, OMP and Grok identities carry reporting provenance;
+    /// an entered id or file path is only a launch argument. The same token
+    /// checks still prevent it becoming an option or a later cwd substitution.
+    /// No existence or ownership check belongs on this path.
+    pub fn filled_named_resume_argv(&self, value: &str) -> Result<Vec<String>, String> {
+        validate_named_conversation(value)?;
+        let mut argv = self
+            .resume_template
+            .clone()
+            .ok_or_else(|| "this agent launch has no resume command".to_string())?;
+        fill_slots(&mut argv, CONVERSATION_PLACEHOLDER, value);
+        Ok(argv)
+    }
+}
+
+/// Validate a one-time conversation selector before it can enter executable argv.
+///
+/// Reuse the captured-id boundary rather than introducing a weaker validator.
+/// Spaces and shell quoting are refused; file paths are passed literally, with
+/// relative paths resolved by the agent in the session folder. The composer
+/// additionally refuses a leading tilde for harnesses that take a file path.
+pub fn validate_named_conversation(value: &str) -> Result<(), String> {
+    if !is_plausible_conversation_id(value) || is_reserved_locator_token(value) {
+        return Err("conversation id or session file must be a nonempty literal without spaces, quotes, control characters, a leading dash or Farhelm placeholders".into());
+    }
+    Ok(())
 }
 
 /// Whether this kind's ownership proofs (foreground attribution plus its own

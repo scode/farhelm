@@ -603,6 +603,15 @@ agent choice is independent of that destination:
   confirmation, and save-as-template panel keep their own Enter rules. In the editable folder field, Enter chooses an
   arrow-highlighted dropdown entry without launching; with no highlighted entry it launches as before. A held Enter
   never launches.
+- Conversation selector: New, Clone and Replace with offer an optional one-time selector for every agent launch. Claude,
+  Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP session file.
+  Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or the session's
+  reusable launch, so a later Clone starts fresh. It is passed literally as one argument, without a shell or checking
+  that the conversation exists. Leading dashes, reserved locator tokens and Farhelm placeholders, spaces, quotes,
+  backslashes, control characters and oversized values are refused by the existing conversation-id checks. Session-file
+  paths may be absolute or relative to the session directory; a leading tilde is refused because it does not expand. New
+  managed-checkout destinations and command launches refuse a selector. Goose, Muse, Cursor and OpenCode show that
+  Farhelm will not capture the named conversation and later Restart will be unavailable.
 - Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
   as a whole argument, and a required YOLO assertion: the user states whether the command bypasses human, classifier,
   AI-reviewer and sandbox safety checks, and Farhelm believes the statement. Farhelm never reads a command line to
@@ -945,33 +954,37 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   carry changed launch settings (Restart with, below); the launch kind, agent type, host, and working directory remain
   fixed. If a harness rejects a changed model or other setting while resuming, that is an ordinary launch failure;
   restart again with settings the harness accepts.
-- **Restart with** opens a dialog for changing the launch before resuming the session's own conversation: the model,
-  effort, permissions, or workspace trust of an agent launch, or the command, resume command, and YOLO assertion of a
-  command launch. The launch kind, agent type, host, and folder stay fixed; Replace with can change the harness or
-  folder, and Clone can change the host. The dialog shows the current settings and marks edited fields, and its primary
-  action is inactive until a setting changes. Enter on an effort, permission or trust button applies that choice, then
-  performs the primary action with the resulting settings, except custom selects the mode and focuses its flags editor.
-  Enter in the model field chooses the model and performs the primary action; with the model list closed it uses the
-  selected model. Enter on a YOLO radio or command field performs the primary action with the values shown, without
-  toggling the radio. An unchanged or invalid draft does nothing, and held or composing Enter never restarts. Action
-  buttons and the YOLO confirmation keep their own Enter rules. When the primary action says "stop and restart", Enter
-  on a choice or field confirms that displayed action. A working agent is stopped first with the user's confirmation on
-  that action; a live agent in any other status is stopped first without it, as for Restart. The edited launch is
-  validated exactly as a create validates it before anything is stopped, so an invalid edit leaves the agent running and
-  the dialog open with the reason. A refusal leaves the dialog and its edits visible with the reason. Restart with runs
-  the resume command, so an edited start command of a command launch takes effect the next time it is cloned or
-  replaced. This action is available exactly when Restart is. Its header button remains visible but greyed out
-  otherwise, with a hover tooltip and accessible description explaining why.
+- **Restart with** opens a dialog for changing the launch before resuming the session's own or a user-named
+  conversation: the model, effort, permissions, or workspace trust of an agent launch, or the command, resume command,
+  and YOLO assertion of a command launch. The launch kind, agent type, host, and folder stay fixed; Replace with can
+  change the harness or folder, and Clone can change the host. The dialog shows the current settings and marks edited
+  fields, and its primary action is inactive until a setting changes or a conversation selector is entered. For an agent
+  launch with a stored resume command, it is available even without a captured conversation; then its conversation field
+  is required and explains why. Muse, Cursor and OpenCode still have no stored resume command, so they do not gain
+  Restart with. Enter on an effort, permission or trust button applies that choice, then performs the primary action
+  with the resulting settings, except custom selects the mode and focuses its flags editor. Enter in the model field
+  chooses the model and performs the primary action; with the model list closed it uses the selected model. Enter on a
+  YOLO radio or command field performs the primary action with the values shown, without toggling the radio. An
+  unchanged or invalid draft does nothing, and held or composing Enter never restarts. Action buttons and the YOLO
+  confirmation keep their own Enter rules. When the primary action says "stop and restart", Enter on a choice or field
+  confirms that displayed action. A working agent is stopped first with the user's confirmation on that action; a live
+  agent in any other status is stopped first without it, as for Restart. The edited launch is validated exactly as a
+  create validates it before anything is stopped, so an invalid edit leaves the agent running and the dialog open with
+  the reason. A refusal leaves the dialog and its edits visible with the reason. Restart with runs the resume command,
+  so an edited start command of a command launch takes effect the next time it is cloned or replaced. Command launches
+  offer this action exactly when Restart is. Its header button remains visible but greyed out otherwise, with a hover
+  tooltip and accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
-  fresh-conversation counterpart to restart's resumed one. A session in a managed checkout starts on a managed checkout
-  of the same repository, named `<title>-clone` with the first free numeric suffix when taken, as described under
-  Managed checkouts. Other sessions keep their working directory; choosing an existing folder restores the source's
-  directory and title. The source session is untouched: cloning starts a brand-new, independent create through the same
-  form and the same confirmation described under Creation and identity above, so every field can be edited before
-  submitting and the request can be cancelled like any other create. The source's stored launch is carried into the
-  launcher verbatim: an agent launch's choices including omitted default fields, never rediscovered by parsing its
-  composed command, or a command launch's command, YOLO assertion, declared agent type, and resume command. Cloning does
-  not deduplicate titles — a duplicate is allowed, the same as any other create.
+  fresh-conversation counterpart to restart's resumed one unless the user names a conversation for this start. A session
+  in a managed checkout starts on a managed checkout of the same repository, named `<title>-clone` with the first free
+  numeric suffix when taken, as described under Managed checkouts. Other sessions keep their working directory; choosing
+  an existing folder restores the source's directory and title. The source session is untouched: cloning starts a
+  brand-new, independent create through the same form and the same confirmation described under Creation and identity
+  above, so every field can be edited before submitting and the request can be cancelled like any other create. The
+  source's stored launch is carried into the launcher verbatim: an agent launch's choices including omitted default
+  fields, never rediscovered by parsing its composed command, or a command launch's command, YOLO assertion, declared
+  agent type, and resume command. Cloning does not deduplicate titles — a duplicate is allowed, the same as any other
+  create.
 - **Replace** creates a new session — new id, fresh conversation, same host, working directory, title, and launch,
   copied exactly as stored — and then DELETES the source. For a command launch, "fresh conversation" means only that
   Farhelm starts the stored command again rather than a resume; a command that itself continues a conversation, such as
@@ -1699,26 +1712,32 @@ agent conversation belongs to each session, and restart resumes exactly that con
 `claude --resume <conversation-id>`) — even when several sessions share a working directory. Claude Code, Codex, Goose,
 Pi, and Grok integrations at this level are required. Confirmed 2026-10-01: Farhelm identifies an agent's conversation
 only from the harness's own explicit report, through a hook, plugin, extension, or whatever reporting mechanism that
-harness needs. Heuristics that cannot be relied upon, such as correlating the vendor's files on disk with a launch, are
-not supported, because a wrong match resumes, and appends to, a conversation that is not the session's own. Checking the
-exact file a report names is verification of that report, not identification. A launch whose harness cannot report, or
-whose report never arrived, has no captured identity and cannot be restarted: Restart says why, and Replace starts the
-session over. What capture never does is write to the agent's own configuration or record directories. A hook passed on
-the command line for one launch is allowed because it writes nothing the vendor owns — no configuration file, no
-conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
-absolute: the report it delivers is written to a file in farhelm's own state directory and from there lands in farhelm's
-own database, and every run leaves a line in farhelm's own hook log. Vendor-owned state is the boundary the
-no-agent-configuration rule from Status is protecting, and that rule's own example — hooks written into the agent's
-configuration — still stands. Grok is the documented opt-in exception: the user installs its hook entries, and Farhelm
-itself never writes, edits, or removes them. Every integrated agent type identifies conversations only through accepted
-reports; Farhelm never selects a conversation by scanning vendor state. Historical stored identities remain usable under
-the same per-type Resume rules, regardless of their source. A reporting credential alone does not establish which Codex
-conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses
-it on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
-session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
-file without following symlinks and requires its session ID to match. A failed check withdraws the durable resume offer,
-which makes Restart unavailable, and rejects the stale Resume request so the user can refresh; it never silently
-launches fresh under that request.
+harness needs. A selector entered in New, Clone, Replace with or Restart with is a one-time start argument, never a
+captured identity. Claude, Codex, Grok, Pi and OMP can report the resulting conversation through the ordinary path. A
+named Restart with keeps the old capture until that report replaces it; Codex reports at the first prompt, so plain
+Restart before then still enters the old conversation. Goose cannot report on this resume, so a named Restart with
+clears its old capture in the relaunch transaction; a definitive pre-spawn abort restores it, an ambiguous failure does
+not. Muse, Cursor, OpenCode and named Goose starts do not gain later plain Restart from this choice. Heuristics that
+cannot be relied upon, such as correlating the vendor's files on disk with a launch, are not supported, because a wrong
+match resumes, and appends to, a conversation that is not the session's own. Checking the exact file a report names is
+verification of that report, not identification. A launch whose harness cannot report, or whose report never arrived,
+has no captured identity and cannot be restarted: Restart says why, and Replace starts the session over. What capture
+never does is write to the agent's own configuration or record directories. A hook passed on the command line for one
+launch is allowed because it writes nothing the vendor owns — no configuration file, no conversation record, no trust
+state — and cannot outlive the launch that carried it. It is not invisible in the absolute: the report it delivers is
+written to a file in farhelm's own state directory and from there lands in farhelm's own database, and every run leaves
+a line in farhelm's own hook log. Vendor-owned state is the boundary the no-agent-configuration rule from Status is
+protecting, and that rule's own example — hooks written into the agent's configuration — still stands. Grok is the
+documented opt-in exception: the user installs its hook entries, and Farhelm itself never writes, edits, or removes
+them. Every integrated agent type identifies conversations only through accepted reports; Farhelm never selects a
+conversation by scanning vendor state. Historical stored identities remain usable under the same per-type Resume rules,
+regardless of their source. A reporting credential alone does not establish which Codex conversation is in the
+foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi loads
+a private static extension from Farhelm's state directory on every launch. A Pi report without a session file withdraws
+the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without following
+symlinks and requires its session ID to match. A failed check withdraws the durable resume offer, which makes Restart
+unavailable, and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that
+request.
 
 Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's owned pane.
 Later reports must come from that process, not a Codex process below it that inherited its credential. Resident

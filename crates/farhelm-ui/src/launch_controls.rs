@@ -101,8 +101,13 @@ fn model_marker_label(old: Option<&str>) -> DetailPart {
 /// runs after an open pick is applied or directly from the closed field. Its
 /// caller must validate the live draft, including a pick the model handler refused.
 /// Omitting it keeps New session's selection-only model Enter behavior.
+/// `on_conversation` opts a launcher into the one-time selector. Template
+/// editors omit it because that value must never become a reusable choice.
 #[component]
 pub(crate) fn LaunchControls(
+    #[props(default)] conversation: String,
+    #[props(default)] conversation_required: bool,
+    #[props(default)] on_conversation: Option<EventHandler<String>>,
     harness: Option<LaunchHarness>,
     model: Option<String>,
     model_raw_seed: Option<String>,
@@ -499,6 +504,26 @@ pub(crate) fn LaunchControls(
                 }
             }
         }
+            if let (Some(harness), Some(on_change)) = (harness.filter(|h| h.offers_named_conversation()), on_conversation) {
+                div { class: "launch-composer-choice named-conversation-choice",
+                    label {
+                        span { class: "launch-composer-section-label", "{launch_composer::conversation_label(harness)}" }
+                        input {
+                            class: "named-conversation", r#type: "text", value: conversation,
+                            disabled: busy, autocomplete: "off", spellcheck: "false",
+                            placeholder: if conversation_required { "required for this restart" } else { "optional, this start only" },
+                            oninput: move |event| { if !busy { on_change.call(event.value()); } },
+                            onkeydown: move |event| enter_choice(event, busy, || {}, on_choice_enter),
+                        }
+                    }
+                    if conversation_required {
+                        p { "Farhelm has no captured conversation to resume. Enter its id or session file to restart here." }
+                    }
+                    if !harness.captures_named_conversation() {
+                        p { "Farhelm will not capture this conversation after a named start, so Restart will not be available." }
+                    }
+                }
+            }
             if permissions == Some(LaunchPermission::Custom) {
                 CustomPermissionFlags { text: permission_flags, busy, harness, on_change: on_permission_flags }
             }

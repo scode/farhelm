@@ -519,6 +519,62 @@ fn resume_arguments(harness: LaunchHarness) -> Option<&'static [&'static str]> {
     }
 }
 
+/// Resolve a one-time conversation start while leaving the ordinary launch unchanged.
+///
+/// Reporting harnesses use their composed resume command directly. The three
+/// generic harnesses have a separate selector only for this start: adding them
+/// to `resume_arguments` would incorrectly offer ordinary Restart afterwards.
+pub(crate) fn named_start(
+    launch: &SessionLaunch,
+    value: String,
+) -> Result<farhelm_proto::NamedConversationStart, String> {
+    let selection = launch
+        .agent_selection()
+        .ok_or_else(|| "a conversation selector is only offered for agent launches".to_string())?;
+    if !selection.harness.offers_named_conversation() {
+        return Err("this agent does not offer a named conversation start".into());
+    }
+    farhelm_supervisor::agent_kind::validate_named_conversation(&value)?;
+    if selection.harness.named_conversation_is_file() && value.starts_with('~') {
+        return Err("session file paths do not expand ~; use an absolute or relative path".into());
+    }
+    let integration = farhelm_supervisor::agent_kind::IntegrationSnapshot::of(launch);
+    let argv = if integration.resume_template.is_some() {
+        integration.filled_named_resume_argv(&value)?
+    } else {
+        let suffix: &[&str] = match selection.harness {
+            LaunchHarness::Muse => &["resume"],
+            LaunchHarness::Cursor => &["--resume"],
+            LaunchHarness::OpenCode => &["--session"],
+            LaunchHarness::Claude
+            | LaunchHarness::Codex
+            | LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp
+            | LaunchHarness::Grok => {
+                return Err("this agent launch has no resume command".into());
+            }
+        };
+        let mut argv = launch.start_argv()?;
+        let marker = argv
+            .iter()
+            .position(|arg| arg == FARHELM_ARGS_PLACEHOLDER)
+            .ok_or_else(|| "agent start has no Farhelm argument slot".to_string())?;
+        argv.splice(
+            marker..marker,
+            suffix
+                .iter()
+                .map(|word| word.to_string())
+                .chain(std::iter::once(value.clone())),
+        );
+        argv
+    };
+    Ok(farhelm_proto::NamedConversationStart {
+        conversation: value,
+        argv,
+    })
+}
+
 /// An agent launch carrying exactly `selection`, for tests that need a
 /// session or reply holding one without going through the catalog (which
 /// would normalize or refuse the choices under test): the harness's bare
@@ -676,6 +732,92 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
 
 #[cfg(test)]
 mod tests {
+    /// A named start uses one literal selector and never changes saved choices.
+    /// Pin every offering harness so a new resume form cannot silently make
+    /// later Clone reuse the one-time conversation or widen ordinary Restart.
+    #[test]
+    fn named_start_uses_resume_argv_without_storing_the_selector() {
+        for harness in LaunchHarness::ALL {
+            let launch = super::compile(selection(*harness)).unwrap();
+            let before = launch.clone();
+            let named = super::named_start(&launch, "named-target".into()).unwrap();
+            assert_eq!(launch, before);
+            assert_eq!(named.conversation, "named-target");
+            assert_eq!(
+                named
+                    .argv
+                    .iter()
+                    .filter(|arg| *arg == "named-target")
+                    .count(),
+                1
+            );
+            assert!(!named.argv.iter().any(|arg| arg == "{conversation}"));
+            assert!(
+                !launch
+                    .start_argv()
+                    .unwrap()
+                    .contains(&"named-target".into())
+            );
+            if let Some(resume) = launch.resume_argv().unwrap() {
+                let expected: Vec<String> = resume
+                    .into_iter()
+                    .map(|arg| {
+                        if arg == "{conversation}" {
+                            "named-target".into()
+                        } else {
+                            arg
+                        }
+                    })
+                    .collect();
+                assert_eq!(named.argv, expected, "{harness:?}");
+            } else {
+                let selector = match harness {
+                    LaunchHarness::Muse => "resume",
+                    LaunchHarness::Cursor => "--resume",
+                    LaunchHarness::OpenCode => "--session",
+                    _ => panic!("all reporting harnesses have an ordinary resume command"),
+                };
+                let index = named.argv.iter().position(|word| word == selector).unwrap();
+                assert_eq!(named.argv[index + 1], "named-target");
+                assert!(!harness.captures_named_conversation());
+            }
+        }
+    }
+
+    /// User text must not become an option or a second placeholder pass.
+    /// Unknown ids remain valid launch arguments; Farhelm does not inspect
+    /// vendor stores, and relative session files resolve in the session folder.
+    #[test]
+    fn named_start_refuses_flag_and_placeholder_inputs() {
+        let launch = super::compile(selection(LaunchHarness::Codex)).unwrap();
+        for invalid in [
+            "",
+            "-bad",
+            "two words",
+            "{cwd}",
+            "{conversation}",
+            "{farhelm_args}",
+            "{codex:trusted-cwd}",
+            "{codex:untrusted-cwd}",
+            "codex:bad",
+            "omp:bad",
+            "a\0b",
+            "a'b",
+        ] {
+            assert!(
+                super::named_start(&launch, invalid.into()).is_err(),
+                "{invalid:?}"
+            );
+        }
+        for harness in [LaunchHarness::Pi, LaunchHarness::Omp] {
+            let launch = super::compile(selection(harness)).unwrap();
+            assert!(super::named_start(&launch, "~/session.jsonl".into()).is_err());
+            assert!(super::named_start(&launch, "relative/session.jsonl".into()).is_ok());
+        }
+        assert!(
+            super::named_start(&SessionLaunch::plain_command("echo hello"), "id".into()).is_err()
+        );
+    }
     /// Custom replaces only the permission slot, with identical word boundaries
     /// in fresh and resume argv. It remains YOLO even for flags that name a
     /// guarded vendor mode; Farhelm intentionally does not interpret them.

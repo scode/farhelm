@@ -338,17 +338,7 @@ impl SessionLaunch {
                     selection.permissions,
                     selection.permission_flags.as_deref(),
                 )?;
-                check_argv("the agent launch's start command", start)?;
-                require_exactly_once(
-                    "the agent launch's start command",
-                    start,
-                    FARHELM_ARGS_PLACEHOLDER,
-                )?;
-                refuse_present(
-                    "the agent launch's start command",
-                    start,
-                    CONVERSATION_PLACEHOLDER,
-                )?;
+                Self::validate_start_argv("the agent launch's start command", start)?;
                 if let Some(resume) = resume {
                     check_argv("the agent launch's resume command", resume)?;
                     require_exactly_once(
@@ -371,6 +361,17 @@ impl SessionLaunch {
                     .to_string(),
             ),
         }
+    }
+
+    /// Check executable agent argv after any conversation selector is filled.
+    ///
+    /// Ordinary and one-time starts share this shape: the reporter expansion
+    /// has one slot, the conversation has none left, and the program cannot
+    /// be a placeholder. Admission must check this before stopping an old run.
+    pub fn validate_start_argv(field: &str, argv: &[String]) -> Result<(), String> {
+        check_argv(field, argv)?;
+        require_exactly_once(field, argv, FARHELM_ARGS_PLACEHOLDER)?;
+        refuse_present(field, argv, CONVERSATION_PLACEHOLDER)
     }
 
     /// The start argv to spawn, still holding its placeholders.

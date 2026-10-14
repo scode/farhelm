@@ -1026,6 +1026,8 @@ fn answer_launcher_yolo(
 ///   honesty about a create being in flight, not the guard.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct IntentBinding {
+    /// Transient choice bound to this request/key, absent from saved launch history.
+    conversation: Option<String>,
     host: HostId,
     /// The target host's incarnation at submit time — see the type docs.
     incarnation: String,
@@ -1066,6 +1068,7 @@ impl IntentBinding {
     ) -> Option<IntentBinding> {
         let host = hosts.iter().find(|host| Some(host.id) == selected)?;
         Some(IntentBinding {
+            conversation: None,
             host: host.id,
             incarnation: host.incarnation.clone(),
             cwd,
@@ -2349,6 +2352,8 @@ pub(super) fn CreateSessionForm(
     let mut structured_permissions_is_explicit = use_signal(|| false);
     // Raw text remains editable through quote errors; only split words reach a launch.
     let mut structured_permission_flags = use_signal(String::new);
+    // Never seed from a source, history or template: every dialog starts fresh.
+    let mut conversation = use_signal(String::new);
     // The helm records only an explicit choice from a supported harness.
     // Seeding the draft does not send it through unsupported harnesses.
     let mut structured_workspace_trust = use_signal(|| {
@@ -4550,6 +4555,12 @@ pub(super) fn CreateSessionForm(
                     ops.release();
                     return;
                 };
+                binding.conversation = (matches!(binding.agent, LaunchIntent::Structured(_)) && !conversation().is_empty()).then(&*conversation);
+                if binding.conversation.is_some() && destination_draft().repo().is_some() {
+                    error.set(Some("named conversations cannot start in a new managed checkout; choose an existing folder".into()));
+                    ops.release();
+                    return;
+                }
                 if crate::launch_composer::scoped_query(&composer_search()).0 == crate::launch_composer::SearchScope::Github {
                     return;
                 }
@@ -4746,6 +4757,7 @@ pub(super) fn CreateSessionForm(
                             binding.agent = LaunchIntent::Structured(selection);
                         }
                         binding = IntentBinding {
+                            conversation: (matches!(binding.agent, LaunchIntent::Structured(_)) && !conversation.peek().is_empty()).then(|| conversation.peek().clone()),
                             cwd: if binding.github_checkout.is_some() { binding.cwd.clone() } else {
                                 submitted_field(&cwd.peek(), *cwd_edited.peek(), cwd_raw_seed.peek().as_deref())
                             },
@@ -4802,7 +4814,10 @@ pub(super) fn CreateSessionForm(
                     }
                     let agent = match &bound.agent {
                         LaunchIntent::Command(command) => CreateAgent::Command(command),
-                        LaunchIntent::Structured(selection) => CreateAgent::Structured(selection),
+                        LaunchIntent::Structured(selection) => match bound.conversation.as_deref() {
+                            Some(value) => CreateAgent::Named(selection, value),
+                            None => CreateAgent::Structured(selection),
+                        },
                     };
                     // The one branch point between the two verbs this form
                     // shares: an ordinary create and a "replace with" send
@@ -6091,6 +6106,12 @@ pub(super) fn CreateSessionForm(
                             // These callbacks retain the create form's history and intent
                             // boundaries. The shared controls only report the user's edits.
                             LaunchControls {
+                                conversation: conversation(),
+                                on_conversation: Some(EventHandler::new(move |value| {
+                                    if !draft_transition_allowed(ops) { return; }
+                                    conversation.set(value);
+                                    intent_key.set(None);
+                                })),
                                 harness: structured_harness(),
                                 model: structured_model(),
                                 model_raw_seed: structured_model_raw_seed(),
@@ -6788,6 +6809,10 @@ mod tests {
         // Every form field is part of the intent too — this is what the
         // post-mint re-read compares against.
         for edited in [
+            IntentBinding {
+                conversation: Some("target".into()),
+                ..base.clone()
+            },
             IntentBinding {
                 cwd: "/other".to_string(),
                 ..base.clone()

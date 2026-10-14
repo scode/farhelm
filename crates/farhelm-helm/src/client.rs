@@ -786,6 +786,8 @@ struct UploadProgress {
 /// create in every respect.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CreateExtras {
+    /// A one-time command, never recorded in reusable session launch settings.
+    pub named_start: Option<farhelm_proto::NamedConversationStart>,
     /// See [`SupervisorClient::create_session_with_key`].
     pub intent_key: Option<String>,
     /// The helm-resolved fresh-checkout payload: repo identity, root, hook,
@@ -2693,6 +2695,7 @@ impl SupervisorClient {
             cols,
             rows,
             CreateExtras {
+                named_start: None,
                 intent_key,
                 ..CreateExtras::default()
             },
@@ -2720,6 +2723,7 @@ impl SupervisorClient {
             .request(
                 req_id,
                 ControlMsg::CreateSession {
+                    named_start: extras.named_start,
                     req_id,
                     parent: extras.parent,
                     inherit_agent: false,
@@ -3036,11 +3040,25 @@ impl SupervisorClient {
         with: Option<farhelm_proto::SessionLaunch>,
         expected_launch: Option<farhelm_proto::SessionLaunch>,
     ) -> anyhow::Result<SessionInfo> {
+        self.restart_session_named(id, stop_if_running, with, expected_launch, None)
+            .await
+    }
+
+    /// Restart with a resolved one-time selector without changing stored choices.
+    pub async fn restart_session_named(
+        &self,
+        id: &str,
+        stop_if_running: bool,
+        with: Option<farhelm_proto::SessionLaunch>,
+        expected_launch: Option<farhelm_proto::SessionLaunch>,
+        named_start: Option<farhelm_proto::NamedConversationStart>,
+    ) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
         match self
             .request(
                 req_id,
                 ControlMsg::RestartSession {
+                    named_start,
                     req_id,
                     session_id: id.to_string(),
                     stop_if_running,
@@ -6267,6 +6285,7 @@ mod tests {
             .request(
                 7,
                 ControlMsg::RestartSession {
+                    named_start: None,
                     req_id: 7,
                     session_id: "restarted".to_string(),
                     stop_if_running: false,

@@ -12,6 +12,23 @@
 use crate::api::{LaunchCatalogModel, LaunchHistory, LaunchHistoryEntry};
 use crate::{HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
+/// Name the one-time selector in the vocabulary the selected agent accepts.
+///
+/// Pi and OMP need a literal session-file path. The other agents take their
+/// own conversation/session identifier; these labels never imply lookup or
+/// existence verification by Farhelm.
+pub(crate) const fn conversation_label(harness: LaunchHarness) -> &'static str {
+    match harness {
+        LaunchHarness::Pi | LaunchHarness::Omp => "session file",
+        LaunchHarness::Goose | LaunchHarness::OpenCode => "session id",
+        LaunchHarness::Cursor => "chat id",
+        LaunchHarness::Claude
+        | LaunchHarness::Codex
+        | LaunchHarness::Muse
+        | LaunchHarness::Grok => "conversation id",
+    }
+}
+
 /// A stable display order prevents catalog entry order from moving buttons.
 // The effort order, the agent-type reconciliation and the effort table
 // live in the wire crate, so a template the helm applies reconciles exactly
@@ -1669,6 +1686,26 @@ pub(crate) fn displayed_efforts(
 
 #[cfg(test)]
 mod tests {
+    /// The label must distinguish a literal file path from an opaque id.
+    /// Keeping this exhaustive prevents an added harness inheriting wording
+    /// that suggests the wrong kind of target or a reporting promise.
+    #[test]
+    fn named_conversation_labels_follow_each_agents_selector() {
+        for (harness, label) in [
+            (LaunchHarness::Claude, "conversation id"),
+            (LaunchHarness::Codex, "conversation id"),
+            (LaunchHarness::Grok, "conversation id"),
+            (LaunchHarness::Muse, "conversation id"),
+            (LaunchHarness::Cursor, "chat id"),
+            (LaunchHarness::Goose, "session id"),
+            (LaunchHarness::OpenCode, "session id"),
+            (LaunchHarness::Pi, "session file"),
+            (LaunchHarness::Omp, "session file"),
+        ] {
+            assert_eq!(conversation_label(harness), label);
+            assert!(harness.offers_named_conversation());
+        }
+    }
     use super::*;
     use crate::api::{FolderHistoryEntry, LaunchCatalogModel};
     use crate::{HostId, LaunchEffort, LaunchHarness, LaunchPermission};
