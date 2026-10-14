@@ -1,8 +1,9 @@
-//! A fixed-destination editor for restarting one captured conversation.
+//! A fixed-destination editor for a captured or explicitly named conversation.
 //!
 //! The session view owns the restart request and its result. This dialog owns
-//! only a draft of the stored launch, so a refusal can leave that draft
-//! visible without changing the session's authoritative state. It edits
+//! a draft of the stored launch and a one-time conversation selector, so a
+//! refusal can leave that draft visible without changing the session's
+//! authoritative state. It edits
 //! whichever launch kind the session has (SPEC.md, Restart with): an agent
 //! launch's model, effort, permissions and workspace trust, or a command
 //! launch's command, resume command and YOLO answer. The launch kind and the
@@ -57,16 +58,19 @@ use crate::modal_isolation;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{ApiBase, CommandLaunch, LaunchEffort, LaunchPermission, LaunchSelection, Session};
 
-/// The changed launch Restart with sends, one per launch kind.
+/// The launch edit and optional one-time target Restart with sends.
 ///
-/// An agent launch sends only its new choices, which the helm composes into
+/// An agent launch sends its ordinary choices, which the helm composes into
 /// commands exactly as it does for a create; a command launch sends the
 /// edited command launch whole. The two travel under different request
 /// fields (`with` and `with_command`), so the helm never has to guess which
-/// kind an edit is.
+/// kind an edit is. A named agent target travels beside `with`, never inside
+/// its reusable selection.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum RestartEdit {
     Agent(LaunchSelection),
+    /// A transient target; selection remains the ordinary reusable launch.
+    NamedAgent(LaunchSelection, String),
     Command(CommandLaunch),
 }
 
@@ -75,7 +79,9 @@ impl RestartEdit {
     /// wording; `None` for a command edit, whose YOLO is its assertion.
     pub(crate) fn selection(&self) -> Option<&LaunchSelection> {
         match self {
-            RestartEdit::Agent(selection) => Some(selection),
+            RestartEdit::Agent(selection) | RestartEdit::NamedAgent(selection, _) => {
+                Some(selection)
+            }
             RestartEdit::Command(_) => None,
         }
     }
@@ -236,13 +242,13 @@ pub(crate) fn RestartWithDialog(
     };
     let opening_command = match &opening {
         RestartEdit::Command(command) => Some(command.clone()),
-        RestartEdit::Agent(_) => None,
+        RestartEdit::Agent(_) | RestartEdit::NamedAgent(_, _) => None,
     };
     // The agent controls' state. A command launch's dialog never shows
     // them; it seeds them from its declared agent type (which
     // `restart_baseline` guarantees) only because hooks run unconditionally.
     let baseline = match &opening {
-        RestartEdit::Agent(selection) => selection.clone(),
+        RestartEdit::Agent(selection) | RestartEdit::NamedAgent(selection, _) => selection.clone(),
         RestartEdit::Command(command) => LaunchSelection {
             permission_flags: None,
             harness: command
@@ -289,6 +295,10 @@ pub(crate) fn RestartWithDialog(
         .map(shell_words::join)
         .unwrap_or_default();
     let mut permission_flags_text = use_signal(move || flags_seed);
+    // A named target belongs to this dialog instance, never the saved selection.
+    let mut conversation = use_signal(String::new);
+    let conversation_required =
+        opening_command.is_none() && session.restart_offer != crate::RestartOffer::Resume;
     let mut model_draft = use_signal(String::new);
     let mut model_open = use_signal(|| false);
     let mut model_active = use_signal(|| None::<usize>);
@@ -338,6 +348,9 @@ pub(crate) fn RestartWithDialog(
                 catalog.map(|models| models.as_slice()),
             );
             let (edit, problem) = match &opening_command {
+                None if !conversation().is_empty() => {
+                    (RestartEdit::NamedAgent(current, conversation()), None)
+                }
                 None => (RestartEdit::Agent(current), None),
                 Some(stored) => {
                     let draft = CommandLaunch {
@@ -359,10 +372,11 @@ pub(crate) fn RestartWithDialog(
                 }
             };
             let ready = match &edit {
-                RestartEdit::Agent(_) => {
+                RestartEdit::Agent(_) | RestartEdit::NamedAgent(_, _) => {
                     !(model_open() && !model_draft().is_empty())
                         && model_error().is_none()
                         && compatible
+                        && (!conversation_required || !conversation().is_empty())
                 }
                 RestartEdit::Command(_) => problem.is_none(),
             };
@@ -558,6 +572,9 @@ pub(crate) fn RestartWithDialog(
                     }
                 } else {
                 LaunchControls {
+                    conversation: conversation(),
+                    conversation_required,
+                    on_conversation: Some(EventHandler::new(move |value| conversation.set(value))),
                     harness: Some(baseline.harness),
                     model: current.model.clone(),
                     model_raw_seed: baseline.model.clone(),

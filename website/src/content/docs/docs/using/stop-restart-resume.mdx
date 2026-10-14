@@ -28,9 +28,16 @@ agents Farhelm can resume, and a command you run yourself needs an agent and a r
 [Custom commands](/docs/agents/custom-commands/).
 
 **restart with** resumes the conversation the same way, with different settings: another model, effort, permission
-mode, or workspace trust. It is greyed out whenever **restart** is. Enter on one of its choices picks it and restarts
+mode, or workspace trust. For an agent Farhelm can resume, you can also name the conversation it should enter. If
+Farhelm never learned its id, **restart with** remains available and requires the id or, for Pi and OMP, the session
+file. Muse, Cursor and OpenCode still cannot use Restart with. Enter on one of its choices picks it and restarts
 with the result; when the button says **stop and restart**, because the agent is working, Enter also confirms stopping
 it first.
+
+The entered conversation is a choice for this start only, as in [the session launcher](/docs/using/start-a-session/#continue-a-conversation-you-know).
+Farhelm keeps the previous conversation until the agent reports the new one. Codex reports at your first prompt, so
+Restart before then still opens the previous conversation. Goose cannot report after this kind of start; naming a new
+conversation forgets the old one and leaves later Restart unavailable.
 
 **replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. It makes a
 new session in this one's place, so the old conversation, shell tabs, and terminal history all go, and it asks you to

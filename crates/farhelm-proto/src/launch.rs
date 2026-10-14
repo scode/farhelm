@@ -13,6 +13,20 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
+/// A resolved one-time start, separate from the session's durable launch.
+///
+/// The helm fills an existing resume command or composes a named start for a
+/// harness without conversation reporting. The supervisor runs this argv for
+/// this request only; captured identity still comes solely from agent reports.
+/// Keeping the selector beside argv binds both into create retry identity and
+/// lets admission validate it before any process can be stopped or started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NamedConversationStart {
+    pub conversation: String,
+    pub argv: Vec<String>,
+}
+
 crate::enum_with_all! {
     /// The command-line harness selected for a structured launch.
     ///
@@ -292,6 +306,61 @@ impl LaunchHarness {
             | LaunchHarness::Goose
             | LaunchHarness::Pi
             | LaunchHarness::OpenCode => &[],
+        }
+    }
+
+    /// Whether the launcher can start this harness in a conversation the user names.
+    ///
+    /// This says nothing about later Restart: Muse, Cursor and OpenCode accept
+    /// a one-time selector but still have no conversation reporting or stored
+    /// resume command. Keep the match exhaustive when adding a harness.
+    pub const fn offers_named_conversation(self) -> bool {
+        match self {
+            LaunchHarness::Claude
+            | LaunchHarness::Codex
+            | LaunchHarness::Grok
+            | LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp
+            | LaunchHarness::Muse
+            | LaunchHarness::Cursor
+            | LaunchHarness::OpenCode => true,
+        }
+    }
+
+    /// Whether the named selector is a file interpreted in the session's folder.
+    ///
+    /// File selectors keep the strict argument grammar and accept relative
+    /// paths, but must refuse tilde because no shell expands this argument.
+    pub const fn named_conversation_is_file(self) -> bool {
+        match self {
+            LaunchHarness::Pi | LaunchHarness::Omp => true,
+            LaunchHarness::Claude
+            | LaunchHarness::Codex
+            | LaunchHarness::Grok
+            | LaunchHarness::Goose
+            | LaunchHarness::Muse
+            | LaunchHarness::Cursor
+            | LaunchHarness::OpenCode => false,
+        }
+    }
+
+    /// Whether a named start can replace the session's captured conversation.
+    ///
+    /// Goose's reporter is attached only to fresh starts. Keeping its old
+    /// capture across a named restart would leave Restart aimed at a different
+    /// conversation indefinitely, so that restart must clear it transactionally.
+    pub const fn captures_named_conversation(self) -> bool {
+        match self {
+            LaunchHarness::Claude
+            | LaunchHarness::Codex
+            | LaunchHarness::Grok
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp => true,
+            LaunchHarness::Goose
+            | LaunchHarness::Muse
+            | LaunchHarness::Cursor
+            | LaunchHarness::OpenCode => false,
         }
     }
 

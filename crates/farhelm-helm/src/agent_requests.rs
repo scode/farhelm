@@ -1727,6 +1727,7 @@ async fn dispatch_agent_create(
             &claim,
             &client,
             crate::sessions::CreateSpec {
+                named_start: None,
                 cwd: resolution.cwd,
                 mode: resolution.launch,
                 title: resolution.title,
@@ -2222,6 +2223,7 @@ async fn clone_for_agent(
             &claim,
             &client,
             crate::sessions::CreateSpec {
+                named_start: None,
                 cwd,
                 mode,
                 title: Some(title),
@@ -4682,6 +4684,7 @@ mod tests {
             while let Ok(Some(frame)) = reader.read_frame().await {
                 let reply = match parse_control(&frame).expect("decode request") {
                     ControlMsg::CreateSession {
+                        named_start: None,
                         req_id,
                         cwd,
                         launch,

@@ -199,6 +199,15 @@ impl FakeHarness {
 /// satisfy a successor assertion. The wrapper's counter makes that mistake
 /// observable without changing the test process environment.
 pub(crate) fn fake_harness() -> FakeHarness {
+    fake_harness_with_script("claude-record")
+}
+
+/// Select the same fake behavior for direct creates and compiled vendor names.
+///
+/// A restart-with launch uses the vendor wrapper without the fixture's leading
+/// subcommand. Report-driven tests therefore need that wrapper to select the
+/// report script too, rather than silently reverting to the record script.
+pub(crate) fn fake_harness_with_script(script: &str) -> FakeHarness {
     let bin = farhelm_teststate::tempdir().expect("fixture executable directory");
     let home = farhelm_teststate::tempdir().expect("structured launch agent home");
     for name in [
@@ -214,10 +223,11 @@ pub(crate) fn fake_harness() -> FakeHarness {
         std::fs::write(
             &executable,
             format!(
-                "#!/bin/sh\ncounter={}\ngeneration=0\nif [ -f \"$counter\" ]; then\n  IFS= read -r generation < \"$counter\"\nfi\ngeneration=$((generation + 1))\nprintf '%s\\n' \"$generation\" > \"$counter\"\nprintf 'STRUCTURED-LAUNCH-GENERATION:%s\\n' \"$generation\"\nprintf 'STRUCTURED-LAUNCH-ARGV-HEX:'\nprintf '%s\\0' \"$@\" | od -An -tx1 | tr -d ' \\n'\nprintf '\\n'\nif [ \"$1\" = fake-agent ]; then\n  exec {} \"$@\"\nfi\nexec {} fake-agent --script claude-record --record-home {} \"$@\"\n",
+                "#!/bin/sh\ncounter={}\ngeneration=0\nif [ -f \"$counter\" ]; then\n  IFS= read -r generation < \"$counter\"\nfi\ngeneration=$((generation + 1))\nprintf '%s\\n' \"$generation\" > \"$counter\"\nprintf 'STRUCTURED-LAUNCH-GENERATION:%s\\n' \"$generation\"\nprintf 'STRUCTURED-LAUNCH-ARGV-HEX:'\nprintf '%s\\0' \"$@\" | od -An -tx1 | tr -d ' \\n'\nprintf '\\n'\nif [ \"$1\" = fake-agent ]; then\n  exec {} \"$@\"\nfi\nexec {} fake-agent --script {} --record-home {} \"$@\"\n",
                 shell_words::quote(&counter.to_string_lossy()),
                 shell_words::quote(fixtures_bin()),
                 shell_words::quote(fixtures_bin()),
+                shell_words::quote(script),
                 shell_words::quote(&home.path().to_string_lossy()),
             ),
         )
@@ -1035,6 +1045,7 @@ async fn restricted_raw_data_is_refused() {
     ] {
         let raw_reply = peer
             .control(ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 1,
                 parent: Some(parent.id.clone()),
                 cwd: fixture.work.path().to_string_lossy().into_owned(),

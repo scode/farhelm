@@ -1606,6 +1606,73 @@ pub(crate) fn create_fingerprint(
         .expect("a fingerprint of strings and options always serializes")
 }
 
+/// Bind a named start into retries without changing any value-less encoding.
+///
+/// Both selector and resolved argv matter: recovering a pending create runs
+/// the retry's transient command, while the row retains its ordinary launch.
+pub(crate) fn named_create_fingerprint(
+    parent: Option<&str>,
+    cwd: &str,
+    launch: &SessionLaunch,
+    title: Option<&str>,
+    named: &farhelm_proto::NamedConversationStart,
+) -> String {
+    serde_json::to_string(&("named_session_launch_v1", parent, cwd, title, launch, named))
+        .expect("named create inputs always serialize")
+}
+
+/// Validate the transient selector at the supervisor's admission boundary.
+///
+/// The helm composes commands, including generic harness selectors; this
+/// boundary checks executable shape and the raw value without duplicating that
+/// compiler. It must run before reservation or destructive restart work.
+pub(crate) fn validate_named_start(
+    launch: &SessionLaunch,
+    named: &farhelm_proto::NamedConversationStart,
+) -> Result<(), String> {
+    let selection = launch
+        .agent_selection()
+        .ok_or_else(|| "named conversations require an agent launch".to_string())?;
+    if !selection.harness.offers_named_conversation() {
+        return Err("this agent does not offer named conversation starts".into());
+    }
+    crate::agent_kind::validate_named_conversation(&named.conversation)?;
+    if selection.harness.named_conversation_is_file() && named.conversation.starts_with('~') {
+        return Err("session file paths do not expand ~; use an absolute or relative path".into());
+    }
+    crate::agent_kind::ensure_executable_argv("named conversation start", &named.argv)?;
+    crate::agent_kind::ensure_no_cwd_program("named conversation start", &named.argv)?;
+    SessionLaunch::validate_start_argv("named conversation start", &named.argv)?;
+    let bytes = serde_json::to_vec(named)
+        .expect("named start serializes")
+        .len();
+    if bytes + launch.field_bytes() > super::handlers::CREATE_FIELD_CAP
+        || named.argv.len() > crate::store::RESUME_TEMPLATE_ELEMENT_CAP
+    {
+        return Err("named conversation start exceeds the launch request bound".into());
+    }
+    Ok(())
+}
+
+/// Choose this request's argv while keeping the stored launch reusable.
+fn create_start_argv(
+    launch: &SessionLaunch,
+    named: Option<&farhelm_proto::NamedConversationStart>,
+    fresh: bool,
+) -> Result<Vec<String>, String> {
+    match named {
+        Some(_) if fresh => Err(
+            "named conversations cannot start in a new managed checkout; choose an existing folder"
+                .into(),
+        ),
+        Some(named) => {
+            validate_named_start(launch, named)?;
+            Ok(named.argv.clone())
+        }
+        None => launch.start_argv(),
+    }
+}
+
 /// The fingerprint of an agent's keyed create: the helm's digest of the
 /// request as the agent sent it, in place of [`create_fingerprint`]'s
 /// resolved fields (protocol 43).
@@ -2016,6 +2083,8 @@ fn unrecorded_outcome(original: anyhow::Error, settle: anyhow::Error) -> anyhow:
 /// checked" — `Supervisor::launch_session` performs no validation of its
 /// own and would have no way to.
 struct LaunchRequest {
+    /// Named creates use resume-phase hook policy without storing their selector.
+    named: bool,
     /// Direct organizational parentage, persisted verbatim with the child.
     parent: Option<String>,
     /// Which destination this create was validated against (Design C's
@@ -2092,6 +2161,8 @@ struct LaunchRequest {
 /// than the session (and are deliberately absent from the fingerprint),
 /// since the launch does need them.
 pub(crate) struct CreateInputs<'a> {
+    /// One-time start only; the ordinary launch still supplies durable choices.
+    pub(crate) named_start: Option<farhelm_proto::NamedConversationStart>,
     pub(crate) cwd: &'a str,
     pub(crate) parent: Option<String>,
     /// The helm-resolved fresh-checkout intent (protocol 24), when this
@@ -2869,9 +2940,10 @@ fn republished_terminal(
 /// previous entry keeps describing the previous run, and its durable
 /// writes are rejected rather than silently landing on this one.
 ///
-/// The capture state carries over, mirroring [`SessionStore::begin_relaunch`]:
-/// every restart resumes, and keeps the conversation it will enter. The
-/// first-input diagnostic anchor resets on every launch.
+/// The supplied capture state carries over, mirroring the generation claim.
+/// Ordinary restarts supply the prior capture; named non-reporting restarts
+/// supply the transaction's cleared mirror, or its restored capture after a
+/// definitive abort. The first-input diagnostic anchor resets on every launch.
 ///
 /// Every RUN-SCOPED mutable cell is fresh here — new `Arc`s, never the
 /// previous entry's — even where the VALUE is carried over. That isolation
@@ -3549,6 +3621,8 @@ struct RestartWithBundle {
 /// lifecycle claim; the spawned task owns the rest of the restart even if its
 /// client disconnects.
 struct RelaunchPlan {
+    /// Withdraw old capture only for a named start without subsequent reports.
+    clear_capture: bool,
     argv: Vec<String>,
     launch_cwd: String,
     terminal_survives: bool,
@@ -7083,6 +7157,7 @@ impl Supervisor {
         }
         self.create_session_admitted(
             CreateInputs {
+                named_start: None,
                 cwd: &requested_cwd,
                 parent,
                 github_checkout: Some(*checkout),
@@ -7218,6 +7293,7 @@ impl Supervisor {
     ) -> anyhow::Result<SessionInfo> {
         self.create_session(
             CreateInputs {
+                named_start: None,
                 cwd,
                 parent: None,
                 github_checkout: None,
@@ -7269,6 +7345,7 @@ impl Supervisor {
     /// spawn bundles alike.
     async fn validate_create(&self, inputs: CreateInputs<'_>) -> anyhow::Result<LaunchRequest> {
         let CreateInputs {
+            named_start,
             cwd,
             parent,
             launch,
@@ -7328,8 +7405,7 @@ impl Supervisor {
         launch
             .validate_new()
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
-        let argv = launch
-            .start_argv()
+        let argv = create_start_argv(&launch, named_start.as_ref(), github_checkout.is_some())
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
         // The SHARED executable-argv rule, beyond the shape check above: it
         // also refuses a NUL byte, which would truncate an argument
@@ -7446,6 +7522,7 @@ impl Supervisor {
                 .await?;
         }
         Ok(LaunchRequest {
+            named: named_start.is_some(),
             parent,
             destination,
             cwd: cwd.clone(),
@@ -7992,12 +8069,14 @@ impl Supervisor {
             };
             self.refuse_pending_archive(&row.cwd, row.canonical_cwd.as_deref())
                 .await?;
-            let argv = row.launch.start_argv().map_err(|message| {
-                RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    format!("the interrupted attempt's recorded launch: {message}"),
-                )
-            })?;
+            let argv =
+                create_start_argv(&row.launch, inputs.named_start.as_ref(), origin.is_some())
+                    .map_err(|message| {
+                        RequestError::new(
+                            ErrorKind::InvalidRequest,
+                            format!("the interrupted attempt's recorded launch: {message}"),
+                        )
+                    })?;
             // Same shared rule the raw path applies, for the reason this
             // function's docs give about the database being a trust boundary:
             // `''` and an embedded NUL both survive a round trip through
@@ -8024,6 +8103,7 @@ impl Supervisor {
                     .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
             }
             Ok(LaunchRequest {
+                named: inputs.named_start.is_some(),
                 parent: row.parent,
                 // Fresh origins recover their original resolution; borrowers
                 // retain the ordinary Existing contract.
@@ -8738,6 +8818,7 @@ impl Supervisor {
         _guards: &CreateGuards,
     ) -> anyhow::Result<SessionInfo> {
         let LaunchRequest {
+            named,
             parent,
             cwd,
             launch_cwd,
@@ -9370,7 +9451,14 @@ impl Supervisor {
             self.simulate_crash(CreateStage::AfterPreparationPublication)?;
         }
         let launch_scope = launch_scope_unit(&id, generation, scoped);
-        let args_mode = FarhelmArgsMode::of(&launch, crate::agent_kind::LaunchPhase::Start);
+        let args_mode = FarhelmArgsMode::of(
+            &launch,
+            if named {
+                crate::agent_kind::LaunchPhase::Resume
+            } else {
+                crate::agent_kind::LaunchPhase::Start
+            },
+        );
         let info = SessionInfo {
             parent,
             id: id.clone(),
@@ -10144,8 +10232,47 @@ impl Supervisor {
         restart_with: Option<SessionLaunch>,
         expected_launch: Option<SessionLaunch>,
     ) -> anyhow::Result<SessionInfo> {
+        self.restart_session_named(
+            session_id,
+            stop_if_running,
+            restart_with,
+            expected_launch,
+            None,
+        )
+        .await
+    }
+
+    /// Restart with a user-selected target, without treating it as captured identity.
+    ///
+    /// Only the captured-target proofs are bypassed. Launch compatibility,
+    /// lifecycle ownership, stop consent and directory identity remain checked.
+    pub(crate) async fn restart_session_named(
+        self: &Arc<Self>,
+        session_id: &str,
+        stop_if_running: bool,
+        restart_with: Option<SessionLaunch>,
+        expected_launch: Option<SessionLaunch>,
+        named_start: Option<farhelm_proto::NamedConversationStart>,
+    ) -> anyhow::Result<SessionInfo> {
         if let Some(launch) = &restart_with {
             validate_restart_with(launch)?;
+        }
+        if let Some(named) = &named_start {
+            let launch = restart_with.as_ref().ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    "a named restart requires Restart with an agent launch",
+                )
+            })?;
+            validate_named_start(launch, named)
+                .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+            anyhow::ensure!(
+                launch
+                    .resume_argv()
+                    .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?
+                    .is_some(),
+                "this agent launch has no resume command"
+            );
         }
         // R1.1: directory admission is taken BEFORE the lifecycle claim —
         // every create takes intent → directory → lifecycle, so a restart
@@ -10273,7 +10400,8 @@ impl Supervisor {
         // reported yet (a Codex session never prompted), and the offer's own
         // reason below says when it normally will; any other offer (no
         // resume command, say) has its own reason too.
-        if let Some(refusal) = crate::agent_kind::unverified_resume_refusal(snapshot.kind)
+        if named_start.is_none()
+            && let Some(refusal) = crate::agent_kind::unverified_resume_refusal(snapshot.kind)
             && snapshot.restart_offer == RestartOffer::NotCaptured
             && snapshot.captured_conversation.is_some()
         {
@@ -10305,9 +10433,10 @@ impl Supervisor {
             }
             // The same reason a plain restart's refusal gives
             // (`relaunch_argv`), so Restart with's dialog can show it.
-            if let Some(reason) = snapshot
-                .restart_offer
-                .unavailable_reason(snapshot.kind, ended)
+            if named_start.is_none()
+                && let Some(reason) = snapshot
+                    .restart_offer
+                    .unavailable_reason(snapshot.kind, ended)
             {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
@@ -10316,13 +10445,18 @@ impl Supervisor {
                 .into());
             }
             let integration = IntegrationSnapshot::of(&launch);
-            let conversation = snapshot
-                .captured_conversation
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("restart-with requires a captured conversation"))?;
-            let argv = integration
-                .filled_resume_argv(conversation)
-                .ok_or_else(|| anyhow::anyhow!("restart-with resume command cannot be filled"))?;
+            let argv = if let Some(named) = &named_start {
+                named.argv.clone()
+            } else {
+                let conversation = snapshot.captured_conversation.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!("restart-with requires a captured conversation")
+                })?;
+                integration
+                    .filled_resume_argv(conversation)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("restart-with resume command cannot be filled")
+                    })?
+            };
             (
                 argv,
                 Some(RestartWithBundle {
@@ -10333,7 +10467,7 @@ impl Supervisor {
         } else {
             (relaunch_argv(&snapshot)?, None)
         };
-        if crate::agent_kind::verifies_resume_target(snapshot.kind) {
+        if named_start.is_none() && crate::agent_kind::verifies_resume_target(snapshot.kind) {
             self.verify_report_only_resume(session_id, &snapshot)
                 .await?;
         }
@@ -10507,6 +10641,12 @@ impl Supervisor {
         // be created instead; the driver's session-paired target remains
         // the cross-session safety barrier either way.
         let terminal_survives = pane_state.is_some();
+        let clear_capture = named_start.is_some()
+            && entry
+                .info
+                .launch
+                .agent_selection()
+                .is_some_and(|selection| !selection.harness.captures_named_conversation());
         let relaunch = tokio::spawn(async move {
             // The claim MOVES into the task with the work it protects.
             // Holding it in the caller instead would release it the moment
@@ -10519,6 +10659,7 @@ impl Supervisor {
                 &entry_for_task,
                 &snapshot,
                 RelaunchPlan {
+                    clear_capture,
                     argv,
                     launch_cwd,
                     terminal_survives,
@@ -10580,17 +10721,18 @@ impl Supervisor {
         plan: RelaunchPlan,
     ) -> anyhow::Result<SessionInfo> {
         let RelaunchPlan {
+            clear_capture,
             argv,
             launch_cwd,
             terminal_survives,
             restart_with,
         } = plan;
         let id = entry.info.id.clone();
-        // The relaunch resumes, so it keeps the exact conversation it enters
-        // (`begin_relaunch` leaves the capture columns alone).
+        // Ordinary resumes keep capture; a named non-reporting start clears
+        // it as part of opening this generation, before any new process starts.
         let claim = self
             .store
-            .begin_relaunch(
+            .begin_relaunch_named(
                 &id,
                 crate::store::OfferBasis {
                     captured_conversation: snapshot.captured_conversation.clone(),
@@ -10602,6 +10744,7 @@ impl Supervisor {
                 // host that has gained or lost its user manager since, the
                 // previous run's answer is simply the wrong one.
                 self.scope_selected(&id).await,
+                clear_capture,
             )
             .await
             .context("opening a new launch generation for this restart")?;
@@ -10628,6 +10771,23 @@ impl Supervisor {
                 .into());
             }
         };
+        // A named non-reporting restart withdrew the durable capture. Give
+        // publication its own cleared mirror; late observers of the prior run
+        // must never be able to put the old conversation back into this cell.
+        let cleared_entry = clear_capture.then(|| SessionEntry {
+            info: entry.info.clone(),
+            terminal: entry.terminal.clone(),
+            run: RunCells {
+                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                ..entry.run.clone()
+            },
+            session: entry.session.clone(),
+            snapshot: entry.snapshot.clone(),
+            canonical_cwd: entry.canonical_cwd.clone(),
+            generation: entry.generation,
+            scope: entry.scope.clone(),
+        });
+        let entry = cleared_entry.as_ref().unwrap_or(entry);
         // Off the map for the duration. The LIFECYCLE CLAIM the caller
         // holds is what actually keeps stop and delete out of this window
         // — they queue behind it rather than seeing a missing entry — and
@@ -10790,6 +10950,20 @@ impl Supervisor {
                     {
                         Ok(restored) => {
                             launch_boot_ended = restored && claim.prior.launch_boot_ended;
+                            if restored && clear_capture {
+                                // Restore what the generation transaction read,
+                                // not a prior mirror a late observer may update.
+                                *entry.run.capture.lock().expect("capture mutex poisoned") =
+                                    match claim.prior.cleared_capture.as_ref() {
+                                        Some((Some(conversation), _, ownership_version)) => {
+                                            CaptureState::Reported {
+                                                conversation: conversation.clone(),
+                                                ownership_version: *ownership_version,
+                                            }
+                                        }
+                                        _ => CaptureState::Unclaimed,
+                                    };
+                            }
                             *entry.run.outcome.lock().expect("outcome mutex poisoned") =
                                 claim.prior.outcome.clone();
                         }
@@ -15024,6 +15198,176 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    /// A valid ordinary agent launch for admission tests that never spawn.
+    /// Its program is deliberately synthetic: these tests inspect durable
+    /// request/argv boundaries without executing an installed vendor agent.
+    fn named_test_launch() -> SessionLaunch {
+        SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                harness: LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+                permission_flags: None,
+            },
+            start: vec!["agent".into(), "{farhelm_args}".into()],
+            resume: Some(vec![
+                "agent".into(),
+                "--resume".into(),
+                "{conversation}".into(),
+                "{farhelm_args}".into(),
+            ]),
+        }
+    }
+
+    /// Pending retries reconstruct the ordinary launch from SQLite, so they
+    /// must explicitly retain the same-fingerprint named argv from the retry.
+    /// Otherwise a lost first reply can silently turn a named start fresh.
+    #[farhelm_testtrace::test]
+    async fn named_create_retry_retains_transient_argv_and_fingerprint() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let cwd = state.path().join("work");
+        std::fs::create_dir(&cwd).unwrap();
+        let cwd = cwd.to_str().unwrap().to_string();
+        let ordinary = named_test_launch();
+        let named = farhelm_proto::NamedConversationStart {
+            conversation: "target".into(),
+            argv: IntegrationSnapshot::of(&ordinary)
+                .filled_named_resume_argv("target")
+                .unwrap(),
+        };
+        let fingerprint = named_create_fingerprint(None, &cwd, &ordinary, Some("named"), &named);
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "named".into(),
+                    parent: None,
+                    title: "named".into(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: cwd.clone(),
+                    launch: ordinary.clone(),
+                    tmux_name: "fh-named".into(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    canonical_cwd: Some(cwd.clone()),
+                    captured_conversation: None,
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    generation: 0,
+                    launch_scoped: false,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    launch_hooked: false,
+                    launch_boot_ended: false,
+                },
+                Some(IntentClaim {
+                    intent_key: "named-key".into(),
+                    fingerprint: fingerprint.clone(),
+                    dedup_scope: DedupScope::Permanent,
+                }),
+            )
+            .await
+            .unwrap();
+        let reservation = sup.store.reservation("named-key").await.unwrap().unwrap();
+        assert_eq!(
+            reservation.fingerprint, fingerprint,
+            "fixture binds the original named request"
+        );
+        let inputs = CreateInputs {
+            named_start: Some(named.clone()),
+            cwd: &cwd,
+            parent: None,
+            github_checkout: None,
+            launch: ordinary.clone(),
+            title: Some("named".into()),
+            cols: 80,
+            rows: 24,
+        };
+        let recovered = sup.validate_retry(inputs, &reservation).await.unwrap();
+        assert_eq!(recovered.argv, named.argv);
+        assert!(
+            recovered.named,
+            "retry must use resume-phase reporter policy"
+        );
+        assert_eq!(recovered.launch, ordinary);
+        assert_eq!(
+            sup.store
+                .session("named")
+                .await
+                .unwrap()
+                .unwrap()
+                .captured_conversation,
+            None
+        );
+        let mut changed = named.clone();
+        changed.conversation = "other".into();
+        changed.argv[2] = "other".into();
+        assert_ne!(
+            fingerprint,
+            named_create_fingerprint(None, &cwd, &ordinary, Some("named"), &changed)
+        );
+        assert_ne!(
+            fingerprint,
+            create_fingerprint(None, None, &cwd, &ordinary, Some("named"))
+        );
+    }
+
+    /// Unsupported destinations and command launches cannot smuggle a selector
+    /// into argv, while malformed transient commands fail before any spawn.
+    #[farhelm_testtrace::test]
+    fn named_start_refuses_unsupported_destinations_and_commands() {
+        let launch = named_test_launch();
+        let mut named = farhelm_proto::NamedConversationStart {
+            conversation: "target".into(),
+            argv: IntegrationSnapshot::of(&launch)
+                .filled_named_resume_argv("target")
+                .unwrap(),
+        };
+        assert!(
+            create_start_argv(&launch, Some(&named), true)
+                .unwrap_err()
+                .contains("managed checkout")
+        );
+        assert!(
+            create_start_argv(&SessionLaunch::plain_command("agent"), Some(&named), false)
+                .unwrap_err()
+                .contains("agent launch")
+        );
+        named.argv[0] = String::new();
+        assert!(create_start_argv(&launch, Some(&named), false).is_err());
+        for argv in [
+            vec!["agent", "{conversation}", "{farhelm_args}"],
+            vec!["agent", "target"],
+            vec!["agent", "{farhelm_args}", "{farhelm_args}"],
+            vec!["{farhelm_args}", "target"],
+            vec!["{conversation}", "{farhelm_args}"],
+            vec!["{cwd}", "{farhelm_args}"],
+        ] {
+            named.argv = argv.into_iter().map(str::to_owned).collect();
+            assert!(
+                create_start_argv(&launch, Some(&named), false).is_err(),
+                "malformed one-time command must be refused: {:?}",
+                named.argv
+            );
+        }
+        named.argv = vec![
+            "agent".into(),
+            "{farhelm_args}".into(),
+            "x".repeat(super::super::handlers::CREATE_FIELD_CAP),
+        ];
+        assert!(
+            create_start_argv(&launch, Some(&named), false)
+                .unwrap_err()
+                .contains("exceeds the launch request bound")
+        );
+    }
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::handlers::handle_control;
     use super::super::status::session_status;
@@ -15635,6 +15979,7 @@ pub(crate) mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    named_start: None,
                     cwd,
                     parent: None,
                     github_checkout: None,
@@ -24490,6 +24835,7 @@ exit 0
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 1,
                 parent: None,
                 inherit_agent: false,
@@ -25325,6 +25671,7 @@ exit 0
         let created = sup
             .create_session(
                 CreateInputs {
+                    named_start: None,
                     github_checkout: None,
                     cwd: &cwd,
                     parent: None,
@@ -25377,6 +25724,7 @@ exit 0
         let refused = sup
             .create_session(
                 CreateInputs {
+                    named_start: None,
                     github_checkout: None,
                     cwd: &cwd,
                     parent: None,
@@ -25416,6 +25764,7 @@ exit 0
             .expect("supervisor");
         let refusal = match sup
             .validate_create(CreateInputs {
+                named_start: None,
                 github_checkout: None,
                 cwd: &cwd,
                 parent: None,
@@ -25466,6 +25815,7 @@ exit 0
             .expect("supervisor");
         let refusal = match sup
             .validate_create(CreateInputs {
+                named_start: None,
                 github_checkout: None,
                 cwd: &cwd,
                 parent: None,
@@ -25513,6 +25863,7 @@ exit 0
             .expect("supervisor");
         let resolved = sup
             .validate_create(CreateInputs {
+                named_start: None,
                 github_checkout: None,
                 cwd: &cwd,
                 parent: None,
@@ -25582,6 +25933,7 @@ exit 0
             let created = sup
                 .create_session(
                     CreateInputs {
+                        named_start: None,
                         github_checkout: None,
                         cwd: &cwd,
                         parent: None,
@@ -25669,6 +26021,7 @@ exit 0
         let mut tasks = tokio::task::JoinSet::new();
         let launch_dir = state.path().join("launch");
         let request = |req_id: u64, yolo: bool| ControlMsg::CreateSession {
+            named_start: None,
             req_id,
             parent: None,
             inherit_agent: false,
@@ -25813,6 +26166,7 @@ exit 0
         let other = "b".repeat(64);
         let request = |req_id: u64, command: &str, key: Option<&str>, digest: &str| {
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id,
                 parent: None,
                 inherit_agent: false,
@@ -26484,6 +26838,7 @@ exit 0
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    named_start: None,
                     req_id,
                     parent: None,
                     inherit_agent: false,
@@ -26535,6 +26890,7 @@ exit 0
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 6,
                 parent: None,
                 inherit_agent: false,
@@ -26597,6 +26953,7 @@ exit 0
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 1,
                 parent: None,
                 inherit_agent: false,
@@ -26675,6 +27032,7 @@ exit 0
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
         let request = |req_id: u64, title: &str| ControlMsg::CreateSession {
+            named_start: None,
             req_id,
             parent: None,
             inherit_agent: false,
@@ -27316,6 +27674,7 @@ exit 0
         let created = sup
             .create_session(
                 CreateInputs {
+                    named_start: None,
                     github_checkout: None,
                     cwd: &cwd,
                     parent: None,
@@ -27783,6 +28142,7 @@ exit 0
         let reply = sup
             .launch_reserved(
                 LaunchRequest {
+                    named: false,
                     parent: None,
                     destination: DestinationResolution::Existing,
                     cwd: cwd.clone(),
@@ -28079,6 +28439,7 @@ exit 0
             .expect("supervisor");
         let create = match sup
             .validate_create(CreateInputs {
+                named_start: None,
                 github_checkout: None,
                 cwd: &cwd,
                 parent: None,
@@ -29951,6 +30312,7 @@ exit 0
         let info = sup
             .create_session(
                 CreateInputs {
+                    named_start: None,
                     github_checkout: None,
                     cwd: "/",
                     parent: None,
@@ -30115,6 +30477,7 @@ exit 0
                 checkout.preview.cwd = preview.cwd.clone();
                 let launch = sup
                     .validate_create(CreateInputs {
+                        named_start: None,
                         cwd: "",
                         parent: None,
                         github_checkout: Some(checkout),
@@ -30178,6 +30541,7 @@ exit 0
             checkout.preview.cwd = preview.cwd.clone();
             let launch = sup
                 .validate_create(CreateInputs {
+                    named_start: None,
                     cwd: "",
                     parent: None,
                     github_checkout: Some(checkout),
@@ -31099,6 +31463,7 @@ exit 0
     ) -> anyhow::Result<SessionInfo> {
         sup.create_session(
             CreateInputs {
+                named_start: None,
                 cwd: "",
                 parent: None,
                 github_checkout: Some(checkout.clone()),
@@ -33145,6 +33510,7 @@ exit 0
                 &entry,
                 &snapshot,
                 RelaunchPlan {
+                    clear_capture: false,
                     argv: vec!["sh".into(), "-c".into(), "exit 0".into()],
                     launch_cwd: "/tmp".into(),
                     terminal_survives: false,
@@ -33197,6 +33563,7 @@ exit 0
         let origin = sup
             .create_session(
                 CreateInputs {
+                    named_start: None,
                     cwd: "",
                     parent: None,
                     github_checkout: Some(checkout_fixture(&root)),
@@ -33557,6 +33924,7 @@ exit 0
             let refusal = sup
                 .create_session(
                     CreateInputs {
+                        named_start: None,
                         cwd: cwd.to_str().unwrap(),
                         parent: None,
                         github_checkout: None,

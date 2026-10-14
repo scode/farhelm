@@ -4213,25 +4213,26 @@ request, shown on a card, which creates a second child if allowed.
 
 ### Restart only resumes
 
-SPEC.md makes Restart mean resuming the session's own conversation, so the wire has no way to ask for anything else.
-`RestartOffer` is `resume` when the supervisor can fill the session's resume command with a captured conversation it
-accepts, and otherwise names why it cannot: `not_captured` for an agent type that reports conversations but has no
-usable identity (nothing reported yet, an identity from before ownership proofs, a Pi or OMP file that no longer
-matches), `no_conversation_reporting` for a session with no integration at all, and `no_resume_command` (protocol 39)
-for a command launch that declared an agent type without opting into Resume. `resume` kept its spelling because agents
-in running sessions read it; the reasons replaced `fresh_only` and `fallback_template`. Protocol 37 removed the `mode`
-field from `RestartSession` and from the agent relay's `Restart` verb, with `RestartMode` itself: a restart whose
-current offer is not `resume` is refused with a `Conflict` naming the reason, before anything is stopped, and the fresh
-relaunch of the stored invocation and the verbatim run of a placeholder-free resume command are gone. Since launch kinds
-(protocol 39) a resume command must contain `{conversation}`, so no new session can carry one; a legacy session that
-stored one keeps it, but it is never run.
+SPEC.md makes plain Restart mean resuming the session's own conversation. Named Restart with is the explicit exception
+described below; the agent relay still has no selector for a different conversation. `RestartOffer` is `resume` when the
+supervisor can fill the session's resume command with a captured conversation it accepts, and otherwise names why it
+cannot: `not_captured` for an agent type that reports conversations but has no usable identity (nothing reported yet, an
+identity from before ownership proofs, a Pi or OMP file that no longer matches), `no_conversation_reporting` for a
+session with no integration at all, and `no_resume_command` (protocol 39) for a command launch that declared an agent
+type without opting into Resume. `resume` kept its spelling because agents in running sessions read it; the reasons
+replaced `fresh_only` and `fallback_template`. Protocol 37 removed the `mode` field from `RestartSession` and from the
+agent relay's `Restart` verb, with `RestartMode` itself: a restart whose current offer is not `resume` is refused with a
+`Conflict` naming the reason, before anything is stopped, and the fresh relaunch of the stored invocation and the
+verbatim run of a placeholder-free resume command are gone. Since launch kinds (protocol 39) a resume command must
+contain `{conversation}`, so no new session can carry one; a legacy session that stored one keeps it, but it is never
+run.
 
-Because every restart resumes, a relaunch keeps the captured identity, its source, and its ownership version; only the
-OMP launch-provenance columns clear, as they describe the launch rather than the conversation. The helm caches each
-host's last listing, so helm.db schema 35 rewrites cached `fresh_only` to `not_captured` and `fallback_template` to
-`no_conversation_reporting`; without it the cache reader would skip those rows and a down host's sessions would drop out
-of the list. Tests of restart mechanics that once restarted a plain command fresh now bind a conversation through the
-supervisor's `record_conversation_for_test` seam, which exists only under `cfg(test)` and the `test-seams` feature.
+Ordinary restarts keep the captured identity, its source, and its ownership version; only the OMP launch-provenance
+columns clear, as they describe the launch rather than the conversation. The helm caches each host's last listing, so
+helm.db schema 35 rewrites cached `fresh_only` to `not_captured` and `fallback_template` to `no_conversation_reporting`;
+without it the cache reader would skip those rows and a down host's sessions would drop out of the list. Tests of
+restart mechanics that once restarted a plain command fresh now bind a conversation through the supervisor's
+`record_conversation_for_test` seam, which exists only under `cfg(test)` and the `test-seams` feature.
 
 ### Launch-kinds reservations
 
@@ -4284,6 +4285,30 @@ is logged, and the reply and live session retain the old stored launch. A relaun
 hit an independent cleanup or reply error still attempts the write and retains that error reply. A later restart uses
 the saved launch, or the old one if the write failed, as it would after a crash between spawn and the write. This is the
 only exception to the ordinary create-time immutability of a session's launch.
+
+Protocol 50 adds a transient `NamedConversationStart { conversation, argv }` beside `with` and ordinary create inputs.
+The browser's raw `conversation` stays outside `LaunchSelection`, history and templates. The helm validates it with the
+supervisor's existing id/token checks and fills the six existing ordinary resume templates through `fill_slots`, without
+parsing captured locator provenance. Muse, Cursor and OpenCode get one-time suffixes in the helm only (`resume`,
+`--resume`, `--session` respectively); their ordinary `resume` stays absent. Exhaustive harness facts state whether a
+named start is offered, whether it takes a session file, and whether it can report afterwards; labels stay in the UI
+composer.
+
+The supervisor validates agent-only eligibility, raw selector and bounded executable argv before admission. Its shared
+start-shape check requires one whole Farhelm argument slot, no unfilled conversation slot and no placeholder program.
+Named Restart with requires a stored resume command, but bypasses only the captured-target offer, legacy Codex refusal,
+locator filling and report-only target verification. Launch kind/harness, directory identity, stop consent and lifecycle
+claims still apply. A named create uses the existing Resume hook phase and runs the transient argv while saving the
+ordinary launch. The `named_session_launch_v1` fingerprint binds both raw selector and argv; absent selectors retain the
+frozen `session_launch_v1` bytes. Same-fingerprint pending retries restore the transient argv beside the recorded
+ordinary launch. New managed checkouts refuse it before their separate recovery encodings become involved. Both launch
+and transient serialized inputs count toward the existing request bounds.
+
+Reporting harnesses retain old capture until an accepted report replaces it. Goose's named restart clears capture,
+source and ownership version in the generation-opening transaction because its resume has no reporter. `PriorRun`
+retains those columns only for the existing definitive-abort restoration, fenced by the new generation. Success and
+ambiguous failures publish a cleared mirror; an abort restores that mirror only if its durable restoration succeeded. No
+capture is seeded from request data and no new report admission rule or database schema is needed.
 
 ### Launch kinds: one resolved launch
 

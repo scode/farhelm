@@ -804,6 +804,9 @@ pub struct OfferBasis {
 /// ([`SessionStore::abort_relaunch`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PriorRun {
+    /// The identity cleared by a named restart that cannot report afterwards.
+    /// Restored only when the existing abort boundary proves no external start.
+    pub cleared_capture: Option<(Option<String>, Option<String>, i64)>,
     pub outcome: LastOutcome,
     /// The pane the previous run confirmed, or empty for a launch that
     /// never confirmed one. Restored alongside the outcome so an aborted
@@ -4083,6 +4086,22 @@ impl SessionStore {
         basis: OfferBasis,
         scope_available: bool,
     ) -> anyhow::Result<RelaunchDecision> {
+        self.begin_relaunch_named(id, basis, scope_available, false)
+            .await
+    }
+
+    /// Open a generation and optionally withdraw a capture it will no longer describe.
+    ///
+    /// Named Goose starts cannot report a replacement. Clear inside this same
+    /// transaction so reload cannot advertise the prior conversation, and keep
+    /// its old columns only for the existing definitive-abort restoration.
+    pub async fn begin_relaunch_named(
+        &self,
+        id: &str,
+        basis: OfferBasis,
+        scope_available: bool,
+        clear_capture: bool,
+    ) -> anyhow::Result<RelaunchDecision> {
         let id = id.to_string();
         self.conn
             .call(
@@ -4130,6 +4149,10 @@ impl SessionStore {
                         return Ok(RelaunchDecision::OfferChanged);
                     }
                     let prior = PriorRun {
+                        cleared_capture: if clear_capture {
+                            let source: Option<String> = tx.query_row("SELECT conversation_source FROM sessions WHERE id = ?1", [&id], |r| r.get(0))?;
+                            Some((captured_conversation.clone(), source, capture_ownership_version))
+                        } else { None },
                         outcome: LastOutcome::from_columns(
                             &state,
                             exit_code,
@@ -4144,8 +4167,9 @@ impl SessionStore {
                     let generation = generation + 1;
                     let (state, exit_code, annotation, error_detail) =
                         LastOutcome::Launching.columns();
-                    // The capture columns are left alone: the relaunch resumes the
-                    // conversation they name. The Codex pin and OMP launch-provenance
+                    // Ordinary relaunches keep capture. A named start without
+                    // reports withdraws it below, in this same transaction.
+                    // The Codex pin and OMP launch-provenance
                     // columns clear — they describe the launch, not the conversation, so a
                     // resume must not inherit them. Its hook flag clears for
                     // the same reason: the new spawn decides injection afresh.
@@ -4166,6 +4190,9 @@ impl SessionStore {
                         ],
                     )
                     .context("opening a new launch generation for a restart")?;
+                    if clear_capture {
+                        tx.execute("UPDATE sessions SET captured_conversation = NULL, conversation_source = NULL, capture_ownership_version = 0 WHERE id = ?1", [&id])?;
+                    }
                     tx.commit().context("committing the launch generation")?;
                     Ok(RelaunchDecision::Claimed(RelaunchClaim {
                         generation,
@@ -4198,7 +4225,8 @@ impl SessionStore {
     /// by the time this loses that race, the newer generation's own outcome
     /// is the truth and this one's prior run is ancient history.
     ///
-    /// Identity is not restored: a relaunch never clears it.
+    /// Ordinary relaunches keep identity. A named non-reporting relaunch
+    /// restores the capture columns it withdrew, alongside the prior outcome.
     /// The Codex reporting-process pin, OMP reporter asset and launch program stay cleared: they
     /// authorize one launch, not the conversation, so a later launch must
     /// establish its own pair. The outcome, pane, and scope selection describe
@@ -4227,6 +4255,7 @@ impl SessionStore {
         let pane = prior.pane.clone();
         let scoped = i64::from(prior.scoped);
         let launch_boot_ended = i64::from(prior.launch_boot_ended);
+        let cleared_capture = prior.cleared_capture.clone();
         self.conn
             .call(
                 "relaunch abort task panicked",
@@ -4234,7 +4263,10 @@ impl SessionStore {
                     let restored = conn
                 .execute(
                     "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
-                     error_detail = ?5, pane = ?6, launch_scoped = ?8, launch_boot_ended = ?9 \
+                     error_detail = ?5, pane = ?6, launch_scoped = ?8, launch_boot_ended = ?9, \
+                     captured_conversation = CASE WHEN ?10 THEN ?11 ELSE captured_conversation END, \
+                     conversation_source = CASE WHEN ?10 THEN ?12 ELSE conversation_source END, \
+                     capture_ownership_version = CASE WHEN ?10 THEN ?13 ELSE capture_ownership_version END \
                      WHERE id = ?1 AND generation = ?7",
                     rusqlite::params![
                         id,
@@ -4246,6 +4278,10 @@ impl SessionStore {
                         generation,
                         scoped,
                         launch_boot_ended,
+                        cleared_capture.is_some(),
+                        cleared_capture.as_ref().and_then(|capture| capture.0.as_deref()),
+                        cleared_capture.as_ref().and_then(|capture| capture.1.as_deref()),
+                        cleared_capture.as_ref().map_or(0, |capture| capture.2),
                     ],
                 )
                 .context("restoring the outcome a failed restart replaced")?;
@@ -12759,6 +12795,60 @@ mod tests {
         assert_eq!(relaunching.tmux_name, stopped.tmux_name);
         assert_eq!(relaunching.invocation(), stopped.invocation());
         assert_eq!(relaunching.agent_kind(), stopped.agent_kind());
+    }
+
+    /// A named non-reporting restart cannot leave plain Restart aimed at the
+    /// previous conversation. Withdrawal belongs to the generation transaction,
+    /// while a proven pre-spawn abort must recover the exact old capture.
+    #[farhelm_testtrace::test]
+    async fn named_relaunch_clears_capture_and_definitive_abort_restores_it() {
+        let (_dir, store) = fresh_store().await;
+        let mut row = launching_row("named");
+        row.captured_conversation = Some("old-conversation".into());
+        row.conversation_source = Some("hook".into());
+        row.capture_ownership_version = 1;
+        store.insert_session(row, None).await.unwrap();
+        let before = store.session("named").await.unwrap().unwrap();
+        assert_eq!(
+            before.captured_conversation.as_deref(),
+            Some("old-conversation")
+        );
+        let claim = claimed(
+            store
+                .begin_relaunch_named(
+                    "named",
+                    OfferBasis {
+                        captured_conversation: before.captured_conversation.clone(),
+                        capture_ownership_version: before.capture_ownership_version,
+                    },
+                    false,
+                    true,
+                )
+                .await
+                .unwrap(),
+        );
+        let cleared = store.session("named").await.unwrap().unwrap();
+        assert_eq!(cleared.generation, claim.generation);
+        assert_eq!(cleared.captured_conversation, None);
+        assert_eq!(cleared.conversation_source, None);
+        assert_eq!(cleared.capture_ownership_version, 0);
+        assert!(
+            store
+                .abort_relaunch("named", claim.generation, &claim.prior)
+                .await
+                .unwrap()
+        );
+        let restored = store.session("named").await.unwrap().unwrap();
+        assert_eq!(restored.captured_conversation, before.captured_conversation);
+        assert_eq!(restored.conversation_source, before.conversation_source);
+        assert_eq!(
+            restored.capture_ownership_version,
+            before.capture_ownership_version
+        );
+        assert_eq!(
+            restored.generation, claim.generation,
+            "abort never rolls back the generation fence"
+        );
     }
 
     /// Item 4's other half, and the contract this PR itself documented: a

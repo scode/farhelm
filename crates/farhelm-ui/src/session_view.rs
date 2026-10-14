@@ -81,13 +81,23 @@ fn focus_restart_with_trigger() {
 
 /// Explain the first fact that prevents editing a resumed launch.
 ///
-/// Provenance takes priority because a raw session cannot supply the
-/// structured choices even if its conversation is captured later. The three
-/// generic integrations are named only in the explanation; the actual
-/// availability rule does not maintain a harness capability list.
+/// Agent launches with a stored resume command can enter a user-named target
+/// even without capture. Command and legacy launches retain their ordinary
+/// captured-target rules. Availability reads the stored command rather than
+/// maintaining another harness capability list.
 fn restart_with_unavailable(session: &Session) -> Option<String> {
     let launch = session.agent_selection()?;
-    if session.restart_offer == RestartOffer::Resume {
+    if session.restart_offer == RestartOffer::Resume
+        || session.launch.as_ref().is_some_and(|launch| {
+            matches!(
+                launch,
+                crate::SessionLaunch::Agent {
+                    resume: Some(_),
+                    ..
+                }
+            )
+        })
+    {
         return None;
     }
     // A harness that runs under the generic integration never has a
@@ -107,7 +117,7 @@ fn restart_with_unavailable(session: &Session) -> Option<String> {
 /// Why this dialog cannot change the session's launch, when it cannot: a
 /// legacy session's launch is never changed (SPEC.md refuses Restart with
 /// for it, naming Replace with), and an agent or command launch can be
-/// edited exactly when Restart could resume it.
+/// edited when Restart could resume it, or an agent launch can accept a named target.
 fn restart_with_reason(session: &Session) -> Option<String> {
     match &session.launch {
         Some(crate::SessionLaunch::Agent { .. }) => restart_with_unavailable(session),
@@ -2587,7 +2597,7 @@ pub(crate) fn SessionView(
                         // this re-check keeps an edit of another kind or type
                         // from ever being sent.
                         let same_kind_and_type = match (&edit, &opening.launch) {
-                            (crate::restart_with::RestartEdit::Agent(selection), Some(crate::SessionLaunch::Agent { selection: saved, .. })) => selection.harness == saved.harness,
+                            (crate::restart_with::RestartEdit::Agent(selection) | crate::restart_with::RestartEdit::NamedAgent(selection, _), Some(crate::SessionLaunch::Agent { selection: saved, .. })) => selection.harness == saved.harness,
                             (crate::restart_with::RestartEdit::Command(command), Some(crate::SessionLaunch::Command(saved))) => command.agent == saved.agent,
                             _ => false,
                         };
@@ -3706,6 +3716,42 @@ mod tests {
             "{:?}",
             restart_with_reason(&session)
         );
+    }
+
+    /// Missing capture disables ordinary Restart but must not hide the route
+    /// for entering an id the user knows. Only a stored agent resume command
+    /// establishes that route; command and legacy launches retain their gates.
+    #[farhelm_testtrace::test]
+    fn named_restart_with_remains_available_without_capture() {
+        let mut session = live_session();
+        session.restart_offer = RestartOffer::NotCaptured;
+        session.launch = Some(crate::SessionLaunch::Agent {
+            selection: crate::LaunchSelection {
+                harness: LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+                permission_flags: None,
+            },
+            start: vec!["codex".into(), "{farhelm_args}".into()],
+            resume: Some(vec![
+                "codex".into(),
+                "resume".into(),
+                "{conversation}".into(),
+                "{farhelm_args}".into(),
+            ]),
+        });
+        assert_eq!(restart_with_reason(&session), None);
+        assert_eq!(
+            session.restart_offer,
+            RestartOffer::NotCaptured,
+            "ordinary offer is not widened"
+        );
+        if let Some(crate::SessionLaunch::Agent { resume, .. }) = &mut session.launch {
+            *resume = None;
+        }
+        assert!(restart_with_reason(&session).is_some());
     }
 
     /// Restart asks for confirmation only while the agent is working.

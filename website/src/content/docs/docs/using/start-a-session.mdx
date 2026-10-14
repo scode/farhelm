@@ -67,6 +67,17 @@ NOTE: The launcher remembers the permissions and trust of your last launch from 
 window. After one YOLO launch, the next launcher opens on **yolo** too. Launches your agents start, custom commands, and
 plain **replace** do not change what it remembers.
 
+## Continue a conversation you know
+
+If you know an agent conversation's id, enter it in the launcher to continue that conversation instead of starting
+fresh. This works in New, Clone and Replace with, for an agent in an existing directory. Pi and OMP ask for a session
+file instead; use its absolute path or a path relative to the session directory, without spaces or `~`.
+
+The choice applies to this start only. Templates and recent setups do not save it, and a later Clone starts fresh.
+Farhelm does not check whether the conversation exists; a mistyped id is handled by the agent. Goose, Muse, Cursor and
+OpenCode can open a conversation this way, but Farhelm cannot continue it with a later Restart. For restarting a session
+whose id Farhelm never learned, see [Restart with](/docs/using/stop-restart-resume/#the-headers-actions).
+
 ## Confirm a YOLO launch
 
 Before a YOLO launch, Farhelm asks you to confirm. Every host asks until you tell it not to.

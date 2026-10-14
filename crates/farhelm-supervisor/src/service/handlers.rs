@@ -254,6 +254,7 @@ fn create_launch(
 /// a field that widens what replays, be honored here without an authority
 /// check of its own.
 struct CreateRequest {
+    named_start: Option<farhelm_proto::NamedConversationStart>,
     parent: Option<String>,
     cwd: String,
     /// What the new session runs. `None`, or `inherit_agent`, is refused
@@ -294,6 +295,7 @@ async fn handle_create_session(
     admission: CreateAdmission,
 ) {
     let CreateRequest {
+        named_start,
         parent,
         cwd,
         launch,
@@ -323,6 +325,20 @@ async fn handle_create_session(
             return;
         }
     };
+    if let Some(named) = &named_start {
+        let refusal = if github_checkout.is_some() || request_fingerprint.is_some() {
+            Some(
+                "named conversations require an ordinary user create in an existing folder"
+                    .to_string(),
+            )
+        } else {
+            super::core::validate_named_start(&mode, named).err()
+        };
+        if let Some(message) = refusal {
+            reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
+            return;
+        }
+    }
     if let Some(message) = match intent_key.as_deref() {
         Some("") => Some("intent key must not be empty".to_string()),
         Some(key) if key.len() > INTENT_KEY_CAP => Some(format!(
@@ -381,6 +397,11 @@ async fn handle_create_session(
     let field_len = parent.as_deref().map_or(0, str::len)
         + cwd.len()
         + mode_bytes
+        + named_start.as_ref().map_or(0, |named| {
+            serde_json::to_vec(named)
+                .expect("named start serializes")
+                .len()
+        })
         + checkout_bytes
         + title.as_deref().map_or(0, str::len);
     let refusal = if field_len > CREATE_FIELD_CAP {
@@ -416,6 +437,13 @@ async fn handle_create_session(
         intent_key,
         fingerprint: match request_fingerprint.as_deref() {
             Some(digest) => agent_request_fingerprint(digest),
+            None if named_start.is_some() => super::core::named_create_fingerprint(
+                parent.as_deref(),
+                &cwd,
+                &mode,
+                title.as_deref(),
+                named_start.as_ref().expect("named branch"),
+            ),
             None => create_fingerprint(
                 github_checkout.as_ref(),
                 parent.as_deref(),
@@ -429,6 +457,7 @@ async fn handle_create_session(
     match sup
         .create_session_admitted(
             CreateInputs {
+                named_start,
                 cwd: &cwd,
                 parent,
                 github_checkout,
@@ -1842,6 +1871,7 @@ async fn handle_resize(
 /// Keeping the optional bundle together makes an ordinary restart's absent
 /// fields explicit while preserving the protocol's partial-bundle refusal.
 struct RestartSessionRequest {
+    named_start: Option<farhelm_proto::NamedConversationStart>,
     req_id: u64,
     session_id: String,
     stop_if_running: bool,
@@ -1897,16 +1927,27 @@ async fn handle_restart_session(
             panic();
         }
         let RestartSessionRequest {
+            named_start,
             req_id,
             session_id,
             stop_if_running,
             with,
             expected_launch,
         } = request;
-        match sup
-            .restart_session(&session_id, stop_if_running, with, expected_launch)
+        let result = if named_start.is_some() {
+            sup.restart_session_named(
+                &session_id,
+                stop_if_running,
+                with,
+                expected_launch,
+                named_start,
+            )
             .await
-        {
+        } else {
+            sup.restart_session(&session_id, stop_if_running, with, expected_launch)
+                .await
+        };
+        match result {
             Ok(session) => {
                 send_reply(&tx, &ControlMsg::SessionRestarted { req_id, session }).await;
             }
@@ -2359,6 +2400,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             send_reply(ctx.tx, &ControlMsg::BrowserForwardingSet { req_id }).await;
         }
         ControlMsg::CreateSession {
+            named_start,
             req_id,
             parent,
             cwd,
@@ -2386,6 +2428,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             // refused by the HELM, which owns raw repo text; the
             // supervisor sees only resolved payloads.)
             let request = CreateRequest {
+                named_start,
                 parent,
                 cwd,
                 launch,
@@ -2664,6 +2707,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             // kill the connection over it.
         }
         ControlMsg::RestartSession {
+            named_start,
             req_id,
             session_id,
             stop_if_running,
@@ -2675,6 +2719,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 ctx.tx,
                 ctx.tasks,
                 RestartSessionRequest {
+                    named_start,
                     req_id,
                     session_id,
                     stop_if_running,
@@ -3653,6 +3698,7 @@ mod tests {
         let (mut tasks, mut rx) = dispatch_for_test(
             &sup,
             ControlMsg::RestartSession {
+                named_start: None,
                 req_id: 72,
                 session_id,
                 stop_if_running: false,
@@ -3986,6 +4032,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    named_start: None,
                     req_id,
                     parent: None,
                     inherit_agent,
@@ -4364,6 +4411,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::RestartSession {
+                named_start: None,
                 req_id: 53,
                 session_id: session_id.to_string(),
                 stop_if_running: true,
@@ -5807,6 +5855,7 @@ mod tests {
         handle_restricted_control(
             &sup,
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 42,
                 parent: Some("forged-parent".to_string()),
                 cwd: state.path().to_string_lossy().into_owned(),
@@ -5961,6 +6010,7 @@ mod tests {
         handle_restricted_control(
             &sup,
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 63,
                 parent: Some("checkout-parent".to_string()),
                 cwd: state.path().to_string_lossy().into_owned(),
@@ -6077,6 +6127,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 66,
                 parent: None,
                 // Fresh creates must NOT choose a cwd: the supervisor
@@ -7336,6 +7387,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    named_start: None,
                     req_id,
                     parent: None,
                     cwd: state.path().to_string_lossy().into_owned(),
@@ -7403,6 +7455,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::RestartSession {
+                named_start: None,
                 req_id: 5,
                 session_id: "no-such-session".to_string(),
                 stop_if_running: false,
@@ -7622,6 +7675,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 98,
                 parent: None,
                 inherit_agent: false,
@@ -7687,6 +7741,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 97,
                 parent: None,
                 inherit_agent: false,
@@ -7747,6 +7802,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id,
                 parent: None,
                 inherit_agent: false,
@@ -7837,6 +7893,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    named_start: None,
                     req_id,
                     parent: None,
                     inherit_agent: false,
@@ -7900,6 +7957,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 4,
                 parent: None,
                 inherit_agent: false,
@@ -7967,6 +8025,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    named_start: None,
                     req_id,
                     parent: None,
                     inherit_agent: false,
@@ -8904,6 +8963,7 @@ mod tests {
         let mut host = BusyHost::new().await;
 
         host.send(ControlMsg::RestartSession {
+            named_start: None,
             req_id: 2,
             session_id: "another-session".to_string(),
             stop_if_running: true,

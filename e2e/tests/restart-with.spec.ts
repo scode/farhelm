@@ -38,6 +38,33 @@ const BASELINE = {
   workspace_trust: null,
 };
 
+/** Without capture the ordinary Restart stays unavailable, but Restart with
+ * accepts a known conversation without requiring an unrelated settings edit.
+ * The intercepted request proves that the value is outside saved choices.
+ */
+test("named restart with requires a target when no conversation was captured", async ({ page }) => {
+  await injectSession(page, BASELINE, "not_captured", "interrupted", [
+    "codex", "resume", "{conversation}", "{farhelm_args}",
+  ]);
+  const bodies = await acceptYoloRestart(page);
+  const dialog = await openInjectedDialog(page);
+  const target = dialog.locator(".named-conversation");
+  await expect(target).toHaveValue("");
+  await expect(dialog).toContainText("Farhelm has no captured conversation");
+  await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
+  await target.fill("named-conversation");
+  await expect(dialog.locator(".restart-with-submit")).toBeEnabled();
+  await dialog.locator(".restart-with-submit").click();
+  await expect(dialog).toHaveCount(0);
+  expect(bodies).toHaveLength(1);
+  // Unset workspace trust is omitted by the ordinary selection's wire shape.
+  expect(bodies[0]).toMatchObject({
+    with: { harness: BASELINE.harness, model: BASELINE.model, effort: BASELINE.effort, permissions: BASELINE.permissions },
+    conversation: "named-conversation",
+  });
+  expect((bodies[0] as { with: object }).with).not.toHaveProperty("conversation");
+});
+
 /** Restart refusal text can quote a peer's hidden characters. Its display
  * must expose them and isolate direction while the editable dialog stays open.
  * Restart requires an edited launch choice; an unchanged draft never submits
@@ -64,8 +91,12 @@ test("Restart with escapes and isolates peer refusal text", async ({ page }) => 
  *
  * Copying the stack's existing row keeps host and transport metadata valid;
  * the test changes only the state whose offer and stored selection matter.
+ * A named restart without capture must also supply its stored resume command:
+ * the shared row builder deliberately has none, for generic fixture callers.
  */
-async function injectSession(page: Page, launch: typeof BASELINE | null, offer: string, state = "interrupted") {
+async function injectSession(
+  page: Page, launch: typeof BASELINE | null, offer: string, state = "interrupted", resume?: string[],
+) {
   await page.route(SESSION_LISTING, async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
@@ -86,7 +117,7 @@ async function injectSession(page: Page, launch: typeof BASELINE | null, offer: 
       launch:
         launch === null
           ? { kind: "legacy", invocation: "codex", agent_kind: "codex", resume_template: null }
-          : agentLaunchRow(launch),
+          : { ...agentLaunchRow(launch), ...(resume ? { resume } : {}) },
       status: { state },
       restart_offer: offer,
     });
@@ -154,6 +185,7 @@ async function openInjectedDialog(page: Page) {
     throw new Error(`injected row readiness failed; ${source}; matching title buttons: ${titlePainted}`, { cause: error });
   }
   await row.locator(".session-row-open").click();
+  await expect(page.locator(".restart-with-trigger")).toHaveAttribute("aria-disabled", "false");
   await page.locator(".restart-with-trigger").click();
   const dialog = page.locator(".restart-with-dialog");
   await expect(dialog).toBeVisible();

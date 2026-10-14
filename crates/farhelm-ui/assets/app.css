@@ -5459,6 +5459,38 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   font-size: 12px;
 }
 
+/* The one-time selector grows with the launcher, including the fixed-width
+   Restart with dialog, while its help stays below the labelled input. */
+.named-conversation-choice {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.named-conversation-choice label {
+  display: grid;
+  align-items: stretch;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+}
+.named-conversation {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  font: inherit;
+  color: var(--fg-0);
+  background: var(--well);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  min-height: 36px;
+  padding: 0 12px;
+}
+.named-conversation-choice p {
+  margin: 0.35rem 0 0;
+  color: var(--fg-1);
+  font-size: 0.85rem;
+}
+
 /* Keep the custom words visible as individual arguments rather than implying
    that this permission-only preview is the whole command Farhelm will run. */
 .custom-permission-choice {

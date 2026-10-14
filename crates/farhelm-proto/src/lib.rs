@@ -130,8 +130,8 @@ pub mod time;
 /// Build classification shared by browser wording and native release decisions.
 pub mod version;
 pub use launch::{
-    LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, check_permission_flags,
-    split_permission_flags,
+    LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, NamedConversationStart,
+    check_permission_flags, split_permission_flags,
 };
 pub use version::is_development_build;
 /// The launcher's shared rules: the model catalog, agent-type
@@ -203,7 +203,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_49` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_50` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -214,7 +214,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 49;
+pub const PROTOCOL_VERSION: u32 = 50;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -2543,6 +2543,10 @@ pub enum ControlMsg {
     /// (`request_fingerprint`).
     CreateSession {
         req_id: u64,
+        /// One-time named start. It never replaces the durable launch or a
+        /// captured identity; named creates refuse new managed checkouts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        named_start: Option<NamedConversationStart>,
         /// The spawning session, when this create came from `farhelm
         /// spawn`. PLAN_M7.md item 4 validates it against the connection's
         /// authenticated identity; this vocabulary-only step carries and
@@ -2963,11 +2967,12 @@ pub enum ControlMsg {
     /// make it unresumable, after that snapshot was taken and before this
     /// request arrives. The handler therefore checks the supervisor's
     /// CURRENT offer at handling time rather than trusting the client's
-    /// copy: anything but [`RestartOffer::Resume`] is refused with
+    /// copy: without `named_start`, anything but [`RestartOffer::Resume`] is refused with
     /// `Conflict` naming the reason, and the client is expected to refresh
     /// its `SessionInfo` and re-present the changed state rather than retry
-    /// blindly. Nothing else is ever launched under this request: there is
-    /// no fresh restart and no fallback command (protocol 37 removed the
+    /// blindly. An agent Restart with may instead explicitly name its target;
+    /// that target is validated as an argument, never as captured identity.
+    /// There is no fresh restart and no fallback command (protocol 37 removed the
     /// `mode` field that once chose between them).
     ///
     /// The handler stops a still-running agent when this request carries
@@ -2978,6 +2983,10 @@ pub enum ControlMsg {
     /// repointed working directory — leaves the session untouched.
     RestartSession {
         req_id: u64,
+        /// Explicitly enter this conversation once, with Restart with only.
+        /// Captured-identity proof gates apply only when this is absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        named_start: Option<NamedConversationStart>,
         session_id: String,
         /// Explicit consent to stop a working agent before relaunching
         /// (`#[serde(default)]` false — the safe direction: an old-shaped
@@ -2999,7 +3008,7 @@ pub enum ControlMsg {
         /// authorization to skip it.
         #[serde(default)]
         stop_if_running: bool,
-        /// Restart with: the changed launch to store and resume under (SPEC.md,
+        /// Restart with: the ordinary launch to store and resume under (SPEC.md,
         /// Lifecycle operations). Its launch kind and agent type must match
         /// the stored launch's, and it is validated before anything is
         /// stopped. Absent means a plain restart with the stored launch.
@@ -4596,6 +4605,7 @@ mod tests {
             },
         };
         let with_payload = ControlMsg::CreateSession {
+            named_start: None,
             req_id: 30,
             parent: None,
             cwd: "/checkouts/bar".to_string(),
@@ -4618,7 +4628,9 @@ mod tests {
         old_shape["github_checkout"] = serde_json::Value::Null;
         let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
         let ControlMsg::CreateSession {
-            github_checkout, ..
+            named_start: None,
+            github_checkout,
+            ..
         } = decoded
         else {
             panic!("expected a CreateSession");
@@ -4637,7 +4649,9 @@ mod tests {
         }
         let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
         let ControlMsg::CreateSession {
-            github_checkout, ..
+            named_start: None,
+            github_checkout,
+            ..
         } = decoded
         else {
             panic!("expected a CreateSession");
@@ -4750,8 +4764,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_49() {
-        assert_eq!(PROTOCOL_VERSION, 49);
+    fn protocol_version_is_pinned_at_50() {
+        assert_eq!(PROTOCOL_VERSION, 50);
     }
 
     /// Placement setup has its own acknowledgement. Request echoes cannot settle it,
@@ -4803,6 +4817,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_request_fingerprint_is_omitted_when_unset() {
         let create = |request_fingerprint: Option<String>| ControlMsg::CreateSession {
+            named_start: None,
             req_id: 1,
             parent: None,
             cwd: "/work".to_string(),
@@ -6295,6 +6310,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_agent_launch_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            named_start: None,
             req_id: 1,
             parent: None,
             inherit_agent: false,
@@ -6370,6 +6386,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_command_launch_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            named_start: None,
             req_id: 2,
             parent: None,
             inherit_agent: false,
@@ -6426,6 +6443,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_inherited_spawn_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            named_start: None,
             req_id: 4,
             parent: Some("parent-1".to_string()),
             cwd: "/some/dir".to_string(),
@@ -6478,6 +6496,7 @@ mod tests {
             (None, false),
         ] {
             let msg = ControlMsg::CreateSession {
+                named_start: None,
                 req_id: 3,
                 parent: None,
                 inherit_agent,
@@ -6527,6 +6546,7 @@ mod tests {
         });
         let decoded: ControlMsg = serde_json::from_value(minimal).unwrap();
         let ControlMsg::CreateSession {
+            named_start: None,
             parent,
             launch,
             intent_key,
@@ -6559,6 +6579,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn restart_session_roundtrips_through_frames() {
         let msg = ControlMsg::RestartSession {
+            named_start: None,
             req_id: 42,
             session_id: "s1".to_string(),
             stop_if_running: true,
@@ -6618,6 +6639,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn restart_session_json_shape_is_pinned() {
         let msg = ControlMsg::RestartSession {
+            named_start: None,
             req_id: 7,
             session_id: "s1".to_string(),
             stop_if_running: true,
@@ -6651,7 +6673,9 @@ mod tests {
         });
         let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
         let ControlMsg::RestartSession {
-            stop_if_running, ..
+            named_start: None,
+            stop_if_running,
+            ..
         } = decoded
         else {
             panic!("expected ControlMsg::RestartSession, got {decoded:?}");
@@ -6680,6 +6704,7 @@ mod tests {
         assert!(with.is_none());
 
         let msg = ControlMsg::RestartSession {
+            named_start: None,
             req_id: 2,
             session_id: "s1".into(),
             stop_if_running: false,
@@ -6789,6 +6814,7 @@ mod tests {
         assert_eq!(
             msg,
             ControlMsg::RestartSession {
+                named_start: None,
                 req_id: 9,
                 session_id: "s1".to_string(),
                 stop_if_running: false,

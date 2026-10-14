@@ -111,11 +111,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
   this refers to and what matching it would mean; ask before starting.
 
-- **Launch a session with a given conversation id.** When creating a session, let the user name the agent conversation
-  it should use (what some agents call a session id), for example to continue a conversation started outside Farhelm in
-  a Farhelm session. Today a session only ever resumes the conversation Farhelm captured for it. Plan:
-  `plans/queue/launch-with-conversation-id.md`.
-
 - **Number shortcuts for launching templates.** Let the user bind each of Cmd+0 through Cmd+9 to a template, so that
   pressing it launches a session from that template right away, the same way the Cmd+P template quick launch (being
   planned, not yet on main) does once a template is picked. Build on that work once it lands. Browsers keep Cmd/Ctrl

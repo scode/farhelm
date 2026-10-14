@@ -8,7 +8,9 @@ use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::hook_identity::{
     ServeTask, attach_ready, hook_log, hook_log_at, report as report_conversation, report_client,
 };
-use crate::structured_launches::{FakeHarness, fake_agent_launch, fake_harness, observed_argv};
+use crate::structured_launches::{
+    FakeHarness, fake_agent_launch, fake_harness, fake_harness_with_script, observed_argv,
+};
 
 /// Give compiled vendor names an owned executable and a private fixture home.
 ///
@@ -20,7 +22,12 @@ use crate::structured_launches::{FakeHarness, fake_agent_launch, fake_harness, o
 /// alive for hook reports and stop it before handing the supervisor to a
 /// successor.
 async fn restart_with_harness() -> (Harness, FakeHarness, ServeTask) {
-    let fixture = fake_harness();
+    restart_with_fixture(fake_harness()).await
+}
+
+/// Keep the supervisor setup identical while choosing a report-driven wrapper.
+/// The fixture must outlive every restarted vendor process it supplies.
+async fn restart_with_fixture(fixture: FakeHarness) -> (Harness, FakeHarness, ServeTask) {
     let shell = fixture.bash_shell().to_string_lossy().into_owned();
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
@@ -90,6 +97,205 @@ async fn durable_launch_bundle(h: &Harness, id: &str) -> farhelm_proto::SessionL
 /// sends it.
 fn composed(selection: farhelm_proto::LaunchSelection) -> farhelm_proto::SessionLaunch {
     farhelm_helm::compile_agent_launch(selection).expect("the catalog composes the selection")
+}
+
+/// Malformed transient commands must be refused before the old pane is stopped.
+/// A live echo on the original attachment and an unchanged generation distinguish
+/// admission refusal from stopping and then failing to launch a replacement.
+#[farhelm_testtrace::test]
+async fn named_restart_with_refuses_malformed_argv_without_stopping_the_old_run() {
+    let (h, fixture, _accepting) = restart_with_harness().await;
+    let session = structured_claude_session(&h, &fixture).await;
+    let ordinary = composed(session.launch.agent_selection().unwrap().clone());
+    let generation = snapshot_of(&h, &session.id).await.generation;
+    let (channel, mut stream, mut seen) = attach_ready(&h, &session).await;
+    for (index, argv) in [
+        vec!["claude", "--resume", "{conversation}", "{farhelm_args}"],
+        vec!["claude", "--resume", "target"],
+        vec!["claude", "{farhelm_args}", "{farhelm_args}"],
+        vec!["{farhelm_args}", "target"],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let error = h
+            .client
+            .restart_session_named(
+                &session.id,
+                true,
+                Some(ordinary.clone()),
+                None,
+                Some(farhelm_proto::NamedConversationStart {
+                    conversation: "target".into(),
+                    argv: argv.into_iter().map(str::to_owned).collect(),
+                }),
+            )
+            .await
+            .expect_err("malformed argv must be refused at admission");
+        assert_eq!(
+            error.downcast_ref::<SupervisorError>().unwrap().kind,
+            ErrorKind::InvalidRequest
+        );
+        assert_eq!(snapshot_of(&h, &session.id).await.generation, generation);
+        let from = seen.len();
+        let marker = format!("named-refusal-live-{index}");
+        h.client
+            .send_input(channel, format!("{marker}\r").into_bytes())
+            .await;
+        crate::hook_identity::wait_for_after_from(
+            &mut stream,
+            &mut seen,
+            from,
+            "echo:",
+            &marker,
+            10,
+        )
+        .await;
+    }
+}
+
+/// A supplied conversation must work even when reporting never captured one.
+/// It changes only this start; reports still establish identity, an existing
+/// capture survives until that report, and a later clone uses the ordinary
+/// fresh command. Real tmux argv distinguishes a literal selector from shell
+/// interpretation and the store checks distinguish capture from request data.
+#[farhelm_testtrace::test]
+async fn named_restart_with_uses_the_requested_target_and_only_reports_capture_it() {
+    for captured in [false, true] {
+        // The wrapper's counter spans sessions, so each capture premise gets
+        // its own fixture; generation two then identifies this exact restart.
+        let (h, fixture, _accepting) =
+            restart_with_fixture(fake_harness_with_script("hook-report")).await;
+        let session = structured_claude_session(&h, &fixture).await;
+        let old = if captured {
+            Some(captured_claude_conversation(&h, &session).await)
+        } else {
+            None
+        };
+        let before = snapshot_of(&h, &session.id).await;
+        assert_eq!(before.captured_conversation, old, "fixture capture premise");
+        let ordinary = composed(session.launch.agent_selection().unwrap().clone());
+        let value = "named;literal$id";
+        let named = farhelm_proto::NamedConversationStart {
+            conversation: value.into(),
+            argv: farhelm_supervisor::agent_kind::IntegrationSnapshot::of(&ordinary)
+                .filled_named_resume_argv(value)
+                .unwrap(),
+        };
+        let restarted = h
+            .client
+            .restart_session_named(&session.id, true, Some(ordinary.clone()), None, Some(named))
+            .await
+            .unwrap();
+        let words = shell_words::split(&observed_argv(&h, &session.id, 2).await).unwrap();
+        assert!(
+            words.windows(2).any(|pair| pair == ["--resume", value]),
+            "one literal argv: {words:?}"
+        );
+        assert_eq!(durable_launch_bundle(&h, &session.id).await, ordinary);
+        assert_eq!(
+            snapshot_of(&h, &session.id).await.captured_conversation,
+            old,
+            "request text never establishes capture"
+        );
+        let (channel, mut stream, mut seen) = attach_ready(&h, &restarted).await;
+        report_conversation(&h, channel, &mut stream, &mut seen, "new-report").await;
+        assert_eq!(
+            snapshot_of(&h, &session.id)
+                .await
+                .captured_conversation
+                .as_deref(),
+            Some("new-report")
+        );
+        let cloned = h
+            .client
+            .create_session_with_extras(
+                &fixture.work().to_string_lossy(),
+                ordinary.clone(),
+                None,
+                WIDE_COLS,
+                ROWS,
+                farhelm_helm::CreateExtras::default(),
+            )
+            .await
+            .unwrap();
+        // The same wrapper has served the original start and named restart;
+        // its third post-exec witness belongs to this independent clone.
+        let clone_words = shell_words::split(&observed_argv(&h, &cloned.id, 3).await).unwrap();
+        assert!(
+            !clone_words
+                .iter()
+                .any(|word| word == "--resume" || word == value),
+            "clone must start fresh: {clone_words:?}"
+        );
+    }
+}
+
+/// A named create runs its resume-shaped command once while recording the
+/// ordinary launch. Its key must replay that same process and refuse a changed
+/// target, and only a later report may create the captured identity.
+#[farhelm_testtrace::test]
+async fn named_create_runs_once_and_reports_identity_without_changing_saved_launch() {
+    let (h, fixture, _accepting) = restart_with_harness().await;
+    let selection = farhelm_proto::LaunchSelection {
+        harness: farhelm_proto::LaunchHarness::Claude,
+        model: None,
+        effort: None,
+        permissions: None,
+        workspace_trust: None,
+        permission_flags: None,
+    };
+    let ordinary = fake_agent_launch(&fixture.hook_invocation(&selection), selection);
+    let named = |target: &str| farhelm_proto::NamedConversationStart {
+        conversation: target.into(),
+        argv: farhelm_supervisor::agent_kind::IntegrationSnapshot::of(&ordinary)
+            .filled_named_resume_argv(target)
+            .unwrap(),
+    };
+    let create = async |target: &str| {
+        h.client
+            .create_session_with_extras(
+                &fixture.work().to_string_lossy(),
+                ordinary.clone(),
+                None,
+                WIDE_COLS,
+                ROWS,
+                farhelm_helm::CreateExtras {
+                    named_start: Some(named(target)),
+                    intent_key: Some("named-create-key".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+    };
+    let created = create("requested-target").await.unwrap();
+    let words = shell_words::split(&observed_argv(&h, &created.id, 1).await).unwrap();
+    assert!(
+        words
+            .windows(2)
+            .any(|pair| pair == ["--resume", "requested-target"])
+    );
+    assert_eq!(durable_launch_bundle(&h, &created.id).await, ordinary);
+    assert_eq!(
+        snapshot_of(&h, &created.id).await.captured_conversation,
+        None,
+        "a named start is not a report"
+    );
+    assert_eq!(create("requested-target").await.unwrap().id, created.id);
+    let changed = create("other-target").await.unwrap_err();
+    assert_eq!(
+        changed.downcast_ref::<SupervisorError>().unwrap().kind,
+        ErrorKind::Conflict
+    );
+    let (channel, mut stream, mut seen) = attach_ready(&h, &created).await;
+    report_conversation(&h, channel, &mut stream, &mut seen, "reported-target").await;
+    assert_eq!(
+        snapshot_of(&h, &created.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some("reported-target")
+    );
 }
 
 /// Establish the reported identity before any restart-with assertion uses it.
@@ -335,6 +541,7 @@ async fn raw_restart_with(
         .expect("handshake");
     writer
         .write_control(&ControlMsg::RestartSession {
+            named_start: None,
             req_id: 1,
             session_id: session_id.to_string(),
             stop_if_running: true,
