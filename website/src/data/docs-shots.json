@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-13T16:41:11Z",
-  "captured_from": "7b09de0c974a81a3b7ec4dc7077d7049feeff173",
-  "commit": "b1ace6cdbefba5a95d03234937abdb48303b6df3",
+  "captured_at": "2026-10-14T01:35:22Z",
+  "captured_from": "df1d8c8e45b60c7564d1726741680a33bf06e7bb",
+  "commit": "8c9073bbeba289b59b5eb7ab5483303e424064ef",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
@@ -58,7 +58,7 @@
       "width": 996
     },
     "manage-hosts/app-settings": {
-      "height": 2676,
+      "height": 3436,
       "width": 1594
     },
     "manage-hosts/details": {
@@ -135,6 +135,10 @@
     },
     "release-notes/v0-28-0-link-permissions": {
       "height": 834,
+      "width": 1544
+    },
+    "release-notes/v0-28-1-terminal-links": {
+      "height": 744,
       "width": 1544
     },
     "session-list/controls": {
