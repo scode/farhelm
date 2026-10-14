@@ -59,8 +59,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   without an app release. Decide what the release gate should cover, including whether it sends to the live endpoint
   (and how such sends stay out of the maintainer's inbox) or tests against a local copy of the handler.
 
-- **Private dry-run release flow before signing.**
-
 - **Website human review deploy gating.**
 
 - **Test in-app feedback's failure path.** Sending feedback works end to end in production (inbox issue #1, sent from
@@ -506,6 +504,17 @@ are large mostly because of their tests.
   changelog docstring and the cross-protocol test pruning that shared this entry are done.
 
 ## Maybe later
+
+- **Brick test a release before signing it.** Today the brick test can only run after the maintainer has signed the
+  release and published it at its version path on get.farhelm.io (it does not need `/latest` moved). The signature is
+  about security, not about the release being free of bugs, so needing it first is not a bug in itself. But it ties the
+  two steps together, and ideally the brick test would not need a signature, so the maintainer could brick test a
+  release separately from signing it. Several parts of the test lean on the signature. The installer and the helm only
+  fetch releases from get.farhelm.io, which only serves signed ones. The helm checks the signature on the remote-host
+  payloads it downloads. The old app's in-app updater checks it against the keys compiled into that old release. And the
+  brick test's first check verifies the candidate against the previous release's keys. The trade-off is realism: every
+  way around the signature (a mirror, a test-only key, skipping verification) makes the brick test exercise something
+  other than what a user's upgrade actually does.
 
 - **Require a systemd user manager on Linux, with no fallback.** Decided 2026-10-02: on Linux, a usable `systemd --user`
   is simply required, and Farhelm has no fallback for working without one; macOS has no systemd and keeps the portable
