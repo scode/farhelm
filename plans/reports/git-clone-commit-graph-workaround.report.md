@@ -54,3 +54,40 @@ blocking product issue; two low test-proof findings were addressed by clearing i
 checking the cache graph again after preparation. Comment clarifications were also applied. The same reviewer rechecked
 these corrections and found every finding resolved, with no new concrete findings. Commit and PR wording passed the
 required fresh-context cold read after one rewrite.
+
+### Landing
+
+Landed alone in its round as #1968. Between the stack's base and the merge, main gained only queue bookkeeping and one
+TODO.md entry (#1969, a quick agent mode). That entry sat beside the TODO entry this PR removes, so the rebase
+conflicted there. The landing resolved it mechanically, keeping the new entry and removing the fixed one. Nothing else
+interacted with this change.
+
+#### Release-relevant
+
+No schema or protocol change. The fix changes only the command used to make a managed checkout.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. It confirmed three things:
+
+- The setting reaches the clone and the helper processes it starts.
+- The setting is not written into the new checkout's configuration or the cache's.
+- A user's own Git environment cannot turn commit-graph reads back on for that clone.
+
+It had two nits, neither changed:
+
+- The regression test's fixture uses `git init -b`, which needs Git 2.28 or newer, so on an older host it fails at setup
+  rather than skipping.
+- On a host whose Git already has the upstream fix, the test still passes but can no longer notice the workaround being
+  removed. That is by design, as the TODO entry asked.
+
+#### Checks
+
+- Run now: none. The rebase changed only TODO.md.
+- Reused: the executor's recorded runs.
+  - Focused preparation run `50f1beea-89be-4842-8df6-66ce977c6d8b`, expanded selection
+    `ee01a577-2317-451d-a913-0691705894da` and final regression `f0c0c3ea-e75a-45b8-9b48-672a2de07a31` all exited zero.
+  - The deliberate mutation run `e980ee3e-a90a-47da-8467-a1cdffcaccbb` failed as intended.
+  - They still apply because nothing outside TODO.md changed.
+- Still unverified: as the report says, nothing automated used macOS's Git. The first managed checkout made on a Mac
+  after this ships confirms it.
