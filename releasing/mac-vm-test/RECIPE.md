@@ -57,10 +57,12 @@ verify the candidate's published bytes against that stable's compiled trust ring
 Export/record evidence and clean up each successful pair before starting the next.
 
 Identify genuine agent CLI/authentication prerequisites for the Mac and Linux hosts during environment readiness; Codex
-is the baseline. Prepare them when needed for steps 4–5; do not delay available install/start checks while doing broader
-agent setup. Resolve missing fixtures under the private operator policy. Authorization to copy a credential into Mac
-clones does not authorize copying it into Linux clones. Keep credentials out of evidence. Agent version output or login
-status establishes only a prerequisite, not successful agent execution.
+is the baseline. Follow BRICK-TEST.md's permission preflight and obtain missing approvals together before product
+checks, including any needed credential refresh on Mac and CLI/authentication setup on Linux. Prepare them when needed
+for steps 4–5; do not delay available install/start checks while doing broader agent setup. Resolve missing fixtures
+under the private operator policy. Authorization to copy a credential into Mac clones does not authorize copying it into
+Linux clones. Keep credentials out of evidence. Agent version output or login status establishes only a prerequisite,
+not successful agent execution.
 
 1. **Fresh install and start.** Confirm both guests have no Farhelm binaries or state (`fixture-clean`). Install the
    candidate through its public version-path installer (`install`), open the installed Mac app, and require the
@@ -208,6 +210,7 @@ Protocol/schema changes and upgrade risks:
 Extra hands-on checks (action, expected result, evidence):
 Feature data agreed not to survive this upgrade (SPEC.md, Upgrade compatibility):
 Unresolved questions or missing test environment:
+Required permission scopes and approvals (no credential contents):
 ```
 
 ## Evidence and report

@@ -71,6 +71,32 @@ resolve that prerequisite with the maintainer. Do not install host software or a
 Run commands from the Farhelm checkout with Python 3.11 or newer. Replace the release placeholder with the requested
 exact tag. Do not interpret `vX.Y.Z` literally.
 
+### Ask for required permissions up front
+
+During environment readiness and basic coverage planning, inventory the permissions needed for the **requested scope**
+before starting product checks. Read the profile, operator policy and previous provisioning/authentication records;
+inspect available prerequisites without printing credentials or starting frozen bases. Include the genuine agent CLI and
+authentication on **both** Mac and Linux, even though their P0 checks run later. A stale copied login may need a
+refresh; a successful `login status` is not proof that it can serve a conversation.
+
+Make any necessary approval request concrete: identify the candidate/run, credential source and each working-clone
+destination, CLI installation source, guest GUI permissions, and the bounded private evidence to retain and where it
+will go. Review the planned operations first, reuse explicit authorization that already covers them, and ask for the
+remaining approvals together. Credential approval must name Mac and Linux separately; authorization for one does not
+cover the other. Scope copies to this run's disposable clones with mode 0600, keep credentials out of logs and exports,
+and leave frozen bases unchanged. Record the scope and response privately without credential contents.
+
+Resolve known permission prerequisites before installing or launching Farhelm. Readiness probes in owned clones may
+reveal a missing requirement that the provisioning records could not establish; settle it before product checks rather
+than deferring it until the corresponding supervisor/agent step. This is permission planning, not an extra agent
+acceptance test before fresh installation. Keep actual setup beside the P0 step it supports and retain P0's order.
+
+Later unexpected permission requests still need their own authorization. This preflight neither grants blanket consent
+nor bypasses automatic approval review; it moves foreseeable requests to startup so testing can proceed without those
+interruptions. In P0-only scope, do not request permissions solely for bonus work.
+
+### Reconcile guests and prepare coverage
+
 Before initializing a new run or cloning guests, inspect live `tart list`, the external journal and previous run
 manifests under the profile's evidence root. Reconcile any running brick-test pair first. A new brick-test request
 authorizes clean guest shutdown of an abandoned previous test pair, with its disks, manifests and evidence preserved; no

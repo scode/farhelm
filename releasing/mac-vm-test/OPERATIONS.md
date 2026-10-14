@@ -178,6 +178,11 @@ authorization for the credential and working guest, a stdin copy to the guest's 
 bases, export authentication directories, or log out a clone to clean it up. Do not infer permission to copy a host
 credential from the brick-test request alone.
 
+Plan that possible refresh in the startup permission preflight, together with the Linux agent CLI and authentication
+requirements. Ask once for the missing scopes before product testing, naming the credential source and each disposable
+Mac/Linux destination covered by this run. Apply an approved refresh only when needed; do not recopy merely because
+permission exists. Reuse the recorded authorization while its credential, destinations and run scope still apply.
+
 Install `continuity.py` inside Linux before freezing the base or copy it into the owned working clone. Launch this as
 Farhelm's **plain command**, with agent type none:
 

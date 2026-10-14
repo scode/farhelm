@@ -21,6 +21,12 @@ fixtures; do not start bonus fixtures. Answer **did P0 checks succeed?** from th
 naming anything incomplete. Missing prerequisites mean could not run; resolve them with the maintainer instead of
 guessing machine bindings. A test request does not authorize publication or release promotion.
 
+During startup readiness and coverage planning, inventory permissions needed for the requested scope and ask for missing
+approvals together before product testing starts. Include agent setup on both Mac and Linux, credential copies or
+refreshes, guest GUI permissions and bounded private evidence export. Name the credential source, each destination and
+run scope; reuse existing explicit authorization when it covers them. Follow BRICK-TEST.md's permission preflight so a
+known agent prerequisite does not first become a permission question halfway through P0.
+
 Before creating a new test pair, inspect live Tart state and reconcile leftover brick-test guests using their original
 ownership manifests and journal. The new test request authorizes clean shutdown of abandoned previous test pairs without
 asking again, preserving their disks and evidence. Do not interrupt an active operator, delete retained data, force-stop
