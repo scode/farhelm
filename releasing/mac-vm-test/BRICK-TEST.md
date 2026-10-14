@@ -173,6 +173,10 @@ evidence, refuses additional observations after a failed or unavailable check ou
 feature checks to P0. Export and record each successful fixture, then clean it up before starting the next; retain the
 last pair for P1 unless scope is P0-only. Never provision frozen bases.
 
+On the first open after a fresh install, or after upgrading from a release without it, the welcome card appears. Dismiss
+it with **got it** before driving the session UI; this is part of observing ordinary startup, not an additional P0
+feature fixture.
+
 After P0 succeeds, report its verdict promptly. Unless asked to stop after P0, perform RECIPE's P1 feedback send on the
 candidate still running in `p0-updater-upgrade`, record its GUI evidence, report its separate verdict, then export and
 clean up the pair. A P1 failure does not require retaining the clones: its evidence and failure verdict remain saved.

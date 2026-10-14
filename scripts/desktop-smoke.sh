@@ -782,7 +782,9 @@ tmux -S "$X/state/tmux.sock" has-session -t "fh-$SID_NEWEST" 2>/dev/null || fail
 # to this point, sessions created and all — must be free of such a request.
 grep -qxF 'desktop_smoke: session listing requested query=sort=title' "$X/desktop.log" \
   && fail "first boot requested sort=title before any preference was seeded"
-SEED_BODY=$(python3 -c 'import json,sys; print(json.dumps({"list_sort": "title", "last_selected": sys.argv[1]}))' "$SID") || fail "encoding the preference seed"
+# The optional click leg uses this restarted window too; keep the welcome out
+# of its way through the same shared preference API ordinary clients use.
+SEED_BODY=$(python3 -c 'import json,sys; print(json.dumps({"list_sort": "title", "last_selected": sys.argv[1], "welcome_seen": True}))' "$SID") || fail "encoding the preference seed"
 curl_auth -sf --max-time 5 -X PUT -H 'content-type: application/json' -d "$SEED_BODY" "$API/api/preferences" \
   || fail "seeding the helm's shared preference for the restart"
 

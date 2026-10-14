@@ -2804,6 +2804,20 @@
   );
 
   window.farhelmTerm = {
+    /** Restore startup focus after a first-open welcome dismissal.
+     * A reveal behind the card deliberately withheld focus and will not replay
+     * that handoff by itself. Only the selected, visible island can take it;
+     * a preparing island keeps its ordinary reveal-time focus, and another
+     * modal (notably a feedback handoff) continues to own the keyboard.
+     */
+    focusSelected() {
+      const selected = focusedEl === null ? null : islands.get(focusedEl);
+      const element = selected?.term.element;
+      if (element && getComputedStyle(element).visibility === 'visible' && !keyboardHeldElsewhere()) {
+        selected.term.focus();
+      }
+    },
+
     /**
      * Change every terminal's text size by `delta` points, within the
      * supported range, remember it for this device, and refit every

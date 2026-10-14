@@ -240,10 +240,10 @@ pub(crate) fn install_dialog_with_selector(
 
 /// Choose whether a host confirmation's automatic focus also opens help.
 ///
-/// Ordinary settings and unrelated modals keep their existing focus behavior.
-/// Only removal and uninstall opt into quiet initial confirming focus here; setup
+/// Ordinary settings keep their existing focus behavior. Removal, uninstall
+/// and welcome opt into quiet initial confirming focus here; setup
 /// uses the same tooltip hook when its already-mounted form receives an offer.
-fn install_dialog_with_focus(
+pub(crate) fn install_dialog_with_focus(
     dialog_selector: &str,
     initial_focus: &str,
     escape_selector: Option<&str>,

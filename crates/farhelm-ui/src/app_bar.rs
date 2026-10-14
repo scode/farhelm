@@ -63,6 +63,8 @@ enum BarMenuItem {
     Documentation,
     /// Always available help, even when no installed update waits for restart.
     ReleaseNotes,
+    /// Reopen the introduction without resetting its shared dismissal.
+    Welcome,
     /// The `?` menu's, offered only by a desktop app whose updater runs
     /// (SPEC.md "Installation and updates").
     CheckForUpdates,
@@ -78,6 +80,7 @@ impl BarMenuItem {
             BarMenuItem::SendFeedback => "send feedback",
             BarMenuItem::Documentation => "documentation",
             BarMenuItem::ReleaseNotes => "release notes",
+            BarMenuItem::Welcome => "welcome",
             BarMenuItem::CheckForUpdates => "check for updates",
             BarMenuItem::RestartToUpdate => "restart to update",
             BarMenuItem::WhatsNew => "what's new",
@@ -99,6 +102,9 @@ impl BarMenuItem {
             BarMenuItem::ReleaseNotes => {
                 "release notes: open Farhelm's release notes at farhelm.io/docs in your browser, each release with what changed"
             }
+            BarMenuItem::Welcome => {
+                "welcome: show the welcome card with Get started and how to send feedback"
+            }
             BarMenuItem::CheckForUpdates => {
                 "check for updates: look for a newer Farhelm release now and install it in the background; the version readout shows how it went"
             }
@@ -117,6 +123,7 @@ impl BarMenuItem {
             BarMenuItem::SendFeedback => "privately, to Farhelm's maintainer",
             BarMenuItem::Documentation => "opens farhelm.io/docs in your browser",
             BarMenuItem::ReleaseNotes => "opens the release notes in your browser",
+            BarMenuItem::Welcome => "shows the welcome card again",
             BarMenuItem::CheckForUpdates => "installs a newer Farhelm if there is one",
             BarMenuItem::RestartToUpdate => "sessions keep running",
             BarMenuItem::WhatsNew => "opens the release notes in your browser",
@@ -124,10 +131,11 @@ impl BarMenuItem {
     }
 }
 
-const BAR_MENU_ITEMS: [BarMenuItem; 6] = [
+const BAR_MENU_ITEMS: [BarMenuItem; 7] = [
     BarMenuItem::SendFeedback,
     BarMenuItem::Documentation,
     BarMenuItem::ReleaseNotes,
+    BarMenuItem::Welcome,
     BarMenuItem::CheckForUpdates,
     BarMenuItem::RestartToUpdate,
     BarMenuItem::WhatsNew,
@@ -142,6 +150,7 @@ fn help_menu_items(has_updater: bool) -> Vec<BarMenuItem> {
         BarMenuItem::SendFeedback,
         BarMenuItem::Documentation,
         BarMenuItem::ReleaseNotes,
+        BarMenuItem::Welcome,
     ];
     if has_updater {
         items.push(BarMenuItem::CheckForUpdates);
@@ -512,6 +521,11 @@ const ANNOUNCE_AFTER_CLOSE_MS: u64 = 100;
 pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let mut settings_open = use_signal(|| false);
     let mut feedback_open = use_signal(|| false);
+    let base = use_context::<crate::ApiBase>().0;
+    let mut preferences = use_context::<crate::list::SharedPreferences>();
+    let initial_welcome = use_context::<crate::welcome::WelcomeOnLoad>();
+    let mut welcome_open = use_signal(move || *initial_welcome.0.peek());
+    let mut welcome_from_load = use_signal(move || *initial_welcome.0.peek());
     // The success announcement lives here, outside the dialog: a status
     // region inserted together with its text is not reliably announced, and
     // the dialog closes itself moments after success. This one is always
@@ -520,6 +534,28 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     // Set when a send succeeds; the announcement waits for the dialog to
     // close (see `close_feedback`).
     let mut pending_thanks = use_signal(|| false);
+    // Record only the first-open card. A help-menu reopening is an explicit
+    // request and does not write the shared seen setting again. Feedback takes
+    // focus itself, so its handoff must not queue a competing toggle focus.
+    let finish_welcome = Callback::new(move |open_feedback: bool| {
+        let first_open = std::mem::take(&mut *welcome_from_load.write());
+        if first_open {
+            preferences.0.write().welcome_seen = Some(true);
+            crate::api::store_preference(&base, crate::api::PreferenceValue::WelcomeSeen(true));
+        }
+        crate::welcome::release(if open_feedback {
+            crate::welcome::CloseFocus::Feedback
+        } else if first_open {
+            crate::welcome::CloseFocus::InitialPage
+        } else {
+            crate::welcome::CloseFocus::Help
+        });
+        welcome_open.set(false);
+        if open_feedback {
+            feedback_notice.set(String::new());
+            feedback_open.set(true);
+        }
+    });
     let close_feedback = move |_| {
         crate::feedback::return_focus_to_help();
         feedback_open.set(false);
@@ -597,9 +633,9 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let has_updater = updater.is_some();
     let help_items = help_menu_items(has_updater);
     let help_tooltip = if has_updater {
-        "help: send feedback, open the documentation or release notes, or check for updates"
+        "help: send feedback, open the documentation or release notes, show welcome, or check for updates"
     } else {
-        "help: send feedback or open the documentation or release notes"
+        "help: send feedback, open the documentation or release notes, or show welcome"
     };
     let help_updater = updater.clone();
     let update_updater = updater.clone();
@@ -689,6 +725,10 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                 }
                 BarMenuItem::Documentation => open_external_page(DOCS_URL),
                 BarMenuItem::ReleaseNotes => open_external_page(RELEASE_NOTES_URL),
+                BarMenuItem::Welcome => {
+                    welcome_from_load.set(false);
+                    welcome_open.set(true);
+                }
                 BarMenuItem::CheckForUpdates => {
                     if let Some(updater) = &help_updater {
                         updater.check_now();
@@ -716,6 +756,7 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                     BarMenuItem::SendFeedback
                     | BarMenuItem::Documentation
                     | BarMenuItem::ReleaseNotes
+                    | BarMenuItem::Welcome
                     | BarMenuItem::CheckForUpdates => {}
                 },
             }
@@ -728,6 +769,12 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                 version: sent_version,
                 on_sent: move |_| pending_thanks.set(true),
                 on_close: close_feedback,
+            }
+        }
+        if welcome_open() {
+            crate::welcome::WelcomeDialog {
+                on_close: move |_| finish_welcome.call(false),
+                on_feedback: move |_| finish_welcome.call(true),
             }
         }
         p { class: "visually-hidden feedback-notice", role: "status", "{feedback_notice}" }
@@ -762,8 +809,8 @@ mod tests {
     }
 
     /// Spec (Feedback): the `?` menu lists send feedback, documentation and
-    /// release notes in that order, and only a desktop app whose updater
-    /// runs adds check for updates as the fourth item. The browser suite
+    /// release notes and welcome in that order. Only a desktop app whose updater
+    /// runs adds check for updates as the fifth item. The browser suite
     /// never has an updater, so this is the one place the desktop order is
     /// pinned.
     #[farhelm_testtrace::test]
@@ -772,6 +819,7 @@ mod tests {
             BarMenuItem::SendFeedback,
             BarMenuItem::Documentation,
             BarMenuItem::ReleaseNotes,
+            BarMenuItem::Welcome,
         ];
         assert_eq!(help_menu_items(false), common);
         assert_eq!(
