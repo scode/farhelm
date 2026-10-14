@@ -318,12 +318,18 @@ overnight still checks about daily. When that release is newer than the installe
 release's signed checksums and its installer against the keys compiled into it, then runs that installer, pinned to that
 release and handed the verified checksums, in the background; nothing on screen changes while it works. While an
 installed update waits for a restart the automatic check does nothing more; only an on-demand check (below) replaces a
-waiting update with a newer one. A failed automatic check or install is logged and tried again at the next check, and is
-not shown, with one exception: a release that fails verification is never installed, and since the app then cannot
-update itself, its version readout carries a warning saying that this Farhelm can no longer verify its updates and must
-be reinstalled with the installer. The warning stays while the app runs, until a later check verifies and installs or
-finds nothing newer, or a newer Farhelm is installed some other way; after a relaunch it returns with the first check
-that fails the same way. It follows the stable channel only; prereleases are not offered.
+waiting update with a newer one. Failed automatic work is logged and tried again at the next check, without changing
+that schedule. An install failure shows **check failed** beside the version immediately, with its reason in the hover;
+anything failing after a successful `/latest` probe, including a download failure, counts as an install failure. A
+failed probe shows that notice only when automatic probes have been failing for at least three days, measured from the
+first failure in the current streak. A successful probe, automatic or on demand, ends that streak. The streak start
+survives restarts; a missing value means no streak, a future value or backwards clock resets it to now, and turning
+automatic updates back on clears it. A gap with no checks (sleep, quit, a waiting update, or automatic updates off)
+starts no clock on its own. A release that fails verification is never installed, and since the app then cannot update
+itself, its version readout carries a warning saying that this Farhelm can no longer verify its updates and must be
+reinstalled with the installer. The warning stays while the app runs, until a later check verifies and installs or finds
+nothing newer, or a newer Farhelm is installed some other way; after a relaunch it returns with the first check that
+fails the same way. It follows the stable channel only; prereleases are not offered.
 
 Whenever the installed version is newer than the running one, however it got there (the app's own background install, or
 the installer run by hand in a terminal, which the app notices within about a minute), the version readout in the
@@ -336,22 +342,26 @@ checks for updates. A dim refresh glyph after it hints at that action; hover and
 the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (the web UI
 or a build from main), the readout stays plain text without the refresh glyph.
 
-The update can also be checked for on demand: the local machine's host row offers Update (see
-[Session list](#session-list)), and the `?` menu offers **Check for updates** (see [Feedback](#feedback)). Each checks
-now and installs a newer release if there is one, even while an earlier update already waits for a restart. A check
-started this way, or an automatic check a user's request joins, spins the refresh glyph with **checking…** beside the
-version readout, then **installing…** while a newer release installs. When an update waits and the readout has no
+The update can be checked for on demand by selecting the version, by choosing the local machine's host row's Update (see
+[Session list](#session-list)), or by choosing **Check for updates** in the `?` menu (see [Feedback](#feedback)). Each
+checks now and installs a newer release if there is one, even while an earlier update already waits for a restart. A
+check started this way, or an automatic check a user's request joins, spins the refresh glyph with **checking…** beside
+the version readout, then **installing…** while a newer release installs. When an update waits and the readout has no
 refresh glyph, a separate spinner carries the same progress. **Up to date** stays there for about five seconds; **check
 failed** carries a warning look and stays until the next check starts or the user clicks it, with the reason kept in the
-hover. An installed update takes over with the red update-ready readout. An up-to-date answer while an update already
-waits shows nothing beside that red readout. A failure to restart into an update stays in the hover only. The inline
-progress and outcome are announced to screen readers, and either spinner stops moving under reduced motion while the
-progress text remains. Hover wording explains the readout's check or restart action. Automatic checks that no user joins
-stay invisible. The desktop settings dialog has a switch for installing updates automatically, on by default; turning it
-off stops the startup and daily checks and the background installs, while on-demand checks keep working and the red
-readout still appears for a version installed by hand. With automatic updates off, the user updates through an on-demand
-check or by running the installer, as before. None of this applies to the web UI, to a build from main, or to remote
-hosts, which the host list's own update actions handle.
+hover. An automatically shown failure, and a user's failed check that took its place, instead stays until a check
+succeeds, a newer version is installed by any route, or the user dismisses it; later unsuccessful work does not silently
+clear it. A user's check takes precedence with its progress and outcome. After dismissal, a later automatic failure
+shows again only if it qualifies under the same rules. Selecting the version retries. An installed update takes over
+with the red update-ready readout. An up-to-date answer while an update already waits shows nothing beside that red
+readout. A failure to restart into an update stays in the hover only. The inline progress and outcome are announced to
+screen readers, and either spinner stops moving under reduced motion while the progress text remains. Hover wording
+explains the readout's check or restart action. Automatic work that no user joins shows no progress; its qualifying
+failures show as described above. The desktop settings dialog has a switch for installing updates automatically, on by
+default; turning it off stops the startup and daily checks and the background installs, while on-demand checks keep
+working and the red readout still appears for a version installed by hand. With automatic updates off, the user updates
+through an on-demand check or by running the installer, as before. None of this applies to the web UI, to a build from
+main, or to remote hosts, which the host list's own update actions handle.
 
 The installer, run by hand, intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from
 get.farhelm.io, downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no
