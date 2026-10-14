@@ -21,3 +21,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`git-clone-commit-graph-workaround`](reports/git-clone-commit-graph-workaround.report.md) landed 2026-10-14 in #1968: Run the managed-checkout clone with commit-graph reading off, working around the git bug that fails it before git 2.55
 - [`ntfy-waiting-alerts`](reports/ntfy-waiting-alerts.report.md) landed 2026-10-14 in #1986: Send an ntfy alert from the helm when a session starts waiting, with server, topic, token and priority settings
 - [`update-check-readout`](reports/update-check-readout.report.md) landed 2026-10-14 in #1988, #1989: Click the desktop app's version readout to check for updates (with a ↻ hint), and show automatic update failures that persist
+- [`guarded-permission-mode`](reports/guarded-permission-mode.report.md) landed 2026-10-14 in #1992: Rename non-YOLO to "guarded", force each agent's guarded mode with explicit flags, and explain it per agent

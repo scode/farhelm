@@ -110,3 +110,103 @@ findings resolved and no remaining defect. It did not run tests; the checks abov
 separate required scope review found no unnecessary subsystem or scope change needed. Commit/PR wording passed two fresh
 cold reads after clarifying host confirmation policy and the difference between Replace and Replace with. No review
 swarm or implementation delegate was used.
+
+### Landing
+
+Landed alone in its round as #1992. Since the stack was based, main gained only queue bookkeeping, so nothing that
+landed interacted with it. confirmation-focus-and-skip was delivered while this landing ran and belongs to the next
+round.
+
+#### Release-relevant
+
+The helm–supervisor protocol moves from 47 to 48, so this release requires updating remote hosts: until a host is
+updated it sits at "needs update" and launches there wait. Neither database schema version changed; protocol bumps that
+added new launch values have not bumped them before either. A launch stored as guarded cannot be read by an older
+release. On a downgraded supervisor that is a refusal, not a crash: its session store fails to load, and the sessions
+keep running in their terminals but cannot be managed until the host is upgraded again.
+
+#### Review
+
+An independent fresh-context review, focused on the "ask before YOLO launches" guard, found nothing blocking. It traced
+every launch path and confirmed the guard is consulted on each one and fails closed. Those paths are:
+
+- user create, fresh checkout, plain Replace, Replace with and Clone;
+- Restart with;
+- agent-requested create, clone and inherited spawn;
+- plain restart, which by design is not re-checked.
+
+Sessions stored before the upgrade without permission flags now count as YOLO there, so protection only got stricter.
+
+#### Fixes made while landing
+
+- The card for approving an agent's launch request showed the permission's full multi-paragraph help in one cell, with
+  each line break rendered as a literal escape. It now shows only the mode's heading, such as "Guarded · Claude auto
+  mode" or "Not classified · agent's own setting", taken from the stored permission. A new unit test covers both.
+- Docs and UI wording still said "runs without approval prompts" for the command tab's YOLO question. The launcher now
+  asks "runs in YOLO mode". Fixed:
+  - Custom commands, its description and its resume note;
+  - the agents overview's command tip;
+  - Start a session;
+  - Approve what agents do, in two places.
+
+  Start a session's list of launches that ask now also names Cursor launches and a plain Replace of an older session.
+  The template editor's YOLO options read "asks for approval" and "runs without prompts (YOLO)"; they now read "keeps
+  safety checks" and "YOLO", matching the save panel.
+- SPEC.md: "plain Replace asking on guarded hosts" now says hosts that ask before YOLO launches, since guarded now names
+  a permission mode. The green shield is described as guarded or an approval mode, since an agent's own setting is
+  neither. The agent instructions now say Claude uses auto mode, not auto-review.
+- Two browser tests the plan had left stale, which failed on both engines:
+  - the approval card's layout fixture asked Claude for the approve mode, which Claude no longer offers; it now asks for
+    guarded with Claude's real guarded flags;
+  - a sidebar test still expected the label "default" for a recent setup without a permission; it now expects "guarded".
+- The approval card is now 401–419 px tall against the layout test's 380 px limit, because the mode name wraps in its
+  narrow column. The limit is now 440 px, with a comment saying why.
+
+#### For the maintainer to decide
+
+The reviewer flagged this in the launcher. On Claude, Codex, Grok or Muse, guarded is the default, and the launcher
+cannot tell a guarded you clicked from one it chose for you. Switching the launcher to OMP therefore always preselects
+OMP's YOLO default, even if you had clicked guarded. On a host that asks before YOLO launches the confirmation still
+catches it; on a host that starts YOLO without asking, the launch runs YOLO with YOLO visibly selected.
+
+The landing first changed this to carry guarded over, but an existing browser test ("OMP's default YOLO does not spill
+into the next harness") pins the original behavior: switching to an agent gives that agent's own default. So the change
+was reverted and the behavior is as built. Remembering an explicit click separately from the default would be a design
+change.
+
+#### Other review notes left as they are
+
+- A docs screenshot callout on Start a session still says "default keeps the agent's approval prompts". The next docs
+  screenshot refresh should update it.
+- Some code comments about "omitted" permissions are stale.
+- With an older session, Restart with shows guarded already selected, so upgrading it means clicking a button that
+  already looks pressed.
+- The FLAKES.md entry this plan added is dated a day ahead in local time.
+
+#### Checks
+
+- Run now, with the review fixes in except the reverted launcher change:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog format lint, and the sleep checker (298 delays, none
+    missing a reason);
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, and
+    `cargo check -p farhelm-ui --features desktop`;
+  - the supervisor, helm, UI, protocol and CLI unit and binary tests, plus the structured launch, agent relay, wrapper
+    launch, restart-with-resume, create idempotency, GitHub checkout and session lifecycle e2e modules, through the
+    recorder with pinned tmux, four slots and no retries: 3114 passed, run `81056466-dcec-4be7-8a0b-cb5ca9681ff4`. Its
+    224 skips are tests filtered out of the selection;
+  - helm, protocol and CLI doctests, run `94f73e31-2a2d-4ba5-9d18-4e76110fbcb9`;
+  - the asset JavaScript harness (241 passed) and the website build;
+  - browser specs on Chromium and WebKit (approval layout, guarded permissions, YOLO guard, restart with, clone,
+    templates, remembered permissions, launcher Enter, launcher tabs, sidebar): 418 passed and 6 failed, run
+    `3c64c110-3138-41fc-ac1e-e8dea13a8958`, kept. The six were the three tests described above, each failing on both
+    engines.
+- Run after the revert and the fixture fixes:
+  - formatting, `dprint check` and full all-target Clippy;
+  - protocol, UI and CLI unit and binary tests: 776 passed, run `6a354376-917e-4ab0-9496-bd5d6c38b4ce`;
+  - the approval layout, remembered permissions and sidebar specs in full on both engines: 250 passed and 2 failed, run
+    `7e825b40-dad0-40db-8f71-03aa867395fd`, kept. Both failures were the approval card height on the two engines;
+  - after raising the height limit, the approval layout spec on both engines: 20 passed, run
+    `9fc05335-3b5d-4be4-9321-a9e05fcd8be3`.
+- Skipped: the full workspace and full browser battery, desktop runtime, installer, provisioning and release gates. The
+  change does not touch those paths, and the selections above cover every permission surface it changes.
+- Still unverified, as the report says: real agents beyond the versions the executor probed.
