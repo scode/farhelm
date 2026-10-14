@@ -912,6 +912,27 @@ const MARKER_MAX_BYTES: u64 = 128;
 /// build rather than a bad release, so it is reported as such, whichever
 /// key signed.
 fn verify_sums(ring: &[&str], version: &str, sums: &[u8], signature: &[u8]) -> anyhow::Result<()> {
+    let signature = verify_signature(ring, sums, signature, || signature_refusal(version))?;
+    let comment = signature.trusted_comment();
+    if comment != required_trusted_comment(version) {
+        bail!(
+            "refusing v{version} assets: SHA256SUMS.minisig was signed for {comment}, not this \
+             version"
+        );
+    }
+    Ok(())
+}
+
+/// Authenticate a prehashed minisign document against the complete ring.
+/// Purpose remains the caller's contract: authentic bytes alone do not establish
+/// that a release manifest can be used as another kind of signed metadata.
+/// The refusal callback preserves each public caller's existing error wording.
+fn verify_signature(
+    ring: &[&str],
+    bytes: &[u8],
+    signature: &[u8],
+    refusal: impl Fn() -> anyhow::Error,
+) -> anyhow::Result<minisign_verify::Signature> {
     let keys = ring
         .iter()
         .map(|key| {
@@ -923,20 +944,34 @@ fn verify_sums(ring: &[&str], version: &str, sums: &[u8], signature: &[u8]) -> a
     let signature = std::str::from_utf8(signature)
         .ok()
         .and_then(|text| minisign_verify::Signature::decode(text).ok())
-        .ok_or_else(|| signature_refusal(version))?;
+        .ok_or_else(&refusal)?;
     if !keys
         .iter()
-        .any(|key| key.verify(sums, &signature, false).is_ok())
+        .any(|key| key.verify(bytes, &signature, false).is_ok())
     {
-        return Err(signature_refusal(version));
+        return Err(refusal());
     }
+    Ok(signature)
+}
 
-    let comment = signature.trusted_comment();
-    if comment != required_trusted_comment(version) {
-        bail!(
-            "refusing v{version} assets: SHA256SUMS.minisig was signed for {comment}, not this \
-             version"
-        );
+/// Verify signed metadata for exactly one declared purpose, without parsing it.
+///
+/// Callers supply a fixed trusted comment for their document type. The same
+/// prehashed-only, any-member ring verification as release checksums applies,
+/// followed by exact comment equality so a genuine signature for another
+/// purpose cannot be replayed here. Failure returns no authenticated data;
+/// callers must not interpret the bytes unless this succeeds.
+pub fn verify_signed_metadata(
+    ring: &[&str],
+    trusted_comment: &str,
+    bytes: &[u8],
+    signature: &[u8],
+) -> anyhow::Result<()> {
+    let signature = verify_signature(ring, bytes, signature, || {
+        anyhow!("signed metadata does not verify with farhelm's built-in key")
+    })?;
+    if signature.trusted_comment() != trusted_comment {
+        bail!("signed metadata was signed for a different purpose");
     }
     Ok(())
 }
@@ -3304,6 +3339,110 @@ mod tests {
             verify_signed_sums(RELEASE_KEY_RING, FIXTURE_VERSION, &sums, &signature).is_err(),
             "the public entry point refuses what verify_sums refuses"
         );
+    }
+
+    /// Arbitrary metadata uses the same ring and prehashed-only boundary as
+    /// release sums, but requires its own exact declared purpose. Reusing a
+    /// genuine checksum fixture isolates signature validation from parsing.
+    #[farhelm_testtrace::test]
+    fn signed_metadata_checks_the_whole_ring_and_exact_purpose() {
+        let bytes = fixture_bytes("SHA256SUMS");
+        let signature = fixture_bytes("SHA256SUMS.minisig");
+        let purpose = required_trusted_comment(FIXTURE_VERSION);
+        for ring in [
+            vec![test_pubkey()],
+            vec![RELEASE_KEY_RING[0], test_pubkey()],
+            vec![test_pubkey(), RELEASE_KEY_RING[0]],
+        ] {
+            verify_signed_metadata(&ring, &purpose, &bytes, &signature)
+                .expect("any member authenticates metadata for its declared purpose");
+            let wrong = verify_signed_metadata(&ring, "farhelm advisories", &bytes, &signature)
+                .expect_err("a genuine release signature cannot be an advisory signature");
+            assert!(wrong.to_string().contains("different purpose"));
+        }
+        assert!(
+            verify_signed_metadata(RELEASE_KEY_RING, &purpose, &bytes, &signature).is_err(),
+            "the fixture key really is outside the production ring"
+        );
+        assert!(verify_signed_metadata(&[], &purpose, &bytes, &signature).is_err());
+    }
+
+    /// Every authenticity refusal returns no permission to interpret metadata:
+    /// legacy signatures, malformed envelopes, different bytes and swapped
+    /// inputs must not gain a weaker path through the generalized entry point.
+    #[farhelm_testtrace::test]
+    fn signed_metadata_refuses_every_unauthenticated_envelope() {
+        let bytes = fixture_bytes("SHA256SUMS");
+        let signature = fixture_bytes("SHA256SUMS.minisig");
+        let legacy = fixture_bytes("variants/legacy-signature/SHA256SUMS.minisig");
+        let purpose = required_trusted_comment(FIXTURE_VERSION);
+        let ring = [test_pubkey()];
+        let mut changed = bytes.clone();
+        changed[0] ^= 1;
+        for (body, envelope) in [
+            (bytes.as_slice(), legacy.as_slice()),
+            (bytes.as_slice(), b"not a minisign signature".as_slice()),
+            (bytes.as_slice(), b"".as_slice()),
+            (bytes.as_slice(), &[0xff]),
+            (changed.as_slice(), signature.as_slice()),
+            (signature.as_slice(), bytes.as_slice()),
+        ] {
+            let error = verify_signed_metadata(&ring, &purpose, body, envelope)
+                .expect_err("unauthenticated metadata refused");
+            assert!(error.to_string().contains("does not verify"), "{error:#}");
+        }
+        // Decode the whole ring before trying a member: a valid signing key
+        // must not conceal a broken compiled-in key later in the list.
+        for ring in [
+            vec!["invalid key"],
+            vec![test_pubkey(), "invalid key"],
+            vec!["invalid key", test_pubkey()],
+        ] {
+            for error in [
+                verify_signed_metadata(&ring, &purpose, &bytes, &signature)
+                    .expect_err("bad compiled key remains a build error"),
+                verify_sums(&ring, FIXTURE_VERSION, &bytes, &signature)
+                    .expect_err("checksum verification preserves the same build-error boundary"),
+            ] {
+                assert!(error.to_string().contains("public key is not decodable"));
+            }
+        }
+    }
+
+    /// Purpose text is authenticated by minisign's global signature, not just
+    /// compared after body verification. A server must not be able to relabel
+    /// an authentic release envelope as advisories without the signing key.
+    #[farhelm_testtrace::test]
+    fn signed_metadata_refuses_a_forged_matching_purpose() {
+        let bytes = fixture_bytes("SHA256SUMS");
+        let signature = fixture_bytes("SHA256SUMS.minisig");
+        verify_signed_metadata(
+            &[test_pubkey()],
+            &required_trusted_comment(FIXTURE_VERSION),
+            &bytes,
+            &signature,
+        )
+        .expect("the unchanged fixture authenticates its original purpose");
+        let forged = std::str::from_utf8(&signature)
+            .expect("text fixture")
+            .replace(
+                &format!(
+                    "trusted comment: {}",
+                    required_trusted_comment(FIXTURE_VERSION)
+                ),
+                "trusted comment: farhelm advisories",
+            );
+        let decoded = minisign_verify::Signature::decode(&forged)
+            .expect("relabeling preserves a decodable envelope");
+        assert_eq!(decoded.trusted_comment(), "farhelm advisories");
+        let error = verify_signed_metadata(
+            &[test_pubkey()],
+            "farhelm advisories",
+            &bytes,
+            forged.as_bytes(),
+        )
+        .expect_err("a matching purpose cannot bypass global-signature authentication");
+        assert!(error.to_string().contains("does not verify"), "{error:#}");
     }
 
     /// Spec: the producer's signing command and the consumer's expectation
