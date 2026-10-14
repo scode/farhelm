@@ -2476,7 +2476,7 @@ mod tests {
             assert!(!plain.update_ready, "{installed:?}");
             assert_eq!(
                 plain.tooltip,
-                "This is Farhelm 1.0.0. When a newer version has been installed, this turns red; select it then to restart into the new version."
+                "This is Farhelm 1.0.0. When a newer version is installed, this turns red and opens the Restart to update / What's new menu."
             );
         }
     }

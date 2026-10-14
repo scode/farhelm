@@ -542,10 +542,11 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     // In a desktop app whose updater runs, the readout is also the update
     // marker (SPEC.md "Installation and updates"): red with an up-arrow, and
     // the update menu's toggle, while a newer version is installed, and its
-    // hover carries the updater's state. Everywhere else it stays exactly as
-    // it was.
+    // hover carries the updater's state. Without an update waiting the desktop
+    // version starts the same check as the help menu; the web stays plain text.
     let updater = use_app_updater();
     let readout = updater.as_ref().map(AppUpdater::readout);
+    let control = crate::app_updater::readout_control(readout.as_ref());
     let update_ready = readout.as_ref().is_some_and(|readout| readout.update_ready);
     // This app can no longer verify its updates (SPEC.md "Installation and
     // updates"): a warning mark on the readout while the app runs, the
@@ -599,7 +600,7 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
             span { class: "app-wordmark", dangerous_inner_html: WORDMARK_SVG }
             crate::window_chrome::WindowDragRegion {}
             // Always mounted, hidden while no update waits (see
-            // `BarMenuToggle`'s `hidden`); the plain readout shows instead.
+            // `BarMenuToggle`'s `hidden`); the check control shows instead.
             if updater.is_some() {
                 BarMenuToggle {
                     layout_epoch,
@@ -621,7 +622,13 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                     span { dir: "ltr", "{version}" }
                 }
             }
-            if !update_ready {
+            if let crate::app_updater::ReadoutControl::Check { .. } = control {
+                if let (Some(check_updater), Some(readout)) = (updater.clone(), readout.as_ref()) {
+                    {crate::app_updater::check_readout(&version, &version_tooltip, readout,
+                        EventHandler::new(move |_| check_updater.check_now()))}
+                }
+            }
+            if control == crate::app_updater::ReadoutControl::Plain {
                 span {
                     class: if needs_reinstall { "app-version app-version-unverified peer-value" } else { "app-version peer-value" },
                     dir: "ltr",
