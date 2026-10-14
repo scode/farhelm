@@ -73,3 +73,71 @@ wording received cold reads.
 Implementation stayed with the executor; only the required reviews and prose cold reads were delegated. Private
 accounting records retain reported external review counters; native/orchestrator usage and exact model/billing
 attribution remain incomplete. They are available with the executor's private working log, not in public source.
+
+### Landing
+
+Landed alone in its round as #2014 then #2015. While it was landing, main gained #2016, which records review findings in
+`review_feedback_queue/`. That change is documentation only and does not interact with this plan.
+
+#### Release-relevant
+
+The helm's database moves from schema 50 to 51 (the shared welcome-seen setting). As with every schema bump, a helm that
+has run this build cannot be downgraded in place. The protocol is unchanged. Existing users see the welcome card once
+after updating, as the report says.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. It confirmed that:
+
+- the migration matches a fresh database, and every rewound-schema test fixture also drops the new column;
+- the browser suite, the README hero, the demo video and the docs screenshot setups all mark the welcome seen before any
+  page opens, so no published capture can show the card;
+- the shared reset helper marks it seen;
+- Escape cannot close it twice;
+- Get started opens the guide once on desktop;
+- Send feedback opens the ordinary dialog and sends nothing.
+
+#### Fixes made while landing
+
+- The helm database's schema history had no entry for 51; it now does.
+- The welcome browser tests touched only the welcome setting. The sign-in recovery case writes a list order through the
+  real helm, which leaked "title" ordering into every later spec sharing that helm, and that case assumed the default
+  order. The spec now resets every shared preference before and after each test.
+- The brick-test procedure said the card appears only on a fresh app's first open. Upgraded helms start unseen too, so
+  the upgrade checks will meet it. The procedure now says so.
+
+#### Something the maintainer should know
+
+A browser test on main fails independently of this plan: `terminal.spec.ts`, "compact rows retain distinct ended and
+harness glyphs within two characters", on both engines. Its expected permission tooltips and descriptions predate the
+guarded permission mode (#1992). The tooltip now also names the agent and command, and "default permission mode" is no
+longer what a no-flag Codex launch shows. The guarded landing did not run that spec. It needs its expectations updated
+to the current wording, a small follow-up outside this plan.
+
+#### Other review notes left as they are
+
+- Unverified on desktop: after the card closes, terminal focus is restored one animation frame later, and only if no
+  dialog remains. If the native webview applies the close later than the script, the terminal may not get focus and
+  needs a click. Worth a look on the Mac.
+- If the browser has to sign in again while the first-open card shows, the card disappears without being marked seen and
+  returns on the next load. That is within the spec's "may appear on a later load", but not stated.
+
+#### Checks
+
+- Run now:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog format lint and the sleep checker;
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+    `cargo check -p farhelm-ui --features desktop`;
+  - the helm, UI and protocol packages in full through the recorder (pinned tmux, four slots, no retries): 1717 passed,
+    none skipped, run `cf2df40d-1161-4540-8bd6-9c543ac06e50`;
+  - the asset JavaScript harness (244 passed) and the website build;
+  - on Chromium and WebKit, the welcome, feedback, sort, hover coverage, settings, session confirmations, quick launch
+    and terminal specs, with the welcome spec already reset-corrected: 287 passed and 3 failed, run
+    `26af5a00-7c86-4322-a804-32871158151c`, kept. Two failures were the stale terminal test described above, one per
+    engine. The third was a single Chromium timeout in the session-confirmations walk.
+  - the welcome and session-confirmations specs three times each on both engines: 72 passed, run
+    `6e1d5915-a4bc-4420-a4e8-c87a40f5b04f`. The single timeout is treated as a load event on a shared machine, not
+    logged as a flake.
+- The schema history line is a comment only, added while the Rust run was underway; it changes no behavior.
+- Not run: the full workspace battery, the full browser battery, the desktop runtime smoke and release gates. The plan's
+  desktop smoke change only seeds the welcome as seen.
