@@ -1619,9 +1619,13 @@ fn clone_with_repo_cache(
         }
         run_preparation_child_process(&mut fetch, "cache fetch")?;
 
+        // Git before 2.55.0 can lose a cached commit's tree during dissociation
+        // when the reference's commit-graph covers it ("unable to parse commit").
+        // Upstream fix 3d8e4004c6 restores that lookup; remove this workaround once
+        // Git 2.55 is Farhelm's minimum. Neither repository's config is changed.
         let mut clone = launch_child_command(std::ffi::OsStr::new("git"), spec);
         clone
-            .args(["clone", "--reference"])
+            .args(["-c", "core.commitGraph=false", "clone", "--reference"])
             .arg(cache)
             .args([
                 "--dissociate",
@@ -3308,14 +3312,16 @@ exec sleep 60
     /// Record each Git stage separately and require init → fetch → clone.
     /// Only clone writes the completion marker; a repeated preparation fails
     /// instead of overwriting its evidence. Failure wiring targets clone unless
-    /// a stage-specific `.fail` file asks init or fetch to refuse.
+    /// a stage-specific `.fail` file asks init or fetch to refuse. Fetch and clone
+    /// both begin with `-c`, so their configuration keys distinguish the stages;
+    /// the exact-argv test separately holds the whole command shape to account.
     fn fake_git_script(argv_record: &str, marker: &str) -> String {
         format!(
             r#"#!/bin/sh
-case "$1" in
-    init) stage=init; record="{argv_record}.init" ;;
-    -c) stage=fetch; record="{argv_record}.fetch" ;;
-    clone) stage=clone; record="{argv_record}" ;;
+case "$1:$2" in
+    init:--bare) stage=init; record="{argv_record}.init" ;;
+    -c:gc.autoDetach=false) stage=fetch; record="{argv_record}.fetch" ;;
+    -c:core.commitGraph=false) stage=clone; record="{argv_record}" ;;
     *) echo "unexpected Git stage" >&2; exit 98 ;;
 esac
 if [ -f "$record.count" ]; then
@@ -3348,7 +3354,7 @@ if [ -f "$record.fail" ]; then exit 44; fi
 if [ "$stage" = clone ]; then
     : > "{marker}.git-ran"
     if [ -f "{argv_record}.git-fail" ]; then
-        printf 'partial\n' > "$7/.git-partial" || exit 94
+        printf 'partial\n' > "$9/.git-partial" || exit 94
         exit 1
     fi
     : > "{marker}"
@@ -3650,6 +3656,8 @@ printf 'AGENT-RAN\n'
         assert_eq!(
             git_argv,
             [
+                "-c",
+                "core.commitGraph=false",
                 "clone",
                 "--reference",
                 cache,
@@ -4225,6 +4233,159 @@ printf 'AGENT-RAN\n'
             std::fs::read_to_string(Path::new(&fixture.preparation.cwd).join("tracked.txt"))
                 .unwrap(),
             "fixture content\n"
+        );
+    }
+
+    /// A graph-backed reference must not make dissociation lose the checkout's tree.
+    ///
+    /// Git before 2.55 needs both a graph covering HEAD and a non-local transport
+    /// to expose this bug. Prepopulate the cache so the shim's fetch brings no
+    /// new commits; file:// avoids the local-path fast path that hides the bug.
+    /// Assert successful preparation rather than a broken plain clone, so the
+    /// test stays useful after Git is fixed.
+    #[farhelm_testtrace::test]
+    fn d2_real_git_clones_with_a_commit_graph_in_the_cache() {
+        let setup = tempfile::tempdir().unwrap();
+        let work = setup.path().join("work");
+        let bare = setup.path().join("upstream.git");
+        std::fs::create_dir(&work).unwrap();
+
+        // Isolate fixture Git commands at the child boundary, including ambient
+        // configuration injection. The test process's environment stays intact.
+        let git = |args: &[&str]| -> std::process::Output {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_CONFIG_COUNT", "0")
+                .output()
+                .expect("run fixture git");
+            assert!(
+                out.status.success(),
+                "fixture git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        std::fs::write(work.join("tracked-file.txt"), "graph-backed content\n").unwrap();
+        git(&["init", "-q", "-b", "main", work.to_str().unwrap()]);
+        git(&["-C", work.to_str().unwrap(), "add", "."]);
+        git(&[
+            "-C",
+            work.to_str().unwrap(),
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ]);
+        git(&[
+            "clone",
+            "-q",
+            "--bare",
+            work.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ]);
+        let upstream_head = git(&["-C", bare.to_str().unwrap(), "rev-parse", "HEAD"]);
+        let upstream_url = format!("file://{}", bare.display());
+
+        let fixture = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
+        fixture.install_script("fake-agent", "#!/bin/sh\nexit 0\n");
+        let cache = &fixture.preparation.repo_cache_path;
+        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        git(&["init", "--bare", "-q", cache.to_str().unwrap()]);
+        git(&[
+            "-C",
+            cache.to_str().unwrap(),
+            "fetch",
+            "--prune",
+            &upstream_url,
+            "+refs/heads/*:refs/heads/*",
+            "+refs/tags/*:refs/tags/*",
+        ]);
+        git(&[
+            "-C",
+            cache.to_str().unwrap(),
+            "commit-graph",
+            "write",
+            "--reachable",
+        ]);
+
+        // This upstream has only one commit; writing all reachable cache refs,
+        // verifying the graph, and matching its branch to HEAD establishes that
+        // the graph covers the very commit the clone is about to check out.
+        assert!(cache.join("objects/info/commit-graph").is_file());
+        git(&["-C", cache.to_str().unwrap(), "commit-graph", "verify"]);
+        let cache_head = git(&[
+            "-C",
+            cache.to_str().unwrap(),
+            "rev-parse",
+            "refs/heads/main",
+        ]);
+        assert_eq!(
+            cache_head.stdout, upstream_head.stdout,
+            "premise: cache covers upstream HEAD"
+        );
+
+        let child_path = format!(
+            "{}:{}",
+            fixture.bin_dir().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let instead_of_key = format!("url.{upstream_url}.insteadOf");
+        let envs = [
+            ("GIT_CONFIG_COUNT", std::ffi::OsStr::new("1")),
+            ("GIT_CONFIG_KEY_0", std::ffi::OsStr::new(&instead_of_key)),
+            (
+                "GIT_CONFIG_VALUE_0",
+                std::ffi::OsStr::new("https://github.com/example/repo.git"),
+            ),
+            ("GIT_CONFIG_GLOBAL", std::ffi::OsStr::new("/dev/null")),
+            ("GIT_CONFIG_SYSTEM", std::ffi::OsStr::new("/dev/null")),
+        ];
+        let (report, terminal, status) = fixture.run_shim_in_child_with(
+            Some(std::ffi::OsStr::new(&child_path)),
+            &envs,
+            &[
+                "GIT_DIR",
+                "GIT_WORK_TREE",
+                "GIT_INDEX_FILE",
+                "GIT_CONFIG_PARAMETERS",
+            ],
+        );
+        assert!(
+            status.success() && report.is_empty(),
+            "preparation: status={status:?} report={report} terminal={terminal}"
+        );
+        assert_eq!(fixture.state().unwrap(), PreparationState::Ready);
+        // The shim fetch sits between the initial premise and the clone. Check
+        // again while the cache is owned, without requiring maintenance to leave
+        // the graph's bytes unchanged when its coverage is still correct.
+        assert!(
+            cache.join("objects/info/commit-graph").is_file(),
+            "premise: shim fetch kept the cache graph"
+        );
+        git(&["-C", cache.to_str().unwrap(), "commit-graph", "verify"]);
+        assert_eq!(
+            git(&[
+                "-C",
+                cache.to_str().unwrap(),
+                "rev-parse",
+                "refs/heads/main"
+            ])
+            .stdout,
+            upstream_head.stdout,
+            "premise: cache graph still covers upstream HEAD"
+        );
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&fixture.preparation.cwd).join("tracked-file.txt"))
+                .unwrap(),
+            "graph-backed content\n"
         );
     }
 
