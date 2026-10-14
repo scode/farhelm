@@ -410,3 +410,40 @@ passed its review gate, and the last code PR removes the TODO.md entry. Open, no
 exists, its latest entry must also be satisfied. Then close the plan per `plans/AGENTS.md` (Executing one plan, steps 11
 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the watchdog. Never
 edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-10-14 (claim a87bc4).
+
+### Safe recovery from a withdrawn waiting update
+
+This plan would warn when a Farhelm release is withdrawn, refuse to install it, and replace a withdrawn update that is
+already installed but waiting for restart. That last operation may install an older release, provided it is at least as
+new as the app still running. The agreed safety guard also checks the record of the supervisor's running version, so it
+does not install an older program over databases a newer supervisor has migrated.
+
+Execution found that this record is insufficient. A supervisor claims exclusive access and migrates its session database
+before checking tmux and before publishing its running version. If startup fails there, or the process stops there, the
+database has changed while the record still names an older supervisor or is absent. A later update check could therefore
+approve an older replacement that refuses the now-newer database. This ordering also exists in the published v0.28.2
+source. A private CLI fixture reproduced migration from schema 30 to 31 followed by a tmux refusal, with the record
+still naming 0.23.0; recorder run 72bb214e-1ed5-48c1-b3a6-cb8075e76fd1 retained the result. No installed app or user
+state was touched.
+
+The independent signature-verification foundation is built and reviewed in draft
+[PR #1991](https://github.com/scode/farhelm/pull/1991/changes). Advisory fetching, warnings and installation decisions
+remain one coherent pending unit: exposing withdrawal warnings without the agreed safe recovery would ship half the
+requested behavior. The working log retains the source evidence and the published-installer inspection.
+
+Which recovery guarantee should this plan implement?
+
+- Expand the plan to record a supervisor's attempted version durably before it can migrate state, with conservative
+  handling when compatibility cannot be established. This preserves automatic recovery but also changes supervisor
+  startup and the meaning of its version record, including how commands inside sessions select a binary. The design must
+  cover existing state and interrupted startup, rather than assuming old records become trustworthy retroactively.
+- Narrow this release to warnings and refusal to install withdrawn targets. A withdrawn waiting update would require
+  explicit manual recovery; automatic replacement would be deferred. This is smaller but drops the agreed automatic
+  replacement and cannot promise that an ordinary relaunch avoids the withdrawn waiting version.
+
+I recommend the first option, with a focused startup and interruption review before implementation. It retains the
+maintainer's chosen automatic recovery without treating an old record as proof that no newer migration happened.
