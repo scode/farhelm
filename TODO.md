@@ -44,6 +44,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Click to open agent-provided paths.** Extend click-to-download for paths agents provide to also support
+  click-to-open. How and implementation details are TBD.
+
 - **Help users start the shared ssh connections themselves.** A host that needs an interactive approval for every new
   ssh connection (a second factor, say) only works if the user starts the helm's shared connections for it by hand, at
   the helm's socket paths, because the helm itself runs ssh non-interactively. Today that means knowing Farhelm's
