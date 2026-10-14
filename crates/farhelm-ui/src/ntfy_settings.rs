@@ -73,32 +73,43 @@ pub(crate) fn NtfySettings() -> Element {
             label { class: "app-settings-choice",
                 span { "send ntfy alerts" }
                 input { r#type: "checkbox", class: "host-settings-switch", checked: draft.read().enabled, disabled: locked,
+                    "data-tooltip": "send alerts when a session waits for you; Save applies this to every window using this helm",
                     onchange: move |event| { draft.write().enabled = event.checked(); outcome.set(None); } }
             }
             label { class: "checkout-root-label", span { "server URL" }
                 input { r#type: "url", value: "{draft.read().server_url}", readonly: locked,
-                    autocomplete: "off", spellcheck: "false",
+                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                    "data-tooltip": "ntfy server that receives session alerts",
                     oninput: move |event| { draft.write().server_url = event.value(); outcome.set(None); } }
             }
             label { class: "checkout-root-label", span { "topic" }
                 input { r#type: "text", value: "{draft.read().topic}", readonly: locked,
-                    autocomplete: "off", spellcheck: "false", autocapitalize: "none",
+                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                    "data-tooltip": "topic to publish alerts to; subscribe to the same topic in your ntfy client",
                     oninput: move |event| { draft.write().topic = event.value(); outcome.set(None); } }
             }
             p { class: "host-settings-help", "Anyone who knows an ntfy.sh topic can read its alerts. Choose a hard-to-guess topic." }
             label { class: "checkout-root-label", span { "access token (optional)" }
-                input { r#type: "password", value: "{token}", readonly: locked || clear(),
-                    autocomplete: "new-password", spellcheck: "false",
+                // `new-password`, not `off`: browsers ignore `off` when they
+                // fill saved logins into a password field, and the helm's own
+                // web token is typically saved for this same origin. Filled
+                // in here and saved, it would be sent to the ntfy server as
+                // the bearer token on every alert.
+                input { r#type: "password", class: "ntfy-token", value: "{token}", readonly: locked || clear(),
+                    autocomplete: "new-password", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                    "data-tooltip": "optional server access token; leave blank to preserve the saved token",
                     placeholder: if draft.read().token_set { "token saved; leave blank to keep it" } else { "no token saved" },
                     oninput: move |event| { token.set(event.value()); outcome.set(None); } }
             }
             label { class: "app-settings-choice",
                 span { "clear saved token" }
                 input { r#type: "checkbox", class: "host-settings-switch", checked: clear(), disabled: locked,
+                    "data-tooltip": "remove the saved access token when you Save",
                     onchange: move |event| { clear.set(event.checked()); outcome.set(None); } }
             }
             label { class: "checkout-root-label", span { "priority" }
                 select { value: draft.read().priority.header(), disabled: locked,
+                    "data-tooltip": "priority used for session alerts; Save applies the selected priority",
                     onchange: move |event| {
                         draft.write().priority = match event.value().as_str() {
                             "min" => Priority::Min, "low" => Priority::Low, "high" => Priority::High,
@@ -112,9 +123,10 @@ pub(crate) fn NtfySettings() -> Element {
             }
             if let Some(error) = error {
                 p { class: "checkout-root-error", role: "alert", "{error}" }
-                button { r#type: "button", onclick: move |_| load.restart(), "retry loading" }
+                button { r#type: "button", "data-tooltip": "load the saved ntfy alert settings again", onclick: move |_| load.restart(), "retry loading" }
             }
             button { r#type: "button", disabled: locked,
+                "data-tooltip": "save ntfy alert settings for every window using this helm",
                 onclick: move |_| {
                     if locked { return; }
                     busy.set(true); outcome.set(None);

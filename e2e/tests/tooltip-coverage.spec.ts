@@ -145,7 +145,14 @@ async function sweepTextFields(page: Page, root: string): Promise<{ checked: num
         checked += 1;
       }
       const attributes = {
-        autocomplete: field.matches(".feedback-dialog .feedback-contact") ? "email" : "off",
+        // Two deliberate exceptions. The ntfy token keeps `new-password`
+        // because browsers ignore `off` when filling saved logins, which
+        // would put the helm's own web token into it.
+        autocomplete: field.matches(".feedback-dialog .feedback-contact")
+          ? "email"
+          : field.matches(".ntfy-token")
+          ? "new-password"
+          : "off",
         autocorrect: "off",
         autocapitalize: "none",
         spellcheck: "false",

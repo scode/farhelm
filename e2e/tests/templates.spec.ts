@@ -8,7 +8,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Page } from "@playwright/test";
-import { cleanupSession, createSession, listHosts, openRowMenu } from "./helpers/fleet";
+import { cleanupSession, createSession, listHosts, openRowMenu, patchPreferences, readPreferences } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 
 /** Store a template through the helm's API, as the panel would. */
@@ -22,6 +22,187 @@ async function deleteTemplate(request: APIRequestContext, name: string) {
   const response = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
   expect(response.ok() || response.status() === 404, `deleting template ${name}`).toBe(true);
 }
+
+/** Keys move between saved names independently of the bolt. Keyboard Escape
+ * closes only the nested menu; rename must retain the key, while delete/Undo
+ * retires it permanently. An ineligible saved name still offers removal.
+ */
+test("number keys move, follow rename, and stay freed after undo", async ({ page, request }) => {
+  const prefix = `number-bindings-${Date.now()}`;
+  const [a, b, partial, renamed] = ["a", "b", "partial", "renamed"].map(s => `${prefix}-${s}`);
+  try {
+    await patchPreferences(request, { template_shortcuts: null, quick_launch_template: null });
+    await putTemplate(request, a, { kind: "agent", agent: "claude" });
+    await putTemplate(request, b, { kind: "agent", agent: "codex" });
+    await putTemplate(request, partial, { effort: "high" });
+    await page.goto("/");
+    await page.locator(".templates-button").click();
+    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    const keyButton = (name: string) => dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
+    await expect(keyButton(partial)).toBeDisabled();
+    await expect(keyButton(a)).toHaveText("Ctrl+Shift+ –");
+    await expect(keyButton(a)).toHaveAttribute("data-tooltip", /right away.*Only one template/);
+    await expect(dialog.getByRole("button", { name: `quick launch ${a}`, exact: true }))
+      .toHaveAttribute("data-tooltip", /without opening New.*Only one template/);
+    await keyButton(a).focus();
+    await expect(keyButton(a)).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    const menu = dialog.getByRole("menu", { name: `number key for ${a}`, exact: true });
+    await expect(menu.getByRole("menuitem", { name: "no shortcut", exact: true })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(keyButton(a)).toBeFocused();
+    await keyButton(a).click();
+    await menu.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "1": a });
+    await keyButton(b).click();
+    const other = dialog.getByRole("menu", { name: `number key for ${b}`, exact: true });
+    await expect(other.getByRole("menuitem", { name: `Ctrl+Shift+1 ${a} (moves here)`, exact: true })).toBeVisible();
+    await other.getByRole("menuitem", { name: `Ctrl+Shift+1 ${a} (moves here)`, exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "1": b });
+    await keyButton(b).click();
+    await other.getByRole("menuitem", { name: "Ctrl+Shift+0", exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "0": b });
+    await dialog.getByRole("button", { name: `quick launch ${b}`, exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(b);
+    await dialog.locator(".templates-row-name").getByText(b, { exact: true }).click();
+    await dialog.locator(".templates-name").fill(renamed);
+    await dialog.getByRole("button", { name: "save", exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "0": renamed });
+    await expect.poll(async () => (await readPreferences(request)).quick_launch_template).toBe(renamed);
+    await dialog.getByRole("button", { name: "delete", exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).template_shortcuts ?? {}).toEqual({});
+    await dialog.getByRole("button", { name: "undo", exact: true }).click();
+    await expect(keyButton(renamed)).toBeVisible();
+    await expect(keyButton(renamed)).toHaveText("Ctrl+Shift+ –");
+    await dialog.locator(".templates-close").click();
+    await patchPreferences(request, { template_shortcuts: { "3": partial } });
+    await page.reload();
+    await page.locator(".templates-button").click();
+    await expect(keyButton(partial)).toBeEnabled();
+    await keyButton(partial).click();
+    const remove = dialog.getByRole("menu", { name: `number key for ${partial}`, exact: true });
+    await expect(remove.getByRole("menuitem")).toHaveCount(1);
+    await remove.getByRole("menuitem", { name: "no shortcut", exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).template_shortcuts ?? {}).toEqual({});
+    await expect(keyButton(partial)).toBeDisabled();
+  } finally {
+    await patchPreferences(request, { template_shortcuts: null, quick_launch_template: null });
+    for (const name of [a, b, partial, renamed]) await deleteTemplate(request, name);
+  }
+});
+
+/** An open toggle owns its pointerdown until click. Holding the button must
+ * not let the shared outside relay close first and turn the click into reopen.
+ */
+test("number popup toggle stays open during pointerdown and closes on click", async ({ page, request }) => {
+  const name = `number-pointer-${Date.now()}`;
+  try {
+    await putTemplate(request, name, { kind: "agent", agent: "claude" });
+    await page.goto("/");
+    await page.locator(".templates-button").click();
+    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    const toggle = dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
+    await toggle.click();
+    const menu = dialog.getByRole("menu", { name: `number key for ${name}`, exact: true });
+    await expect(menu).toBeVisible();
+    await test.info().attach("number-menu", { body: await page.screenshot(), contentType: "image/png" });
+    await toggle.hover();
+    await page.mouse.down();
+    // sleep-ok: deliberate held-pointer stimulus lets the outside-dismiss timer run before the native click.
+    await page.waitForTimeout(100);
+    await expect(menu, "pointerdown on its own toggle cannot dismiss the menu").toBeVisible();
+    await page.mouse.up();
+    await expect(menu).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+  } finally {
+    await page.mouse.up();
+    await deleteTemplate(request, name);
+  }
+});
+
+for (const movement of ["scroll", "resize", "width-only resize"]) {
+  /** Fixed coordinates are valid only while the owning row stays put. The
+   * dialog must really overflow before scrolling; popup-internal scrolling
+   * remains available, and dismissal must not drag the dialog back to its row.
+   */
+  test(`number popup closes when the dialog moves by ${movement}`, async ({ page, request }) => {
+    const prefix = `number-layout-${movement.replaceAll(" ", "-")}-${Date.now()}`;
+    const names = Array.from({ length: 16 }, (_, n) => `${prefix}-${String(n).padStart(2, "0")}`);
+    try {
+      for (const name of names) await putTemplate(request, name, { kind: "agent", agent: "claude" });
+      await page.setViewportSize({ width: 1100, height: 500 });
+      await page.goto("/");
+      await page.locator(".templates-button").click();
+      const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+      await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+      expect(await dialog.evaluate(node => node.scrollHeight > node.clientHeight), "premise: dialog overflows").toBe(true);
+      await dialog.getByRole("button", { name: `number shortcut ${names[0]}`, exact: true }).click();
+      const menu = dialog.getByRole("menu", { name: `number key for ${names[0]}`, exact: true });
+      await expect(menu).toBeVisible();
+      await expect(menu.getByRole("menuitem", { name: "no shortcut", exact: true })).toBeFocused();
+      if (movement === "scroll") {
+        await dialog.evaluate(node => { node.scrollTop = 120; });
+        await expect.poll(() => dialog.evaluate(node => node.scrollTop)).toBe(120);
+      } else if (movement === "resize") {
+        await page.setViewportSize({ width: 900, height: 650 });
+        expect(page.viewportSize()).toEqual({ width: 900, height: 650 });
+      } else {
+        const before = await dialog.boundingBox();
+        expect(before).not.toBeNull();
+        await page.setViewportSize({ width: 1300, height: 500 });
+        const after = await dialog.boundingBox();
+        expect(after).not.toBeNull();
+        expect(after!.width, "premise: the dialog stays at its width cap").toBe(before!.width);
+        expect(after!.x, "premise: centering moved the dialog").toBeGreaterThan(before!.x);
+      }
+      await expect(menu).toHaveCount(0);
+      if (movement === "scroll") expect(await dialog.evaluate(node => node.scrollTop)).toBe(120);
+      await expect(dialog).toBeVisible();
+    } finally {
+      for (const name of names) await deleteTemplate(request, name);
+    }
+  });
+}
+
+/** A delayed outside relay can arrive after another popup owns focus, especially
+ * across the desktop bridge. Open both by keyboard to hold that ordering without
+ * a timer race, then deliver the old relay twice: neither arrival may take focus.
+ */
+test("number popup delayed close keeps another popup's focus", async ({ page, request }) => {
+  const names = ["a", "b"].map(s => `number-focus-${Date.now()}-${s}`);
+  try {
+    for (const name of names) await putTemplate(request, name, { kind: "agent", agent: "claude" });
+    await page.goto("/");
+    await page.locator(".templates-button").click();
+    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    const menu = (name: string) => dialog.getByRole("menu", { name: `number key for ${name}`, exact: true });
+    for (const name of names) {
+      const toggle = dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
+      await toggle.focus();
+      await expect(toggle).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(menu(name).getByRole("menuitem", { name: "no shortcut", exact: true })).toBeFocused();
+    }
+    await expect(menu(names[0])).toBeVisible();
+    const current = menu(names[1]).getByRole("menuitem", { name: "no shortcut", exact: true });
+    const relay = dialog.locator(`[data-row-menu="template-number:${names[0]}"]`);
+    await expect(relay).toHaveCount(1);
+    for (let delivery = 0; delivery < 2; delivery++) {
+      await expect(current).toBeFocused();
+      await relay.evaluate(node => (node as HTMLButtonElement).click());
+      await expect(menu(names[0])).toHaveCount(0);
+      await expect(current).toBeFocused();
+    }
+    await page.keyboard.press("Escape");
+    await expect(menu(names[1])).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+  } finally {
+    for (const name of names) await deleteTemplate(request, name);
+  }
+});
 
 /** Committing an IME candidate is still editing, not consent to save the
  * template. Edit to a distinct final name before ordinary Enter so an async

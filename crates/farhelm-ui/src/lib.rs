@@ -1500,6 +1500,16 @@ fn install_quick_launch_shortcut() {
     );
 }
 
+/// Bind physical number keys according to the build, including Mac web clients.
+/// The shared asset also exposes its pure matcher to the JS unit harness, which
+/// can exercise Mac-desktop input unavailable to the web-only browser suite.
+fn install_template_number_shortcuts() {
+    document::eval(&format!(
+        "{}\nwindow.installTemplateNumberShortcuts({HAS_NEW_SESSION_SHORTCUT});",
+        include_str!("../assets/template-number-shortcuts.js")
+    ));
+}
+
 /// The renderer-independent application mounted only after desktop IPC auth
 /// has completed. Browser builds mount it immediately.
 #[component]
@@ -1510,6 +1520,7 @@ fn AppBody() -> Element {
     use_hook(install_window_activity_tracking);
     use_hook(install_quick_switcher_shortcut);
     use_hook(install_quick_launch_shortcut);
+    use_hook(install_template_number_shortcuts);
     #[cfg(native_desktop)]
     use_hook(|| {
         // cfg! keeps the Mac branch type-checked by the Linux desktop build

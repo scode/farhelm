@@ -954,6 +954,7 @@ pub(crate) fn ListView(
     // The Templates dialog, opened from the button beside New.
     let mut templates_open = use_signal(|| false);
     let mut quick_launch_hint = use_signal(|| false);
+    let mut number_shortcut_hint = use_signal(|| false);
     // A launcher save hands the actual stored snapshot to the next dialog;
     // loading the list must not decide which template the person just opened.
     let mut initial_template = use_signal(|| None::<farhelm_proto::launcher::LaunchTemplate>);
@@ -3328,7 +3329,9 @@ pub(crate) fn ListView(
         },
     );
     let quick_base = base.clone();
-    let quick_launch = use_callback(move |_: ()| {
+    // Both shortcuts resolve a name from fresh shared preferences and then
+    // enter exactly the same New/template/confirmation path.
+    let quick_launch = use_callback(move |number: Option<String>| {
         if *quick_launch_pending.peek()
             || *show_create.peek()
             || *templates_open.peek()
@@ -3351,7 +3354,7 @@ pub(crate) fn ListView(
             let result = async {
                 let fresh = crate::api::fetch_preferences(&base).await?;
                 let templates = crate::api::fetch_templates(&base).await?;
-                Ok::<_, String>((crate::api::quick_launch_mark_after_read(fresh), templates))
+                Ok::<_, String>((crate::api::template_bindings_after_read(fresh), templates))
             }
             .await;
             // A modal opened while the read was out must not be hidden behind
@@ -3366,8 +3369,13 @@ pub(crate) fn ListView(
                 return;
             }
             match result {
-                Ok((name, templates)) => {
-                    preferences.0.write().quick_launch_template = name.clone();
+                Ok((fresh, templates)) => {
+                    let name = match &number {
+                        Some(key) => fresh.template_shortcuts.get(key).cloned(),
+                        None => fresh.quick_launch_template.clone(),
+                    };
+                    preferences.0.write().quick_launch_template = fresh.quick_launch_template;
+                    preferences.0.write().template_shortcuts = fresh.template_shortcuts;
                     if let Some(template) = name
                         .as_ref()
                         .and_then(|name| templates.iter().find(|t| &t.name == name))
@@ -3382,7 +3390,8 @@ pub(crate) fn ListView(
                         }
                     } else {
                         initial_template.set(None);
-                        quick_launch_hint.set(true);
+                        quick_launch_hint.set(number.is_none());
+                        number_shortcut_hint.set(number.is_some());
                         templates_open.set(true);
                     }
                 }
@@ -3427,7 +3436,7 @@ pub(crate) fn ListView(
                     restore = !open_new.call(Some(action));
                 }
                 Some(super::quick_switcher::SwitcherPick::QuickLaunch) => {
-                    quick_launch.call(());
+                    quick_launch.call(None);
                     restore = false;
                 }
                 None => {}
@@ -3443,7 +3452,15 @@ pub(crate) fn ListView(
             "data-opening-generation": "{opening_generation()}",
             "data-read-completed-generation": "{quick_read_completed()}",
             disabled: quick_launch_pending() || show_create() || templates_open() || busy,
-            onclick: move |_| quick_launch.call(()),
+            onclick: move |_| quick_launch.call(None),
+        }
+        for key in super::templates::NUMBER_KEYS {
+            button {
+                key: "number-{key}", class: "template-number-trigger", r#type: "button",
+                hidden: true, tabindex: "-1", "data-number-key": "{key}",
+                disabled: quick_launch_pending() || show_create() || templates_open() || busy,
+                onclick: move |_| quick_launch.call(Some(key.into())),
+            }
         }
         // Status sounds follow the very replies these rows display. Keeping
         // the observer here avoids another session read or a mirrored listing.
@@ -3667,7 +3684,7 @@ pub(crate) fn ListView(
                         "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("templates: mark one with ⚡ for quick launch ({})", super::templates::QUICK_LAUNCH_CHORD), |name| format!("templates: quick launch {} ({})", crate::peer::display_peer(name), super::templates::QUICK_LAUNCH_CHORD)),
                         aria_haspopup: "dialog",
                         disabled: busy,
-                        onclick: move |_| { opening_generation += 1; quick_launch_pending.set(false); auto_launch.set(false); initial_template.set(None); quick_launch_hint.set(false); templates_open.set(true); },
+                        onclick: move |_| { opening_generation += 1; quick_launch_pending.set(false); auto_launch.set(false); initial_template.set(None); quick_launch_hint.set(false); number_shortcut_hint.set(false); templates_open.set(true); },
                         "templates"
                     }
                 }
@@ -3675,8 +3692,10 @@ pub(crate) fn ListView(
             if templates_open() {
                 super::templates::TemplatesDialog {
                     hosts: host_options.clone(),
+                    layout_epoch,
                     initial_template: initial_template(),
                     quick_launch_hint: quick_launch_hint(),
+                    number_shortcut_hint: number_shortcut_hint(),
                     on_close: move |_| {
                         super::templates::return_focus_to_templates_button();
                         templates_open.set(false);

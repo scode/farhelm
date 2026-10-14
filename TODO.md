@@ -103,12 +103,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
   this refers to and what matching it would mean; ask before starting.
 
-- **Number shortcuts for launching templates.** Let the user bind each of Cmd+0 through Cmd+9 to a template, so that
-  pressing it launches a session from that template right away, the same way the Cmd+P template quick launch (being
-  planned, not yet on main) does once a template is picked. Build on that work once it lands. Browsers keep Cmd/Ctrl
-  with a digit for switching tabs and Cmd/Ctrl+0 for resetting zoom, the same reason the web UI has no Cmd+N, so decide
-  what the web UI and the chord off macOS get. Plan: `plans/queue/template-number-shortcuts.md`.
-
 - **In-app intro tour.** Introduce new users to the app from inside it. At minimum, point out how to send feedback and
   encourage reading the docs website's Get started section, with a link to it; it may grow into a fuller guided tour.
   When it appears, how it is dismissed, and how much it covers are to be decided when the entry is planned. Plan:

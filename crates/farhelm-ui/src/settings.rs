@@ -318,6 +318,7 @@ fn TerminalLinkChoice(
         div {
             label {
                 class: "app-settings-choice",
+                "data-tooltip": help,
                 span { "{label}" }
                 input {
                     r#type: "radio",

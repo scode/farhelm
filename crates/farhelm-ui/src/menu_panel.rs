@@ -786,6 +786,8 @@ pub(crate) fn forget_menu_focus<A: Copy, Id: 'static, const N: usize>(
 /// document body, or an element still inside a row menu (the menu's DOM may
 /// not be gone yet when this runs). A user's own focus choice elsewhere
 /// always wins over the handback.
+/// Independently keyed popups can overlap during a deferred outside relay;
+/// focus inside a different keyed popup belongs to that popup, not this close.
 ///
 /// Fire-and-forget, like every other focus call here: a renderer that
 /// cannot run this leaves the keyboard experience unimproved rather than
@@ -800,6 +802,9 @@ pub(crate) fn focus_menu_toggle(id_attr: &str, id_value: &str, toggle_selector: 
             const attrName = {attr_js};
             const toggleSelector = {toggle_js};
             const active = document.activeElement;
+            const activeOwner = active?.closest('[data-row-menu-key]');
+            if (attrName === 'data-row-menu-key' && activeOwner &&
+                activeOwner.getAttribute(attrName) !== wanted) return;
             if (active && active !== document.body &&
                 !active.closest('.session-row-menu-flyout, .host-row-menu-panel, .bar-menu-panel')) return;
             // Several elements can carry the same marker (a bar menu's
@@ -898,7 +903,7 @@ pub(crate) fn install_row_menu_outside_dismiss() {
                 const target = event.target;
                 if (!open || !(target instanceof Element)) return;
                 if (open.contains(target)) return;
-                if (target.closest('.session-row-menu[aria-expanded="true"], .host-row-menu[aria-expanded="true"], .bar-menu-toggle[aria-expanded="true"], .session-row-bell[aria-expanded="true"]')) return;
+                if (target.closest('.session-row-menu[aria-expanded="true"], .host-row-menu[aria-expanded="true"], .bar-menu-toggle[aria-expanded="true"], .session-row-bell[aria-expanded="true"], .templates-number-key[aria-expanded="true"]')) return;
                 const keyed = open.closest('[data-row-menu-key]');
                 const sessionRow = open.closest('[data-session-id]');
                 const hostRow = open.closest('[data-host-id]');

@@ -67,6 +67,23 @@ async function chord(page: Page, mac = false, repeat = false) {
   }
 }
 
+/** Number shortcuts always use the physical digit's web chord, even on a Mac.
+ * Waiting for all triggers establishes that the Rust list has admitted input.
+ */
+async function numberChord(page: Page, key = "1", repeat = false) {
+  await expect(page.locator(".template-number-trigger")).toHaveCount(10);
+  await page.keyboard.down("Control");
+  await page.keyboard.down("Shift");
+  try {
+    await page.keyboard.down(`Digit${key}`);
+    if (repeat) await page.keyboard.down(`Digit${key}`);
+  } finally {
+    await page.keyboard.up(`Digit${key}`);
+    await page.keyboard.up("Shift");
+    await page.keyboard.up("Control");
+  }
+}
+
 test.beforeEach(async ({ request }) => {
   await resetPreferences(request);
 });
@@ -509,11 +526,11 @@ test("the quick switcher row launches through the fresh direct path", async ({ p
   }
 });
 
-for (const mac of [false, true]) {
+for (const [mac, numbered] of [[false, false], [true, false], [false, true], [true, true]]) {
   /** The held create reply establishes the hidden in-flight boundary. Actual
    * binary input frames and a fresh echo prove both taking the chord away from
    * the old agent and handing keyboard ownership to the newly selected one. */
-  test(`${mac ? "Mac" : "non-Mac"} quick launch owns input and submits once without showing New`, async ({ page, request }) => {
+  test(`${mac ? "Mac" : "non-Mac"} ${numbered ? "number shortcut" : "quick launch"} owns input and submits once without showing New`, async ({ page, request }) => {
     await platform(page, mac);
     const source = await createSession(request, { title: `quick-source-${Date.now()}` });
     const name = `quick-direct-${Date.now()}`;
@@ -555,8 +572,9 @@ for (const mac of [false, true]) {
       });
       // The page was seeded without a mark: only a fresh shortcut read can
       // discover this other client's change without a reload.
-      await patchPreferences(request, { quick_launch_template: name });
-      await chord(page, mac, true);
+      await patchPreferences(request, numbered ? { template_shortcuts: { "1": name } } : { quick_launch_template: name });
+      if (numbered) await numberChord(page, "1", true);
+      else await chord(page, mac, true);
       await expect.poll(() => bodies.length, { message: "the owned create request is captured and held" }).toBe(1);
       const form = page.locator(".create-session-form");
       await expect(form).toHaveCount(1);
@@ -602,7 +620,8 @@ for (const mac of [false, true]) {
 
 /** The host owns YOLO admission. Quick launch reveals the same draft and
  * question with Cancel focus, and cancelling it must never dispatch a retry. */
-test("quick launch reveals the ordinary YOLO question and retains its draft", async ({ page, request }) => {
+for (const numbered of [false, true]) {
+test(`${numbered ? "number shortcut" : "quick launch"} reveals the ordinary YOLO question and retains its draft`, async ({ page, request }) => {
   const name = `quick-yolo-${Date.now()}`;
   const posts: any[] = [];
   await page.route("**/api/sessions", async (route) => {
@@ -612,9 +631,9 @@ test("quick launch reveals the ordinary YOLO question and retains its draft", as
   try {
     await setLocalYoloWithoutAsking(request, false);
     await commandTemplate(request, name, true);
-    await patchPreferences(request, { quick_launch_template: name });
+    await patchPreferences(request, numbered ? { template_shortcuts: { "1": name } } : { quick_launch_template: name });
     await page.goto("/");
-    await chord(page);
+    if (numbered) await numberChord(page); else await chord(page);
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await expect(form.locator(".yolo-confirmation")).toBeVisible();
@@ -630,11 +649,13 @@ test("quick launch reveals the ordinary YOLO question and retains its draft", as
     expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
   }
 });
+}
 
 /** A refusal spends the shortcut attempt, while a later deliberate Launch
  * reuses the mounted draft. Showing an error without that draft would lose the
  * setup; automatic retries would turn an ambiguous refusal into extra work. */
-test("quick launch reveals a refusal without automatically retrying", async ({ page, request }) => {
+for (const numbered of [false, true]) {
+test(`${numbered ? "number shortcut" : "quick launch"} reveals a refusal without automatically retrying`, async ({ page, request }) => {
   const name = `quick-refused-${Date.now()}`;
   const bodies: any[] = [];
   await page.route("**/api/sessions", async (route) => {
@@ -644,9 +665,9 @@ test("quick launch reveals a refusal without automatically retrying", async ({ p
   });
   try {
     await commandTemplate(request, name);
-    await patchPreferences(request, { quick_launch_template: name });
+    await patchPreferences(request, numbered ? { template_shortcuts: { "1": name } } : { quick_launch_template: name });
     await page.goto("/");
-    await chord(page);
+    if (numbered) await numberChord(page); else await chord(page);
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-error")).toContainText("quick fixture refusal");
@@ -658,6 +679,59 @@ test("quick launch reveals a refusal without automatically retrying", async ({ p
   } finally {
     await page.unroute("**/api/sessions");
     expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
+  }
+});
+}
+
+/** Unbound and incomplete number bindings use the existing Templates/New
+ * fallbacks, while a visible modal must keep input and launch authority.
+ * The disabled primary action pins incompleteness rather than a timed absence.
+ */
+test("number shortcuts respect modals and explain unbound or incomplete templates", async ({ page, request }) => {
+  const name = `number-partial-${Date.now()}`;
+  const runnable = `${name}-ready`;
+  let creates = 0;
+  page.on("request", request => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/sessions") creates++;
+  });
+  try {
+    expect((await request.put(`/api/templates/${name}`, { data: { effort: "high" } })).ok()).toBe(true);
+    await commandTemplate(request, runnable);
+    await patchPreferences(request, { template_shortcuts: { "1": runnable } });
+    expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": runnable });
+    await page.goto("/");
+    await page.locator(".templates-button").click();
+    const dialog = page.getByRole("dialog", { name: "templates", exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator(".templates-new")).toBeFocused();
+    await dialog.evaluate(node => {
+      const received: { code: string; prevented: boolean }[] = [];
+      (window as unknown as { numberModalInput: typeof received }).numberModalInput = received;
+      node.addEventListener("keydown", event => {
+        const key = event as KeyboardEvent;
+        if (key.code === "Digit1" && key.ctrlKey && key.shiftKey) received.push({ code: key.code, prevented: key.defaultPrevented });
+      }, true);
+    });
+    await numberChord(page);
+    expect(await page.evaluate(() => (window as unknown as {
+      numberModalInput: { code: string; prevented: boolean }[];
+    }).numberModalInput)).toEqual([{ code: "Digit1", prevented: false }]);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator(".templates-number-hint")).toHaveCount(0);
+    await dialog.locator(".templates-close").click();
+    await expect(dialog).toHaveCount(0);
+    await numberChord(page, "0");
+    await expect(dialog.locator(".templates-number-hint")).toContainText("Give a template a number key");
+    await dialog.locator(".templates-close").click();
+    await expect(dialog).toHaveCount(0);
+    await patchPreferences(request, { template_shortcuts: { "1": name } });
+    await numberChord(page);
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
+    expect(creates).toBe(0);
+  } finally {
+    for (const template of [name, runnable]) await request.delete(`/api/templates/${template}`);
   }
 });
 

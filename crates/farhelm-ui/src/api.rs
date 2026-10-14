@@ -377,6 +377,9 @@ pub(crate) struct Preferences {
     /// Shared quick-launch mark, separate from a template editor's fields.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) quick_launch_template: Option<String>,
+    /// Shared whole-map number bindings; stale names are handled at each press.
+    #[serde(default)]
+    pub(crate) template_shortcuts: std::collections::BTreeMap<String, String>,
     /// Shared contact memory; dialogs seed this authenticated snapshot once.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) feedback_contact: Option<String>,
@@ -578,6 +581,7 @@ pub(crate) enum PreferenceField {
     HostSetupConfirmation,
     SessionConfirmations,
     QuickLaunchTemplate,
+    TemplateShortcuts,
     FeedbackContact,
     TerminalLinkClick,
 }
@@ -593,6 +597,7 @@ impl PreferenceField {
             PreferenceField::HostSetupConfirmation => "skip_host_setup_confirmation",
             PreferenceField::SessionConfirmations => "skip_session_confirmations",
             PreferenceField::QuickLaunchTemplate => "quick_launch_template",
+            PreferenceField::TemplateShortcuts => "template_shortcuts",
             PreferenceField::FeedbackContact => "feedback_contact",
             PreferenceField::TerminalLinkClick => "terminal_link_click",
         }
@@ -615,12 +620,24 @@ pub(crate) enum PreferenceValue {
     SessionConfirmations(bool),
     /// Explicit clear removes the sole mark without changing template fields.
     QuickLaunchTemplate(Option<String>),
+    /// Empty clears every key; each write replaces the entire shared map.
+    TemplateShortcuts(std::collections::BTreeMap<String, String>),
     /// None is an explicit clear, not an omitted patch field.
     FeedbackContact(Option<String>),
     TerminalLinkClick(TerminalLinkClick),
 }
 
 impl PreferenceValue {
+    /// Remove only a deleted template from this client's queued shortcut intent.
+    /// Retiring it before DELETE prevents credential replay from restoring a key
+    /// the helm just freed, while unrelated number bindings remain intact.
+    fn retire_template(&mut self, name: &str) {
+        match self {
+            Self::QuickLaunchTemplate(value) if value.as_deref() == Some(name) => *value = None,
+            Self::TemplateShortcuts(value) => value.retain(|_, template| template != name),
+            _ => {}
+        }
+    }
     /// Select the independent queue slot that serializes writes for this value.
     fn field(&self) -> PreferenceField {
         match self {
@@ -631,6 +648,7 @@ impl PreferenceValue {
             Self::HostSetupConfirmation(_) => PreferenceField::HostSetupConfirmation,
             Self::SessionConfirmations(_) => PreferenceField::SessionConfirmations,
             Self::QuickLaunchTemplate(_) => PreferenceField::QuickLaunchTemplate,
+            Self::TemplateShortcuts(_) => PreferenceField::TemplateShortcuts,
             Self::FeedbackContact(_) => PreferenceField::FeedbackContact,
             Self::TerminalLinkClick(_) => PreferenceField::TerminalLinkClick,
         }
@@ -644,6 +662,7 @@ impl PreferenceValue {
                 serde_json::json!(value)
             }
             Self::TerminalLinkClick(value) => serde_json::json!(value.key()),
+            Self::TemplateShortcuts(value) => serde_json::json!(value),
             Self::Compact(value)
             | Self::HostRemoveConfirmation(value)
             | Self::SessionConfirmations(value)
@@ -663,6 +682,7 @@ impl PreferenceValue {
             Self::HostSetupConfirmation(value) => seed.skip_host_setup_confirmation = Some(*value),
             Self::SessionConfirmations(value) => seed.skip_session_confirmations = Some(*value),
             Self::QuickLaunchTemplate(value) => seed.quick_launch_template = value.clone(),
+            Self::TemplateShortcuts(value) => seed.template_shortcuts = value.clone(),
             Self::FeedbackContact(value) => seed.feedback_contact = value.clone(),
             Self::TerminalLinkClick(value) => seed.terminal_link_click = Some(value.key().into()),
         }
@@ -685,6 +705,17 @@ struct FieldWrite {
     /// already being sent: another client may have committed in between.
     recorded_since_send: bool,
     completion: Option<PreferenceCompletion>,
+}
+
+/// Retire the matching mark entirely, or just the deleted name from a map.
+/// A failed map write may also contain unrelated choices that still need replay.
+fn retire_template_choice(slot: &mut FieldWrite, name: &str) {
+    if matches!(&slot.latest, Some(PreferenceValue::QuickLaunchTemplate(Some(value))) if value == name)
+    {
+        slot.latest = None;
+    } else if let Some(value) = &mut slot.latest {
+        value.retire_template(name);
+    }
 }
 
 /// One optional caller waiting for the field's newest choice to settle.
@@ -727,6 +758,7 @@ struct PreferenceWrites {
     host_setup_confirmation: FieldWrite,
     session_confirmations: FieldWrite,
     quick_launch_template: FieldWrite,
+    template_shortcuts: FieldWrite,
     feedback_contact: FieldWrite,
     terminal_link_click: FieldWrite,
 }
@@ -741,6 +773,7 @@ impl PreferenceWrites {
             PreferenceField::HostSetupConfirmation => &mut self.host_setup_confirmation,
             PreferenceField::SessionConfirmations => &mut self.session_confirmations,
             PreferenceField::QuickLaunchTemplate => &mut self.quick_launch_template,
+            PreferenceField::TemplateShortcuts => &mut self.template_shortcuts,
             PreferenceField::FeedbackContact => &mut self.feedback_contact,
             PreferenceField::TerminalLinkClick => &mut self.terminal_link_click,
         }
@@ -801,10 +834,8 @@ impl PreferenceWrites {
         slot.in_flight = false;
         if let Some(completion) = slot.completion.take() {
             let deleting = completion.retire_template.is_some();
-            if let Some(name) = completion.retire_template
-                && slot.latest.as_ref() == Some(&PreferenceValue::QuickLaunchTemplate(Some(name)))
-            {
-                slot.latest = None;
+            if let Some(name) = completion.retire_template {
+                retire_template_choice(slot, &name);
             }
             let _ = completion.sender.send(deleting || success);
         }
@@ -822,7 +853,7 @@ impl PreferenceWrites {
         }
     }
 
-    /// Drain any already-owned mark request without recording another PUT.
+    /// Drain one shortcut field's owned request without recording another PUT.
     ///
     /// Retirement happens before releasing the waiter, so a reauthentication
     /// between settlement and DELETE cannot replay the obsolete name. A dirty
@@ -830,15 +861,12 @@ impl PreferenceWrites {
     /// a cancelled request's remote outcome is unknown.
     fn before_template_delete(
         &mut self,
+        field: PreferenceField,
         name: &str,
     ) -> Option<futures_channel::oneshot::Receiver<bool>> {
-        let slot = self.field(PreferenceField::QuickLaunchTemplate);
+        let slot = self.field(field);
         if !slot.in_flight {
-            if slot.latest.as_ref()
-                == Some(&PreferenceValue::QuickLaunchTemplate(Some(name.into())))
-            {
-                slot.latest = None;
-            }
+            retire_template_choice(slot, name);
             return None;
         }
         let (sender, receiver) = futures_channel::oneshot::channel();
@@ -853,11 +881,24 @@ impl PreferenceWrites {
 
     /// An unconfirmed explicit mark still owns this client's display. Once
     /// acknowledged, only the newly fetched helm mark decides rename or launch.
+    #[cfg(test)]
     fn quick_launch_mark_after_read(&self, mut fetched: Preferences) -> Option<String> {
-        if let Some(value) = self.dirty(PreferenceField::QuickLaunchTemplate) {
-            value.overlay(&mut fetched);
-        }
+        fetched = self.template_bindings_after_read(fetched);
         fetched.quick_launch_template
+    }
+
+    /// Refresh both shortcut fields without rolling back unacknowledged edits.
+    /// Other preferences are left alone: this read is not credential recovery.
+    fn template_bindings_after_read(&self, mut fetched: Preferences) -> Preferences {
+        for field in [
+            PreferenceField::QuickLaunchTemplate,
+            PreferenceField::TemplateShortcuts,
+        ] {
+            if let Some(value) = self.dirty(field) {
+                value.overlay(&mut fetched);
+            }
+        }
+        fetched
     }
 
     /// This session's newest choice for `field` when no PUT has confirmed
@@ -874,6 +915,7 @@ impl PreferenceWrites {
             PreferenceField::HostSetupConfirmation => &self.host_setup_confirmation,
             PreferenceField::SessionConfirmations => &self.session_confirmations,
             PreferenceField::QuickLaunchTemplate => &self.quick_launch_template,
+            PreferenceField::TemplateShortcuts => &self.template_shortcuts,
             PreferenceField::FeedbackContact => &self.feedback_contact,
             PreferenceField::TerminalLinkClick => &self.terminal_link_click,
         };
@@ -965,6 +1007,7 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
         PreferenceField::HostSetupConfirmation,
         PreferenceField::SessionConfirmations,
         PreferenceField::QuickLaunchTemplate,
+        PreferenceField::TemplateShortcuts,
         PreferenceField::FeedbackContact,
         PreferenceField::TerminalLinkClick,
     ] {
@@ -1024,44 +1067,58 @@ async fn send_preference_patch(base: &str, value: &PreferenceValue) -> bool {
     false
 }
 
-/// Finish the mark write before a template rename deletes its old name.
+/// Acknowledge a shortcut-field repoint before rename deletes the old name.
 ///
 /// The optional acknowledgment belongs to the existing latest-wins queue;
 /// failures and writer loss leave the choice dirty for credential recovery.
 /// Receiver cancellation never cancels that process-wide writer. A rename
 /// retains both names if its particular choice is not acknowledged.
-pub(crate) async fn write_quick_launch_template(base: &str, name: Option<String>) -> bool {
+pub(crate) async fn write_template_binding(base: &str, value: PreferenceValue) -> bool {
+    let field = value.field();
+    debug_assert!(matches!(
+        field,
+        PreferenceField::QuickLaunchTemplate | PreferenceField::TemplateShortcuts
+    ));
     let (sender, receiver) = futures_channel::oneshot::channel();
     let start = preference_writes().record_with_completion(
-        PreferenceValue::QuickLaunchTemplate(name),
+        value,
         Some(PreferenceCompletion {
             sender,
             retire_template: None,
         }),
     );
     if start {
-        spawn_preference_writer(base.to_string(), PreferenceField::QuickLaunchTemplate);
+        spawn_preference_writer(base.to_string(), field);
     }
     receiver.await.unwrap_or(false)
 }
 
-/// Refresh the mark without discarding an unconfirmed explicit local choice.
-/// Only this field is overlaid; reading a mark is not credential recovery and
+/// Refresh shortcut bindings without discarding unconfirmed local choices.
+/// Only these fields are overlaid; a bindings read is not credential recovery and
 /// must not replay unrelated dirty preferences. Rename and direct launch both
 /// honor this ownership; an acknowledged choice yields to the fresh shared read.
-pub(crate) fn quick_launch_mark_after_read(fetched: Preferences) -> Option<String> {
-    preference_writes().quick_launch_mark_after_read(fetched)
+pub(crate) fn template_bindings_after_read(fetched: Preferences) -> Preferences {
+    preference_writes().template_bindings_after_read(fetched)
 }
 
-/// Order template deletion after existing mark writes and retire local intent.
+/// Order template deletion after shortcut writes and retire matching local intent.
 /// No null preference PUT is sent: only the helm's matching-name delete has
-/// authority to clear the shared mark. A lost writer requires a deliberate retry.
+/// authority to clear shared bindings. A lost writer requires a deliberate retry.
 pub(crate) async fn prepare_template_delete(name: &str) -> bool {
-    let waiting = preference_writes().before_template_delete(name);
-    match waiting {
-        Some(receiver) => receiver.await.unwrap_or(false),
-        None => true,
+    let waiting = {
+        let mut queue = preference_writes();
+        [
+            PreferenceField::QuickLaunchTemplate,
+            PreferenceField::TemplateShortcuts,
+        ]
+        .map(|field| queue.before_template_delete(field, name))
+    };
+    for receiver in waiting.into_iter().flatten() {
+        if !receiver.await.unwrap_or(false) {
+            return false;
+        }
     }
+    true
 }
 
 /// One listing request's whole query string: the order first, then the
@@ -4937,6 +4994,78 @@ mod preference_write_tests {
         TerminalLinkClick,
     };
 
+    /// A failed in-flight map is drained before deletion and its matching name
+    /// retired before credential replay. Other keys stay dirty: clearing them
+    /// as collateral would lose a separate local choice the helm never saved.
+    #[farhelm_testtrace::test]
+    fn number_binding_delete_retires_only_the_deleted_name() {
+        use std::collections::BTreeMap;
+        let mut queue = PreferenceWrites::default();
+        let field = PreferenceField::TemplateShortcuts;
+        let value = PreferenceValue::TemplateShortcuts(BTreeMap::from([
+            ("1".into(), "deleted".into()),
+            ("0".into(), "kept".into()),
+        ]));
+        assert!(queue.record(value.clone()));
+        assert_eq!(queue.next_to_send(field), Some(value.clone()));
+        let mut deleting = queue.before_template_delete(field, "deleted").unwrap();
+        assert_eq!(
+            deleting.try_recv(),
+            Ok(None),
+            "premise: deletion waits for the owned PUT"
+        );
+        assert!(!queue.finished(field, &value, false));
+        assert_eq!(deleting.try_recv(), Ok(Some(true)));
+        let kept =
+            PreferenceValue::TemplateShortcuts(BTreeMap::from([("0".into(), "kept".into())]));
+        assert_eq!(queue.dirty(field), Some(kept.clone()));
+        assert_eq!(queue.begin_replay(field), Some(kept));
+        let mut deleting = queue.before_template_delete(field, "kept").unwrap();
+        queue.writer_lost(field);
+        assert_eq!(
+            deleting.try_recv(),
+            Ok(Some(false)),
+            "lost ownership refuses deletion"
+        );
+    }
+
+    /// A bindings refresh honors both unconfirmed local shortcut fields, then
+    /// yields to another window after acknowledgment. The wire still replaces
+    /// the map as a single independent preference, including an empty map.
+    #[farhelm_testtrace::test]
+    fn number_bindings_refresh_and_clear_through_the_shared_queue() {
+        use std::collections::BTreeMap;
+        let mut queue = PreferenceWrites::default();
+        let field = PreferenceField::TemplateShortcuts;
+        let value =
+            PreferenceValue::TemplateShortcuts(BTreeMap::from([("1".into(), "local".into())]));
+        let seed = Preferences {
+            template_shortcuts: BTreeMap::from([("0".into(), "other".into())]),
+            quick_launch_template: Some("bolt".into()),
+            ..Default::default()
+        };
+        assert!(queue.record(value.clone()));
+        assert_eq!(value.wire_value(), serde_json::json!({"1":"local"}));
+        assert_eq!(value.field().key(), "template_shortcuts");
+        let refreshed = queue.template_bindings_after_read(seed.clone());
+        assert_eq!(
+            refreshed.template_shortcuts.get("1").map(String::as_str),
+            Some("local")
+        );
+        assert_eq!(refreshed.quick_launch_template.as_deref(), Some("bolt"));
+        assert!(!queue.finished(field, &value, true));
+        assert_eq!(queue.template_bindings_after_read(seed.clone()), seed);
+        let clear = PreferenceValue::TemplateShortcuts(BTreeMap::new());
+        assert!(queue.record(clear.clone()));
+        assert_eq!(clear.wire_value(), serde_json::json!({}));
+        assert!(
+            queue
+                .template_bindings_after_read(seed)
+                .template_shortcuts
+                .is_empty()
+        );
+    }
+
     /// Attach a portable acknowledgment without a runtime or network. The
     /// receiver observes settlement, while the real queue owns the writer slot.
     fn record_waiting(
@@ -5057,7 +5186,9 @@ mod preference_write_tests {
             let mut queue = PreferenceWrites::default();
             assert!(queue.record(value.clone()));
             assert_eq!(queue.next_to_send(field), Some(value.clone()));
-            let mut deleting = queue.before_template_delete("deleted").unwrap();
+            let mut deleting = queue
+                .before_template_delete(PreferenceField::QuickLaunchTemplate, "deleted")
+                .unwrap();
             assert_eq!(deleting.try_recv(), Ok(None));
             assert!(!queue.finished(field, &value, success));
             assert_eq!(queue.dirty(field), None);
@@ -5068,7 +5199,11 @@ mod preference_write_tests {
         assert!(queue.record(value.clone()));
         assert!(!queue.finished(field, &value, false));
         assert_eq!(queue.dirty(field), Some(value));
-        assert!(queue.before_template_delete("deleted").is_none());
+        assert!(
+            queue
+                .before_template_delete(PreferenceField::QuickLaunchTemplate, "deleted")
+                .is_none()
+        );
         assert_eq!(queue.begin_replay(field), None);
     }
 
@@ -5082,14 +5217,22 @@ mod preference_write_tests {
         let mut queue = PreferenceWrites::default();
         assert!(queue.record(value.clone()));
         assert_eq!(queue.next_to_send(field), Some(value.clone()));
-        let mut deleting = queue.before_template_delete("deleted").unwrap();
+        let mut deleting = queue
+            .before_template_delete(PreferenceField::QuickLaunchTemplate, "deleted")
+            .unwrap();
         assert!(!queue.finished(field, &value, false));
         assert_eq!(deleting.try_recv(), Ok(Some(true)));
         assert_eq!(queue.dirty(field), Some(value.clone()));
-        assert!(queue.before_template_delete("deleted").is_none());
+        assert!(
+            queue
+                .before_template_delete(PreferenceField::QuickLaunchTemplate, "deleted")
+                .is_none()
+        );
         assert_eq!(queue.dirty(field), Some(value.clone()));
         assert_eq!(queue.begin_replay(field), Some(value.clone()));
-        let mut deleting = queue.before_template_delete("other").unwrap();
+        let mut deleting = queue
+            .before_template_delete(PreferenceField::QuickLaunchTemplate, "other")
+            .unwrap();
         queue.writer_lost(field);
         assert_eq!(deleting.try_recv(), Ok(Some(false)));
         assert_eq!(queue.dirty(field), Some(value));

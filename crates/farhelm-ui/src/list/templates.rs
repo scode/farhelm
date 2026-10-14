@@ -9,6 +9,12 @@
 use super::shared::HostOption;
 use crate::ApiBase;
 use crate::hosts::settings_dialog::install_dialog_with_selector;
+use crate::menu_panel::{
+    MenuFocusQueue, MenuOpenIntent, MenuOrder, MenuWiring, PanelPlacement, ROW_MENU_OUTSIDE_RELAY,
+    cancel_menu_focus, closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus,
+    handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, remember_menu_item,
+    session_menu_placement_style,
+};
 use crate::peer::display_peer;
 use dioxus::prelude::*;
 use farhelm_proto::launcher::{
@@ -16,6 +22,8 @@ use farhelm_proto::launcher::{
     TemplateFields, check_template_shape,
 };
 use farhelm_proto::{LaunchHarness, LaunchPermission};
+use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
 
 const DIALOG_SELECTOR: &str = r#".templates-dialog[role="dialog"]"#;
 
@@ -33,6 +41,210 @@ pub(super) fn quick_launch_eligible(fields: &TemplateFields) -> bool {
 /// Advertise both platform chords without mistaking the browser for a Mac app.
 /// The capture listener chooses the actual chord using navigator.platform.
 pub(super) const QUICK_LAUNCH_CHORD: &str = "⌘P / Ctrl+Shift+P";
+/// Keep the row menu and hidden triggers in keyboard order, with zero last.
+pub(super) const NUMBER_KEYS: [&str; 10] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+
+/// Display the one chord the current build takes, including Mac web clients.
+fn number_chord(key: &str) -> String {
+    if crate::HAS_NEW_SESSION_SHORTCUT {
+        format!("⌘{key}")
+    } else {
+        format!("Ctrl+Shift+{key}")
+    }
+}
+
+/// Giving a key to a template moves it from its old owner and releases its
+/// previous key. This whole-map edit preserves one key per template by construction.
+fn bind_number(bindings: &mut BTreeMap<String, String>, name: &str, key: Option<&str>) {
+    bindings.retain(|_, owner| owner != name);
+    if let Some(key) = key {
+        bindings.insert(key.into(), name.into());
+    }
+}
+
+/// Move the old name's key even if the new name has a stale binding already.
+/// A rename cannot produce two keys for one template, which the helm refuses.
+fn rename_number_binding(bindings: &mut BTreeMap<String, String>, old: &str, new: &str) {
+    let key = bindings
+        .iter()
+        .find_map(|(key, name)| (name == old).then(|| key.clone()));
+    if let Some(key) = key {
+        bindings.remove(&key);
+        bind_number(bindings, new, Some(&key));
+    }
+}
+
+/// A row-local popup stays inside modal isolation while using the app's menu
+/// keyboard, placement and outside-dismiss machinery. Escape closes this menu
+/// without bubbling into the containing Templates dialog.
+#[component]
+fn NumberShortcutMenu(
+    name: String,
+    eligible: bool,
+    disabled: bool,
+    bindings: BTreeMap<String, String>,
+    layout_epoch: ReadSignal<u64>,
+    dialog_epoch: ReadSignal<u64>,
+    on_choose: EventHandler<Option<String>>,
+) -> Element {
+    let bound = bindings
+        .iter()
+        .find_map(|(key, owner)| (owner == &name).then(|| key.clone()));
+    let mut open = use_signal(|| false);
+    let mut placement = use_signal(|| PanelPlacement::Unmeasured);
+    let mut toggle = use_signal(|| None::<Rc<MountedData>>);
+    let mut handles = use_signal(HashMap::new);
+    let mut focused = use_signal(|| None::<usize>);
+    let mut requested = use_signal(|| None::<usize>);
+    let mut intent = use_signal(|| None::<MenuOpenIntent>);
+    let focus = MenuFocusQueue {
+        target: use_signal(|| None),
+        draining: use_signal(|| false),
+    };
+    let mut generation = use_signal(|| 0_u64);
+    let menu_key = format!("template-number:{name}");
+    let focus_key = menu_key.clone();
+    let close_menu = use_callback(move |()| {
+        // An outside relay may arrive after another close across the renderer
+        // bridge. Re-delivery must not return focus from a newer popup.
+        if !*open.peek() {
+            return;
+        }
+        let restore = focused.peek().is_some();
+        open.set(false);
+        cancel_menu_focus(focus);
+        // The shared helper restores only menu-owned focus and prevents a
+        // scroll back to this row after layout invalidation or an outside click.
+        if restore {
+            focus_menu_toggle("data-row-menu-key", &focus_key, ".templates-number-key");
+        }
+    });
+    // Fixed coordinates become stale when either the dialog or its ancestors
+    // move. Opening is deliberately not a dependency; the popup's own scroller
+    // also leaves these epochs untouched, so its ten choices stay reachable.
+    use_effect(move || {
+        layout_epoch();
+        dialog_epoch();
+        if *open.peek() {
+            close_menu.call(());
+        }
+    });
+    let order = MenuOrder::pack(
+        [
+            None,
+            Some("1"),
+            Some("2"),
+            Some("3"),
+            Some("4"),
+            Some("5"),
+            Some("6"),
+            Some("7"),
+            Some("8"),
+            Some("9"),
+            Some("0"),
+        ],
+        |key| eligible || key.is_none(),
+    );
+    let wiring = MenuWiring {
+        order,
+        handles,
+        focus,
+        focused,
+        requested,
+        open_intent: intent,
+        close_menu,
+    };
+    let mut begin = move |opening: MenuOpenIntent| {
+        generation += 1;
+        let current = generation();
+        placement.set(PanelPlacement::Unmeasured);
+        handles.write().clear();
+        cancel_menu_focus(focus);
+        focused.set(None);
+        requested.set(None);
+        intent.set(Some(opening));
+        install_row_menu_outside_dismiss();
+        open.set(true);
+        let handle = toggle.peek().clone();
+        spawn(async move {
+            let rect = match handle {
+                Some(handle) => handle.get_client_rect().await.ok(),
+                None => None,
+            };
+            if let Some(result) = measurement_outcome(current, *generation.peek(), rect) {
+                placement.set(result);
+            }
+        });
+    };
+    let key_text = number_chord(bound.as_deref().unwrap_or(" –"));
+    let tooltip = if !eligible && bound.is_some() {
+        format!(
+            "{} is set to start this template right away, without opening New. Only one template can hold each key. This template now chooses neither an agent nor a command; click to remove its key.",
+            number_chord(bound.as_deref().unwrap())
+        )
+    } else if !eligible {
+        "A number shortcut starts a session from this template right away, without opening New. Only one template can hold each key. Can't set one: this template chooses neither an agent nor a command.".into()
+    } else {
+        let state = bound.as_ref().map_or_else(
+            || "Click to give this template a number key.".into(),
+            |key| {
+                format!(
+                    "{} is set; click to change or remove it.",
+                    number_chord(key)
+                )
+            },
+        );
+        format!(
+            "A number shortcut starts a session from this template right away, without opening New. Only one template can hold each key. {state}"
+        )
+    };
+    rsx! {
+        span { class: "templates-number-control", "data-row-menu-key": "{menu_key}",
+            button { r#type: "button", class: "templates-number-key",
+                disabled: disabled || (!eligible && bound.is_none()),
+                aria_label: "number shortcut {display_peer(&name)}", aria_haspopup: "menu", aria_expanded: open(),
+                "data-bound": bound.is_some(),
+                "data-tooltip": "{tooltip}",
+                onmounted: move |element| toggle.set(Some(element.data())),
+                onfocusin: move |_| forget_menu_focus(wiring),
+                onclick: move |_| { if open() { close_menu.call(()); } else { begin(MenuOpenIntent::First); } },
+                onkeydown: move |event| {
+                    if open() { event.stop_propagation(); handle_menu_key(&event, None, wiring, &()); }
+                    else if let Some(intent) = closed_toggle_key_intent(&event.key()) {
+                        event.prevent_default(); event.stop_propagation(); begin(intent);
+                    }
+                },
+                "{key_text}"
+            }
+            button { class: ROW_MENU_OUTSIDE_RELAY, r#type: "button", hidden: true, tabindex: "-1",
+                "data-row-menu": "{menu_key}", onclick: move |_| close_menu.call(()), }
+            if open() {
+                div { class: "host-row-menu-flyout templates-number-flyout", style: session_menu_placement_style(placement()),
+                    div { class: "host-row-menu-panel",
+                        div { class: "session-row-menu-items", role: "menu", aria_label: "number key for {display_peer(&name)}",
+                            for key in order.actions() {
+                                button { r#type: "button", class: "btn session-row-menu-item templates-number-option", role: "menuitem",
+                                    tabindex: if focused().and_then(|position| order.get(position)).or(order.get(0)) == Some(key) { "0" } else { "-1" },
+                                    "data-tooltip": if let Some(key) = key { format!("give this template {}", number_chord(key)) } else { "remove this template's number shortcut".into() },
+                                    onmounted: move |element| remember_menu_item(wiring, key, element.data()),
+                                    onfocusin: move |_| focused.set(order.position(key)), onfocusout: move |_| focused.set(None),
+                                    onkeydown: move |event| { event.stop_propagation(); handle_menu_key(&event, order.position(key), wiring, &()); },
+                                    onclick: move |_| { close_menu.call(()); on_choose.call(key.map(str::to_string)); },
+                                    span { if let Some(key) = key { "{number_chord(key)}" } else { "no shortcut" } }
+                                    if let Some(owner) = key.and_then(|key| bindings.get(key)) {
+                                        span { class: "templates-number-owner peer-value", dir: "ltr",
+                                            if owner == &name { "this template" } else { "{display_peer(owner)} (moves here)" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 const DEFAULT: &str = "default";
 
 /// Tell an already-open launcher to reload templates when the editor closes.
@@ -895,6 +1107,7 @@ fn name_refusal(
 #[component]
 pub(super) fn TemplatesDialog(
     hosts: Vec<HostOption>,
+    layout_epoch: ReadSignal<u64>,
     on_close: EventHandler<()>,
     /// A successful launcher save opens its actual returned fields directly;
     /// the asynchronous list read is not needed to rediscover the new record.
@@ -902,9 +1115,14 @@ pub(super) fn TemplatesDialog(
     /// A shortcut with no usable mark explains how to enable it here.
     #[props(default)]
     quick_launch_hint: bool,
+    /// An unbound number chord explains row binding rather than the bolt.
+    #[props(default)]
+    number_shortcut_hint: bool,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<super::SharedPreferences>();
+    let mut dialog_epoch = use_signal(|| 0_u64);
+    let number_launch_chord = number_chord("number");
     let list_base = base.clone();
     let mut templates = use_resource(move || {
         let base = list_base.clone();
@@ -943,6 +1161,20 @@ pub(super) fn TemplatesDialog(
             crate::api::PreferenceValue::QuickLaunchTemplate(next),
         );
     });
+    let number_base = base.clone();
+    let bind_key: EventHandler<(String, Option<String>)> =
+        EventHandler::new(move |(name, key): (String, Option<String>)| {
+            if busy() {
+                return;
+            }
+            let mut bindings = preferences.0.peek().template_shortcuts.clone();
+            bind_number(&mut bindings, &name, key.as_deref());
+            preferences.0.write().template_shortcuts = bindings.clone();
+            crate::api::store_preference(
+                &number_base,
+                crate::api::PreferenceValue::TemplateShortcuts(bindings),
+            );
+        });
     use_effect(move || {
         let writing = busy();
         let loading = templates.pending();
@@ -1039,19 +1271,25 @@ pub(super) fn TemplatesDialog(
                         Ok(fetched) => fetched,
                         Err(message) => {
                             busy.set(false);
-                            error.set(Some(format!("the new name was saved, but the quick launch mark could not be read; the old template was kept: {message}")));
+                            error.set(Some(format!("the new name was saved, but shortcut bindings could not be read; the old template was kept: {message}")));
                             templates.restart();
                             return;
                         }
                     };
-                    preferences.0.write().quick_launch_template =
-                        crate::api::quick_launch_mark_after_read(fetched);
+                    let fetched = crate::api::template_bindings_after_read(fetched);
+                    preferences.0.write().quick_launch_template = fetched.quick_launch_template;
+                    preferences.0.write().template_shortcuts = fetched.template_shortcuts;
                     // Repoint before deletion: the shared delete path clears
                     // only an old-name mark, and cannot clear the new one.
                     if preferences.0.peek().quick_launch_template.as_ref() == Some(&old) {
                         preferences.0.write().quick_launch_template = Some(value.name.clone());
-                        if !crate::api::write_quick_launch_template(&base, Some(value.name.clone()))
-                            .await
+                        if !crate::api::write_template_binding(
+                            &base,
+                            crate::api::PreferenceValue::QuickLaunchTemplate(Some(
+                                value.name.clone(),
+                            )),
+                        )
+                        .await
                         {
                             busy.set(false);
                             error.set(Some("the new name was saved, but the quick launch mark could not be moved; the old template was kept".into()));
@@ -1059,9 +1297,26 @@ pub(super) fn TemplatesDialog(
                             return;
                         }
                     }
+                    let mut bindings = preferences.0.peek().template_shortcuts.clone();
+                    let before = bindings.clone();
+                    rename_number_binding(&mut bindings, &old, &value.name);
+                    if bindings != before {
+                        preferences.0.write().template_shortcuts = bindings.clone();
+                        if !crate::api::write_template_binding(
+                            &base,
+                            crate::api::PreferenceValue::TemplateShortcuts(bindings),
+                        )
+                        .await
+                        {
+                            busy.set(false);
+                            error.set(Some("the new name was saved, but its number key could not be moved; the old template was kept".into()));
+                            templates.restart();
+                            return;
+                        }
+                    }
                     if !crate::api::prepare_template_delete(&old).await {
                         busy.set(false);
-                        error.set(Some("the new name was saved, but a quick launch write was interrupted; the old template was kept".into()));
+                        error.set(Some("the new name was saved, but a shortcut write was interrupted; the old template was kept".into()));
                         templates.restart();
                         return;
                     }
@@ -1127,7 +1382,7 @@ pub(super) fn TemplatesDialog(
             if !crate::api::prepare_template_delete(&name).await {
                 busy.set(false);
                 error.set(Some(
-                    "a quick launch write was interrupted; try deleting the template again".into(),
+                    "a shortcut write was interrupted; try deleting the template again".into(),
                 ));
                 return;
             }
@@ -1136,6 +1391,11 @@ pub(super) fn TemplatesDialog(
                     if preferences.0.peek().quick_launch_template.as_ref() == Some(&name) {
                         preferences.0.write().quick_launch_template = None;
                     }
+                    preferences
+                        .0
+                        .write()
+                        .template_shortcuts
+                        .retain(|_, owner| owner != &name);
                     undo_generation += 1;
                     let generation = undo_generation();
                     undo.set(Some(Undo {
@@ -1222,7 +1482,12 @@ pub(super) fn TemplatesDialog(
         previous().is_some() && baseline().fields.kind.is_none() && current.fields.kind.is_some();
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
+            // The capped dialog can move while keeping its own size. Its
+            // full-window backdrop also observes width-only viewport changes.
+            onresize: move |_| dialog_epoch += 1,
             div { class: if opened() { "templates-dialog templates-editor-open" } else { "templates-dialog" }, role: "dialog", aria_modal: "true", aria_label: "templates", tabindex: "-1",
+                onscroll: move |_| dialog_epoch += 1,
+                onresize: move |_| dialog_epoch += 1,
                 onmounted: move |_| install_dialog_with_selector(DIALOG_SELECTOR,".templates-new",Some(".templates-close")),
                 onkeydown: move |event: KeyboardEvent| {
                     if event.key()==Key::Escape && !event.is_composing() {
@@ -1236,10 +1501,13 @@ pub(super) fn TemplatesDialog(
                     button { r#type: "button", class: "btn btn-neutral templates-close", disabled, "data-tooltip": "close templates; unsaved changes ask before leaving", onclick: move |_| depart.call(Departure::Close), "close" }
                 }
                 p { class: "host-settings-help templates-help",
-                    "A template is a named set of launcher edits. In New session, type tl:name to apply one; it changes only the fields it sets. Templates stack, the later one winning: tl:my-claude then tl:webbuilder starts Claude in a managed checkout of acme/web on build-box."
+                    "A template is a named set of launcher edits. In New session, type tl:name to apply one; it changes only the fields it sets. Templates stack, the later one winning: tl:my-claude then tl:webbuilder starts Claude in a managed checkout of acme/web on build-box. ⚡ marks the template {QUICK_LAUNCH_CHORD} launches directly; a number key launches its template with {number_launch_chord}."
                 }
                 if quick_launch_hint {
                     p { class: "templates-quick-hint", role: "status", "Mark a template with ⚡ to launch it directly with {QUICK_LAUNCH_CHORD}." }
+                }
+                if number_shortcut_hint {
+                    p { class: "templates-number-hint", role: "status", "Give a template a number key with the key button beside its ⚡; {number_launch_chord} launches it directly." }
                 }
                 div { class: "templates-panes",
                     aside { class: "templates-sidebar", aria_label: "template list", aria_busy: templates.pending(),
@@ -1260,9 +1528,16 @@ pub(super) fn TemplatesDialog(
                                                 disabled: disabled || templates.pending() || (!quick_launch_eligible(&template.fields) && preferences.0.read().quick_launch_template.as_ref() != Some(&template.name)),
                                                 aria_label: "quick launch {display_peer(&template.name)}",
                                                 aria_pressed: preferences.0.read().quick_launch_template.as_ref() == Some(&template.name),
-                                                "data-tooltip": if preferences.0.read().quick_launch_template.as_ref() == Some(&template.name) { format!("Quick launch ({QUICK_LAUNCH_CHORD}). Click to turn off") } else if !quick_launch_eligible(&template.fields) { "Can't be the quick launch: this template chooses neither an agent nor a command".to_string() } else { format!("Make this the quick launch ({QUICK_LAUNCH_CHORD})") },
+                                                "data-tooltip": if preferences.0.read().quick_launch_template.as_ref() == Some(&template.name) { format!("{QUICK_LAUNCH_CHORD} starts a session from this template right away, without opening New. Only one template can hold ⚡. Click to turn off.") } else if !quick_launch_eligible(&template.fields) { format!("{QUICK_LAUNCH_CHORD} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Can't mark this one: it chooses neither an agent nor a command.") } else { format!("{QUICK_LAUNCH_CHORD} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Click to mark this one.") },
                                                 onclick: { let name = template.name.clone(); move |_| mark.call(name.clone()) },
                                                 "⚡"
+                                            }
+                                            NumberShortcutMenu {
+                                                key: "number-{template.name}", name: template.name.clone(),
+                                                eligible: quick_launch_eligible(&template.fields), disabled: disabled || templates.pending(),
+                                                bindings: preferences.0.read().template_shortcuts.clone(),
+                                                layout_epoch, dialog_epoch,
+                                                on_choose: { let name = template.name.clone(); move |key| bind_key.call((name.clone(), key)) },
                                             }
                                             button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&template.name), "data-tooltip": "edit template {display_peer(&template.name)}", onclick: move |_| depart.call(Departure::Open(Box::new(template.clone()))),
                                                 span { class: "templates-row-name peer-value", dir: "ltr", "{display_peer(&template.name)}" }
@@ -1374,6 +1649,22 @@ pub(super) fn TemplatesDialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Moving and renaming keys must preserve the helm's one-key-per-template
+    /// contract, including a stale binding already naming the rename target.
+    #[test]
+    fn number_bindings_move_clear_and_follow_rename() {
+        let mut bindings = BTreeMap::from([("1".into(), "a".into()), ("0".into(), "b".into())]);
+        bind_number(&mut bindings, "a", Some("0"));
+        assert_eq!(bindings, BTreeMap::from([("0".into(), "a".into())]));
+        bind_number(&mut bindings, "b", Some("3"));
+        rename_number_binding(&mut bindings, "a", "b");
+        assert_eq!(bindings, BTreeMap::from([("0".into(), "b".into())]));
+        rename_number_binding(&mut bindings, "absent", "b");
+        assert_eq!(bindings, BTreeMap::from([("0".into(), "b".into())]));
+        bind_number(&mut bindings, "b", None);
+        assert!(bindings.is_empty());
+    }
 
     /// A partial setup cannot become the shortcut's sole launch instruction.
     /// A kind switch alone or a blank command still needs New; an actual agent
