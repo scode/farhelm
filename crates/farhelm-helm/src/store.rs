@@ -319,7 +319,15 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 46;
+const SCHEMA_VERSION: i64 = 47;
+
+/// One helm-wide configuration row, kept apart from replayed preferences:
+/// explicit saves validate these values, and reads must never return the token.
+const NTFY_ALERTS_SCHEMA: &str = r#"CREATE TABLE ntfy_alerts (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    config TEXT NOT NULL
+) STRICT;
+INSERT INTO ntfy_alerts VALUES (1, '{"settings":{"enabled":false,"server_url":"https://ntfy.sh","topic":"","priority":"default","token_set":false},"token":null}');"#;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -1845,6 +1853,8 @@ pub struct HelmStore {
 ///   A previous command or YOLO grant never supplies either permission.
 /// - 46: the nullable terminal web-link click ownership joins the shared
 ///   preferences row; null (and any unknown word) means interception.
+/// - 47: a dedicated ntfy settings singleton, disabled and unconfigured until
+///   explicitly saved; its token is never part of a preferences/API snapshot.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2142,10 +2152,11 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               {CHECKOUT_CONFIG_SCHEMA}
               {LAUNCH_TEMPLATES_SCHEMA}
               {SESSION_NOTIFICATION_MARKS_SCHEMA}
+              {NTFY_ALERTS_SCHEMA}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 46;",
+              PRAGMA user_version = 47;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3174,6 +3185,25 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("PRAGMA user_version = 46;")
             .context("migrating helm.db to schema version 46")?;
         version = 46;
+    }
+    if version == 46 {
+        // Rewound migration fixtures can already contain the current table.
+        // Genuine schema-46 databases acquire disabled, unconfigured alerts.
+        let present: bool = tx
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'ntfy_alerts'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .context("checking for the ntfy alerts table")?
+            > 0;
+        if !present {
+            tx.execute_batch(NTFY_ALERTS_SCHEMA)
+                .context("creating the ntfy alerts table")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 47;")
+            .context("migrating helm.db to schema version 47")?;
+        version = 47;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to

@@ -2906,6 +2906,21 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .checkout-root-error, .checkout-root-success { font-size: 12px; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
 .checkout-root-error { color: var(--danger); }
 .checkout-root-success { color: var(--fg-1); }
+/* ntfy is explicitly saved helm configuration. Its secret field and priority
+   use the same wells as checkout fields, and long topics fit phone-width dialogs. */
+.ntfy-settings .checkout-root-label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ntfy-settings select {
+  /* WebKit's native face needs the dark scheme, as the template editor does. */
+  color-scheme: dark;
+  min-height: 36px; background: var(--well); color: var(--fg-0);
+  border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 0 12px;
+}
+.ntfy-settings button {
+  justify-self: start; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--fg-0); padding: 6px 12px; cursor: pointer;
+}
+.ntfy-settings button:hover { background: var(--control-hover-bg); }
+.ntfy-settings button:disabled { opacity: .5; cursor: default; }
 .host-add-dialog,
 .host-uninstall-dialog {
   width: min(560px, 100%);

@@ -144,12 +144,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   cargo-dist release build jobs honor the pin: they install Rust only when it is missing and otherwise use the runner's
   own. Once pinned, drop the newest-stable clippy step from `.agents/run-all-tests.md`.
 
-- **Send ntfy.sh notifications when an agent is blocked.** Today the only alert that a session needs the user (it starts
-  waiting, or an agent asks for approval) is a sound in whichever client happens to be open, so nothing reaches the user
-  when no Farhelm window is in front of them. Support sending a notification through ntfy.sh (a topic the user
-  configures) when an agent becomes blocked on them. SPEC.md currently lists desktop and operating-system notifications
-  as a non-goal for v1, so this needs a SPEC change alongside it. Plan: `plans/queue/ntfy-waiting-alerts.md`.
-
 - **Check that "not YOLO" is true in practice.** Farhelm decides and shows whether a session runs with approval prompts
   from the flags it passed, but an agent's own configuration can make it run without them anyway. Observed 2026-10-11:
   `grok` 1.0.50, started as Farhelm starts it with no YOLO choice (`grok --no-leader`), showed "always-approve" in its

@@ -140,8 +140,9 @@ mod ensure;
 mod events;
 
 /// `POST /api/feedback` — sends the UI's feedback submission to the project's
-/// feedback endpoint; the helm's one outbound connection carrying user text.
+/// feedback endpoint; the helm's explicit feedback connection carrying user text.
 mod feedback;
+mod ntfy;
 
 /// The changed-only fleet invalidation feed shared by the manager and REST edge.
 mod feed;
@@ -530,6 +531,8 @@ struct AppState {
     /// than a constant so a test helm can point it at a stand-in server it
     /// started itself (see `feedback.rs`).
     feedback: feedback::FeedbackForwarder,
+    /// The manager's fleet sender, also used by explicit test-send requests.
+    ntfy: ntfy::Alerts,
     /// Acting agent requests waiting for the user's answer (see
     /// `approvals`). A field rather than a global so each helm in a test
     /// process has its own table, and so a test can shorten the wait.
@@ -593,6 +596,7 @@ impl AppState {
     ) -> AppState {
         AppState {
             mode,
+            ntfy: manager.ntfy.clone(),
             manager,
             store: store.clone(),
             auth: auth::AuthState::for_mode(store, mode),
@@ -813,7 +817,7 @@ fn api_router(state: Arc<AppState>) -> Router {
         // and holds no attachment.
         .route("/api/events", get(events::events_ws))
         // Feedback to the maintainer (SPEC.md, Feedback): the helm's one
-        // outbound connection carrying user-written text, made only when the
+        // feedback connection carrying user-written text, made only when the
         // user presses Send in the dialog. A UI route on purpose, inside the
         // protected group, with no agent request verb behind it.
         .route(
@@ -822,6 +826,13 @@ fn api_router(state: Arc<AppState>) -> Router {
                 axum::extract::DefaultBodyLimit::max(feedback::MAX_BODY_BYTES),
             ),
         )
+        .route(
+            "/api/ntfy-alerts",
+            axum::routing::get(ntfy::get)
+                .put(ntfy::put)
+                .layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route("/api/ntfy-alerts/test", axum::routing::post(ntfy::test))
         // API paths are reserved before the public SPA fallback is installed.
         // Without this catch-all, an extensionless GET typo receives
         // index.html and looks successful until JSON decoding fails; other

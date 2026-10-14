@@ -13,6 +13,8 @@
 //! even if a storage write fails; the sound asset owns those controls.
 //! The checkout folder and post-clone command are helm configuration, not
 //! preferences: each explicitly saves validated text and shows its outcome.
+//! Ntfy alerts follow that explicit-save contract too, with a secret that is
+//! never part of the shared client snapshot or replayed preference writes.
 
 use dioxus::prelude::*;
 
@@ -51,7 +53,7 @@ fn restore_automatic_checkbox(in_force: bool) {
 /// Writes use the ordinary preference queue and its silent failure behavior.
 /// Controls stay enabled: preferences have no host-operation lock or outcome
 /// surface, and closing the dialog must not cancel a queued preference write.
-/// The checkout fields are exceptions: their explicit saves expose validation
+/// The checkout and ntfy fields are exceptions: their explicit saves expose validation
 /// refusals rather than treating arbitrary text like a switch preference.
 /// Only the grouped body scrolls; both dismissal paths stay outside it and
 /// share the caller's close callback and focus-return lifecycle.
@@ -98,7 +100,7 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                     },
                     summary: "for every host on this helm, and for this device",
                     dismiss_label: "close settings",
-                    dismiss_tooltip: "close: changes are already saved",
+                    dismiss_tooltip: "close settings; unsaved fields are discarded",
                     on_dismiss: move |_| on_close.call(()),
                 }
                 div { class: "host-settings-body",
@@ -200,6 +202,7 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                         crate::checkout_post_clone::CheckoutPostCloneField {}
                     }
                     crate::sounds::SoundSettings {}
+                    crate::ntfy_settings::NtfySettings {}
                     if let Some(updater) = updater {
                         section {
                             class: "host-settings-section",
@@ -258,11 +261,11 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                     }
                 }
                 div { class: "host-settings-actions host-settings-footer",
-                    span { "switches save as you flip them" }
+                    span { "Most choices save immediately. Ntfy alerts and checkout fields use save." }
                     button {
                         r#type: "button",
                         class: "btn btn-neutral app-settings-close",
-                        "data-tooltip": "close: changes are already saved",
+                        "data-tooltip": "close settings; unsaved fields are discarded",
                         onclick: move |_| on_close.call(()),
                         "close"
                     }
