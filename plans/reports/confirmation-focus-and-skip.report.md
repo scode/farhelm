@@ -118,3 +118,85 @@ tab identity key were retained. A second scope reassessment found no unnecessary
 guarded action paths or narrow browser fixtures. Independent cold readers accepted the commit/PR wording. Source
 reviewers ran no runtime checks; the recorded execution evidence above was collected by the executor. No review swarm,
 code delegation, ready transition or merge was performed.
+
+### Landing
+
+Landed alone in its round as #1990 then #1993. After the stack was written, main gained the guarded permission mode
+(#1992). That change reworked the YOLO confirmation, made a plain Replace of an older session ask the YOLO question on
+hosts that ask before YOLO launches, and changed much of SPEC.md. The landing rebased the stack onto it. The one textual
+conflict was in the Restart with browser test: the stack's cleanup rework collided with #1992's new "was agent's own
+setting" label. It was resolved by keeping both.
+
+#### Release-relevant
+
+The helm's database moves from schema 47 to 48 (the new preference). As with every schema bump, a helm that has run this
+build cannot be downgraded in place. The helm–supervisor protocol version is unchanged.
+
+#### Interaction with the guarded permission mode
+
+An independent fresh-context review traced every action the new switch covers: the row menu's Delete and Replace, the
+session header's Restart, Replace and Delete, the interrupted-session notice's Replace, and shell-tab Close. With **skip
+session confirmations** on, none of them can skip a YOLO question, including the one #1992 added. A skipped Replace
+sends the same request as before, without the YOLO override, and the helm still refuses it as a YOLO launch. The YOLO
+question then opens with Cancel focused. The two changes' preference and spec edits compose.
+
+#### Fixes made while landing
+
+- That property had no test. The one existing test that turns the switch on drives the session launcher, which the
+  switch never covered, so it would pass either way. A new browser test now covers it ("a skipped header replace still
+  asks the YOLO question"). With confirmations skipped and a YOLO session on a host that asks first, one Replace click
+  must:
+  - send a single Replace without the YOLO override;
+  - be refused as a YOLO launch;
+  - open the YOLO question with Cancel focused;
+  - after Cancel, have sent nothing more and leave only the source session.
+
+  It passed on both engines.
+- The landing's first browser run had 26 failures out of 378, a cascade from one test. The plan's own walk through the
+  skipped actions hit a background "Route is already handled" race in its status-rewriting fixture. That failed the test
+  without running its `finally`, which left **skip session confirmations** on for the shared test helm. Every later test
+  that expected a confirmation then failed. The fixes:
+  - The fixture now tolerates that race, matching the pattern and reasoning terminal-reconnect's build stamp already
+    uses.
+  - Both spec files that turn the switch on reset it after every test.
+- The walk also stopped a session it had just created and required "exited". On WebKit the stop once landed before the
+  launch was confirmed and settled as "error". Either state is an ended agent, which is all the test needs, so it now
+  accepts both and waits as long as the other stop-then-wait tests do.
+- One SPEC.md sentence said a refused Restart's "next attempt asks"; it now adds "unless session confirmations are
+  skipped", matching the paragraph that introduces the switch.
+
+#### Review notes left as they are
+
+- Two tests (in the header and terminal-restart specs) now carry two doc comments each, one left dangling. A comment in
+  the list's shared code and one in the list view break mid-sentence. One provisioning test resets the switch to null
+  instead of restoring its previous value, which is harmless.
+- The open session view now redraws on every preference write, including the selection memory saved on each session
+  switch. It does no visible harm.
+- The host-update offer's Cancel now stays enabled while busy, matching the setup offer. That is a small change beyond
+  focus that the report does not mention.
+- Unconfirmed: after a skipped Replace from the row menu meets the YOLO question, the row menu may stay open behind it.
+  That would be cosmetic only.
+
+#### Checks
+
+- Run now, on the rebased stack:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog format lint and the sleep checker (298 delays, none
+    missing a reason);
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+    `cargo check -p farhelm-ui --features desktop`;
+  - the helm, UI and protocol packages in full through the recorder (pinned tmux, four slots, no retries): 1685 passed,
+    none skipped, run `40d6437d-f5ac-4f0e-9982-5a5c210a2800`;
+  - the asset JavaScript harness (241 passed) and the website build;
+  - browser specs on Chromium and WebKit (session confirmations, YOLO guard, guarded permissions, Restart with, Replace,
+    header, terminal tabs, terminal restart, delete precondition, settings, trash dialog, provisioning): 352 passed and
+    26 failed, run `e16fa1fe-56ea-4b59-acc5-aec79aa07262`, kept. These were the cascade described above, which started
+    at 07:12 UTC. The new YOLO test passed there on both engines.
+- Run after the fixes:
+  - every spec file that failed there, on both engines: 141 passed and 1 failed, run
+    `2c3b172b-e22a-4ca1-bcde-ef19bbd6d8e3`, kept. The failure was the WebKit stop-state premise described above;
+  - after that fix, the session-confirmations spec three times per engine: 6 passed, run
+    `6bf0052c-51c0-4637-bf20-5b953ae99ac3`.
+- Reused: the executor's focus and setting evidence. The landing changes are test fixtures, one new test and one spec
+  sentence.
+- Not run: the full browser battery, desktop runtime, installer and release gates. The confirmation and permission
+  surfaces this stack and #1992 share are covered by the selections above.
