@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`unit-test-oracle-fixes`](reports/unit-test-oracle-fixes.report.md) landed 2026-10-12 in #1927: 13 triage outcomes: supervisor, helm and test-sweep unit tests that prove what they claim
 - [`supervisor-and-test-followups`](reports/supervisor-and-test-followups.report.md) landed 2026-10-12 in #1933: 4 triage outcomes: exited-tab cleanup off the status loop, the systemd `$`-protection probe, the release-profile hook test gate, and letting the opt-in real-Claude browser tests reach the real `claude`
 - [`helm-supervisor-small-fixes`](reports/helm-supervisor-small-fixes.report.md) landed 2026-10-12 in #1934: 5 triage outcomes: setup/uninstall exclusion on a fresh machine, lock-table pruning, helm shutdown retiring clients, a total template-catalog cap, and Pi reporter guard
 - [`ui-layout-and-escaping-fixes`](reports/ui-layout-and-escaping-fixes.report.md) landed 2026-10-12 in #1932: 12 triage outcomes: header and sidebar refresh, no unattended takeover under a build mismatch, read-state queue, escaped Rename and template names, layout at minimum widths, refresh-failure notice, approvals-only templates, template delete guard, permission-switch reset
