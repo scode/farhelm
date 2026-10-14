@@ -102,3 +102,82 @@ retained the existing preference writer and ordinary New, and rejected an atomic
 concurrency contract than the approved plan. Commit and PR wording passed the required three-round cold-reader process.
 Runtime results were collected by the executor; the correctness reviewer performed static inspection and did not rerun
 them. The independent report cold read passed decision sufficiency and public-repository hygiene.
+
+### Landing
+
+Landed alone in its round as #1994. Since the stack was based, main had gained only queue bookkeeping. The plan already
+built on the guarded permission mode (#1992) and the confirmation focus and skip work (#1990, #1993), both landed
+earlier the same day.
+
+#### Release-relevant
+
+The helm's database moves from schema 48 to 49 (the quick launch mark). As with every schema bump, a helm that has run
+this build cannot be downgraded in place. The helm–supervisor protocol version is unchanged.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. It confirmed that:
+
+- a quick launch goes through New's ordinary submit, so the host still decides whether to ask the YOLO question, and
+  nothing answers it for the user;
+- a managed checkout submits once and never retries a lost path race;
+- one key press launches at most once, with key repeat and composing input filtered;
+- the shortcut never reaches a terminal program as well;
+- a template delete clears only a matching mark, in the same transaction as the delete.
+
+#### Fixes made while landing
+
+- A marked template later edited, through the API say, so that it chooses neither an agent nor a command showed a lit ⚡
+  that was disabled. Clicking the lit bolt is the only way to clear a mark in the UI, so the mark could not be turned
+  off short of deleting the template. A lit bolt now stays clickable, and its tooltip says it turns quick launch off. A
+  new browser test covers it ("a marked template that became ineligible can still be unmarked").
+- The helm's package-wide tests had not been run against this change. Four failed: each builds an older database by
+  dropping newer columns from a fresh one, and none dropped the new mark column. All twelve such setups now drop it.
+  Failed run `d82d6aba-ac04-49b2-b030-2435d56ae3fd` is kept.
+- The managed-checkout browser spec marks a template without resetting the helm-wide mark after each test. A test
+  abandoned before its `finally` would leak the mark into every later spec, as happened with another preference in the
+  previous round. It now resets the mark after every test.
+- The test of the shortcut beside other dialogs pressed the shortcut while a just-closed dialog could still be rendering
+  out. That dialog could then swallow the press and pass for the guard being tested. It now waits for each dialog to go
+  first.
+- The UI crate's Cargo.toml was not in the order `dprint` requires.
+- Two expectations in the managed-checkout browser spec had been left stale by the previous two landings, which had not
+  run that spec. They now expect what the app does:
+  - a Replace with new choices stores Claude's guarded request default (from #1992);
+  - the trash's permanent-deletion confirmation focuses its confirming button, so Enter answers and Escape still cancels
+    (from #1990).
+
+#### Review notes left as they are
+
+- While a quick launch is preparing or its create is in flight, the window shows nothing and ignores clicks and keys.
+  With a managed checkout clone that can last tens of seconds and look like a freeze. A small "starting <template>…"
+  status while hidden would help; that is a design choice, so it is noted here rather than added.
+- In the quick switcher, with no sessions to list (or after a failed session read), the Quick launch row is the only row
+  and starts selected. Then opening the switcher and pressing Enter launches at once. Never selecting that row initially
+  is a possible follow-up.
+- After pressing the shortcut with no mark, then later saving a template from New, the Templates hint still says to mark
+  a template.
+- A revealed quick-launch fallback keeps the header's New toggle inert, unlike ordinary New.
+- One SPEC_impl.md sentence calls the delete transaction "existing" although this change introduced it. The Terminal
+  experience section could also list the quick launch chord among those never sent to a program.
+- `futures-channel` is declared directly rather than through the workspace.
+- Unverified: whether the native Mac app delivers Cmd+P to the page. The report already states this limit.
+
+#### Checks
+
+- Run now, on the final tree:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog format lint and the sleep checker (298 delays, none
+    missing a reason);
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+    `cargo check -p farhelm-ui --features desktop`;
+  - the helm, UI and protocol packages in full through the recorder (pinned tmux, four slots, no retries): 1693 passed,
+    none skipped, run `e02a3bde-159f-4971-9e18-3e616c71ea25`;
+  - the asset JavaScript harness (241 passed) and the website build;
+  - browser specs on Chromium and WebKit (quick launch, quick switcher, templates, managed checkouts, YOLO guard,
+    settings, session confirmations): 180 passed and 4 failed, run `46f0a36d-bc0a-45d4-a38e-771bb145e00f`, kept. The
+    four failures were the two stale managed-checkout expectations on each engine;
+  - after correcting them, the managed-checkout spec in full on both engines: 32 passed, run
+    `b94029fc-398e-4662-9f74-a1dbb035b357`.
+- Stopped on purpose: run `80a39866-c593-4633-818b-6c8d6c6d2fdf`, while the review fixes were edited in.
+- Not run: full workspace and full browser batteries, desktop runtime, installer and release gates. This plan changes
+  none of those paths.
