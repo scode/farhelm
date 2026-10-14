@@ -123,3 +123,70 @@ receives the required separate native cold read for product understanding and pu
 stayed local under no-workhorse; only required reviews and cold reads were delegated. Private galaxy-brain records
 retain review outcomes and available per-turn external counters. Initial accounting was delayed; exact external model
 attribution and native/orchestrator usage are unavailable. No cost comparison is claimed.
+
+### Landing
+
+Landed alone in its round as #2008 then #2013. The stack was written before main gained the named-conversation start
+(#2012), which reworked the New form, the launch composer and Restart with. The rebase's only textual conflict was in
+TODO.md, where both sides had removed their own completed entries; both removals were kept.
+
+#### Release-relevant
+
+The helm's database moves from schema 49 to 50 (the number-key bindings). As with every schema bump, a helm that has run
+this build cannot be downgraded in place. The helm–supervisor protocol is unchanged by this plan.
+
+#### Interaction with the named-conversation start
+
+An independent fresh-context review checked the stack against #2012. The New form's conversation field starts empty on
+every mount and only the user's edit sets it, and templates do not store it. A direct launch (number key or ⚡) mounts a
+fresh hidden form, so it never sends a named start. The YOLO and refusal reveals are unchanged. The two changes' spec
+text agrees.
+
+#### Fixes made while landing
+
+- **Blocker, fixed.** The plan changed the ntfy access-token field's browser hint from `new-password` to `off`, to
+  satisfy the hover-help test's text-field rule. Browsers ignore `off` when filling saved logins into a password field,
+  and the helm's own web token is typically saved for the same origin. A browser could therefore fill that token into
+  the ntfy token field. Saved that way, the helm would send its own web token to the ntfy server, often ntfy.sh, on
+  every alert. The field is back to `new-password`, with a comment saying why. The hover-help test now accepts that one
+  field, the same way it already accepts the feedback contact's `email`.
+- The named-conversation field #2012 added lacked the autocorrect and autocapitalize opt-outs every text field carries.
+  Once this plan's settings fixes let the hover-help test get past the settings dialog, it reached that field and
+  failed. The opt-outs are added.
+- The helm database's schema history had no entry for version 50; it now does.
+
+#### Something the maintainer should know
+
+On the web and on any non-Mac client, Ctrl+Shift+digit is taken from the terminal on every press, bound or not, and an
+unbound press opens Templates. On US layouts Ctrl+Shift+2 is Ctrl+@: the NUL control character, which emacs users know
+as the alternative set-mark key. SPEC.md says the chord never reaches the terminal, so this is as specified. Unlike the
+Ctrl+_ trade for font size, though, no explicit acceptance of it is recorded.
+
+#### Other review notes left as they are
+
+- An unbound key button reads "Ctrl+Shift+ –" or "⌘ –".
+- The storage PR's changelog fragment says the controls "follow in the next change". Release curation rewrites fragments
+  anyway.
+- Whether the Mac desktop framework's default menu claims any Cmd+digit was checked only by searching the code, not on a
+  Mac. The report likewise notes that Cmd+digit was not driven on a physical Mac.
+- The Templates docs screenshots predate the new row controls and need the next screenshot refresh.
+
+#### Checks
+
+- Run now:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog format lint and the sleep checker;
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+    `cargo check -p farhelm-ui --features desktop`;
+  - the helm, UI and protocol packages in full through the recorder (pinned tmux, four slots, no retries): 1714 passed,
+    none skipped, run `02152069-afce-4a46-af55-a9b7ca967f54`. That includes every rewound-schema fixture, which the
+    review found already drop the new storage;
+  - the asset JavaScript harness (244 passed) and the website build;
+  - on Chromium and WebKit, the quick launch, templates, hover coverage, quick switcher, named conversations, settings,
+    ntfy settings, YOLO guard and launcher Enter specs: 202 passed and 2 failed, run
+    `3b1983cd-7523-4448-9e99-797598dcf816`, kept. Both failures were the hover-coverage test reaching the
+    named-conversation field described above.
+- Run after that fix: UI Clippy, the web build, and the hover coverage and named conversations specs on both engines: 8
+  passed, run `ca1642f9-cee2-4383-83e6-563c17e7e008`.
+- Stopped on purpose: run `2870cc37-0978-4a47-b64d-dfcde032b77f`, while the token fix was edited in.
+- Not run: the full workspace battery, the full browser battery, desktop runtime, installer and release gates. Nothing
+  in those paths changed.
