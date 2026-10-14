@@ -500,3 +500,35 @@ test("v0.28.0 app settings", async ({ page, request }) => {
   );
   await shot(page, name, [dialog], { maxWidth: 930 });
 });
+
+// v0.28.1. Clicking a web link in a terminal no longer reaches the program in
+// it as well (#1962); the one thing a reader can see of that fix is the new
+// choice in Settings that brings the old behaviour back, so that is the shot.
+
+/** v0.28.1: Settings chooses what clicking a web link in a terminal does. */
+test("v0.28.1 terminal links", async ({ page, request }) => {
+  const name = `${PAGE}/v0-28-1-terminal-links`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  const links = dialog.getByRole("region", { name: "terminal links" });
+  const choices = links.getByRole("radio");
+  await expect(choices).toHaveCount(3);
+  // The staged fleet has never saved this choice, so the shot shows the
+  // default every reader starts from.
+  await expect(choices.first()).toBeChecked();
+  // Both in the left margin, level with the choice each explains: to the
+  // right, the crop would pass the docs' text column and cut them off.
+  await director.callout(
+    links.locator(".app-settings-choice").first(),
+    "The default: a click opens the link once, and the program in the terminal never sees it.",
+    { side: "left" },
+  );
+  await director.callout(
+    links.locator(".app-settings-choice").nth(1),
+    "For a program that needs link clicks, pass them on too, or only to the program.",
+    { side: "left", dy: 40 },
+  );
+  await shot(page, name, [links], { maxWidth: 930 });
+});
