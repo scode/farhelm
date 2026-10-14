@@ -25,7 +25,7 @@ import {
 } from "./helpers/fleet";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { routeGate } from "./helpers/route-gate";
-import { expectKeyboardTooltip, expectQuietInitialCancel, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
+import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
 
 /** Live helm identity copied onto every route response this suite fabricates. */
 let HELM_BUILD = "";
@@ -404,7 +404,7 @@ test("Settings waits while an uninstall confirmation is being planned", async ({
     gate.release();
     const confirmation = page.locator(".host-uninstall-dialog");
     await expect(confirmation).toBeVisible();
-    await expect(confirmation.locator(".uninstall-cancel")).toBeFocused();
+    await expect(confirmation.locator(".uninstall-confirm")).toBeFocused();
     await confirmation.locator(".uninstall-cancel").click();
     await expect(confirmation).toHaveCount(0);
     await openHostMenu(row);
@@ -576,7 +576,7 @@ async function expectPlanCopyAndIndent(plan: Locator, confirmation: string): Pro
 
 for (const phone of [false, true]) {
   /**
-   * Keyboard submission must keep the same dialog width and land on Cancel,
+   * Keyboard submission must keep the same dialog width and land on Set up,
    * while the plan remains readable and copyable at both supported layouts.
    * Initial focus keeps its ring without a covering tooltip, but subsequent
    * hover and keyboard navigation must still explain the answers.
@@ -605,8 +605,8 @@ for (const phone of [false, true]) {
     expect(planned.result, "real discovery must produce the plan this test measures").toBe("provisionable");
     if (planned.result !== "provisionable") throw new Error("fixture did not offer setup");
     await expect(dialog.getByRole("heading")).toHaveText(`set up host · ${remote}`);
-    await expect(dialog.getByRole("button", { name: "cancel", exact: true })).toBeFocused();
-    await expectQuietInitialCancel(page, dialog.getByRole("button", { name: "cancel", exact: true }));
+    await expect(dialog.getByRole("button", { name: "set up", exact: true })).toBeFocused();
+    await expectQuietInitialFocus(page, dialog.getByRole("button", { name: "set up", exact: true }));
     expect((await dialog.boundingBox())!.width).toBe(before.width);
     await expectHostAnswers(dialog, ["cancel", "set up, don't ask again", "set up"], phone);
     await expectPlanCopyAndIndent(dialog.locator(".provisioning-plan"), planned.confirmation);
@@ -788,7 +788,7 @@ test("cancel and a setup answer in one burst add nothing and change no preferenc
  * every later host on an answer the user had just cancelled. Specifies: after
  * Cancel then the permanent answer in one burst, no setup request is sent and
  * the preference is unchanged; a genuine answer afterwards still runs setup.
- * The separately mounted row question also keeps initial Cancel focus quiet
+ * The separately mounted row question also keeps initial Set up focus quiet
  * without losing later keyboard or pointer help.
  */
 test("cancel and a permanent answer on a host row's setup question change no preference", async ({
@@ -848,7 +848,7 @@ test("cancel and a permanent answer on a host row's setup question change no pre
   await expect(row.locator(".host-row-menu-panel")).toBeVisible();
   await row.locator(".provisioning-rerun").press("Enter");
   await expect(question).toBeVisible();
-  await expectQuietInitialCancel(page, question.getByRole("button", { name: "cancel", exact: true }));
+  await expectQuietInitialFocus(page, question.getByRole("button", { name: "set up", exact: true }));
   await expect(question.getByRole("heading")).toHaveText(`set up host · ${remote}`);
   await expectHostAnswers(question, ["cancel", "set up, don't ask again", "set up"], false);
   await testInfo.attach("host-row-setup", { body: await question.screenshot(), contentType: "image/png" });
@@ -863,7 +863,8 @@ test("cancel and a permanent answer on a host row's setup question change no pre
   await openHostMenu(row);
   await row.locator(".provisioning-rerun").click();
   await expect(question).toBeVisible();
-  await question.getByRole("button", { name: "set up", exact: true }).click();
+  await expect(question.getByRole("button", { name: "set up", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect.poll(() => provisions.length).toBe(1);
 });
 

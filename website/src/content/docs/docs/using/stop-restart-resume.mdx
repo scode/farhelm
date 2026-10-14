@@ -34,7 +34,7 @@ it first.
 
 **replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. It makes a
 new session in this one's place, so the old conversation, shell tabs, and terminal history all go, and it asks you to
-confirm first. **replace with** opens the [session launcher](/docs/using/start-a-session/) filled in with this session's
+confirm first; press Enter to go ahead. **replace with** opens the [session launcher](/docs/using/start-a-session/) filled in with this session's
 choices; change anything but the host, and the new session takes this one's place. **clone** opens the launcher the same
 way but leaves this session alone, so you end up with two.
 
@@ -54,6 +54,7 @@ launches.
 Both are in a session's menu in the [session list](/docs/using/session-list/), and delete is also the red button at the
 right of the session header. Delete asks you to confirm, with one exception: from the session list, a session that has
 already ended and has no shell tabs open is deleted at once.
+When a confirmation opens, Enter confirms it; **cancel** backs out. The YOLO question still starts on **cancel**.
 
 For a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the checkout stays while another
 session uses it; deleting its last session moves the directory, including uncommitted work, into

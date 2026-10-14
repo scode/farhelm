@@ -960,6 +960,11 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   notice, which the delete itself causes, is held back meanwhile; if the delete fails, the row and header come back with
   the refusal shown, and a held notice appears.
 
+After a user explicitly opens a confirmation, keyboard focus starts on its enabled confirming button, so a new Enter
+goes ahead; if that button is disabled, focus starts on Cancel instead. This covers session Delete, Replace, Restart and
+tab close, host setup, removal and uninstall, and permanent trash deletion. Repeated or composing Enter cannot answer
+the new question. The YOLO confirmation and Restart with dialog still start on Cancel.
+
 Confirmed 2026-10-01: a destructive confirmation authorizes only what the prompt the user answered said would happen.
 This covers every destructive confirmation (Delete, Restart, Restart with, Replace and Replace with), including a prompt
 that rewords itself while it is open because the session changed underneath it: the answer applies to the wording on

@@ -325,7 +325,8 @@ test("closing a tab confirms in-page, then kills its shell and drops it from the
     expect(pidAlive(shell)).toBe(true);
 
     await page.locator(".tab-close").click();
-    await page.locator(".confirm-close-tab").click();
+    await expect(page.locator(".confirm-close-tab")).toBeFocused();
+    await page.keyboard.press("Enter");
 
     // Gone from the strip, and the view falls back to the agent terminal
     // rather than leaving a selection pointing at nothing.
@@ -1239,6 +1240,39 @@ test("a confirmed close sends one DELETE per tab, and a sibling can close alongs
       if (bodyFailed) console.error("sibling-close session cleanup failed", error);
       else throw error;
     }
+  }
+});
+
+/**
+ * Retargeting an unanswered close question is a fresh keyboard interaction.
+ * The second tab's close control must hand focus to its own answer even when
+ * the band was already mounted; Enter must close only that tab, leaving the
+ * first question's shell and session membership intact.
+ */
+test("retargeting an open tab-close question focuses the new answer", async ({ page, request }) => {
+  const session = await openSessionWithTabs(page, request, `tab-retarget-${Date.now()}`, 2);
+  const [a, b] = session.tabs;
+  const deletes: string[] = [];
+  await page.route(`**/api/sessions/${session.id}/tabs/*`, async (route) => {
+    if (route.request().method() === "DELETE") deletes.push(new URL(route.request().url()).pathname.split("/").pop()!);
+    await route.continue();
+  });
+  try {
+    await page.locator(`.tab-slot[data-tab-id="${a}"] .tab-close`).click();
+    await expect(page.locator(".tab-confirm .confirm-title")).toHaveText("Terminal 1");
+    await expect(page.locator(".confirm-close-tab")).toBeFocused();
+    expect(deletes).toEqual([]);
+    await page.locator(`.tab-slot[data-tab-id="${b}"] .tab-close`).click();
+    await expect(page.locator(".tab-confirm .confirm-title")).toHaveText("Terminal 2");
+    await expect(page.locator(".confirm-close-tab")).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(`.tab-slot[data-tab-id="${b}"]`)).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.locator(`.tab-slot[data-tab-id="${a}"]`)).toHaveCount(1);
+    expect(deletes).toEqual([b]);
+    await selectTerminal(page, a);
+    await runInShell(page, `terminal-${a}`, "sh -c 'echo RETARGET-SURVIVOR:$$'", /RETARGET-SURVIVOR:\d+/);
+  } finally {
+    await cleanupSession(request, session.id);
   }
 });
 

@@ -1895,7 +1895,7 @@ test("a confirm prompt ignores the menu's keys and keeps its state", async ({ pa
       "there are no items in this state for an arrow to reach",
     ).toHaveCount(0);
 
-    // Cancel is the only way out, and it is the one the prompt autofocuses.
+    // Cancel still backs out; the initial confirming focus does not change dismissal.
     await target.locator(".confirm-cancel").click();
     await expect(target.locator(".session-row-stop")).toBeVisible();
   } finally {

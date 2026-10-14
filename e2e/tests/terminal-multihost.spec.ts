@@ -1,5 +1,5 @@
 import { chooseLauncherHost } from "./helpers/host-picker";
-import { expectKeyboardTooltip, expectQuietInitialCancel, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
+import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
 // =====================================================================
 // Multi-host: the hosts panel, the stale list, and host management
 // (PLAN_M6.md item 6).
@@ -3700,7 +3700,7 @@ test.describe("multi-host", () => {
    * Cancel and the header dismiss both forget nothing and return to the same
    * row. Desktop/phone measurements guard the new answer layout without
    * replacing the real registry identity check with a visual look-alike.
-   * Keyboard opening keeps Cancel's ring and suppresses only its initial
+   * Keyboard opening keeps Remove's ring and suppresses only its initial
    * tooltip, so the safe answer remains usable without covering its neighbor.
    */
   test("remove-cancel: backing out of the prompt forgets nothing", async ({
@@ -3728,14 +3728,13 @@ test.describe("multi-host", () => {
     await row.locator(".host-remove").press("Enter");
     const dialog = page.locator(".host-remove-dialog");
     await expect(dialog).toBeVisible();
-    // Focus lands on the way OUT of the destructive action, so a stray
-    // Enter after the remove click backs out rather than in.
-    await expect(dialog.locator(".host-settings-close")).toBeFocused();
+    // Remove takes initial focus; Cancel and the header still dismiss without a write.
+    await expect(dialog.locator(".host-remove-confirm")).toBeFocused();
     await expect(dialog.getByRole("heading")).toHaveText(`remove host · ${info.remote_ssh}`);
     for (const phone of [false, true]) {
       await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
-      await expect(dialog.locator(".host-settings-close")).toBeFocused();
-      await expectQuietInitialCancel(page, dialog.locator(".host-settings-close"));
+      await expect(dialog.locator(".host-remove-confirm")).toBeFocused();
+      await expectQuietInitialFocus(page, dialog.locator(".host-remove-confirm"));
       await expectManagementAnswers(dialog, ["cancel", "remove, don't ask again", "remove"], phone);
       await testInfo.attach(`host-remove-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
     }
@@ -3844,7 +3843,7 @@ test.describe("multi-host", () => {
    * the real thing; the injected provisioning backend absorbs the host
    * actions themselves, which is what keeps that supervisor running for the
    * rest of the suite once the row is restored.
-   * Initial Cancel focus stays visibly outlined and quiet; later hover and
+   * Initial Uninstall focus stays visibly outlined and quiet; later hover and
    * keyboard help remain available while the user reads the real plan.
    */
   test("uninstall-remote-host: the plan names the kept data, confirming removes the host", async ({
@@ -3888,13 +3887,13 @@ test.describe("multi-host", () => {
       });
       await expect(dialog).toContainText(lib);
       await expect(dialog).toContainText(`Kept: the host's Farhelm data in ${kept}`);
-      // Cancel is where focus lands, so a stray Enter backs out.
-      await expect(dialog.locator(".uninstall-cancel")).toBeFocused();
+      // A new Enter would accept the requested uninstall plan.
+      await expect(dialog.locator(".uninstall-confirm")).toBeFocused();
       await expect(dialog.getByRole("heading")).toHaveText(`uninstall Farhelm · ${info.remote_ssh}`);
       for (const phone of [false, true]) {
         await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
-        await expect(dialog.locator(".uninstall-cancel")).toBeFocused();
-        await expectQuietInitialCancel(page, dialog.locator(".uninstall-cancel"));
+        await expect(dialog.locator(".uninstall-confirm")).toBeFocused();
+        await expectQuietInitialFocus(page, dialog.locator(".uninstall-confirm"));
         await expectManagementAnswers(dialog, ["cancel", "uninstall"], phone);
         await expectUninstallText(dialog.locator(".provisioning-plan"), confirmation);
         await testInfo.attach(`host-uninstall-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
@@ -3905,7 +3904,7 @@ test.describe("multi-host", () => {
       await expect(row.locator(".host-row-menu")).toBeFocused();
       await openHostMenu(row);
       await row.locator(".provisioning-uninstall").click();
-      await expect(dialog.locator(".uninstall-cancel")).toBeFocused();
+      await expect(dialog.locator(".uninstall-confirm")).toBeFocused();
       await dialog.locator(".uninstall-cancel").click();
       await expect(dialog).toHaveCount(0);
       await expect(row.locator(".host-row-menu")).toBeFocused();
@@ -3922,7 +3921,7 @@ test.describe("multi-host", () => {
       await page.setViewportSize({ width: 1100, height: 850 });
       await openHostMenu(row);
       await row.locator(".provisioning-uninstall").click();
-      await expect(dialog.locator(".uninstall-cancel")).toBeFocused();
+      await expect(dialog.locator(".uninstall-confirm")).toBeFocused();
 
       // Hold the confirmation's reply until the row has left the PAGE, and
       // require the notice while it is still held. The row, and the panel

@@ -19,17 +19,17 @@ export async function expectKeyboardTooltip(page: Page, control: Locator): Promi
 }
 
 /**
- * Automatic Cancel focus must keep its keyboard ring without hover help.
+ * Automatic confirming focus must keep its keyboard ring without hover help.
  * Call after a keyboard-tooltip positive control and with the pointer parked;
  * observe beyond the show delay so a pending tooltip cannot count as quiet.
  */
-export async function expectQuietInitialCancel(page: Page, cancel: Locator): Promise<void> {
-  await expect(cancel).toBeFocused();
-  const focus = await cancel.evaluate((element) => {
+export async function expectQuietInitialFocus(page: Page, control: Locator): Promise<void> {
+  await expect(control).toBeFocused();
+  const focus = await control.evaluate((element) => {
     const style = getComputedStyle(element);
     return { visible: element.matches(":focus-visible"), ring: style.outlineStyle !== "none" && parseFloat(style.outlineWidth) > 0 };
   });
-  expect(focus, "Cancel retains the browser's keyboard focus and painted ring").toEqual({ visible: true, ring: true });
+  expect(focus, "The initial answer retains the browser's keyboard focus and painted ring").toEqual({ visible: true, ring: true });
   expect(await page.evaluate(() => document.elementFromPoint(0, 0)?.closest("[data-tooltip]") ?? null),
     "the parked pointer cannot explain a tooltip").toBeNull();
   await page.waitForTimeout(600); // sleep-ok: initial-focus absence window exceeds the tooltip's 300 ms show delay

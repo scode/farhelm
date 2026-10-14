@@ -323,13 +323,17 @@ test("replacing a live session creates a fresh row in its place, selected, with 
     );
     await expect(sourceRow.locator(".confirm-title")).toContainText(title);
 
+    // The explicit Replace request hands focus to its answer; a new Enter
+    // must run the same guarded path as clicking that confirming button.
+    await expect(sourceRow.locator(".confirm-replace")).toBeFocused();
+
     const [response] = await Promise.all([
       page.waitForResponse(
         (r) =>
           r.request().method() === "POST"
           && r.url().endsWith(`/api/sessions/${source.id}/replace`),
       ),
-      sourceRow.locator(".confirm-replace").click(),
+      page.keyboard.press("Enter"),
     ]);
     const replaced: SessionRow = await response.json();
     replacementId = replaced.id;

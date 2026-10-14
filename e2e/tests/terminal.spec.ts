@@ -3408,16 +3408,13 @@ test("dispatching cancel and confirm in the same tick never deletes the session"
   }
 });
 
-// `autofocus` on the cancel button (`SessionRow`'s "Focus-on-open" doc in
-// lib.rs) is the safety default: the instant the confirm prompt mounts,
-// keyboard focus must already be ON cancel, not confirm, so a stray
-// Enter/Space reaching the page right after the delete click (residual
-// focus, a fast typist) backs OUT of the destructive action instead of
-// into it. Checked via `document.activeElement` (Playwright's
-// `toBeFocused`), then exercised through a genuine Enter keypress via
-// Playwright's own keyboard API — the actual mechanism a stray keystroke
-// would use, not just a synthetic click on cancel.
-test("the confirm prompt focuses cancel on open; Enter closes it without deleting", async ({
+/**
+ * A new Enter accepts the delete the user requested, but holding the Enter
+ * that opened the question must not answer it. Native keyboard input proves
+ * both focus handoff and browser click suppression; a synthetic confirm
+ * click would miss the repeat boundary that moving focus introduces.
+ */
+test("the confirm prompt focuses delete; held Enter waits for a new press", async ({
   page,
   request,
 }) => {
@@ -3442,16 +3439,21 @@ test("the confirm prompt focuses cancel on open; Enter closes it without deletin
       timeout: 10_000,
     });
     await openRowMenu(row);
-    await row.locator(".session-row-delete").click();
+    await row.locator(".session-row-delete").focus();
+    await expect(row.locator(".session-row-delete")).toBeFocused();
+    await page.keyboard.down("Enter");
     await expect(row.locator(".confirm-consequence")).toBeVisible();
 
-    await expect(row.locator(".confirm-cancel")).toBeFocused();
-
+    await expect(row.locator(".confirm-delete")).toBeFocused();
+    await page.keyboard.down("Enter");
+    await page.keyboard.up("Enter");
+    await expect(row.locator(".confirm-consequence")).toBeVisible();
+    expect(deleteRequests, "auto-repeat cannot answer the newly opened question").toBe(0);
     await page.keyboard.press("Enter");
-    await expect(row.locator(".confirm-consequence")).toHaveCount(0);
-    await expect(row.locator(".session-row-delete")).toBeEnabled();
-    expect(deleteRequests).toBe(0);
+    await expect(row).toHaveCount(0);
+    expect(deleteRequests).toBe(1);
   } finally {
+    await page.keyboard.up("Enter");
     await request.post(`/api/sessions/${id}/stop`).catch(() => {});
     await request.delete(`/api/sessions/${id}`).catch(() => {});
   }

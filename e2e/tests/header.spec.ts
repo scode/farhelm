@@ -430,6 +430,9 @@ test("header copy shows escaped peer text, copies raw bytes, and warns", async (
  * the supervisor-side precondition, the same guard the row's unconfirmed
  * delete sends.
  */
+/** A reopened header question must hand Enter to its confirming answer.
+ * Deletion still goes through the list's guarded request path and retires the
+ * selected view; changing focus cannot weaken the live-versus-ended consent. */
 test("the header delete confirms in place and deletes through the list", async ({ page, request }) => {
   const liveTitle = `header-delete-live-${Date.now()}`;
   const live = await createSession(request, {
@@ -478,7 +481,8 @@ test("the header delete confirms in place and deletes through the list", async (
     expect(deleteUrls).toHaveLength(0);
 
     await deleteButton.click();
-    await confirmation.getByRole("button", { name: "delete", exact: true }).click();
+    await expect(confirmation.getByRole("button", { name: "delete", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(row(page, live.id)).toHaveCount(0, { timeout: 20_000 });
     // The main pane lets go of the deleted session. Auto-select may open
     // another one straight away, so the check is on whose header shows.

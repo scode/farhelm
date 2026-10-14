@@ -763,6 +763,9 @@ pub(crate) fn PlanConfirmation(
                     class: "btn btn-primary provisioning-confirm",
                     "data-tooltip": "{confirm_label}: carry out the plan shown above",
                     disabled: busy,
+                    autofocus: !busy,
+                    onkeydown: crate::guard_confirmation_enter,
+                    onmounted: move |_| crate::focus_confirmation(".provisioning-confirmation .provisioning-confirm", ".provisioning-confirmation .provisioning-cancel"),
                     onclick: move |_| on_confirm.call(()),
                     "{confirm_label}"
                 }
@@ -770,7 +773,9 @@ pub(crate) fn PlanConfirmation(
                     r#type: "button",
                     class: "btn btn-neutral provisioning-cancel",
                     "data-tooltip": "cancel: change nothing on this host",
-                    disabled: busy,
+                    // Retiring an unsubmitted offer cannot affect the page
+                    // token held by a different operation. Keep this fallback live.
+                    autofocus: busy,
                     onclick: move |_| on_cancel.call(()),
                     "cancel"
                 }
@@ -822,7 +827,7 @@ pub(crate) fn SetupPlanConfirmation(
                 r#type: "button",
                 class: "btn btn-neutral add-host-cancel",
                 "data-tooltip": "cancel: change nothing on this host",
-                autofocus: true,
+                autofocus: busy,
                 onclick: move |_| on_cancel.call(()),
                 "cancel"
             }
@@ -832,6 +837,7 @@ pub(crate) fn SetupPlanConfirmation(
                 "data-tooltip": "set up this host, and set up new hosts from now on without asking",
                 aria_describedby: "host-setup-permanent-hint",
                 disabled: busy,
+                onkeydown: crate::guard_confirmation_enter,
                 onclick: move |_| on_confirm.call(true),
                 "set up, don't ask again"
             }
@@ -840,6 +846,8 @@ pub(crate) fn SetupPlanConfirmation(
                 class: "btn btn-primary provisioning-confirm",
                 "data-tooltip": "set up: set up this host as the plan above describes",
                 disabled: busy,
+                autofocus: !busy,
+                onkeydown: crate::guard_confirmation_enter,
                 onclick: move |_| on_confirm.call(false),
                 "set up"
             }
@@ -853,8 +861,8 @@ pub(crate) fn SetupPlanConfirmation(
 /// The text is the helm's, rendered from the plan the run will consume (see
 /// [`PlanConfirmation`] for why the UI never re-renders it), and it already
 /// names what goes and what stays. The confirm button is in the danger tier
-/// because the removal cannot be undone from Farhelm; cancel takes focus
-/// first so a stray Enter dismisses rather than removes. These frame siblings
+/// because the removal cannot be undone from Farhelm. Confirm takes initial
+/// focus when enabled so a new Enter accepts the requested plan. These frame siblings
 /// pin the actual host identity and answers around the scrollable plan. Header
 /// dismissal uses the caller's Cancel path, including its row-focus return.
 #[component]
@@ -883,7 +891,7 @@ pub(crate) fn UninstallConfirmation(
                     r#type: "button",
                     class: "btn btn-neutral provisioning-cancel uninstall-cancel",
                     "data-tooltip": "cancel: leave Farhelm installed on this host",
-                    autofocus: true,
+                    autofocus: busy,
                     onclick: move |_| on_cancel.call(()),
                     "cancel"
                 }
@@ -892,6 +900,8 @@ pub(crate) fn UninstallConfirmation(
                     class: "btn btn-danger provisioning-confirm uninstall-confirm",
                     "data-tooltip": "uninstall: remove Farhelm from this host as described above",
                     disabled: busy,
+                    autofocus: !busy,
+                    onkeydown: crate::guard_confirmation_enter,
                     onclick: move |_| on_confirm.call(()),
                     "uninstall"
                 }
@@ -2778,7 +2788,7 @@ pub(crate) fn ProvisioningPanel(
                             tabindex: "-1",
                             onmounted: move |_| {
                                 settings_dialog::install_add_dialog();
-                                settings_dialog::focus_add_cancel();
+                                settings_dialog::focus_add_confirm();
                             },
                             // Cancel and Escape stay live while another
                             // operation holds the page token: dismissing the
@@ -2860,13 +2870,13 @@ pub(crate) fn ProvisioningPanel(
                         confirm_label: "confirm update",
                         on_confirm: move |_| confirm.call(false),
                         on_cancel: move |_| {
-                            if !ops.busy_now() {
-                                pending.set(None);
-                                action_error.set(None);
-                                action_warning.set(None);
-                                if local_setup {
-                                    local_auto_retry.set(true);
-                                }
+                            // The offer owns no submitted request or page token;
+                            // cancellation must stay available while a peer is busy.
+                            pending.set(None);
+                            action_error.set(None);
+                            action_warning.set(None);
+                            if local_setup {
+                                local_auto_retry.set(true);
                             }
                         },
                     }

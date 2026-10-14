@@ -212,13 +212,13 @@ for (const width of [1000, 360]) {
         await all.click();
         const confirmation = dialog.locator(".checkout-trash-confirm");
         await expect(confirmation).toContainText("Delete 2 archived checkouts");
-        await expect(confirmation.locator(".trash-confirm-cancel")).toBeFocused();
+        await expect(confirmation.locator(".trash-confirm-submit")).toBeFocused();
         // The live region must already exist, empty, before the delete starts:
         // only a text change in a mounted region is announced reliably.
         const status = dialog.locator(".checkout-trash-progress");
         await expect(status).toHaveAttribute("role", "status");
         await expect(status).toHaveText("");
-        await confirmation.locator(".trash-confirm-submit").click();
+        await page.keyboard.press("Enter");
         await expect.poll(() => ids.map((id) => attempts.get(id) ?? 0), { message: "both host requests reached the held boundary" }).toEqual([1, 1]);
         await expect(status).toHaveText("deleting on 2 of 2 hosts…");
         for (const section of sections) await expect(section.locator(".trash-host-progress")).toHaveText("deleting…");
@@ -263,7 +263,8 @@ for (const width of [1000, 360]) {
           await expect(all).toBeEnabled();
           await all.click();
           await expect(confirmation).toContainText("Delete 1 archived checkout");
-          await confirmation.locator(".trash-confirm-submit").click();
+          await expect(confirmation.locator(".trash-confirm-submit")).toBeFocused();
+          await page.keyboard.press("Enter");
           await expect.poll(() => attempts.get(ids[0]), { message: "one-host retry reached its held boundary" }).toBe(2);
           await expect(status).toHaveText("deleting…");
           await expect(sections[0].locator(".trash-host-progress")).toHaveText("deleting…");
@@ -361,7 +362,7 @@ for (const width of [1000, 360]) {
     await expect(confirm).toContainText("Delete 48 archived checkouts");
     const cancel = confirm.locator(".trash-confirm-cancel");
     const submit = confirm.locator(".trash-confirm-submit");
-    await expect(cancel).toBeFocused();
+    await expect(submit).toBeFocused();
     for (const control of [cancel, submit]) await expectExposed(control, body);
     for (const control of [all, close]) await expectExposed(control);
     expect(await dialog.evaluate((node) => node.scrollTop)).toBe(0);
@@ -370,7 +371,7 @@ for (const width of [1000, 360]) {
     await expect(confirm).toHaveCount(0);
     await expect(all).toBeFocused();
     await all.click();
-    await expect(cancel).toBeFocused();
+    await expect(submit).toBeFocused();
     await cancel.click();
     await expect(confirm).toHaveCount(0);
     await expect(all).toBeFocused();

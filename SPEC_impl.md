@@ -412,14 +412,15 @@ refuses. The directory and invocation buttons carry their full values in their t
 title, and reveal a clipboard affordance on hover or keyboard focus. The six action buttons remain fully visible and in
 DOM order from a 650px main pane. The app's 320px main-pane floor is unchanged; between those widths the row may clip
 its trailing actions rather than wrapping or hiding them. The restart confirmation became a popover anchored under the
-button that opened it, still confirm-in-place with focus on cancel; the consequence sentence they lead with is the one
-line standing between a click and a killed process tree, and a header that kept it in flow would have to either wrap or
-truncate it. Header Replace has a separate anchored confirmation state so it cannot accidentally open the interrupted
-card's confirmation. Everything conditional — a refused restart's prose, the host-unreachable notice and its
-last-known-status band, the "helm stopped listing this session" line — is still a full-width band, because a band that
-only appears when it has something to say costs the steady state nothing. A classified status renders in at most one
-place: the header normally, the stale notice's own metadata band for a stale session (where SPEC.md's
-title/directory/last-known-status triple is assembled), and nowhere at all for a session nothing has classified yet.
+button that opened it, still confirm-in-place with focus on the enabled confirming answer (Cancel while disabled); the
+consequence sentence they lead with is the one line standing between a click and a killed process tree, and a header
+that kept it in flow would have to either wrap or truncate it. Header Replace has a separate anchored confirmation state
+so it cannot accidentally open the interrupted card's confirmation. Everything conditional — a refused restart's prose,
+the host-unreachable notice and its last-known-status band, the "helm stopped listing this session" line — is still a
+full-width band, because a band that only appears when it has something to say costs the steady state nothing. A
+classified status renders in at most one place: the header normally, the stale notice's own metadata band for a stale
+session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for a session
+nothing has classified yet.
 
 Restart with uses a separate dialog because it relaunches the current session rather than creating one. For an agent
 launch it renders the same `LaunchControls` component as the session launcher, with the harness fixed to the session's
@@ -517,9 +518,9 @@ and lets later setup-needed adds submit after probing. The dialog never holds th
 cancel and Escape stay live while discovery or another operation's request is out, and confirming setup closes it at
 once. The submission then continues from the hosts panel, which keeps the page token until the helm answers; the new row
 tracks the run, and a refusal or transport failure is reported on the panel, since the dialog is gone. Remove opens the
-modal `HostRemoveDialog`; the modal is isolated from the page, starts focus on cancel, and returns focus to the row
-toggle when cancelled. The dialog's permanent answer writes the shared helm preference best-effort before removing the
-registry row.
+modal `HostRemoveDialog`; the modal is isolated from the page, starts focus on Remove when enabled (Cancel otherwise),
+and returns focus to the row toggle when cancelled. The dialog's permanent answer writes the shared helm preference
+best-effort before removing the registry row.
 
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel opens just beyond the sidebar's right edge, with its top aligned to
@@ -550,13 +551,20 @@ user would otherwise swallow every navigation key. The row tint is owned by the 
 not make the row look as though its menu is still open. The focused toggle or menu item retains the normal
 `:focus-visible` indicator, so pointer-return focus and keyboard focus remain visually distinct without changing the
 dismissal or focus-return contract. **Confirm in place:** a destructive item swaps the panel's own contents for the
-consequence line and a confirm/cancel pair with focus on cancel, rather than opening a second surface; that sub-state is
-a `role="dialog"` inside the same positioned box, and it survives the panel closing, which is why it deliberately does
-not answer Escape. The one exception is a pointer going down outside the open menu: that closes the menu and answers a
-showing confirmation with cancel, since a click elsewhere is the user leaving the question, and a prompt kept for the
-next open would greet them with a question they already walked away from. Every other dismissal still preserves it.
-Outside dismissal also never takes focus back from the control the pointer went to: the toggle handback only reclaims
-focus that is on nothing, on the document body, or still inside a row menu.
+consequence line and a confirm/cancel pair with focus on the enabled confirming answer, or Cancel while busy, rather
+than opening a second surface; that sub-state is a `role="dialog"` inside the same positioned box, and it survives the
+panel closing, which is why it deliberately does not answer Escape. The one exception is a pointer going down outside
+the open menu: that closes the menu and answers a showing confirmation with cancel, since a click elsewhere is the user
+leaving the question, and a prompt kept for the next open would greet them with a question they already walked away
+from. Every other dismissal still preserves it. Outside dismissal also never takes focus back from the control the
+pointer went to: the toggle handback only reclaims focus that is on nothing, on the document body, or still inside a row
+menu.
+
+Each session confirmation mount schedules focus on its enabled confirming answer, falling back to Cancel if disabled.
+The script supplements native autofocus because browsers can ignore it after a document's first prompt, including when
+an existing question remounts. Confirm buttons consume repeated or composing Enter before native click synthesis: a held
+opening key cannot also answer the question. Host dialogs retain quiet scripted focus and independent Escape selectors;
+trash focuses and scrolls its confirming answer into view. YOLO and Restart with keep their Cancel default.
 
 Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
 appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. In-place
@@ -694,30 +702,30 @@ create (terminal.js does for its reconnect and take-control buttons); one delega
 body-level `role="tooltip"` element serve the whole page, keeping the mechanism out of every component's props. The
 tooltip appears 300 ms after the pointer comes to rest on a target (each movement inside it restarts the wait) or
 keyboard focus (`:focus-visible`) reaches one. Host confirmations suppress hover help during their automatic initial
-focus on Cancel, preserving its visible focus ring; later pointer entry or moving focus away restores ordinary help.
-Other programmatic focus keeps its existing behavior. The tooltip appears at once when another target is entered while
-one is showing or within 300 ms of the pointer or focus leaving one (a press, Escape, a scroll or window blur does not
-open that window, so the next tooltip after a dismissal waits the full delay). It hides on leaving, any press (which
-keeps that element's tooltip down until the pointer leaves it or it loses focus), Escape, losing focus, window blur, the
-target leaving the document (checked on a short timer rather than with a DOM observer, which would run on every live
-status update), and a scroll of the document or of a container holding the target, but not a scroll elsewhere such as
-the terminal under live output. Touch never shows it. It is placed above the target with a 6 px gap and, only without
-room there, below with a 28 px gap: a page cannot know the cursor's size, and standard cursors extend downward from
-their hot spot, so space above a control is never under the cursor while a box just below a small icon would be. It is
-`position: fixed` from the target's measured rectangle so no scroll container clips it, wears the row menu panels'
-background, border and shadow, wraps at about 280 px and clamps to eight lines. Peer text still goes through
-`display_peer` before it becomes tooltip text, which the script sets with `textContent`. The tooltip element is a visual
-aid kept out of the accessibility tree (`aria-hidden`); icon-only controls and status marks keep accessible text of
-their own (an `aria-label` or a `.visually-hidden` copy), and the hover texts that carry information a screen-reader
-user needs (the header copy buttons' full values, a host's update urgency, a too-new host's remedy) are also exposed as
-accessible descriptions. Plain timestamps and the client build string are hover-only. Two hover displays keep their own
-shape and carry no `data-tooltip`, so two popups never stack: a host's update-progress popup and the terminal's
-link-target display. Coverage is guarded by a browser sweep (`e2e/tests/tooltip-coverage.spec.ts`) that visits the
-states the suite's fixtures reach and fails on any visible `button`, `[role=button]`, `[role=tab]`, `[role=menuitem]`,
-`a[href]`, `select`, `summary`, checkbox or radio button without hover text (for the last two, on the `label` that wraps
-them), exempting only described items in the session and host rows' menus. The local and remote host marks carry their
-hover text inside the icon component itself, so the session rows and the host rows both get it without either row's
-layout changing.
+focus on their enabled confirming answer (Cancel while disabled), preserving its visible focus ring; later pointer entry
+or moving focus away restores ordinary help. Other programmatic focus keeps its existing behavior. The tooltip appears
+at once when another target is entered while one is showing or within 300 ms of the pointer or focus leaving one (a
+press, Escape, a scroll or window blur does not open that window, so the next tooltip after a dismissal waits the full
+delay). It hides on leaving, any press (which keeps that element's tooltip down until the pointer leaves it or it loses
+focus), Escape, losing focus, window blur, the target leaving the document (checked on a short timer rather than with a
+DOM observer, which would run on every live status update), and a scroll of the document or of a container holding the
+target, but not a scroll elsewhere such as the terminal under live output. Touch never shows it. It is placed above the
+target with a 6 px gap and, only without room there, below with a 28 px gap: a page cannot know the cursor's size, and
+standard cursors extend downward from their hot spot, so space above a control is never under the cursor while a box
+just below a small icon would be. It is `position: fixed` from the target's measured rectangle so no scroll container
+clips it, wears the row menu panels' background, border and shadow, wraps at about 280 px and clamps to eight lines.
+Peer text still goes through `display_peer` before it becomes tooltip text, which the script sets with `textContent`.
+The tooltip element is a visual aid kept out of the accessibility tree (`aria-hidden`); icon-only controls and status
+marks keep accessible text of their own (an `aria-label` or a `.visually-hidden` copy), and the hover texts that carry
+information a screen-reader user needs (the header copy buttons' full values, a host's update urgency, a too-new host's
+remedy) are also exposed as accessible descriptions. Plain timestamps and the client build string are hover-only. Two
+hover displays keep their own shape and carry no `data-tooltip`, so two popups never stack: a host's update-progress
+popup and the terminal's link-target display. Coverage is guarded by a browser sweep
+(`e2e/tests/tooltip-coverage.spec.ts`) that visits the states the suite's fixtures reach and fails on any visible
+`button`, `[role=button]`, `[role=tab]`, `[role=menuitem]`, `a[href]`, `select`, `summary`, checkbox or radio button
+without hover text (for the last two, on the `label` that wraps them), exempting only described items in the session and
+host rows' menus. The local and remote host marks carry their hover text inside the icon component itself, so the
+session rows and the host rows both get it without either row's layout changing.
 
 Known risks, accepted deliberately:
 
