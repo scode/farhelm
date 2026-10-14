@@ -156,6 +156,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   inside sessions select a binary under the new meaning of the record, and then restore the automatic replacement. Start
   with a focused review of supervisor startup and interruption before implementing.
 
+- **Protect the repository against force pushes and similar, while agents can still merge.** Guard main and the release
+  tags against force pushes, deletion and other history rewrites in a way that also binds agents, while still letting
+  them open, publish and merge PRs as they do today. Main's branch protection already disallows force pushes and
+  deletion, but it does not apply to administrators, and agents work through the maintainer's own GitHub account, so it
+  does not stop them. Tags have no protection at all (the repository has no rulesets), though the release procedure says
+  a tag is never deleted or reused. Work out what GitHub rulesets, bypass lists or a separate agent identity can enforce
+  without blocking the PR flow.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
