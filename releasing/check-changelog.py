@@ -11,8 +11,9 @@ writes to the repository; every mode reports and exits non-zero on a problem.
 `format` lints `CHANGELOG.md` and the fragments under `releasing/changelog.d/` against the layouts the process has used:
 one `## vX.Y.Z - YYYY-MM-DD` heading per stable release, newest first; recognized category headings in their prescribed
 order; and entries with the required PR references. Current sections use one-paragraph bullets in every category, while
-older curated sections retain their historical Highlights subsections. The checker is deliberately narrower than what
-dist accepts, so a violation here is a curation slip, not a dist failure. It runs in the release gate on every tag.
+older curated sections retain their historical Highlights subsections. The newest section, and only that one, may open
+with the fixed draft notice while its wording is still in review. The checker is deliberately narrower than what dist
+accepts, so a violation here is a curation slip, not a dist failure. It runs in the release gate on every tag.
 
 `fragments` answers "did every user-facing change since the last stable release leave a changelog fragment". It walks
 the commits since the merge base with the last stable tag, picks out the Conventional Commit types the process says
@@ -78,6 +79,13 @@ MISC_FIXES_PREAMBLE = (
     '*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the'
     " complete list is included.*"
 )
+
+# A stable section opens with exactly this line while the maintainer is still reviewing its wording. The tag is pushed
+# with the draft so the release builds during that review, and dist copies the line into the GitHub release along with
+# everything else, so anyone reading the release page or a watcher's notification before finalization knows the text
+# will change. Finalization (`releasing/finalize-release-notes.py`) replaces the whole section, notice included. Only
+# the newest section may carry it: a release cut on top of an unfinished one would bury the draft where nobody looks.
+DRAFT_NOTICE = "**DRAFT release notes - not yet finalized**"
 
 # Historical sections used these categories before the current format. They remain accepted so changing the release
 # process never forces a rewrite of approved or in-flight release notes. New sections must follow `CATEGORIES`; these
@@ -219,13 +227,33 @@ def check_changelog_format(text: str) -> list[str]:
         if previous is not None and current >= previous:
             problems.append(f"{where}: v{release.version} is not older than the release above it; newest goes first")
         previous = current
-        problems.extend(f"{where} (v{release.version}): {item}" for item in _check_release_body(release.version, release.body))
+        may_be_draft = release is releases[0]
+        problems.extend(
+            f"{where} (v{release.version}): {item}"
+            for item in _check_release_body(release.version, release.body, may_be_draft)
+        )
     return problems
 
 
-def _check_release_body(version: str, lines: list[str]) -> list[str]:
-    """Validate the version's category set and order, and the shape each category's body must have."""
+def is_draft(release: Release) -> bool:
+    """Whether the section still opens with `DRAFT_NOTICE`, meaning the maintainer has not yet approved its wording."""
+    first = next((line for line in release.body if line.strip()), "")
+    return first == DRAFT_NOTICE
+
+
+def _check_release_body(version: str, lines: list[str], may_be_draft: bool = False) -> list[str]:
+    """Validate the version's category set and order, and the shape each category's body must have.
+
+    `may_be_draft` admits `DRAFT_NOTICE` as the section's first line and nothing else before the first category. It is
+    true only for the newest section; an older section carrying the notice is reported as unfinished rather than as
+    stray text, so the message says what to do about it.
+    """
     problems: list[str] = []
+    first = next((index for index, line in enumerate(lines) if line.strip()), None)
+    if first is not None and lines[first] == DRAFT_NOTICE:
+        if not may_be_draft:
+            problems.append("only the newest section may still be a draft; finalize this one before cutting another release")
+        lines = lines[first + 1 :]
     allowed = categories_for(version)
     headings = {f"### {emoji} {name}": name for name, emoji in allowed}
     order_of = {name: index for index, (name, _emoji) in enumerate(allowed)}
@@ -799,6 +827,27 @@ def self_test() -> int:
         ),
     }
     for what, text in split_variants.items():
+        expect(check_changelog_format(text) != [], f"the format check rejects {what}")
+
+    # The draft notice lets a stable tag go out before its wording is approved, so the format has to admit it, but only
+    # in the one place the procedure puts it: the newest section's first line, verbatim.
+    newest_heading = "## v1.1.0 - 2027-02-01\n\n"
+    draft = SPLIT_CHANGELOG.replace(newest_heading, f"{newest_heading}{DRAFT_NOTICE}\n\n")
+    expect(check_changelog_format(draft) == [], "the format check accepts the draft notice on the newest section")
+    _preamble, draft_releases = parse_changelog(draft)
+    expect(is_draft(draft_releases[0]) and not is_draft(draft_releases[1]), "is_draft tells a draft section from a finished one")
+    older_heading = "## v1.0.0 - 2027-01-01\n\n"
+    draft_variants = {
+        "the draft notice on an older section": SPLIT_CHANGELOG.replace(older_heading, f"{older_heading}{DRAFT_NOTICE}\n\n"),
+        "a reworded draft notice": SPLIT_CHANGELOG.replace(newest_heading, f"{newest_heading}**Draft notes**\n\n"),
+        "text between the draft notice and the first category": draft.replace(
+            f"{DRAFT_NOTICE}\n\n", f"{DRAFT_NOTICE}\n\nMore to come.\n\n"
+        ),
+        "the draft notice inside a category": SPLIT_CHANGELOG.replace(
+            "- A fix most users would notice. (#21)", f"{DRAFT_NOTICE}\n\n- A fix most users would notice. (#21)"
+        ),
+    }
+    for what, text in draft_variants.items():
         expect(check_changelog_format(text) != [], f"the format check rejects {what}")
 
     good_fragment = "---\nkind: added\npr: 12, 13\n---\n\nThe thing.\n"

@@ -128,6 +128,10 @@
 #      is what names the version; deleting it would make the next attempt build
 #      from a re-created tag that may not point where the first one did.
 #   2. Re-run the `Release` workflow for that tag from the Actions UI.
+#   3. For a stable release, the recreated release body carries the tag's
+#      notes again, which are the draft if the tag was cut with one. Run
+#      `releasing/finalize-release-notes.py --tag vX.Y.Z` once the approved
+#      notes are on main (`releasing/AGENTS.md`, stable step 3).
 #
 # Once a version is published on get.farhelm.io, treat its files there as
 # final: a release that went wrong after publishing is fixed with a new
