@@ -193,6 +193,22 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   encourage reading the docs website's Get started section, with a link to it; it may grow into a fuller guided tour.
   When it appears, how it is dismissed, and how much it covers are to be decided when the entry is planned.
 
+- **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
+  narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
+  that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open
+  it. The plan, with the blocked question and the decision, is
+  https://github.com/scode/farhelm/blob/d8f02862ce4014255d02d4383910999b61c85dbb/plans/queue/release-advisories.md.
+  Automatic replacement was blocked by what execution found about supervisor startup: a supervisor claims its state and
+  migrates its session database before it checks tmux and before it records its running version. If startup fails or
+  stops in that window, the database is newer than the record says (or there is no record), so an update check that
+  trusts the record could install an older release that then refuses the database. The ordering exists in shipped
+  releases (v0.28.2 included) and was reproduced with a migration from schema 30 to 31 followed by a tmux refusal while
+  the record still named 0.23.0. The follow-up: have a supervisor durably record the version it is about to run before
+  it can migrate any state, handle compatibility conservatively when it cannot be established (existing installations
+  and interrupted startups included, without treating old records as trustworthy retroactively), check how commands
+  inside sessions select a binary under the new meaning of the record, and then restore the automatic replacement. Start
+  with a focused review of supervisor startup and interruption before implementing.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
