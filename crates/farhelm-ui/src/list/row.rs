@@ -466,7 +466,7 @@ fn agent_badge(session: &Session) -> AgentBadge {
         } else {
             match launch.harness.stored_permission(launch.permissions) {
                 Some(crate::LaunchPermission::Guarded) => PermissionGlyph::Guarded,
-                Some(crate::LaunchPermission::Yolo) => {
+                Some(crate::LaunchPermission::Yolo | crate::LaunchPermission::Custom) => {
                     unreachable!("the shared classifier handled YOLO")
                 }
                 Some(crate::LaunchPermission::Approve) => PermissionGlyph::Approve,
@@ -481,6 +481,10 @@ fn agent_badge(session: &Session) -> AgentBadge {
             launch.harness,
             launch.harness.stored_permission(launch.permissions),
         ));
+        if let Some(words) = &launch.permission_flags {
+            description.push_str("\n\nCustom permission flags: ");
+            description.push_str(&display_peer(&shell_words::join(words)));
+        }
         description.push_str("\n\nLaunched with: ");
         description.push_str(&display_peer(
             &session
@@ -2536,6 +2540,7 @@ mod tests {
     fn menu_header_uses_saved_launch_facts_and_existing_state_words() {
         let structured = Session {
             launch: agent_launch(crate::LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Claude,
                 model: None,
                 effort: None,
@@ -3336,6 +3341,7 @@ mod tests {
     fn structured_launch_metadata_is_authoritative_for_the_agent_badge() {
         let session = Session {
             launch: agent_launch(crate::LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Claude,
                 model: None,
                 effort: None,
@@ -3363,6 +3369,7 @@ mod tests {
     fn structured_goose_and_pi_badges_use_effective_permission_modes() {
         let goose = Session {
             launch: agent_launch(crate::LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Goose,
                 model: Some("z-ai/glm-5.3".into()),
                 effort: None,
@@ -3380,6 +3387,7 @@ mod tests {
 
         let pi = Session {
             launch: agent_launch(crate::LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Pi,
                 model: Some("z-ai/glm-5.3".into()),
                 effort: None,
@@ -3415,9 +3423,16 @@ mod tests {
                 PermissionGlyph::Yolo,
                 "YOLO:",
             ),
+            (
+                Some(crate::LaunchPermission::Custom),
+                PermissionGlyph::Yolo,
+                "Farhelm does not check them and treats this as YOLO",
+            ),
         ] {
             let session = Session {
                 launch: agent_launch(crate::LaunchSelection {
+                    permission_flags: (permission == Some(crate::LaunchPermission::Custom))
+                        .then(|| vec!["--mode".into(), "ask me".into()]),
                     harness: LaunchHarness::Codex,
                     model: None,
                     effort: None,
@@ -3495,6 +3510,7 @@ mod tests {
         ] {
             let session = Session {
                 launch: agent_launch(crate::LaunchSelection {
+                    permission_flags: None,
                     harness: LaunchHarness::Goose,
                     model: None,
                     effort: None,

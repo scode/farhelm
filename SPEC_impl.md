@@ -2625,6 +2625,19 @@ explicit YOLO provenance, so switching back selects the real default. Preference
 their value until the next structured launch; the stored word does not say which harness supplied it. No second
 default-mode table or preference provenance is kept.
 
+Protocol 49 adds the closed `Custom` permission and `LaunchSelection::permission_flags`, an optional vector present
+exactly with Custom. Older peers refuse the new protocol and older releases cannot read custom sessions or templates;
+the missing downgrade path is accepted. Absent flags remain absent on serialization, so existing create fingerprints and
+`agent_create_v1` digests do not change. `split_permission_flags` shares `shell_words::split` between the editors and
+the helm's shape check: quotes/backslashes group words, a `#` starting a word begins a comment, and nothing expands. The
+compiler refuses all five reserved supervisor placeholders as complete words, then inserts custom words where YOLO flags
+would go, before workspace-trust flags and the resume suffix. No custom-flag meaning is interpreted. The shared shape
+check requires a nonempty word vector with Custom and refuses flags with any other choice. Templates store the same
+words, explicitly paired with Custom; another permission edit clears them. A harness switch drops both even when the
+destination also offers Custom, because words belong to the source CLI. The remembered-permission read, write validation
+and successful-create projection exclude Custom while recent setups retain the whole selection. Editable UI text is
+separate from words so malformed quotes remain repairable without submitting a different command.
+
 Schema 30 adds nullable `remembered_workspace_trust` to the preference row. The helm updates it in the same admitted
 create transaction as structured launch history, only for an explicit Codex, Muse, or Pi choice from a user-originated
 create. Both are written from the selection the user submitted (`CreateAcceptance::explicit_selection`), never from the

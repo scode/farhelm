@@ -204,7 +204,10 @@ impl Field {
             Self::Agent => f.agent = None,
             Self::Model => f.model = None,
             Self::Effort => f.effort = None,
-            Self::Permissions => f.permissions = None,
+            Self::Permissions => {
+                f.permissions = None;
+                f.permission_flags = None;
+            }
             Self::Trust => f.workspace_trust = None,
             Self::Command => f.command = None,
             Self::Yolo => f.yolo = None,
@@ -360,6 +363,12 @@ impl Draft {
     /// Refuse incompatible or unfinished fields without requiring a complete
     /// launch. Another stacked template may supply the missing agent or command.
     fn refusal(&self, catalog: Option<&[LaunchCatalogModel]>) -> Option<String> {
+        if let Err(reason) = farhelm_proto::check_permission_flags(
+            self.fields.permissions.flatten(),
+            self.fields.permission_flags.as_deref(),
+        ) {
+            return Some(reason);
+        }
         for field in Field::ALL.into_iter().filter(|k| k.is_set(&self.fields)) {
             if let Some(message) = field.refusal(&self.fields, catalog) {
                 return Some(format!("{}: {message}", field.label()));
@@ -496,6 +505,9 @@ pub(super) fn template_summary(fields: &TemplateFields) -> String {
             crate::launch_composer::permission_label(fields.agent, permissions)
         ));
     }
+    if let Some(words) = &fields.permission_flags {
+        parts.push(crate::peer::display_peer(&shell_words::join(words)));
+    }
     if let Some(trust) = fields.workspace_trust {
         parts.push(choice(
             "trust",
@@ -575,6 +587,12 @@ fn FieldEditor(
     disabled: bool,
 ) -> Element {
     let current = draft().fields;
+    let flags_seed = current
+        .permission_flags
+        .as_ref()
+        .map(shell_words::join)
+        .unwrap_or_default();
+    let mut permission_flags_text = use_signal(move || flags_seed);
     let refusal = field.refusal(&current, catalog.as_deref());
     let label = field.label();
     let controls = match field {
@@ -633,7 +651,19 @@ fn FieldEditor(
         },
         Field::Permissions => rsx! {
             Choice { label, value: current.permissions.flatten().map(word).unwrap_or_else(|| DEFAULT.into()), options: permission_options(current.agent), disabled,
-                on_change: move |v: String| draft.with_mut(|d| d.fields.permissions = Some(from_word(&v))),
+                on_change: move |v: String| draft.with_mut(|d| {
+                    d.fields.permissions = Some(from_word(&v));
+                    d.fields.permission_flags = crate::launch_composer::permission_words(d.fields.permissions.flatten(), &permission_flags_text());
+                    if d.fields.permissions.flatten() != Some(LaunchPermission::Custom) { permission_flags_text.set(String::new()); }
+                }),
+            }
+            if current.permissions.flatten() == Some(LaunchPermission::Custom) {
+                crate::launch_controls::CustomPermissionFlags { text: permission_flags_text(), busy: disabled, harness: current.agent,
+                    on_change: move |text: String| {
+                        draft.with_mut(|d| d.fields.permission_flags = farhelm_proto::split_permission_flags(&text).ok());
+                        permission_flags_text.set(text);
+                    },
+                }
             }
         },
         Field::Trust => rsx! {
@@ -739,7 +769,9 @@ fn FieldEditor(
 /// the user saves from the inline prompt.
 #[derive(Clone, PartialEq)]
 enum Departure {
-    Open(LaunchTemplate),
+    // Only Open carries a stored template. Keep the pending navigation value
+    // small as template fields grow; the other departures carry no payload.
+    Open(Box<LaunchTemplate>),
     New,
     Duplicate,
     Back,
@@ -919,6 +951,11 @@ pub(super) fn TemplatesDialog(
         }
     });
     let current = draft();
+    // Field editors own raw text that can be invalid while being repaired.
+    // Changing the approved source template must remount them rather than
+    // letting that text describe a different saved vector. Renaming a draft
+    // keeps this source identity stable, so it does not erase ongoing edits.
+    let editor_source = previous().unwrap_or_default();
     let dirty = opened() && current != baseline();
     let catalog_rows = catalog
         .read()
@@ -1227,7 +1264,7 @@ pub(super) fn TemplatesDialog(
                                                 onclick: { let name = template.name.clone(); move |_| mark.call(name.clone()) },
                                                 "⚡"
                                             }
-                                            button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&template.name), "data-tooltip": "edit template {display_peer(&template.name)}", onclick: move |_| depart.call(Departure::Open(template.clone())),
+                                            button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&template.name), "data-tooltip": "edit template {display_peer(&template.name)}", onclick: move |_| depart.call(Departure::Open(Box::new(template.clone()))),
                                                 span { class: "templates-row-name peer-value", dir: "ltr", "{display_peer(&template.name)}" }
                                                 span { class: "templates-row-summary", "{template_summary(&template.fields)}" }
                                                 if preferences.0.read().quick_launch_template.as_ref() == Some(&template.name) { span { class: "templates-quick-chord", "{QUICK_LAUNCH_CHORD}" } }
@@ -1277,7 +1314,7 @@ pub(super) fn TemplatesDialog(
                             if inferred { p { class: "templates-hint templates-inferred", "This stored template does not switch the launcher yet. Saving will store the switch inferred from its fields." } }
                             h4 { class: "templates-sets-heading", "sets" }
                             for field in Field::ALL.into_iter().filter(|f| f.is_set(&current.fields)) {
-                                FieldEditor { key: "{field.key()}", field, draft, hosts: hosts.clone(), catalog: catalog_rows.clone(), disabled }
+                                FieldEditor { key: "{editor_source}-{field.key()}", field, draft, hosts: hosts.clone(), catalog: catalog_rows.clone(), disabled }
                             }
                             div { class: "templates-add-area",
                                 button { r#type: "button", class: "btn btn-neutral templates-add", disabled, aria_expanded: add_open(), "data-tooltip": "add a field this template will set; fields not shown are left as is", onclick: move |_| add_open.toggle(), "+ add field" }
@@ -1381,6 +1418,8 @@ mod tests {
                         kind: Some(LauncherKind::Agent),
                         agent: Some(harness),
                         permissions: Some(Some(permission)),
+                        permission_flags: (permission == LaunchPermission::Custom)
+                            .then(|| vec!["--mode".into(), "ask me".into()]),
                         ..Default::default()
                     },
                 };
@@ -1539,7 +1578,8 @@ mod tests {
                     "Guarded · Claude auto mode (reset)".into()
                 ),
                 ("guarded".into(), "Guarded · Claude auto mode".into()),
-                ("yolo".into(), "yolo".into())
+                ("yolo".into(), "yolo".into()),
+                ("custom".into(), "custom".into())
             ]
         );
         assert!(
@@ -1575,6 +1615,8 @@ mod tests {
                 fields: TemplateFields {
                     kind: Some(LauncherKind::Agent),
                     permissions: Some(Some(permission)),
+                    permission_flags: (permission == LaunchPermission::Custom)
+                        .then(|| vec!["--mode".into()]),
                     ..Default::default()
                 },
             };

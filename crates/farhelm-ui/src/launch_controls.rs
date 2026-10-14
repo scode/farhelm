@@ -109,6 +109,7 @@ pub(crate) fn LaunchControls(
     model_edited: bool,
     effort: Option<LaunchEffort>,
     permissions: Option<LaunchPermission>,
+    permission_flags: String,
     workspace_trust: Option<bool>,
     catalog: Vec<LaunchCatalogModel>,
     busy: bool,
@@ -133,6 +134,7 @@ pub(crate) fn LaunchControls(
     on_model_option: EventHandler<ModelOption>,
     on_effort: EventHandler<Option<LaunchEffort>>,
     on_permissions: EventHandler<Option<LaunchPermission>>,
+    on_permission_flags: EventHandler<String>,
     on_workspace_trust: EventHandler<Option<bool>>,
 ) -> Element {
     let omitted_permission = harness.and_then(LaunchHarness::omitted_permission);
@@ -453,6 +455,21 @@ pub(crate) fn LaunchControls(
                             "yolo"
                         }
                     }
+                    if harness.is_some_and(|harness| harness.offers_permission(LaunchPermission::Custom)) {
+                        button {
+                            r#type: "button", class: if permissions == Some(LaunchPermission::Custom) { "selected" } else { "" },
+                            aria_pressed: permissions == Some(LaunchPermission::Custom), disabled: busy,
+                            "data-tooltip": launch_composer::permission_tooltip(LaunchPermission::Custom),
+                            onclick: move |_| {
+                                on_permissions.call(Some(LaunchPermission::Custom));
+                                document::eval("requestAnimationFrame(() => document.querySelector('.custom-permission-flags')?.focus())");
+                            },
+                            // This choice opens an editor. Native button Enter
+                            // follows the same focus handoff as a click, rather
+                            // than invoking primary on an incomplete choice.
+                            "custom"
+                        }
+                    }
                     // The approval modes after guarded and YOLO, in their
                     // fixed order, shown for whichever harness offers them
                     // (Goose all three, OMP Approve alone). Filtered in the
@@ -482,7 +499,10 @@ pub(crate) fn LaunchControls(
                 }
             }
         }
-        if harness.is_some_and(LaunchHarness::offers_workspace_trust) {
+            if permissions == Some(LaunchPermission::Custom) {
+                CustomPermissionFlags { text: permission_flags, busy, harness, on_change: on_permission_flags }
+            }
+            if harness.is_some_and(LaunchHarness::offers_workspace_trust) {
             div { class: "launch-composer-choice launch-composer-trust-choice",
                 span { class: "launch-composer-section-label", "workspace trust" }
                 if let Some(parts) = trust_change { PeerLine { class: "launch-composer-changed-marker", parts } }
@@ -523,6 +543,45 @@ fn scroll_model_result(prefix: &str, index: usize) {
     document::eval(&format!(
         r#"document.getElementById('{prefix}-option-{index}')?.scrollIntoView({{ block: 'nearest' }});"#,
     ));
+}
+
+/// Edit literal permission words without advertising an incomplete command.
+/// The input retains invalid text so a quote can be repaired; only successfully
+/// split words appear in the preview or can become a submitted selection.
+#[component]
+pub(crate) fn CustomPermissionFlags(
+    text: String,
+    busy: bool,
+    harness: Option<LaunchHarness>,
+    on_change: EventHandler<String>,
+) -> Element {
+    let parsed = farhelm_proto::split_permission_flags(&text);
+    // Stored words may be relayed by a host or an agent request. Show hidden
+    // characters visibly, while untouched props retain their exact bytes for
+    // parsing and submission. An input event replaces them with the edited text.
+    // Empty and whitespace-only editors stay literal rather than using the
+    // read-only display labels, which could become arguments during an edit.
+    let shown_text = crate::peer::editable_peer(&text);
+    let agent = harness
+        .map(launch_composer::harness_label)
+        .unwrap_or("the agent");
+    rsx! {
+        div { class: "launch-composer-choice custom-permission-choice",
+            label { "permission flags"
+                input { class: "custom-permission-flags", value: "{shown_text}", disabled: busy,
+                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                    oninput: move |event| on_change.call(event.value()),
+                }
+            }
+            p { "Passed to {agent} instead of Farhelm's permission flags. You are responsible for ensuring they only change permissions. Farhelm does not check them, so this session counts as YOLO." }
+            match parsed {
+                Ok(words) => rsx! { div { class: "custom-permission-words", aria_label: "permission arguments",
+                    for word in words { code { dir: "auto", "{crate::peer::display_peer(&word)}" } }
+                } },
+                Err(error) => rsx! { p { class: "launch-composer-error", role: "alert", "{error}" } },
+            }
+        }
+    }
 }
 
 #[cfg(test)]

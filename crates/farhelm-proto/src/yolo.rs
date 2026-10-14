@@ -63,7 +63,12 @@ pub fn selection_is_yolo(selection: &LaunchSelection) -> bool {
     selection
         .harness
         .stored_permission(selection.permissions)
-        .is_none_or(|permission| permission == LaunchPermission::Yolo)
+        .is_none_or(|permission| {
+            matches!(
+                permission,
+                LaunchPermission::Yolo | LaunchPermission::Custom
+            )
+        })
 }
 
 #[cfg(test)]
@@ -106,6 +111,7 @@ mod tests {
     #[test]
     fn structured_selections_are_classified_by_permission_and_sole_mode() {
         let selection = |harness, permissions| LaunchSelection {
+            permission_flags: None,
             harness,
             model: None,
             effort: None,

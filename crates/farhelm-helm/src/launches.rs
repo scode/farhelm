@@ -349,7 +349,9 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
                 LaunchPermission::Approve => "approve",
                 LaunchPermission::SmartApprove => "smart_approve",
                 LaunchPermission::Chat => "chat",
-                LaunchPermission::Guarded => unreachable!("Goose does not offer guarded"),
+                LaunchPermission::Guarded | LaunchPermission::Custom => {
+                    unreachable!("Goose does not offer guarded or custom")
+                }
             };
             argv.push(format!("GOOSE_MODE={mode}"));
         }
@@ -450,6 +452,18 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
             argv.push(flag.to_string());
         }
     }
+    if selection.permissions == Some(LaunchPermission::Custom) {
+        // Validation established the shape; use the same permission position
+        // as YOLO, before trust arguments and each harness's resume suffix.
+        argv.extend(
+            selection
+                .permission_flags
+                .as_ref()
+                .expect("validated custom words")
+                .iter()
+                .cloned(),
+        );
+    }
     // Workspace trust is independent of tool approval. Codex's project key
     // needs the target's final cwd, which the supervisor fills only after a
     // possible checkout has been prepared.
@@ -541,6 +555,17 @@ fn program(harness: LaunchHarness) -> &'static str {
 /// The catalog constrains an entered model and effort; an omitted model is
 /// valid for every harness and is resolved by that harness when it starts.
 fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
+    farhelm_proto::check_permission_flags(
+        selection.permissions,
+        selection.permission_flags.as_deref(),
+    )?;
+    if let Some(words) = &selection.permission_flags {
+        for word in words {
+            if farhelm_supervisor::agent_kind::is_reserved_placeholder(word) {
+                return Err("custom permission flags cannot contain Farhelm placeholders".into());
+            }
+        }
+    }
     if selection.workspace_trust.is_some() && !selection.harness.offers_workspace_trust() {
         return Err("workspace trust is not offered by this harness".to_string());
     }
@@ -651,6 +676,91 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
 
 #[cfg(test)]
 mod tests {
+    /// Custom replaces only the permission slot, with identical word boundaries
+    /// in fresh and resume argv. It remains YOLO even for flags that name a
+    /// guarded vendor mode; Farhelm intentionally does not interpret them.
+    #[test]
+    fn custom_permission_words_replace_flags_on_every_supported_harness() {
+        for (harness, prefix, suffix) in [
+            (LaunchHarness::Claude, vec!["claude"], Some("--resume")),
+            (LaunchHarness::Codex, vec!["codex"], Some("resume")),
+            (
+                LaunchHarness::Grok,
+                vec!["grok", "--no-leader"],
+                Some("--resume"),
+            ),
+            (LaunchHarness::Muse, vec!["muse"], None),
+            (LaunchHarness::Cursor, vec!["cursor-agent"], None),
+            (LaunchHarness::Omp, vec!["omp"], Some("--resume")),
+        ] {
+            let words = vec!["--mode".into(), "ask me".into(), "$HOME".into()];
+            let mut input = selection(harness);
+            input.permissions = Some(LaunchPermission::Custom);
+            input.permission_flags = Some(words.clone());
+            let launch = super::compile(input.clone()).unwrap();
+            assert_eq!(launch.yolo(), Some(true), "{harness:?} is always YOLO");
+            assert_eq!(launch.agent_selection(), Some(&input));
+            let SessionLaunch::Agent { start, resume, .. } = &launch else {
+                panic!("agent")
+            };
+            let mut expected: Vec<String> = prefix.into_iter().map(str::to_string).collect();
+            expected.extend(words);
+            let mut resumed = expected.clone();
+            expected.push(FARHELM_ARGS_PLACEHOLDER.into());
+            assert_eq!(*start, expected, "{harness:?} fresh");
+            let expected_resume = suffix.map(|suffix| {
+                resumed.extend([
+                    suffix.into(),
+                    CONVERSATION_PLACEHOLDER.into(),
+                    FARHELM_ARGS_PLACEHOLDER.into(),
+                ]);
+                resumed
+            });
+            assert_eq!(*resume, expected_resume, "{harness:?} resume");
+            let restored: SessionLaunch =
+                serde_json::from_str(&serde_json::to_string(&launch).unwrap()).unwrap();
+            assert_eq!(restored, launch);
+        }
+    }
+
+    /// Admission refuses malformed relationships and every supervisor token,
+    /// so a user word cannot become a later Farhelm substitution pass.
+    #[test]
+    fn custom_permissions_refuse_unsupported_modes_and_placeholder_words() {
+        for harness in [
+            LaunchHarness::Goose,
+            LaunchHarness::Pi,
+            LaunchHarness::OpenCode,
+        ] {
+            let mut input = selection(harness);
+            input.permissions = Some(LaunchPermission::Custom);
+            input.permission_flags = Some(vec!["--mode".into()]);
+            assert!(super::compile(input).is_err(), "{harness:?}");
+        }
+        let mut input = selection(LaunchHarness::Codex);
+        input.permissions = Some(LaunchPermission::Custom);
+        assert!(super::compile(input.clone()).is_err());
+        input.permission_flags = Some(vec![]);
+        assert!(super::compile(input.clone()).is_err());
+        for placeholder in [
+            "{cwd}",
+            "{conversation}",
+            "{farhelm_args}",
+            "{codex:trusted-cwd}",
+            "{codex:untrusted-cwd}",
+        ] {
+            input.permission_flags = Some(vec![placeholder.into()]);
+            assert!(
+                super::compile(input.clone())
+                    .unwrap_err()
+                    .contains("placeholders"),
+                "{placeholder}"
+            );
+        }
+        input.permissions = Some(LaunchPermission::Guarded);
+        input.permission_flags = Some(vec!["--mode".into()]);
+        assert!(super::compile(input).is_err());
+    }
     use super::{CATALOG, normalize_selection};
     use farhelm_proto::{
         AgentKind, SessionLaunch,
@@ -744,6 +854,7 @@ mod tests {
 
     fn selection(harness: LaunchHarness) -> LaunchSelection {
         LaunchSelection {
+            permission_flags: None,
             harness,
             model: None,
             effort: None,
@@ -764,6 +875,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn normalized_and_compiled_selections_agree() {
         let pi = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Pi,
             model: None,
             effort: None,
@@ -780,6 +892,7 @@ mod tests {
         for model in [None, Some("composer-2.5"), Some("custom[effort=high]")] {
             for permissions in [None, Some(LaunchPermission::Yolo)] {
                 let input = LaunchSelection {
+                    permission_flags: None,
                     harness: LaunchHarness::Cursor,
                     model: model.map(str::to_owned),
                     effort: None,
@@ -903,6 +1016,7 @@ mod tests {
     #[test]
     fn explicit_choices_use_each_harnesses_documented_flags() {
         let codex = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Codex,
             model: Some("gpt-5.6-terra".to_string()),
             effort: Some(LaunchEffort::High),
@@ -922,6 +1036,7 @@ mod tests {
         );
 
         let claude = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Claude,
             model: Some("claude-fable-5".to_string()),
             effort: Some(LaunchEffort::High),
@@ -941,6 +1056,7 @@ mod tests {
         );
 
         let muse = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Muse,
             model: Some("muse-spark-1.3-contributor".to_string()),
             effort: Some(LaunchEffort::Xhigh),
@@ -960,6 +1076,7 @@ mod tests {
         );
 
         let opencode = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: Some("opencode/grok-4.6".to_string()),
             effort: None,
@@ -986,6 +1103,7 @@ mod tests {
         );
 
         let bare = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: Some("private-zen-model".to_string()),
             effort: None,
@@ -1043,6 +1161,7 @@ mod tests {
         for bare in overlapping {
             for typed in [bare.to_string(), format!("opencode/{bare}")] {
                 let opencode = LaunchSelection {
+                    permission_flags: None,
                     harness: LaunchHarness::OpenCode,
                     model: Some(typed.clone()),
                     effort: None,
@@ -1093,6 +1212,7 @@ mod tests {
     #[test]
     fn opencode_refuses_an_unsupported_effort() {
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: Some("opencode/glm-5.3".to_string()),
             effort: Some(LaunchEffort::High),
@@ -1220,6 +1340,7 @@ mod tests {
     fn muse_contributor_catalog_stops_at_xhigh() {
         for effort in [LaunchEffort::Max, LaunchEffort::Ultra] {
             let selection = LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Muse,
                 model: Some("muse-spark-1.3-contributor".to_string()),
                 effort: Some(effort),
@@ -1238,6 +1359,7 @@ mod tests {
     #[test]
     fn goose_and_pi_compile_their_native_openrouter_contracts() {
         let goose = compile(LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Goose,
             model: Some("x-ai/grok-4.6".into()),
             effort: Some(LaunchEffort::Max),
@@ -1261,6 +1383,7 @@ mod tests {
         );
 
         let pi = compile(LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Pi,
             model: Some("x-ai/grok-4.6".into()),
             effort: Some(LaunchEffort::Minimal),
@@ -1289,6 +1412,7 @@ mod tests {
     #[test]
     fn goose_maps_every_permission_without_unsolicited_overrides() {
         let base = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Goose,
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
@@ -1342,6 +1466,7 @@ mod tests {
     #[test]
     fn pi_accepts_only_its_yolo_label_without_an_approve_flag() {
         let base = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Pi,
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
@@ -1387,6 +1512,7 @@ mod tests {
     fn omp_compiles_its_native_openrouter_contract_with_an_explicit_approval_mode() {
         // Every optional flag at once, with the OMP-specific Approve mode.
         let full = compile(LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("x-ai/grok-4.6".into()),
             effort: Some(LaunchEffort::Minimal),
@@ -1412,6 +1538,7 @@ mod tests {
 
         // YOLO carries its own approval-mode value, never a bare flag.
         let yolo = compile(LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("z-ai/glm-5.3".into()),
             effort: Some(LaunchEffort::Xhigh),
@@ -1436,6 +1563,7 @@ mod tests {
 
         // An omitted OMP permission is Farhelm's explicit YOLO default.
         let omitted = compile(LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
@@ -1484,6 +1612,7 @@ mod tests {
 
         // A custom id stays one literal argv element under OMP's contract.
         let custom = compile(LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("release/candidate'42;$literal".to_string()),
             effort: None,
@@ -1515,6 +1644,7 @@ mod tests {
         for effort in super::OMP_EFFORTS {
             assert!(
                 compile(LaunchSelection {
+                    permission_flags: None,
                     harness: LaunchHarness::Omp,
                     model: Some("z-ai/glm-5.3".into()),
                     effort: Some(*effort),
@@ -1527,6 +1657,7 @@ mod tests {
         }
         assert!(
             compile(LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Omp,
                 model: Some("z-ai/glm-5.3".into()),
                 effort: Some(LaunchEffort::Ultra),
@@ -1541,6 +1672,7 @@ mod tests {
         for permission in [LaunchPermission::SmartApprove, LaunchPermission::Chat] {
             assert!(
                 compile(LaunchSelection {
+                    permission_flags: None,
                     harness: LaunchHarness::Omp,
                     model: Some("z-ai/glm-5.3".into()),
                     effort: None,
@@ -1594,6 +1726,7 @@ mod tests {
         );
 
         let permissive = compile(LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Grok,
             model: None,
             effort: None,
@@ -1632,6 +1765,7 @@ mod tests {
         for harness in [LaunchHarness::Goose, LaunchHarness::Pi, LaunchHarness::Omp] {
             assert!(
                 compile(LaunchSelection {
+                    permission_flags: None,
                     harness,
                     model: Some("z-ai/glm-5.3".into()),
                     effort: None,
@@ -1643,6 +1777,7 @@ mod tests {
         }
         assert!(
             compile(LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Pi,
                 model: Some("z-ai/glm-5.3".into()),
                 effort: None,

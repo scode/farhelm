@@ -244,6 +244,7 @@ pub(crate) fn RestartWithDialog(
     let baseline = match &opening {
         RestartEdit::Agent(selection) => selection.clone(),
         RestartEdit::Command(command) => LaunchSelection {
+            permission_flags: None,
             harness: command
                 .agent
                 .expect("restart_baseline admits only a command launch with a declared agent type"),
@@ -282,6 +283,12 @@ pub(crate) fn RestartWithDialog(
 
     let seed = baseline.clone();
     let mut selection = use_signal(move || seed);
+    let flags_seed = baseline
+        .permission_flags
+        .as_ref()
+        .map(shell_words::join)
+        .unwrap_or_default();
+    let mut permission_flags_text = use_signal(move || flags_seed);
     let mut model_draft = use_signal(String::new);
     let mut model_open = use_signal(|| false);
     let mut model_active = use_signal(|| None::<usize>);
@@ -557,6 +564,13 @@ pub(crate) fn RestartWithDialog(
                     model_edited: model_edited(),
                     effort: current.effort,
                     permissions: current.permissions,
+                    permission_flags: permission_flags_text(),
+                    on_permission_flags: move |text: String| {
+                        let mut after = selection();
+                        after.permission_flags = farhelm_proto::split_permission_flags(&text).ok();
+                        permission_flags_text.set(text);
+                        selection.set(after);
+                    },
                     workspace_trust: current.workspace_trust,
                     catalog: catalog.clone(),
                     busy,
@@ -632,6 +646,8 @@ pub(crate) fn RestartWithDialog(
                     on_permissions: move |permissions: Option<LaunchPermission>| {
                         let mut after = selection();
                         after.permissions = permissions;
+                        after.permission_flags = crate::launch_composer::permission_words(permissions, &permission_flags_text());
+                        if permissions != Some(LaunchPermission::Custom) { permission_flags_text.set(String::new()); }
                         selection.set(after);
                     },
                     on_workspace_trust: move |workspace_trust| {

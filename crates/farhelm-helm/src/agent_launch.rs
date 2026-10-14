@@ -202,6 +202,7 @@ pub(crate) fn resolve(
             };
             LaunchRequest::Agent {
                 selection: LaunchSelection {
+                    permission_flags: state.permission_flags,
                     harness,
                     model: state.model,
                     effort: state.effort,

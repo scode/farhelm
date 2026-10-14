@@ -15686,6 +15686,7 @@ pub(crate) mod tests {
         );
         let agent = SessionLaunch::Agent {
             selection: farhelm_proto::LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Claude,
                 model: None,
                 effort: None,
@@ -24575,6 +24576,7 @@ exit 0
         );
         let agent = SessionLaunch::Agent {
             selection: farhelm_proto::LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Claude,
                 model: None,
                 effort: None,
@@ -24797,6 +24799,7 @@ exit 0
                 "/work",
                 &SessionLaunch::Agent {
                     selection: farhelm_proto::LaunchSelection {
+                        permission_flags: None,
                         harness: LaunchHarness::Codex,
                         model: Some("gpt-6-astra".to_string()),
                         effort: Some(farhelm_proto::LaunchEffort::High),
@@ -25097,6 +25100,7 @@ exit 0
         assert_eq!(
             selection,
             &farhelm_proto::LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Omp,
                 model: Some("x-ai/grok-4.6".into()),
                 effort: Some(farhelm_proto::LaunchEffort::High),
@@ -30470,6 +30474,7 @@ exit 0
         let checkout = checkout_fixture(root.path());
         let agent = |model: Option<&str>| SessionLaunch::Agent {
             selection: farhelm_proto::LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Codex,
                 model: model.map(str::to_string),
                 effort: None,

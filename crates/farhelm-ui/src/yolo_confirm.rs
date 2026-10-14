@@ -46,6 +46,8 @@ use crate::peer::{DetailPart, PeerLine, display_peer};
 /// remains distinct from a known bypass mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum YoloReason {
+    /// Farhelm never infers safety from user-supplied permission words.
+    CustomFlags,
     /// A structured launch whose harness offers other permission modes, with
     /// YOLO chosen.
     ChosenPermission,
@@ -69,6 +71,11 @@ impl YoloReason {
     pub(crate) fn of_launch(selection: Option<&LaunchSelection>) -> Self {
         match selection {
             None => YoloReason::Asserted,
+            Some(selection)
+                if selection.permissions == Some(farhelm_proto::LaunchPermission::Custom) =>
+            {
+                YoloReason::CustomFlags
+            }
             Some(selection) if selection.harness.offers_only_yolo() => {
                 YoloReason::OnlyMode(selection.harness)
             }
@@ -87,6 +94,7 @@ impl YoloReason {
     /// The sentence the confirmation shows for this reason.
     fn sentence(self) -> String {
         match self {
+            YoloReason::CustomFlags => "This launch uses custom permission flags. Farhelm does not check what they do, so it treats the session as YOLO.".into(),
             YoloReason::ChosenPermission => "This launch uses YOLO permissions. Another permission mode would keep the agent's safety checks instead.".to_string(),
             YoloReason::OnlyMode(harness) => {
                 let name = crate::launch_composer::harness_label(harness);
@@ -295,6 +303,7 @@ mod tests {
 
     fn selection(harness: LaunchHarness, permissions: Option<LaunchPermission>) -> LaunchSelection {
         LaunchSelection {
+            permission_flags: None,
             harness,
             model: None,
             effort: None,
@@ -303,15 +312,29 @@ mod tests {
         }
     }
 
-    /// The confirmation tells the user WHY the launch is YOLO, and the three
+    /// The confirmation tells the user WHY the launch is YOLO, and its distinct
     /// reasons call for different reactions: pick another permission mode,
     /// accept that this harness offers only YOLO, or fix the command line. A wrong
     /// reason sends the user looking for a setting that does not exist.
     /// Specifies: no selection means a command line; a harness
     /// whose only mode is YOLO gets the only-mode sentence naming it; any
-    /// other structured launch was YOLO by choice.
+    /// other structured launch was YOLO by choice, except custom flags whose
+    /// permission meaning Farhelm does not interpret.
     #[test]
     fn the_reason_follows_the_kind_of_launch_that_was_sent() {
+        assert_eq!(
+            YoloReason::of_launch(Some(&selection(
+                LaunchHarness::Cursor,
+                Some(LaunchPermission::Custom)
+            ))),
+            YoloReason::CustomFlags,
+            "custom takes priority even on a harness without a guarded mode"
+        );
+        assert!(
+            YoloReason::CustomFlags
+                .sentence()
+                .contains("does not check what they do")
+        );
         assert_eq!(YoloReason::of_launch(None), YoloReason::Asserted);
         assert_eq!(
             YoloReason::of_launch(Some(&selection(LaunchHarness::Pi, None))),

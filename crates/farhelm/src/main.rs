@@ -706,6 +706,12 @@ fn parse_effort(value: &str) -> Result<Choice<farhelm_proto::LaunchEffort>, Stri
 /// harness's admission default (notably OMP's YOLO default). Reasoning effort
 /// has a separate default vocabulary and still uses [`parse_choice`].
 fn parse_permissions(value: &str) -> Result<Choice<farhelm_proto::LaunchPermission>, String> {
+    if value == "custom" {
+        return Err(
+            "custom permission flags are available through launch templates, not --permissions"
+                .into(),
+        );
+    }
     if value == "default" {
         return Ok(Choice(None));
     }
@@ -716,6 +722,7 @@ fn parse_permissions(value: &str) -> Result<Choice<farhelm_proto::LaunchPermissi
                 "{value:?} is not a permission; the choices are {}",
                 farhelm_proto::LaunchPermission::ALL
                     .iter()
+                    .filter(|permission| **permission != farhelm_proto::LaunchPermission::Custom)
                     .map(|permission| permission.wire_word())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -836,6 +843,7 @@ impl LaunchFlags {
     ) -> farhelm_proto::launcher::TemplateFields {
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
         TemplateFields {
+            permission_flags: None,
             kind: self.command.as_ref().map(|_| LauncherKind::Command),
             agent: self.agent,
             model: self
@@ -1118,7 +1126,7 @@ fn main() -> anyhow::Result<()> {
                     } else if launch.any() {
                         SpawnLaunch::Flags {
                             templates: launch.templates.clone(),
-                            edits: launch.edits(None, None),
+                            edits: Box::new(launch.edits(None, None)),
                         }
                     } else {
                         anyhow::bail!(
@@ -1924,6 +1932,19 @@ async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// The CLI has no custom-flags text field. Accepting the enum's wire word
+    /// here would create an incomplete selection; templates remain the supported
+    /// CLI path for a complete Custom choice.
+    #[test]
+    fn custom_permissions_need_a_template_in_the_cli() {
+        assert!(
+            super::parse_permissions("custom")
+                .unwrap_err()
+                .contains("templates")
+        );
+        assert!(super::parse_permissions("guarded").is_ok());
+        assert!(super::parse_permissions("yolo").is_ok());
+    }
     use super::*;
 
     /// The hook budget override is a child-only testing seam: absent, invalid,

@@ -95,6 +95,12 @@ pub fn reconcile_harness_selection(
     catalog: &[LaunchCatalogModel],
 ) -> (LaunchSelection, Option<LaunchHarness>) {
     let source = selection.harness;
+    if source != harness && selection.permissions == Some(LaunchPermission::Custom) {
+        // Permission words belong to the source agent's CLI, even when the
+        // destination also offers custom. Never carry them across agents.
+        selection.permissions = None;
+        selection.permission_flags = None;
+    }
     // A harness's default YOLO does not express an approval preference for a
     // different harness. Keep explicit approval choices, and explicit YOLO
     // from harnesses whose omitted mode is non-YOLO.
@@ -235,6 +241,10 @@ pub struct TemplateFields {
         skip_serializing_if = "Option::is_none"
     )]
     pub permissions: Option<Option<LaunchPermission>>,
+    /// Literal custom words travel with the template's Custom choice, never
+    /// independently of it. Later permission edits clear the older words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_flags: Option<Vec<String>>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -279,6 +289,7 @@ impl TemplateFields {
         self.model.is_some()
             || self.effort.is_some()
             || self.permissions.is_some()
+            || self.permission_flags.is_some()
             || self.workspace_trust.is_some()
     }
 
@@ -324,6 +335,10 @@ pub struct LaunchTemplate {
 /// of naming a template, even when percent-encoded.
 /// Whether fields apply is decided against the launcher when applied.
 pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
+    crate::check_permission_flags(
+        template.fields.permissions.flatten(),
+        template.fields.permission_flags.as_deref(),
+    )?;
     let name = &template.name;
     if name.is_empty() {
         return Err("a template needs a name".to_string());
@@ -389,6 +404,9 @@ pub struct LauncherState {
     pub model_owner: Option<LaunchHarness>,
     pub effort: Option<LaunchEffort>,
     pub permissions: Option<LaunchPermission>,
+    /// Words stay paired with Custom through template application. Replacing
+    /// the permission or changing agents must clear this source-agent intent.
+    pub permission_flags: Option<Vec<String>>,
     pub workspace_trust: Option<bool>,
     pub command: String,
     pub yolo: Option<bool>,
@@ -465,6 +483,11 @@ pub fn apply_template(
         reason,
     };
     let mut next = state.clone();
+    crate::check_permission_flags(
+        fields.permissions.flatten(),
+        fields.permission_flags.as_deref(),
+    )
+    .map_err(|reason| refuse("permission flags", reason))?;
 
     // 1. The launch kind.
     if let Some(kind) = fields.kind {
@@ -477,6 +500,7 @@ pub fn apply_template(
         match kind {
             LauncherKind::Agent => {
                 let selection = LaunchSelection {
+                    permission_flags: next.permission_flags.clone(),
                     harness: next.harness.unwrap_or(agent),
                     model: next.model.clone(),
                     effort: next.effort,
@@ -494,6 +518,7 @@ pub fn apply_template(
                 next.model = selection.model;
                 next.effort = selection.effort;
                 next.permissions = selection.permissions;
+                next.permission_flags = selection.permission_flags;
                 next.workspace_trust = selection.workspace_trust;
             }
             LauncherKind::Command => next.command_agent = Some(agent),
@@ -501,10 +526,11 @@ pub fn apply_template(
     }
 
     // 3. The agent launch's choices.
-    let agent_fields: [(&'static str, bool); 4] = [
+    let agent_fields: [(&'static str, bool); 5] = [
         ("model", fields.model.is_some()),
         ("effort", fields.effort.is_some()),
         ("permissions", fields.permissions.is_some()),
+        ("permission flags", fields.permission_flags.is_some()),
         ("workspace trust", fields.workspace_trust.is_some()),
     ];
     if let Some((field, _)) = agent_fields.iter().find(|(_, set)| *set) {
@@ -566,6 +592,7 @@ pub fn apply_template(
                     // runs: an effort the new model does not offer goes.
                     let (selection, owner) = reconcile_harness_selection(
                         LaunchSelection {
+                            permission_flags: next.permission_flags.clone(),
                             harness,
                             model: Some(model.clone()),
                             effort: next.effort,
@@ -615,6 +642,7 @@ pub fn apply_template(
                 ));
             }
             next.permissions = permissions;
+            next.permission_flags = fields.permission_flags.clone();
         }
         if let Some(trust) = fields.workspace_trust {
             if trust.is_some() && !harness.offers_workspace_trust() {
@@ -695,6 +723,66 @@ pub fn apply_templates<'t>(
 
 #[cfg(test)]
 mod tests {
+    /// Custom CLI words stay with their agent, survive template serialization,
+    /// and disappear on a later permission edit. Stacking cannot smuggle words
+    /// into a non-custom choice, nor mutate the original on a refusal.
+    #[test]
+    fn custom_templates_and_harness_switches_preserve_the_permission_contract() {
+        let words = vec!["--mode".into(), "ask me".into()];
+        let template = super::LaunchTemplate {
+            name: "custom".into(),
+            fields: super::TemplateFields {
+                agent: Some(crate::LaunchHarness::Claude),
+                permissions: Some(Some(crate::LaunchPermission::Custom)),
+                permission_flags: Some(words.clone()),
+                ..Default::default()
+            },
+        };
+        super::check_template_shape(&template).unwrap();
+        let roundtrip: super::LaunchTemplate =
+            serde_json::from_str(&serde_json::to_string(&template).unwrap()).unwrap();
+        assert_eq!(roundtrip, template);
+        let context = super::TemplateContext {
+            catalog: &[],
+            known_hosts: &[],
+            host_fixed: false,
+        };
+        let custom =
+            super::apply_template(&super::LauncherState::default(), &template, &context).unwrap();
+        assert_eq!(custom.permission_flags, Some(words.clone()));
+        let mut later = template.clone();
+        later.fields.permissions = Some(Some(crate::LaunchPermission::Guarded));
+        assert!(super::apply_template(&custom, &later, &context).is_err());
+        later.fields.permission_flags = None;
+        assert!(
+            super::apply_template(&custom, &later, &context)
+                .unwrap()
+                .permission_flags
+                .is_none()
+        );
+        let selection = crate::LaunchSelection {
+            harness: crate::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: Some(crate::LaunchPermission::Custom),
+            permission_flags: Some(words),
+            workspace_trust: None,
+        };
+        for destination in [
+            crate::LaunchHarness::Codex,
+            crate::LaunchHarness::Goose,
+            crate::LaunchHarness::Grok,
+        ] {
+            let (changed, _) =
+                super::reconcile_harness_selection(selection.clone(), None, destination, &[]);
+            assert!(changed.permission_flags.is_none());
+            assert_ne!(changed.permissions, Some(crate::LaunchPermission::Custom));
+        }
+        assert_eq!(
+            super::reconcile_harness_selection(selection.clone(), None, selection.harness, &[]).0,
+            selection
+        );
+    }
     use super::*;
 
     /// Every launch-specific field determines a legacy template's tab, while

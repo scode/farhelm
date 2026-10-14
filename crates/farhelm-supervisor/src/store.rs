@@ -6131,6 +6131,7 @@ mod tests {
             .expect("read prior row")
             .expect("row exists");
         let selection = farhelm_proto::LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
             effort: None,
@@ -8839,6 +8840,7 @@ mod tests {
     async fn work_start_provenance_and_launch_survive_both_session_readers() {
         let (_dir, store) = fresh_store().await;
         let launch = farhelm_proto::LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: Some("gpt-6-astra".to_string()),
             effort: Some(farhelm_proto::LaunchEffort::High),
@@ -8934,6 +8936,7 @@ mod tests {
         ] {
             let (_dir, store) = fresh_store().await;
             let launch = farhelm_proto::LaunchSelection {
+                permission_flags: None,
                 harness,
                 model: Some(model.to_string()),
                 effort,
@@ -9003,6 +9006,7 @@ mod tests {
             .await
             .expect("create fixture");
         let launch = farhelm_proto::LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Omp,
             model: Some("provider/model".into()),
             effort: Some(farhelm_proto::LaunchEffort::High),
@@ -12129,6 +12133,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
         let selection = farhelm_proto::LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: Some("gpt-x".to_string()),
             effort: None,
@@ -12217,6 +12222,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("supervisor.db");
         let selection = farhelm_proto::LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
             effort: None,

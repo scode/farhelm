@@ -1137,6 +1137,7 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
         (
             "structured-recovery",
             Selector::Structured(LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Codex,
                 model: Some("gpt-5.6-terra".into()),
                 effort: Some(LaunchEffort::High),

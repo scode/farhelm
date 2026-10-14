@@ -34,7 +34,7 @@ const BASELINE = {
   harness: "codex",
   model: "gpt-6-astra" as string | null,
   effort: "high" as string | null,
-  permissions: null,
+  permissions: null as string | null,
   workspace_trust: null,
 };
 
@@ -1067,8 +1067,30 @@ test("restart with makes the page inert while open and restores it exactly", asy
   expect(await inertSet(), "after a successful restart").toEqual(["sidebar"]);
 });
 
-/**
- * Older default-YOLO sessions stored an omitted permission. Pressing their
+/** Custom words from a stored selection must seed the editor and an edited
+ * vector must be the restart request, even when quoted arguments contain spaces.
+ * Malformed quotes disable the action rather than dropping the custom choice.
+ */
+test("restart with re-displays and submits custom permission words", async ({ page }) => {
+  const custom = { ...BASELINE, permissions: "custom", permission_flags: ["--mode", "ask me", "$HOME"] };
+  await injectSession(page, custom, "resume");
+  const bodies = await acceptYoloRestart(page);
+  const dialog = await openInjectedDialog(page);
+  const flags = dialog.locator(".custom-permission-flags");
+  await expect(flags).toHaveValue("--mode 'ask me' '$HOME'");
+  await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
+  await flags.fill("--mode '");
+  await expect(dialog.locator(".restart-with-submit")).toBeDisabled();
+  await expect(flags).toHaveValue("--mode '");
+  await flags.fill('--mode "different words"');
+  await expect(dialog.locator(".restart-with-submit")).toBeEnabled();
+  await dialog.locator(".restart-with-submit").click();
+  await expect(dialog).toHaveCount(0);
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).toMatchObject({ with: { permissions: "custom", permission_flags: ["--mode", "different words"] } });
+});
+
+/** Older default-YOLO sessions stored an omitted permission. Pressing their
  * already-selected YOLO button must not invent an edit or enable a restart.
  */
 test("restart with compares an older omitted permission by its effective mode", async ({ page }) => {

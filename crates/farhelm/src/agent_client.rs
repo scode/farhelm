@@ -334,7 +334,9 @@ pub(crate) enum SpawnLaunch {
     /// title are added by [`spawn_session`].
     Flags {
         templates: Vec<String>,
-        edits: farhelm_proto::launcher::TemplateFields,
+        // Template fields grow with launcher choices. The inherited case has
+        // no edits, so only flag-based requests own this larger payload.
+        edits: Box<farhelm_proto::launcher::TemplateFields>,
     },
 }
 
@@ -372,7 +374,7 @@ pub(crate) async fn spawn_session(env: &SessionEnv, args: SpawnArgs) -> anyhow::
                 true,
             )
         }
-        SpawnLaunch::Flags { templates, edits } => (templates, edits, false),
+        SpawnLaunch::Flags { templates, edits } => (templates, *edits, false),
     };
     edits.destination = cwd.map(farhelm_proto::launcher::TemplateDestination::Folder);
     edits.name = args.title;

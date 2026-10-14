@@ -1178,6 +1178,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
 
     let work = farhelm_teststate::tempdir().expect("structured clone workdir");
     let selection = LaunchSelection {
+        permission_flags: None,
         harness: LaunchHarness::Codex,
         model: Some("gpt-6-astra".to_string()),
         effort: Some(LaunchEffort::High),

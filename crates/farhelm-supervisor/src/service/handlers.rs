@@ -3762,6 +3762,7 @@ mod tests {
                 crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
             ]),
             Some(LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Codex,
                 model: Some("gpt-6-astra".to_string()),
                 effort: Some(farhelm_proto::LaunchEffort::High),

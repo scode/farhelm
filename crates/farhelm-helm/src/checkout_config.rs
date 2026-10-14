@@ -2182,6 +2182,7 @@ mod tests {
                 migration_session(&format!("history-{sequence}"), 1_700_000_000 + sequence);
             entry.creation_seq = Some(sequence as u64);
             entry.launch = crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: Some(format!("model-{sequence}")),
                 effort: None,
@@ -2197,6 +2198,7 @@ mod tests {
             title: "history title".into(),
             creation_seq: Some(9_999),
             launch: crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: Some("gpt-6-astra".into()),
                 effort: Some(farhelm_proto::LaunchEffort::High),

@@ -127,7 +127,10 @@ pub(crate) async fn put_preferences(
                 "{word:?} is not a remembered structured-launch permissions mode; this helm \
                  serves {}",
                 farhelm_proto::LaunchPermission::ALL
+                    .into_iter()
+                    .filter(|permission| *permission != farhelm_proto::LaunchPermission::Custom)
                     .map(farhelm_proto::LaunchPermission::wire_word)
+                    .collect::<Vec<_>>()
                     .join(", ")
             ),
         }));

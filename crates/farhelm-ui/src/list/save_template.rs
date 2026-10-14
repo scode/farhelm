@@ -51,6 +51,7 @@ impl Candidate {
                 fields.effort = state.effort.map(Some);
                 fields.permissions = (state.permissions.is_some() || explicit.permissions)
                     .then_some(state.permissions);
+                fields.permission_flags = state.permission_flags.clone();
                 fields.workspace_trust = (state.workspace_trust.is_some() || explicit.trust)
                     .then_some(state.workspace_trust);
                 // Clone and recents mark their launch choices explicit even
@@ -114,9 +115,14 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
         Field::Agent => fields.agent.map(word),
         Field::Model => fields.model.clone().flatten(),
         Field::Effort => fields.effort.flatten().map(word),
-        Field::Permissions => Some(crate::launch_composer::permission_label(
-            fields.agent,
-            fields.permissions.flatten(),
+        Field::Permissions => Some(format!(
+            "{}{}",
+            crate::launch_composer::permission_label(fields.agent, fields.permissions.flatten()),
+            fields
+                .permission_flags
+                .as_ref()
+                .map(|words| format!(" · {}", shell_words::join(words)))
+                .unwrap_or_default(),
         )),
         Field::Trust => fields
             .workspace_trust

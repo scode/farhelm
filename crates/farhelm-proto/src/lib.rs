@@ -129,7 +129,10 @@ pub mod text;
 pub mod time;
 /// Build classification shared by browser wording and native release decisions.
 pub mod version;
-pub use launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+pub use launch::{
+    LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, check_permission_flags,
+    split_permission_flags,
+};
 pub use version::is_development_build;
 /// The launcher's shared rules: the model catalog, agent-type
 /// reconciliation and launch templates.
@@ -200,7 +203,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_48` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_49` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -211,7 +214,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 48;
+pub const PROTOCOL_VERSION: u32 = 49;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -2104,7 +2107,10 @@ pub enum AgentReply {
     Created { session: AgentSession },
     /// A template write's result: the template as stored, in the listing's
     /// form (command text withheld, as [`AgentTemplate::listed`] makes it).
-    TemplateWritten { template: AgentTemplate },
+    // Template fields grow independently of most replies. Keep their owned
+    // payload behind one pointer so adding a template choice does not enlarge
+    // every agent response, including refusals. Serde keeps the same wire shape.
+    TemplateWritten { template: Box<AgentTemplate> },
     /// A template delete's confirmation, carrying nothing beyond success.
     TemplateDeleted {},
 }
@@ -4744,8 +4750,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_48() {
-        assert_eq!(PROTOCOL_VERSION, 48);
+    fn protocol_version_is_pinned_at_49() {
+        assert_eq!(PROTOCOL_VERSION, 49);
     }
 
     /// Placement setup has its own acknowledgement. Request echoes cannot settle it,
@@ -6295,6 +6301,7 @@ mod tests {
             cwd: "/some/dir".to_string(),
             launch: Some(SessionLaunch::Agent {
                 selection: crate::LaunchSelection {
+                    permission_flags: None,
                     harness: crate::LaunchHarness::Claude,
                     model: Some("opus".to_string()),
                     effort: None,

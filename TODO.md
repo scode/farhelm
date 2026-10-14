@@ -172,8 +172,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
   this refers to and what matching it would mean; ask before starting.
 
-- add a "custom" permission mode next to guarded/yolo. Plan: `plans/queue/custom-permission-flags.md`.
-
 - **Launch a session with a given conversation id.** When creating a session, let the user name the agent conversation
   it should use (what some agents call a session id), for example to continue a conversation started outside Farhelm in
   a Farhelm session. Today a session only ever resumes the conversation Farhelm captured for it. Plan:

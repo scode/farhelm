@@ -749,6 +749,9 @@ fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
                 .expect("permission help has a heading")
                 .to_string(),
             ));
+            if let Some(words) = &selection.permission_flags {
+                rows.push(CardRow::Value("permission flags", shell_words::join(words)));
+            }
             if let Some(trust) = selection.workspace_trust {
                 rows.push(CardRow::Note(
                     "workspace trust",
@@ -814,6 +817,14 @@ fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Ve
             "permissions",
             crate::launch_composer::permission_label(fields.agent, *permissions),
         ));
+    }
+    // The words themselves, as the launch card shows them. An agent can
+    // write or edit a custom template's flags (an edit may send only the
+    // words, keeping the stored Custom), and those words can make the agent
+    // CLI run arbitrary commands; approving a card that said only "custom"
+    // would approve flags the user never saw.
+    if let Some(words) = &fields.permission_flags {
+        rows.push(CardRow::Value("permission flags", shell_words::join(words)));
     }
     if let Some(trust) = &fields.workspace_trust {
         rows.push(CardRow::Note(
@@ -963,6 +974,36 @@ mod tests {
         assert!(rows.contains(&CardRow::Note("title", "generated")));
     }
 
+    /// Spec: a template write's card shows the whole resulting template,
+    /// custom permission flags included.
+    ///
+    /// Why: an agent can store or swap a custom template's flags, which can
+    /// make the agent CLI run arbitrary commands when the template launches
+    /// (possibly by quick launch, with no further prompt on a host that does
+    /// not ask before YOLO launches). The approval covers what the card
+    /// shows, so the card must show the words, not only "custom".
+    #[test]
+    fn a_template_card_shows_custom_permission_flags() {
+        let fields = TemplateFields {
+            agent: Some(farhelm_proto::LaunchHarness::Claude),
+            permissions: Some(Some(farhelm_proto::LaunchPermission::Custom)),
+            permission_flags: Some(vec![
+                "--settings".to_string(),
+                "{\"hooks\": {}}".to_string(),
+            ]),
+            ..TemplateFields::default()
+        };
+        let mut rows = Vec::new();
+        template_rows(&fields, None, &mut rows);
+        assert!(
+            rows.contains(&CardRow::Value(
+                "permission flags",
+                "--settings '{\"hooks\": {}}'".to_string()
+            )),
+            "{rows:?}"
+        );
+    }
+
     /// Spec: an agent launch's card names its permission mode in one line,
     /// from the stored permission.
     ///
@@ -976,6 +1017,7 @@ mod tests {
         let permissions_of = |permissions: Option<farhelm_proto::LaunchPermission>| {
             let launch = SessionLaunch::Agent {
                 selection: farhelm_proto::LaunchSelection {
+                    permission_flags: None,
                     harness: farhelm_proto::LaunchHarness::Claude,
                     model: None,
                     effort: None,
