@@ -75,3 +75,77 @@ Test selectors and invalid-save expectations were corrected. The final recheck f
 required scope reassessment found no substantial expansion and identified the existing editable renderer, which was
 reused. Commit and PR wording cold reads confirmed the explanation and compatibility caveats; the final title includes
 the required breaking marker. All implementation remained local; only mandated reviews and cold reads were delegated.
+
+### Landing
+
+Landed alone in its round as #1995. While it was landing, main gained queue bookkeeping and one TODO.md entry (#1996,
+the follow-up from the release-advisories decision). Neither touches launches or permissions.
+
+#### Release-relevant
+
+The helm–supervisor protocol moves from 48 to 49, so this release requires updating remote hosts: a host left on the old
+version sits at "needs update". Neither database schema version changed, matching the precedent of #1992. A session or
+template stored with custom flags cannot be read by an older release, as the plan's own report says.
+
+#### Review
+
+An independent fresh-context review traced the YOLO guard and confirmed that custom counts as YOLO on every path:
+
+- a user's create, a quick launch from the marked template, and templates;
+- Restart with;
+- a plain Replace, which asks on hosts that ask first;
+- agent-requested creates, clones and inherited spawns, which are refused on hosts that ask first;
+- plain restart, which by design is not re-checked.
+
+Skipping session confirmations cannot skip the YOLO question. Custom words are placed as whole arguments with no shell,
+and the reserved placeholders are refused. Custom never becomes the remembered permission on either side.
+
+#### Fix made while landing
+
+The review found one blocker, fixed before merging. An agent's request to write or edit a launch template showed only
+"permissions: custom" on its approval card, never the flags themselves. An agent could store arbitrary custom flags in a
+template this way, or edit a custom template and swap only its flags, leaving the card looking the same. Such flags can
+make the agent run arbitrary commands, for example through hooks given in a settings flag. Launching that template, or
+quick-launching it if it carries the mark, would then start it with no further prompt on a host that starts YOLO
+sessions without asking. The approval covers what the card shows, so the card now shows the exact words, as the launch
+card already did, and a new unit test pins it. The YOLO question for a custom launch also no longer says "your custom
+permission flags", since an agent may have supplied them; the browser test that pinned the old wording was updated.
+
+#### Review notes left as they are
+
+- The YOLO question does not list the custom flags it is asking about. Showing them would make that confirmation more
+  meaningful.
+- Length and count limits on custom words are enforced only by the supervisor. Very long flag lists therefore fail after
+  the YOLO question, with a message about resume command elements rather than permission flags. A helm-side limit would
+  give a clearer refusal.
+- Only NUL is refused among control characters. That is harmless, since no shell runs the words and the display escapes
+  them.
+- Words like `--` or a vendor subcommand are not refused. That escalates nothing, since a custom launch is already YOLO
+  and the spec leaves such words to the user.
+- Launching with custom clears the remembered permission rather than leaving the previous one. That is the safe
+  direction.
+- Agents see custom words in their template listing, while command text is withheld there; the spec does not say which
+  is intended.
+- On the agents page, the custom paragraph comes before the guarded and YOLO modes are explained.
+- The changelog fragment's wording will be rewritten at release curation.
+
+#### Checks
+
+- Run now, on the final tree:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog format lint and the sleep checker (298 delays, none
+    missing a reason);
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+    `cargo check -p farhelm-ui --features desktop`;
+  - the supervisor, helm, UI, protocol and CLI unit and binary tests, plus the structured launch, agent relay, wrapper
+    launch, restart-with-resume, create idempotency, GitHub checkout and session lifecycle e2e modules, through the
+    recorder with pinned tmux, four slots and no retries: 3133 passed, run `e19fbb4b-74af-4d13-acd8-91946caa3abd`. Its
+    224 skips are tests outside the selection;
+  - helm, protocol and CLI doctests, run `07b31069-9f75-4af3-9e84-fb45011ca40f`;
+  - the asset JavaScript harness (241 passed) and the website build;
+  - on Chromium and WebKit, the custom permissions, approval layout, guarded permissions, YOLO guard, Restart with,
+    clone, templates, remembered permissions, quick launch and launcher Enter specs: 258 passed, none failed, run
+    `dcf806fa-80c5-4aad-a34d-998616292b98`.
+- Stopped on purpose: an earlier start of the same run, while the blocker fix was edited in.
+- Not run: the full workspace battery, the full browser battery, desktop runtime, installer and release gates. This
+  change touches none of those paths.
+- No real vendor agent was launched with custom flags, here or by the executor.
