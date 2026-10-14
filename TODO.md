@@ -236,6 +236,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   it should use (what some agents call a session id), for example to continue a conversation started outside Farhelm in
   a Farhelm session. Today a session only ever resumes the conversation Farhelm captured for it.
 
+- **Number shortcuts for launching templates.** Let the user bind each of Cmd+0 through Cmd+9 to a template, so that
+  pressing it launches a session from that template right away, the same way the Cmd+P template quick launch (being
+  planned, not yet on main) does once a template is picked. Build on that work once it lands. Browsers keep Cmd/Ctrl
+  with a digit for switching tabs and Cmd/Ctrl+0 for resetting zoom, the same reason the web UI has no Cmd+N, so decide
+  what the web UI and the chord off macOS get.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
