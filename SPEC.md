@@ -1170,11 +1170,11 @@ apply to every host and client of this helm; existing controls with a natural pl
 keeps its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a
 browser tab and the desktop app open in the same order and on the same session. Per-client persistence — browser
 storage, a desktop state file, anything that lets two clients remember different answers — is not wanted for these
-shared preferences (sidebar width, terminal text size and sound switches, by contrast, are deliberately per device; see
-Session list, Terminal experience and Status). A client that asks the helm for no particular order gets creation time.
-No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest
-the list and implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record
-it, while `farhelm agent create` and `clone` need not record the asking session.
+shared preferences, including welcome-card dismissal (sidebar width, terminal text size and sound switches, by contrast,
+are deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm for no
+particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by
+the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 240px and 600px, with 340px as the default. Double-click
 the edge to reset it, or focus the separator and use Left and Right to step by 10px. Its width is remembered per device,
@@ -2206,11 +2206,30 @@ the agent creates it.
 ## Feedback
 
 The sidebar's top bar has a **?** button immediately to the right of the settings gear, in the desktop app and the web
-UI alike. It opens a small menu with three items, in order: **Send feedback**, **Documentation** and **Release notes**.
-Documentation opens the docs site (`https://farhelm.io/docs/`) in the user's browser: a new tab from the web UI, the
-system browser from the desktop app. Release notes opens the general release notes page
+UI alike. It opens a small menu with four items, in order: **Send feedback**, **Documentation**, **Release notes** and
+**Welcome**. Documentation opens the docs site (`https://farhelm.io/docs/`) in the user's browser: a new tab from the
+web UI, the system browser from the desktop app. Release notes opens the general release notes page
 (`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is waiting. The installed desktop
-app's menu has a fourth item, **Check for updates** (see [Installation and updates](#installation-and-updates)).
+app's menu has a fifth item, **Check for updates** (see [Installation and updates](#installation-and-updates)). Welcome
+shows the welcome card again.
+
+### Welcome card
+
+Once per helm, a welcome card introduces Farhelm and points at the Get started guide's first-session page and private
+feedback. Every helm starts unseen, including existing helms after updating. Each page load decides once, after sign-in
+and a successful shared-preferences read; a failed or timed-out read does not open the card. It is a modal in the app's
+dialog style, titled **welcome to farhelm**, with focus inside and other global chords inactive. Escape, the ×, **got
+it**, and **Send feedback now** close it and mark it seen in the helm's shared preferences. A failed write still closes
+it and may let it appear on a later load. Other clients pick up dismissal on their next load; a card already open
+elsewhere stays open.
+
+**Read Get started** opens `https://farhelm.io/docs/get-started/first-session/` in the user's browser through the same
+opener as Documentation and leaves the card open. **Send feedback now** closes it and opens the feedback dialog, without
+sending anything. The footer says it is available again as **welcome** in the **?** menu. Reopening does not reset or
+rewrite seen. Closing a reopened card returns focus to the help toggle; the first-open card has no originating control
+and restores ordinary initial page focus.
+
+### Sending feedback
 
 Send feedback is a lightweight, private way to tell the maintainer something. It opens a dialog with a required message,
 an optional field for how to reach the user, and a plain display of everything else that will be sent: the Farhelm

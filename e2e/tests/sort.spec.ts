@@ -654,7 +654,7 @@ test.describe("session list ordering", () => {
       await fulfillAsHelm(route, helm, {
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ list_sort: "most-recent" }),
+        body: JSON.stringify({ list_sort: "most-recent", welcome_seen: true }),
       });
     });
     const asked = await watchSortParameters(page);
@@ -663,6 +663,7 @@ test.describe("session list ordering", () => {
 
     await expect(page.locator(".sort-select")).toHaveValue("activity");
     expect(asked.length, "loading the list must read it").toBeGreaterThan(0);
+    await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
     for (const sort of asked) {
       expect(sort, "an unusable preference must not reach the helm").toBe("activity");
     }
@@ -797,7 +798,7 @@ test.describe("session list ordering", () => {
       await fulfillAsHelm(route, helm, {
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ list_sort: "title", last_selected: ids.m }),
+        body: JSON.stringify({ list_sort: "title", last_selected: ids.m, welcome_seen: true }),
       });
     });
     const asked = await watchSortParameters(page);
@@ -819,6 +820,7 @@ test.describe("session list ordering", () => {
     await feed.waitForConnection(1);
     feed.notify(1);
     await expect(page.locator(".sort-select")).toHaveValue("title", { timeout: 20_000 });
+    await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
     await expect(page.locator(".titlebar .title")).toContainText(`sortfix-${stamp}-mmm`, {
       timeout: 20_000,
     });

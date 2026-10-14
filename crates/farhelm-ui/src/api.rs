@@ -577,6 +577,7 @@ pub(crate) async fn save_checkout_post_clone(
 /// them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PreferenceField {
+    WelcomeSeen,
     Sort,
     Selected,
     Compact,
@@ -593,6 +594,7 @@ impl PreferenceField {
     /// The field's wire key in a `PUT /api/preferences` patch.
     fn key(self) -> &'static str {
         match self {
+            PreferenceField::WelcomeSeen => "welcome_seen",
             PreferenceField::Sort => "list_sort",
             PreferenceField::Selected => "last_selected",
             PreferenceField::Compact => "compact",
@@ -615,6 +617,8 @@ impl PreferenceField {
 /// helm route's typed-validation concern.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PreferenceValue {
+    /// Dismissing the first-open card is a best-effort shared preference write.
+    WelcomeSeen(bool),
     Sort(String),
     Selected(String),
     Compact(bool),
@@ -644,6 +648,7 @@ impl PreferenceValue {
     /// Select the independent queue slot that serializes writes for this value.
     fn field(&self) -> PreferenceField {
         match self {
+            Self::WelcomeSeen(_) => PreferenceField::WelcomeSeen,
             Self::Sort(_) => PreferenceField::Sort,
             Self::Selected(_) => PreferenceField::Selected,
             Self::Compact(_) => PreferenceField::Compact,
@@ -666,7 +671,8 @@ impl PreferenceValue {
             }
             Self::TerminalLinkClick(value) => serde_json::json!(value.key()),
             Self::TemplateShortcuts(value) => serde_json::json!(value),
-            Self::Compact(value)
+            Self::WelcomeSeen(value)
+            | Self::Compact(value)
             | Self::HostRemoveConfirmation(value)
             | Self::SessionConfirmations(value)
             | Self::HostSetupConfirmation(value) => serde_json::json!(value),
@@ -676,6 +682,7 @@ impl PreferenceValue {
     /// Place a dirty local choice over a freshly fetched helm seed.
     fn overlay(&self, seed: &mut Preferences) {
         match self {
+            Self::WelcomeSeen(value) => seed.welcome_seen = Some(*value),
             Self::Sort(value) => seed.list_sort = Some(value.clone()),
             Self::Selected(value) => seed.last_selected = Some(value.clone()),
             Self::Compact(value) => seed.compact = Some(*value),
@@ -754,6 +761,7 @@ struct PreferenceCompletion {
 /// OUTSIDE every remounted subtree.
 #[derive(Default)]
 struct PreferenceWrites {
+    welcome_seen: FieldWrite,
     sort: FieldWrite,
     selected: FieldWrite,
     compact: FieldWrite,
@@ -769,6 +777,7 @@ struct PreferenceWrites {
 impl PreferenceWrites {
     fn field(&mut self, field: PreferenceField) -> &mut FieldWrite {
         match field {
+            PreferenceField::WelcomeSeen => &mut self.welcome_seen,
             PreferenceField::Sort => &mut self.sort,
             PreferenceField::Selected => &mut self.selected,
             PreferenceField::Compact => &mut self.compact,
@@ -911,6 +920,7 @@ impl PreferenceWrites {
     /// may have written since).
     fn dirty(&self, field: PreferenceField) -> Option<PreferenceValue> {
         let slot = match field {
+            PreferenceField::WelcomeSeen => &self.welcome_seen,
             PreferenceField::Sort => &self.sort,
             PreferenceField::Selected => &self.selected,
             PreferenceField::Compact => &self.compact,
@@ -1003,6 +1013,7 @@ pub(crate) fn store_preference(base: &str, value: PreferenceValue) {
 /// those (another client may have written since this one did).
 pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Preferences {
     for field in [
+        PreferenceField::WelcomeSeen,
         PreferenceField::Sort,
         PreferenceField::Selected,
         PreferenceField::Compact,
@@ -4996,6 +5007,28 @@ mod preference_write_tests {
         PreferenceCompletion, PreferenceField, PreferenceValue, PreferenceWrites, Preferences,
         TerminalLinkClick,
     };
+
+    /// Dismissal uses the ordinary independent queue slot. A failed write
+    /// remains local intent across credential recovery, rather than reopening
+    /// the first-open card because the server still says unseen.
+    #[farhelm_testtrace::test]
+    fn welcome_seen_failure_keeps_replay_intent() {
+        let mut queue = PreferenceWrites::default();
+        let field = PreferenceField::WelcomeSeen;
+        let seen = PreferenceValue::WelcomeSeen(true);
+        assert!(queue.record(seen.clone()));
+        assert_eq!(queue.next_to_send(field), Some(seen.clone()));
+        assert!(!queue.finished(field, &seen, false));
+        assert_eq!(queue.dirty(field), Some(seen.clone()));
+        let mut seed = Preferences::default();
+        queue.dirty(field).unwrap().overlay(&mut seed);
+        assert_eq!(seed.welcome_seen, Some(true));
+        assert_eq!(seen.wire_value(), serde_json::json!(true));
+        assert_eq!(field.key(), "welcome_seen");
+        assert_eq!(queue.begin_replay(field), Some(seen.clone()));
+        assert!(!queue.finished(field, &seen, true));
+        assert_eq!(queue.dirty(field), None);
+    }
 
     /// A failed in-flight map is drained before deletion and its matching name
     /// retired before credential replay. Other keys stay dirty: clearing them

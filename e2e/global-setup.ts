@@ -32,7 +32,10 @@ interface StackInfo {
  */
 export const STACK_INFO_ENV = "FARHELM_E2E_STACK_INFO";
 
-/** Mint one device identity and persist it before any browser worker starts. */
+/** Authenticate and mark the shared welcome seen before any harness page opens.
+ * All four capture/test configs use this setup, so a fresh helm's introduction
+ * cannot cover their UI. The welcome's own tests explicitly restore unseen.
+ */
 export default async function globalSetup(config: FullConfig) {
   const infoPath = process.env[STACK_INFO_ENV] || path.join(__dirname, ".stack-info.json");
   const info = JSON.parse(await readFile(infoPath, "utf8")) as StackInfo;
@@ -55,6 +58,12 @@ export default async function globalSetup(config: FullConfig) {
   if (typeof body.device_secret !== "string" || body.device_secret === "") {
     throw new Error("the harness token exchange returned no device secret");
   }
+
+  const seen = await client.put("/api/preferences", {
+    headers: { Authorization: `Bearer ${body.device_secret}` },
+    data: { welcome_seen: true },
+  });
+  expect(seen, "the welcome must be marked seen before harness pages open").toBeOK();
 
   const directory = path.dirname(AUTH_STORAGE_STATE_PATH);
   await mkdir(directory, { recursive: true, mode: 0o700 });

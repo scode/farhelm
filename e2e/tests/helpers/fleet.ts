@@ -993,6 +993,8 @@ export async function hideSeenState(page: Page): Promise<void> {
 
 /** The helm's shared client preference as `GET /api/preferences` answers it. */
 export interface Preferences {
+  /** First-open welcome dismissal, shared across all clients of this helm. */
+  welcome_seen?: boolean;
   list_sort?: string;
   last_selected?: string;
   compact?: boolean;
@@ -1036,6 +1038,7 @@ export async function readPreferences(request: APIRequestContext): Promise<Prefe
 export async function patchPreferences(
   request: APIRequestContext,
   patch: {
+    welcome_seen?: boolean | null;
     list_sort?: string | null;
     last_selected?: string | null;
     compact?: boolean | null;
@@ -1063,6 +1066,7 @@ export async function patchPreferences(
  * spec whose subject is the order or the auto-select must therefore reset
  * the row in `beforeEach` rather than inherit the last test's answer.
  *
+ * Welcome is restored to seen, because these tests are not first-open flows.
  * Every field `patchPreferences` accepts belongs in this reset. One left out
  * leaks across spec files without any test noticing locally: remembered
  * workspace trust was missing, so the quick switcher's `true` survived its
@@ -1071,6 +1075,7 @@ export async function patchPreferences(
  */
 export async function resetPreferences(request: APIRequestContext): Promise<void> {
   await patchPreferences(request, {
+    welcome_seen: true,
     list_sort: null,
     last_selected: null,
     compact: null,

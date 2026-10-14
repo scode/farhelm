@@ -164,6 +164,7 @@ mod skew;
 mod sounds;
 mod status;
 mod tabs;
+mod welcome;
 mod window_chrome;
 /// The loud confirmation a YOLO launch asks for on a host that asks first.
 mod yolo_confirm;
@@ -1530,6 +1531,9 @@ fn AppBody() -> Element {
         }
     });
     let mut current = use_signal(|| None::<Session>);
+    // Authentication recovery remounts PreferencesGate, but must not decide
+    // whether to introduce the app a second time in the same page load.
+    use_context_provider(|| welcome::WelcomeDecided(Signal::new(false)));
     // A single one-shot bridge lets the keyed session view request the list's
     // existing clone composer without introducing a registry or context.
     let prefill_request = use_signal(|| None::<HeaderPrefillRequest>);
@@ -1795,6 +1799,8 @@ fn AppBody() -> Element {
 
 /// Hold the authenticated tree until the helm's shared preference has been
 /// read once, then provide it as `list::SharedPreferences` context.
+/// A successful read also decides whether to offer the first-open welcome;
+/// defaults supplied after failure must never be mistaken for an unseen helm.
 ///
 /// The read is the seed for two things the list decides on its FIRST run:
 /// which order the sort control starts in, and which session auto-select
@@ -1834,6 +1840,8 @@ fn PreferencesGate(children: Element) -> Element {
         use_context_provider(|| list::SharedPreferences(Signal::new(api::Preferences::default())));
     use_context_provider(|| list::DeleteNotice(Signal::new(None)));
     let mut loaded = use_signal(|| false);
+    let mut welcome_on_load = use_context_provider(|| welcome::WelcomeOnLoad(Signal::new(false)));
+    let mut welcome_decided = use_context::<welcome::WelcomeDecided>();
     // Retained JS terminal islands outlive tab renders. Publish one page-wide
     // choice from the authenticated shared snapshot; every gesture reads it
     // afresh, so changing settings never remounts or reattaches a terminal.
@@ -1858,18 +1866,27 @@ fn PreferencesGate(children: Element) -> Element {
             // spirit.
             #[cfg(target_arch = "wasm32")]
             scrub_retired_preference_keys();
-            let seed = match api::fetch_preferences(&base).await {
-                Ok(seed) => seed,
+            let (seed, read_succeeded) = match api::fetch_preferences(&base).await {
+                Ok(seed) => (seed, true),
                 Err(detail) => {
                     dioxus::logger::tracing::warn!(
                         target: "preferences",
                         "could not read the list preference from the helm; using defaults: \
                          {detail}"
                     );
-                    api::Preferences::default()
+                    (api::Preferences::default(), false)
                 }
             };
-            preferences.0.set(api::seed_with_local_changes(&base, seed));
+            let seed = api::seed_with_local_changes(&base, seed);
+            // A failed read also yields defaults, but those defaults are not
+            // evidence that this helm's welcome has never been dismissed.
+            if !*welcome_decided.0.peek() && !*auth::TOKEN_REQUIRED.peek() {
+                welcome_decided.0.set(true);
+                welcome_on_load
+                    .0
+                    .set(read_succeeded && seed.welcome_seen != Some(true));
+            }
+            preferences.0.set(seed);
             loaded.set(true);
         }
     });

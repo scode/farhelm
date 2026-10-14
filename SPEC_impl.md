@@ -145,6 +145,16 @@ Helm schema 51 adds `welcome_seen` to the shared preference row. Unset and false
 helms start unseen. The dismissal belongs to the helm so closing the welcome card on one client hides it on every
 client's next load. This migration prevents older helms from opening the database.
 
+The preferences gate exposes its successful-read, unseen decision before mounting the authenticated UI. AppBar seeds the
+welcome's open state once from it, separately from later preference changes; defaults after a failed or timed-out read
+never count as unseen evidence. A page-owned consumed-decision flag survives authentication remounts; an initial
+authentication refusal does not consume it before sign-in finishes. First-open dismissal explicitly restores the
+selected, revealed terminal's focus, because its reveal behind a modal deliberately withholds that handoff. The card
+uses the existing framed modal and isolation helper, with every close path available regardless of persistence.
+First-open dismissal writes through the normal per-field preference queue; help-menu reopening writes nothing. AppBar
+owns both welcome and feedback so their handoff releases isolation and replaces one modal with the other without a
+competing focus-return task.
+
 The session list's chosen ORDER, last-selected session, compact-row choice, and the launch composer's remembered
 permissions and workspace-trust choices, host confirmation choices, and remembered feedback contact are one preference
 the HELM keeps, in a singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`,

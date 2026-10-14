@@ -103,11 +103,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
   this refers to and what matching it would mean; ask before starting.
 
-- **In-app intro tour.** Introduce new users to the app from inside it. At minimum, point out how to send feedback and
-  encourage reading the docs website's Get started section, with a link to it; it may grow into a fuller guided tour.
-  When it appears, how it is dismissed, and how much it covers are to be decided when the entry is planned. Plan:
-  `plans/queue/intro-tour.md`.
-
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
   that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open

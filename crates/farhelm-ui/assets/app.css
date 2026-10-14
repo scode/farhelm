@@ -2645,6 +2645,23 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    attached values stay scoped here. Only its body scrolls, leaving send
    and dismiss reachable. */
 .feedback-dialog { width: min(560px, 100%); }
+/* The welcome uses the same pinned frame, with short prose and two bordered
+   pointers instead of editors. Only its body scrolls in a short window, so
+   dismissal always remains reachable. */
+.welcome-dialog { width: min(520px, 100%); font-size: 12px; line-height: 1.55; }
+.welcome-dialog > .welcome-header { padding: 10px 14px; }
+.welcome-header .host-settings-dismiss { margin-left: auto; }
+.welcome-dialog > .welcome-body { padding: 12px 14px; gap: 8px; color: var(--fg-dim); }
+.welcome-introduction { margin: 0 0 2px; }
+.welcome-item { padding: 8px 10px; border: 1px solid var(--border-dim); border-radius: var(--radius-sm); }
+.welcome-item strong { color: var(--fg-0); }
+.welcome-item a,
+.welcome-feedback { color: var(--accent); }
+.welcome-feedback { display: inline; border: 0; padding: 0; background: transparent; font: inherit; cursor: pointer; }
+.welcome-item a:hover,
+.welcome-feedback:hover { text-decoration: underline; }
+.welcome-dialog > .welcome-footer { display: flex; flex-wrap: nowrap; padding: 8px 14px; }
+.welcome-footer .btn { flex-shrink: 0; }
 .feedback-glyph { width: 28px; height: 28px; }
 .feedback-dialog .host-settings-body { gap: 16px; }
 .feedback-dialog .app-settings-choice { font-size: 13px; }
