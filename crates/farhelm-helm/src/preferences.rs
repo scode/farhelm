@@ -3,7 +3,7 @@
 //! last user-selected session, compact-row choice, and the remembered
 //! permissions and workspace-trust choices of successful structured launches,
 //! host confirmation choices, terminal web-link ownership, quick-launch template,
-//! number-key bindings, and contact reused after successful feedback.
+//! number-key bindings, welcome dismissal, and contact reused after successful feedback.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client persists its own copy, so a browser tab and the desktop
@@ -240,6 +240,55 @@ mod tests {
     async fn read(harness: &rest_harness::Harness) -> Preferences {
         serde_json::from_slice(&read_raw(harness).await)
             .expect("the preference reply decodes as the shared type")
+    }
+
+    /// Seen is a typed, shared field: omission cannot undo another client's
+    /// dismissal, null restores unseen, and invalid types refuse the whole patch.
+    #[farhelm_testtrace::test]
+    async fn welcome_seen_sparse_patch_and_type_contract() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read(&harness).await.welcome_seen, None);
+        for value in [true, false] {
+            let response = harness
+                .router()
+                .oneshot(put(serde_json::json!({"welcome_seen": value})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            assert_eq!(read(&harness).await.welcome_seen, Some(value));
+        }
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({"welcome_seen": true})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({"compact": true})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        for invalid in [serde_json::json!("true"), serde_json::json!(1)] {
+            let response = harness
+                .router()
+                .oneshot(put(
+                    serde_json::json!({"welcome_seen": invalid, "compact": false}),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let saved = read(&harness).await;
+            assert_eq!(saved.welcome_seen, Some(true));
+            assert_eq!(saved.compact, Some(true));
+        }
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({"welcome_seen": null})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(read(&harness).await.welcome_seen, None);
     }
 
     /// Number bindings replace one shared map and never merge per key. Invalid
@@ -591,6 +640,7 @@ mod tests {
                 skip_session_confirmations: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
+                welcome_seen: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -697,6 +747,7 @@ mod tests {
                 skip_session_confirmations: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
+                welcome_seen: None,
             },
             "an explicit null clears the field it names and only that one"
         );
