@@ -216,6 +216,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   cancel default is part of this entry; the per-button decisions get settled when the entry is planned. Related: the
   native `<dialog>` entry under Maybe later, which would change how these dialogs manage focus.
 
+- **Setting to turn off confirmations.** A settings toggle that skips the confirmation step on Delete and similar
+  actions, so they happen on the first click. Which confirmations it covers, and the rest of the details, are to be
+  decided when the entry is planned. Related: the keyboard focus entry above, whose audit of every confirmation in the
+  app is the list this setting would apply to.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
