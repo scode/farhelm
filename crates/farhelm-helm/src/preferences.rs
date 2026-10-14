@@ -2,7 +2,8 @@
 //! remembers for every client (SPEC.md, Session list): the chosen list order,
 //! last user-selected session, compact-row choice, and the remembered
 //! permissions and workspace-trust choices of successful structured launches,
-//! host confirmation choices, terminal web-link ownership, quick-launch template, and contact reused after successful feedback.
+//! host confirmation choices, terminal web-link ownership, quick-launch template,
+//! number-key bindings, and contact reused after successful feedback.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client persists its own copy, so a browser tab and the desktop
@@ -93,6 +94,32 @@ pub(crate) async fn put_preferences(
     State(state): State<Arc<AppState>>,
     axum::Json(patch): axum::Json<PreferencePatch>,
 ) -> impl IntoResponse {
+    if let Some(Some(bindings)) = &patch.template_shortcuts {
+        let mut names = std::collections::BTreeSet::new();
+        // A whole-map replacement has ten possible entries, each naming a
+        // template. Existence is deliberately independent of this shape check:
+        // another client may delete or rename the name before the next press.
+        let valid = bindings.iter().all(|(key, name)| {
+            key.len() == 1
+                && key.as_bytes()[0].is_ascii_digit()
+                && names.insert(name)
+                && farhelm_proto::launcher::check_template_shape(
+                    &farhelm_proto::launcher::LaunchTemplate {
+                        name: name.clone(),
+                        fields: Default::default(),
+                    },
+                )
+                .is_ok()
+        });
+        if !valid {
+            return http_error(anyhow::Error::new(SupervisorError {
+                origin: crate::client::ErrorOrigin::Helm,
+                kind: ErrorKind::InvalidRequest,
+                message: "template_shortcuts needs digit keys and distinct valid template names"
+                    .into(),
+            }));
+        }
+    }
     // Like last_selected, a template name can become stale after a write. The
     // reader handles that race; cap its size without inventing an existence or
     // eligibility gate that would disagree with the template editor.
@@ -213,6 +240,90 @@ mod tests {
     async fn read(harness: &rest_harness::Harness) -> Preferences {
         serde_json::from_slice(&read_raw(harness).await)
             .expect("the preference reply decodes as the shared type")
+    }
+
+    /// Number bindings replace one shared map and never merge per key. Invalid
+    /// maps refuse the whole sparse patch; missing templates remain valid names
+    /// because deletion and cross-window rename can make any binding stale.
+    #[farhelm_testtrace::test]
+    async fn template_shortcuts_validate_replace_and_clear() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read_raw(&harness).await, b"{}");
+        let bindings = serde_json::json!({ "1": "missing", "0": "other" });
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "template_shortcuts": bindings, "quick_launch_template": "missing"
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let saved = read(&harness).await;
+        assert_eq!(
+            serde_json::to_value(&saved.template_shortcuts).unwrap(),
+            bindings
+        );
+        assert_eq!(saved.quick_launch_template.as_deref(), Some("missing"));
+        for invalid in [
+            serde_json::json!({ "10": "a" }),
+            serde_json::json!({ "x": "a" }),
+            serde_json::json!({ "": "a" }),
+            serde_json::json!({ "１": "a" }),
+            serde_json::json!({ "1": "a", "2": "a" }),
+            serde_json::json!({ "1": "" }),
+            serde_json::json!({ "1": "." }),
+            serde_json::json!({ "1": ".." }),
+            serde_json::json!({ "1": " a" }),
+            serde_json::json!({ "1": "a\n" }),
+            serde_json::json!({ "1": "a".repeat(farhelm_proto::launcher::TEMPLATE_NAME_CAP + 1) }),
+        ] {
+            let response = harness
+                .router()
+                .oneshot(put(serde_json::json!({
+                    "template_shortcuts": invalid, "compact": true
+                })))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{invalid}");
+            assert_eq!(read(&harness).await, saved, "refusal preserves every field");
+        }
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "template_shortcuts": { "2": "replacement" }
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            read(&harness).await.template_shortcuts,
+            std::collections::BTreeMap::from([("2".into(), "replacement".into())])
+        );
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({ "compact": true })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            read(&harness).await.template_shortcuts.len(),
+            1,
+            "omission preserves bindings"
+        );
+        for clear in [serde_json::json!(null), serde_json::json!({})] {
+            let response = harness
+                .router()
+                .oneshot(put(serde_json::json!({
+                    "template_shortcuts": clear
+                })))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            let saved = read(&harness).await;
+            assert!(saved.template_shortcuts.is_empty());
+            assert_eq!(saved.compact, Some(true));
+            assert_eq!(saved.quick_launch_template.as_deref(), Some("missing"));
+        }
     }
 
     /// All link choices travel through the protected sparse route. Invalid
@@ -479,6 +590,7 @@ mod tests {
                 terminal_link_click: None,
                 skip_session_confirmations: None,
                 quick_launch_template: None,
+                template_shortcuts: Default::default(),
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -584,6 +696,7 @@ mod tests {
                 terminal_link_click: None,
                 skip_session_confirmations: None,
                 quick_launch_template: None,
+                template_shortcuts: Default::default(),
             },
             "an explicit null clears the field it names and only that one"
         );
