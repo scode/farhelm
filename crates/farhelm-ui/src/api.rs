@@ -357,6 +357,9 @@ impl ListSort {
 /// gets everywhere else in this codebase.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
 pub(crate) struct Preferences {
+    /// Shared first-open dismissal; unset and false both mean unseen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) welcome_seen: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) list_sort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
