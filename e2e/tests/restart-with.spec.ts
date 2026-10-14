@@ -9,7 +9,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type Locator, type Page } from "@playwright/test";
-import { agentLaunchRow, commandLaunchRow, SESSION_LISTING } from "./helpers/fleet";
+import { agentLaunchRow, commandLaunchRow, patchPreferences, readPreferences, SESSION_LISTING } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { attachSession, cleanupSession } from "./helpers/term";
 import {
@@ -167,49 +167,60 @@ async function openInjectedDialog(page: Page) {
  * The reply exercises the ordinary restart success path, including closing the
  * modal, while the request body proves the UI did not create a fresh session.
  */
-test("restart with shows fixed context and submits one edited resume", async ({ page }) => {
-  await injectSession(page, BASELINE, "resume");
-  const bodies = await acceptYoloRestart(page);
+test("restart with shows fixed context and submits one edited resume", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  try {
+    // The settings dialog is still the action, even when session questions are skipped.
+    await patchPreferences(request, { skip_session_confirmations: true });
+    await injectSession(page, BASELINE, "resume");
+    const bodies = await acceptYoloRestart(page);
 
-  await page.goto("/");
-  const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
-  await expect(row).toBeVisible();
-  await row.locator(".session-row-open").click();
-  const trigger = page.locator(".restart-with-trigger");
-  await expect(trigger).toBeVisible();
-  await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
-  await trigger.click();
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
+    await expect(row).toBeVisible();
+    await row.locator(".session-row-open").click();
+    const trigger = page.locator(".restart-with-trigger");
+    await expect(trigger).toBeVisible();
+    await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
+    await trigger.click();
 
-  const dialog = page.locator(".restart-with-dialog");
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText(`restart with · ${TITLE}`);
-  const context = dialog.locator(".restart-with-context");
-  await expect(context.locator("dt")).toHaveText(["harness", "host", "folder", "resumes"]);
-  await expect(context.locator("dd").nth(0)).toHaveText("codex");
-  await expect(context.locator("dd").nth(1)).not.toBeEmpty();
-  await expect(context.locator("dd").nth(2)).toHaveText("/tmp");
-  await expect(context.locator("dd").nth(3)).toHaveText("this session's conversation");
-  await expect(dialog).toContainText("harness, host and folder stay fixed; use replace with for another harness or folder, or clone for another host");
+    const dialog = page.locator(".restart-with-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(`restart with · ${TITLE}`);
+    const context = dialog.locator(".restart-with-context");
+    await expect(context.locator("dt")).toHaveText(["harness", "host", "folder", "resumes"]);
+    await expect(context.locator("dd").nth(0)).toHaveText("codex");
+    await expect(context.locator("dd").nth(1)).not.toBeEmpty();
+    await expect(context.locator("dd").nth(2)).toHaveText("/tmp");
+    await expect(context.locator("dd").nth(3)).toHaveText("this session's conversation");
+    await expect(dialog).toContainText("harness, host and folder stay fixed; use replace with for another harness or folder, or clone for another host");
 
-  const submit = dialog.locator(".restart-with-submit");
-  await expect(submit).toBeDisabled();
-  await dialog.locator(".restart-with-cancel").click();
-  await expect(dialog).toHaveCount(0);
-  expect(bodies, "cancel must not send a restart").toEqual([]);
+    const submit = dialog.locator(".restart-with-submit");
+    await expect(submit).toBeDisabled();
+    await dialog.locator(".restart-with-cancel").click();
+    await expect(dialog).toHaveCount(0);
+    expect(bodies, "cancel must not send a restart").toEqual([]);
 
-  await trigger.click();
-  await expect(dialog).toBeVisible();
-  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
-  await expect(dialog.locator(".launch-composer-permissions-choice .launch-composer-changed-marker"))
-    .toHaveText("● changed · was agent's own setting");
-  await expect(submit).toBeEnabled();
-  await expect(submit).toHaveText("restart");
-  await submit.click();
-  await expect(dialog).toHaveCount(0);
-  expect(bodies, "one consent must send one restart request").toEqual([{
-    stop_if_running: false,
-    with: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "yolo" },
-  }]);
+    await trigger.click();
+    await expect(dialog).toBeVisible();
+    await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+    await expect(dialog.locator(".launch-composer-permissions-choice .launch-composer-changed-marker"))
+      .toHaveText("● changed · was agent's own setting");
+    await expect(submit).toBeEnabled();
+    await expect(submit).toHaveText("restart");
+    await submit.click();
+    await expect(dialog).toHaveCount(0);
+    expect(bodies, "one consent must send one restart request").toEqual([{
+      stop_if_running: false,
+      with: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "yolo" },
+    }]);
+  } finally {
+    try {
+      await page.unrouteAll({ behavior: "wait" });
+    } finally {
+      await patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null });
+    }
+  }
 });
 
 /**

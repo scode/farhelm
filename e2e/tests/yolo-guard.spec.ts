@@ -20,11 +20,19 @@ import {
   localHostId,
   openRowMenu,
   patchPreferences,
+  readPreferences,
   setLocalYoloWithoutAsking,
   stopSession,
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 import { requireHelmBuild } from "./helpers/helm-build";
+
+// Two tests here turn session confirmations off. The preference is helm-wide
+// and later specs share this helm, so reset it even when a test body is
+// abandoned before its own `finally` restores it. Null is the default.
+test.afterEach(async ({ request }) => {
+  await patchPreferences(request, { skip_session_confirmations: null });
+});
 
 /** Open the launcher on a Codex YOLO launch into `cwd`, ready to submit. */
 async function openYoloLaunch(page: Page, cwd: string): Promise<Locator> {
@@ -38,9 +46,12 @@ async function openYoloLaunch(page: Page, cwd: string): Promise<Locator> {
 }
 
 test("a YOLO launch asks first and starts only when confirmed", async ({ page, request }) => {
+  const previous = await readPreferences(request);
   const cwd = stackScratchDir("yolo-guard-");
   const created: string[] = [];
   try {
+    // The session opt-out cannot supply the helm's separate YOLO consent.
+    await patchPreferences(request, { skip_session_confirmations: true });
     // Premise, made true rather than assumed: the suite shares one helm,
     // and a spec that marks the host safe puts it back, but say so here.
     await setLocalYoloWithoutAsking(request, false);
@@ -140,7 +151,7 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
     await setLocalYoloWithoutAsking(request, false);
     // The confirmed launches leave YOLO remembered helm-wide; later specs
     // on the shared helm expect a fresh composer to start on "default".
-    await patchPreferences(request, { remembered_permissions: null });
+    await patchPreferences(request, { remembered_permissions: null, skip_session_confirmations: previous.skip_session_confirmations ?? null });
     for (const id of created) await cleanupSession(request, id);
   }
 });
@@ -547,4 +558,67 @@ test("a sidebar replace keeps its confirmed nothing-alive answer when told not t
   request,
 }) => {
   await sidebarReplaceKeepsAnswer(page, request, ".yolo-confirm-stop-asking");
+});
+
+/**
+ * With session confirmations skipped, a Replace of a YOLO session on a host
+ * that asks before YOLO launches still meets the YOLO question, with Cancel
+ * focused, and Cancel replaces nothing. Why: skipping covers the everyday
+ * "are you sure" question only; the YOLO question is a separate guard the
+ * helm enforces, and a refactor that let a skipped first click count as YOLO
+ * consent would launch YOLO without asking. Specifies that the one skipped
+ * click sends a single Replace without the YOLO override, that the helm
+ * refuses it as a YOLO launch, and that the source session survives Cancel.
+ */
+test("a skipped header replace still asks the YOLO question", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  const cwd = stackScratchDir("yolo-skip-replace-");
+  const local = await localHostId(request);
+  const sourceId = await createResumableYoloSession(request, {
+    cwd,
+    title: `yolo-skip-replace-${Date.now()}`,
+    host: local,
+  });
+  try {
+    await setLocalYoloWithoutAsking(request, false);
+    await patchPreferences(request, { skip_session_confirmations: true });
+    expect((await readPreferences(request)).skip_session_confirmations, "premise: confirmations are skipped").toBe(true);
+    await stopSession(request, sourceId);
+    const replacePosts: string[] = [];
+    page.on("request", (candidate) => {
+      if (candidate.method() === "POST" && candidate.url().endsWith(`/api/sessions/${sourceId}/replace`)) {
+        replacePosts.push(candidate.postData() ?? "{}");
+      }
+    });
+    await page.goto("/");
+    await page.locator(`.session-row[data-session-id="${sourceId}"]`).click();
+    await expect(page.locator(".titlebar .status-badge.exited")).toBeVisible({ timeout: 20_000 });
+
+    const [refused] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.request().method() === "POST" && candidate.url().endsWith(`/api/sessions/${sourceId}/replace`),
+      ),
+      page.locator(".header-replace-anchor .header-replace").click(),
+    ]);
+    await expect(page.locator(".header-replace-confirm"), "premise: the session question was skipped").toHaveCount(0);
+    expect(refused.status(), "the skipped replace is refused as a YOLO launch").toBe(409);
+    const confirmation = page.locator(".yolo-confirmation");
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation.locator(".yolo-cancel")).toBeFocused();
+    expect(replacePosts).toHaveLength(1);
+    expect(JSON.parse(replacePosts[0]).confirm_yolo ?? false, "a skipped click is not YOLO consent").toBe(false);
+
+    await confirmation.locator(".yolo-cancel").click();
+    await expect(confirmation).toHaveCount(0);
+    expect(replacePosts, "cancel sends nothing").toHaveLength(1);
+    const remaining = (await listSessions(request)).sessions.filter((row) => row.cwd === cwd);
+    expect(remaining.map((row) => row.id), "only the source session exists").toEqual([sourceId]);
+  } finally {
+    await patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null });
+    await setLocalYoloWithoutAsking(request, false);
+    for (const row of (await listSessions(request)).sessions.filter((candidate) => candidate.cwd === cwd)) {
+      await cleanupSession(request, row.id);
+    }
+  }
 });

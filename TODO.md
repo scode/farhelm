@@ -178,20 +178,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - add a "custom" permission mode next to guarded/yolo. Plan: `plans/queue/custom-permission-flags.md`.
 
-- **Keyboard focus on confirmations.** After clicking Delete, Replace, or any other button that asks for confirmation,
-  the user should be able to press Enter to go ahead, so focus should land on the confirmation's confirm button. Today
-  the row menu's confirm-in-place prompts, the restart confirmation, and the remove-host dialog deliberately start focus
-  on Cancel, as SPEC_impl.md specifies (the row menu's code calls it a safety default). Audit every button with a
-  confirmation in the entire app: list each one, where focus goes today, and where it should go. Changing SPEC_impl.md's
-  cancel default is part of this entry; the per-button decisions get settled when the entry is planned. Related: the
-  native `<dialog>` entry under Maybe later, which would change how these dialogs manage focus. Plan:
-  `plans/queue/confirmation-focus-and-skip.md`.
-
-- **Setting to turn off confirmations.** A settings toggle that skips the confirmation step on Delete and similar
-  actions, so they happen on the first click. Which confirmations it covers, and the rest of the details, are to be
-  decided when the entry is planned. Related: the keyboard focus entry above, whose audit of every confirmation in the
-  app is the list this setting would apply to. Plan: `plans/queue/confirmation-focus-and-skip.md`.
-
 - **Launch a session with a given conversation id.** When creating a session, let the user name the agent conversation
   it should use (what some agents call a session id), for example to continue a conversation started outside Farhelm in
   a Farhelm session. Today a session only ever resumes the conversation Farhelm captured for it. Plan:

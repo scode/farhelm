@@ -887,17 +887,18 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   or whose status is unknown is stopped and relaunched without asking, because a prompt shown on every live agent gets
   clicked through unread. Harnesses with weak activity detection may therefore restart a busy agent unasked; that cost
   is accepted. The supervisor applies the same rule from its own reading at the moment of the restart, so an agent that
-  started working after the user clicked is refused rather than stopped unconfirmed, and the next attempt asks. Replace
-  keeps its confirmation whatever the agent is doing. Restart reuses the session's terminal when it still exists —
-  whatever scrollback the terminal itself retained is still there — and creates a fresh one when the terminal no longer
-  exists, such as after a reboot. Restart does NOT preserve the previous run's last visible screen: the pane is blank
-  until the new agent draws, and a full-screen program's final frame (which was never in scrollback to begin with) is
-  gone. Losing it is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched
-  terminal ahead of the new process — a frame with no process behind it looks live, accepts typing, and is overwritten
-  when the real program draws, which is worse than blank. Restart touches the agent terminal only; terminal tabs are
-  unaffected. Restart may carry changed launch settings (Restart with, below); the launch kind, agent type, host, and
-  working directory remain fixed. If a harness rejects a changed model or other setting while resuming, that is an
-  ordinary launch failure; restart again with settings the harness accepts.
+  started working after the user clicked is refused rather than stopped unconfirmed, and the next attempt asks unless
+  session confirmations are skipped (below). Replace keeps its confirmation whatever the agent is doing unless session
+  confirmations are skipped (below). Restart reuses the session's terminal when it still exists — whatever scrollback
+  the terminal itself retained is still there — and creates a fresh one when the terminal no longer exists, such as
+  after a reboot. Restart does NOT preserve the previous run's last visible screen: the pane is blank until the new
+  agent draws, and a full-screen program's final frame (which was never in scrollback to begin with) is gone. Losing it
+  is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched terminal ahead of the
+  new process — a frame with no process behind it looks live, accepts typing, and is overwritten when the real program
+  draws, which is worse than blank. Restart touches the agent terminal only; terminal tabs are unaffected. Restart may
+  carry changed launch settings (Restart with, below); the launch kind, agent type, host, and working directory remain
+  fixed. If a harness rejects a changed model or other setting while resuming, that is an ordinary launch failure;
+  restart again with settings the harness accepts.
 - **Restart with** opens a dialog for changing the launch before resuming the session's own conversation: the model,
   effort, permissions, or workspace trust of an agent launch, or the command, resume command, and YOLO assertion of a
   command launch. The launch kind, agent type, host, and folder stay fixed; Replace with can change the harness or
@@ -948,17 +949,22 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   kept: the new session is still created first, with no liveness check before it, and the user gets Replace's
   both-sessions-exist error.
 - **Delete** removes the session and its stored state, in any state, terminating the agent and tabs if running — with
-  confirmation that says so when anything is still alive. Deletion may make partial progress before failing, including
-  removing attachment files while retaining the session row for retry. There is no rollback guarantee. Report the
-  failure visibly and allow a later Delete to finish cleanup; a retained row does not mean previously removed state has
-  been restored. Stopping a live agent can take a few seconds, since it gets its own chance to exit first, and a
-  session's row stays until the supervisor confirms the whole process tree is gone. From the moment a delete is
-  committed until that answer arrives, the client that started the delete shows it prominently, as an expected wait
-  rather than an error: the row shows a spinner and what is happening in place of its title (stopping the agent,
-  stopping its terminal tabs when only those are alive, or, when nothing was alive, deleting), the open session's header
-  shows the same in place of its actions, and a scrim over its terminal says it again. The terminal's own "detached"
-  notice, which the delete itself causes, is held back meanwhile; if the delete fails, the row and header come back with
-  the refusal shown, and a held notice appears.
+  confirmation that says so when anything is still alive, unless session confirmations are skipped (below). Deletion may
+  make partial progress before failing, including removing attachment files while retaining the session row for retry.
+  There is no rollback guarantee. Report the failure visibly and allow a later Delete to finish cleanup; a retained row
+  does not mean previously removed state has been restored. Stopping a live agent can take a few seconds, since it gets
+  its own chance to exit first, and a session's row stays until the supervisor confirms the whole process tree is gone.
+  From the moment a delete is committed until that answer arrives, the client that started the delete shows it
+  prominently, as an expected wait rather than an error: the row shows a spinner and what is happening in place of its
+  title (stopping the agent, stopping its terminal tabs when only those are alive, or, when nothing was alive,
+  deleting), the open session's header shows the same in place of its actions, and a scrim over its terminal says it
+  again. The terminal's own "detached" notice, which the delete itself causes, is held back meanwhile; if the delete
+  fails, the row and header come back with the refusal shown, and a held notice appears.
+
+The off-by-default **skip session confirmations** switch in Settings skips session row Delete and Replace, header
+Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close. Each runs on the first click through the
+ordinary action path, with consent from the state shown by that render. It does not skip YOLO, host or trash questions,
+nor the Restart with dialog or Replace with launcher. Host setup and removal retain their separate choices.
 
 After a user explicitly opens a confirmation, keyboard focus starts on its enabled confirming button, so a new Enter
 goes ahead; if that button is disabled, focus starts on Cancel instead. This covers session Delete, Replace, Restart and
@@ -968,15 +974,17 @@ the new question. The YOLO confirmation and Restart with dialog still start on C
 Confirmed 2026-10-01: a destructive confirmation authorizes only what the prompt the user answered said would happen.
 This covers every destructive confirmation (Delete, Restart, Restart with, Replace and Replace with), including a prompt
 that rewords itself while it is open because the session changed underneath it: the answer applies to the wording on
-screen at the click, never to a state the user was not shown. The request carries the matching precondition, and the
-supervisor refuses, at the moment it acts, when the session has more alive than that: a Delete or Replace whose prompt
-said nothing was alive (or that asked nothing, because the session showed nothing alive) is refused if the agent or any
-terminal tab is running; one whose prompt warned only about open terminal tabs is refused if the agent is running again;
-a Restart whose prompt did not say it stops a running agent is refused if the agent is working (as for a Restart with no
-prompt, an idle, waiting or unknown agent is still stopped unasked). A refusal deletes, replaces or stops nothing (a
-Replace has already created its new session, and reports both, as above), and the next attempt asks again from the
-current state. These races are reachable in ordinary use because the command line and agents act on sessions while a GUI
-is open (see One GUI at a time). Accepted: a terminal tab opened between a tabs-only prompt and the click is closed with
+screen at the click, never to a state the user was not shown. When the session setting skips a prompt, the click
+authorizes only the state the screen showed, under the same guards. The request carries the matching precondition, and
+the supervisor refuses, at the moment it acts, when the session has more alive than that: a Delete or Replace whose
+prompt said nothing was alive (or that asked nothing, because the session showed nothing alive) is refused if the agent
+or any terminal tab is running; one whose prompt warned only about open terminal tabs is refused if the agent is running
+again; a Restart whose prompt did not say it stops a running agent is refused if the agent is working (as for a Restart
+with no prompt, an idle, waiting or unknown agent is still stopped unasked). A refusal deletes, replaces or stops
+nothing (a Replace has already created its new session, and reports both, as above), and the next attempt asks again
+from the current state, skipping its question again if the setting remains on. No refusal opens a confirmation by
+itself. These races are reachable in ordinary use because the command line and agents act on sessions while a GUI is
+open (see One GUI at a time). Accepted: a terminal tab opened between a tabs-only prompt and the click is closed with
 the others; the prompt need not name the exact tabs it showed.
 
 Process-tree ownership is session-wide. Restart reaps any leftover descendants of the prior run before relaunching —
@@ -1059,32 +1067,34 @@ last-known sessions remain useful. Choosing a host sends a server-side query imm
 can be ordered independently by most recent activity, by creation time, or by title; the order someone picks is
 remembered by the helm as one preference shared by every client, together with the last-selected session and compact-row
 choice, and most recent activity is what a client shows until someone picks otherwise. The same shared preference row
-carries terminal web-link click ownership and whether host setup or host removal confirmation should be skipped after an
-explicit permanent answer; a client that has already loaded its preferences keeps its previous behavior until it
-reloads. The gear immediately to the right of the sidebar version opens a settings dialog with the host switches
-`set up new hosts without asking` and `remove hosts without asking`, on when the respective confirmation is skipped.
-Turning one off restores that confirmation; turning one on makes the same choice as the host dialog's permanent answer.
-Changes take effect immediately in the current client. Each switch explains the current behavior, and each host dialog's
-permanent answer points to the gear as the place to undo it. A separate **terminal links** section chooses whether web
-links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the click on, or only
-pass the click on. The latter two choices explain the risk of a second browser tab and that a program without mouse
-reporting cannot act on a click. This choice covers every client of the helm and takes effect in every mounted terminal
-of the current client immediately; other open clients pick it up when they reload, like the host choices. Sounds has
-three device switches (see Status). A separate **ntfy alerts** section has an off-by-default switch, server URL (default
-`https://ntfy.sh`), topic, optional access token, and priority (min, low, default, high, urgent; default default). These
-are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
-inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
-**Send test** uses the saved configuration, even while disabled, and reports success or failure inline. The dialog also
-holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command field (see
-[Managed checkouts](#managed-checkouts)). The folder's help explains expansion on each host, first-use folder creation,
-and that command-line host overrides keep their folder. The command's help explains that it runs in each new checkout on
-its host, after cloning and before the agent starts, that changes affect future checkouts only, and that command-line
-host overrides keep their command. The installed desktop app's dialog also has a switch for installing updates
-automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of
-that app installation, kept with the app rather than by the helm, and a browser never shows it. The two host
-confirmation choices apply to every host and client of this helm; existing controls with a natural place in the main UI
-stay there. No client keeps its own copy: every client reads the helm's preference once after authenticating and writes
-it on change, so a browser tab and the desktop app open in the same order and on the same session. Per-client
+carries terminal web-link click ownership, the session-confirmation opt-out, and whether host setup or host removal
+confirmation should be skipped after an explicit permanent answer; a client that has already loaded its preferences
+keeps its previous behavior until it reloads. The gear immediately to the right of the sidebar version opens a settings
+dialog with an off-by-default **skip session confirmations** switch under **sessions**. Its help names Delete, Replace,
+Restart and tab Close and excludes YOLO, host and trash questions (see Lifecycle operations). The dialog also has the
+host switches `set up new hosts without asking` and `remove hosts without asking`, on when the respective confirmation
+is skipped. Turning one off restores that confirmation; turning one on makes the same choice as the host dialog's
+permanent answer. Changes take effect immediately in the current client. Each switch explains the current behavior, and
+each host dialog's permanent answer points to the gear as the place to undo it. A separate **terminal links** section
+chooses whether web links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the
+click on, or only pass the click on. The latter two choices explain the risk of a second browser tab and that a program
+without mouse reporting cannot act on a click. This choice covers every client of the helm and takes effect in every
+mounted terminal of the current client immediately; other open clients pick it up when they reload, like the host
+choices. Sounds has three device switches (see Status). A separate **ntfy alerts** section has an off-by-default switch,
+server URL (default `https://ntfy.sh`), topic, optional access token, and priority (min, low, default, high, urgent;
+default default). These are explicitly saved helm configuration, shared by every client, outside the preference row.
+Save refusals appear inline. The stored token is never returned: the form shows whether one exists and allows replacing
+or clearing it. **Send test** uses the saved configuration, even while disabled, and reports success or failure inline.
+The dialog also holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone
+command field (see [Managed checkouts](#managed-checkouts)). The folder's help explains expansion on each host,
+first-use folder creation, and that command-line host overrides keep their folder. The command's help explains that it
+runs in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts
+only, and that command-line host overrides keep their command. The installed desktop app's dialog also has a switch for
+installing updates automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it
+is a setting of that app installation, kept with the app rather than by the helm, and a browser never shows it. The two
+host confirmation choices apply to every host and client of this helm; existing controls with a natural place in the
+main UI stay there. No client keeps its own copy: every client reads the helm's preference once after authenticating and
+writes it on change, so a browser tab and the desktop app open in the same order and on the same session. Per-client
 persistence — browser storage, a desktop state file, anything that lets two clients remember different answers — is not
 wanted for these shared preferences (sidebar width, terminal text size and sound switches, by contrast, are deliberately
 per device; see Session list, Terminal experience and Status). A client that asks the helm for no particular order gets
@@ -1413,8 +1423,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   need and ellipsize only when the row runs out of room; a click confirms locally for about 1.5 seconds. Clipboard
   writes use the native bridge first and `navigator.clipboard` second, with JSON serialization and silent failures.
   Replace has its own anchored danger confirmation and neutral cancellation. Delete is styled as the danger action and
-  always asks first in the same anchored way, even for a session that has ended, with the same consequence text the
-  row's delete prompt shows.
+  asks first in the same anchored way, even for a session that has ended, with the same consequence text the row's
+  delete prompt shows. The session-confirmation setting skips the header's Delete, Replace and Restart questions, the
+  interrupted-card Replace question, and tab Close, using the screen's consent and existing guards.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a
@@ -2081,13 +2092,14 @@ the agent creates it.
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
   operation succeeded when it failed. Three best-effort exceptions log a failure but stay silent rather than surfacing
   it: the helm-side preference (list order, last selection, compact layout, and the host setup and removal confirmation
-  choices, and the feedback contact), because losing next-launch convenience must not turn a choice that already took
-  effect into a failed current operation, and a helm that lost the preference falls back to the defaults; and the
-  automatic "mark seen" a session's own opening or activity advance triggers (see Status), because a lost automatic mark
-  costs nothing worse than a dot that is one open-and-close cycle behind, corrected by the next successful write; and
-  marking a session's notifications read when their list closes (see Status), for the same reason: a lost mark costs a
-  bell that stays loud until the list is next closed. The manual "mark unread"/"mark read" toggle and the notification
-  list's clear button are not covered — a failed toggle or clear surfaces like any other operation.
+  choices, the session-confirmation opt-out, and the feedback contact), because losing next-launch convenience must not
+  turn a choice that already took effect into a failed current operation, and a helm that lost the preference falls back
+  to the defaults; and the automatic "mark seen" a session's own opening or activity advance triggers (see Status),
+  because a lost automatic mark costs nothing worse than a dot that is one open-and-close cycle behind, corrected by the
+  next successful write; and marking a session's notifications read when their list closes (see Status), for the same
+  reason: a lost mark costs a bell that stays loud until the list is next closed. The manual "mark unread"/"mark read"
+  toggle and the notification list's clear button are not covered — a failed toggle or clear surfaces like any other
+  operation.
 - Connection state per host is always visible in the host list; reconnection uses bounded retries followed by periodic
   low-frequency re-probing, so a host that comes back overnight resurfaces by itself. Actions stay in each row's menu,
   with the older-host update button also available inline, while the global details disclosure shows the evidence and

@@ -367,6 +367,8 @@ test.beforeEach(async () => {
  * will isolate the page. Settings must remain refused until that request
  * settles, or two independent focus traps can make both dialogs unusable. */
 test("Settings waits while an uninstall confirmation is being planned", async ({ page, request }, testInfo) => {
+  // Session questions are skipped, but an uninstall still owns its question.
+  await patchPreferences(request, { skip_session_confirmations: true });
   const remote = destination(testInfo, "settings-plan");
   const accepted = await startAdd(request, remote);
   await waitForProgress(request, accepted.host_id, "completed");
@@ -489,7 +491,7 @@ test.afterEach(async ({ request }) => {
   // Release an action held by a failed assertion so it cannot poison the
   // next serial test or the second browser project.
   await configureBackend();
-  await patchPreferences(request, { skip_host_setup_confirmation: null });
+  await patchPreferences(request, { skip_host_setup_confirmation: null, skip_session_confirmations: null });
   await removeHostsBeyondBaseline(request);
 });
 
@@ -585,7 +587,7 @@ for (const phone of [false, true]) {
   test(`host-setup-layout ${phone ? "phone" : "desktop"} keeps answers and exact plan text`, async ({ page, request }, testInfo) => {
     const remote = destination(testInfo, `layout-${phone ? "phone" : "desktop"}`);
     await configureBackend({ targets: { [target(remote)]: { home: `/home/${"long-path-".repeat(8)}` } } });
-    await patchPreferences(request, { skip_host_setup_confirmation: null });
+    await patchPreferences(request, { skip_host_setup_confirmation: null, skip_session_confirmations: true });
     await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
     await page.goto("/");
     await openHostsPanel(page);

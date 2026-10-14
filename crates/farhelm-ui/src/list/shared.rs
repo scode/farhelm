@@ -48,8 +48,9 @@ impl DeleteTarget {
     /// still alive". An agent that has not ended is alive; so is any listed
     /// terminal tab, even after the agent has exited, because Stop and an
     /// agent's own exit both leave tabs running (a dev server, a build).
-    /// Only an ended agent with no tabs deletes unconfirmed. That can still
-    /// kill process-tree leftovers the UI cannot see, a residual
+    /// With session confirmations enabled, only an ended agent with no tabs
+    /// deletes unconfirmed. That can still kill process-tree leftovers the UI
+    /// cannot see, a residual
     /// `on_delete`'s own comment accepts.
     pub(super) fn needs_confirmation(&self) -> bool {
         !crate::status::shows_nothing_alive(&self.status, self.tabs)
@@ -57,11 +58,11 @@ impl DeleteTarget {
 
     /// What a Delete click on this row does: open the confirmation, or
     /// delete at once with the supervisor-side precondition attached.
-    pub(super) fn click(&self) -> DeleteClick {
-        if self.needs_confirmation() {
+    pub(super) fn click(&self, skip_confirmations: bool) -> DeleteClick {
+        if self.needs_confirmation() && !skip_confirmations {
             DeleteClick::Confirm
         } else {
-            DeleteClick::DeleteGuarded
+            DeleteClick::DeleteGuarded(crate::status::delete_guard(&self.status, self.tabs))
         }
     }
 }
@@ -74,9 +75,9 @@ pub(super) enum DeleteClick {
     /// Open the inline confirmation; the confirmed delete carries the guard
     /// of the prompt the user answered (`status::delete_guard`).
     Confirm,
-    /// Delete without asking, because the row shows nothing alive, and ask
-    /// the supervisor to refuse if the row was stale.
-    DeleteGuarded,
+    /// Delete without asking, under the consent of the row the user clicked.
+    /// Skipping a question must not expand that consent from a fresh read.
+    DeleteGuarded(crate::DeleteGuard),
 }
 
 /// The display state `ListView` derives for one `SessionRow` render.
@@ -564,6 +565,47 @@ pub(super) mod tests {
     use super::*;
     use crate::HostKind;
 
+    /// Skipping asks less, but authorizes only the liveness the clicked row
+    /// showed. In particular an ended agent with tabs must retain AgentEnded:
+    /// NothingAlive would refuse its tabs, and Unconditional could kill a new agent.
+    #[farhelm_testtrace::test]
+    fn skipped_delete_retains_the_rendered_guard() {
+        for (status, tabs, guard) in [
+            (
+                SessionStatus::Exited { exit_code: Some(0) },
+                0,
+                crate::DeleteGuard::NothingAlive,
+            ),
+            (
+                SessionStatus::Exited { exit_code: Some(0) },
+                1,
+                crate::DeleteGuard::AgentEnded,
+            ),
+            (
+                SessionStatus::Interrupted,
+                1,
+                crate::DeleteGuard::AgentEnded,
+            ),
+            (SessionStatus::Running, 0, crate::DeleteGuard::Unconditional),
+            (SessionStatus::Unknown, 1, crate::DeleteGuard::Unconditional),
+        ] {
+            let target = DeleteTarget {
+                id: "shown".into(),
+                status,
+                tabs,
+            };
+            assert_eq!(target.click(true), DeleteClick::DeleteGuarded(guard));
+            assert_eq!(
+                target.click(false),
+                if target.needs_confirmation() {
+                    DeleteClick::Confirm
+                } else {
+                    DeleteClick::DeleteGuarded(guard)
+                },
+            );
+        }
+    }
+
     /// Why this matters: Delete used to decide from the agent's status
     /// alone, so one click on a stopped session silently killed the dev
     /// servers and builds still running in its tabs. Spec: an ended agent
@@ -587,9 +629,12 @@ pub(super) mod tests {
         // The click's action: only an ended agent with no tabs deletes at
         // once (under `DeleteGuard::NothingAlive`); everything else asks.
         let bare = DeleteTarget::for_session(&exited_bare);
-        assert_eq!(bare.click(), DeleteClick::DeleteGuarded);
         assert_eq!(
-            DeleteTarget::for_session(&running_bare).click(),
+            bare.click(false),
+            DeleteClick::DeleteGuarded(crate::DeleteGuard::NothingAlive)
+        );
+        assert_eq!(
+            DeleteTarget::for_session(&running_bare).click(false),
             DeleteClick::Confirm
         );
 

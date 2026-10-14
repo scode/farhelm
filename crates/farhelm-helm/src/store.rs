@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 47;
+const SCHEMA_VERSION: i64 = 48;
 
 /// One helm-wide configuration row, kept apart from replayed preferences:
 /// explicit saves validate these values, and reads must never return the token.
@@ -991,6 +991,9 @@ pub struct Preferences {
     /// Whether host setup skips its confirmation dialog for this helm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_host_setup_confirmation: Option<bool>,
+    /// Everyday session prompts may be skipped, but their guards still apply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_session_confirmations: Option<bool>,
     /// Contact from the last successful feedback send that opted into reuse.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feedback_contact: Option<String>,
@@ -1061,6 +1064,13 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub skip_host_setup_confirmation: Option<Option<bool>>,
+    /// An explicit null restores asking; an omitted field preserves the choice.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub skip_session_confirmations: Option<Option<bool>>,
     /// A successful send may replace or explicitly forget the contact.
     #[serde(
         default,
@@ -1855,6 +1865,7 @@ pub struct HelmStore {
 ///   preferences row; null (and any unknown word) means interception.
 /// - 47: a dedicated ntfy settings singleton, disabled and unconfigured until
 ///   explicitly saved; its token is never part of a preferences/API snapshot.
+/// - 48: a nullable session-confirmation opt-out; unset keeps the existing prompts.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2066,7 +2077,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  skip_host_remove_confirmation INTEGER CHECK (skip_host_remove_confirmation IN (0, 1)),
                  skip_host_setup_confirmation INTEGER CHECK (skip_host_setup_confirmation IN (0, 1)),
                  feedback_contact TEXT,
-                 terminal_link_click TEXT
+                 terminal_link_click TEXT,
+                 skip_session_confirmations INTEGER CHECK (skip_session_confirmations IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2156,7 +2168,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 47;",
+              PRAGMA user_version = 48;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3205,6 +3217,29 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 47")?;
         version = 47;
     }
+    if version == 47 {
+        // Unset keeps asking after upgrade. Rewound ladder fixtures may already
+        // have the new column, while genuine schema-47 databases do not.
+        let present: bool = tx
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('preferences') \
+                 WHERE name = 'skip_session_confirmations'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .context("checking session confirmation preference")?
+            > 0;
+        if !present {
+            tx.execute_batch(
+                "ALTER TABLE preferences ADD COLUMN skip_session_confirmations INTEGER \
+                 CHECK (skip_session_confirmations IN (0, 1));",
+            )
+            .context("migrating session confirmation preference")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 48;")
+            .context("migrating helm.db to schema version 48")?;
+        version = 48;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4102,7 +4137,7 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -4127,6 +4162,7 @@ impl HelmStore {
                             feedback_contact: row.get(7)?,
                             terminal_link_click: row.get::<_, Option<String>>(8)?
                                 .filter(|word| is_known_terminal_link_click_word(word)),
+                            skip_session_confirmations: row.get(9)?,
                         })
                     },
                 )
@@ -4168,6 +4204,8 @@ impl HelmStore {
             let feedback_contact = patch.feedback_contact.flatten();
             let terminal_link_click_present = patch.terminal_link_click.is_some();
             let terminal_link_click = patch.terminal_link_click.flatten();
+            let skip_session_confirmations_present = patch.skip_session_confirmations.is_some();
+            let skip_session_confirmations = patch.skip_session_confirmations.flatten();
             let sort = patch.list_sort.flatten();
             let selected = patch.last_selected.flatten();
             let compact = patch.compact.flatten();
@@ -4178,8 +4216,8 @@ impl HelmStore {
             conn
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -4194,7 +4232,8 @@ impl HelmStore {
                          skip_host_setup_confirmation = CASE WHEN ?16 \
                              THEN excluded.skip_host_setup_confirmation ELSE skip_host_setup_confirmation END, \
                          feedback_contact = CASE WHEN ?17 THEN excluded.feedback_contact ELSE feedback_contact END, \
-                         terminal_link_click = CASE WHEN ?18 THEN excluded.terminal_link_click ELSE terminal_link_click END",
+                         terminal_link_click = CASE WHEN ?18 THEN excluded.terminal_link_click ELSE terminal_link_click END, \
+                         skip_session_confirmations = CASE WHEN ?20 THEN excluded.skip_session_confirmations ELSE skip_session_confirmations END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -4213,7 +4252,9 @@ impl HelmStore {
                         skip_host_remove_confirmation_present,
                         skip_host_setup_confirmation_present,
                         feedback_contact_present,
-                        terminal_link_click_present
+                        terminal_link_click_present,
+                        skip_session_confirmations,
+                        skip_session_confirmations_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -7598,6 +7639,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
@@ -9921,6 +9963,7 @@ mod tests {
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
                 terminal_link_click: None,
+                skip_session_confirmations: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -9942,6 +9985,7 @@ mod tests {
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
                 terminal_link_click: None,
+                skip_session_confirmations: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -9962,6 +10006,7 @@ mod tests {
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
                 terminal_link_click: None,
+                skip_session_confirmations: None,
             },
             "an explicit null clears exactly the field it names"
         );
@@ -10031,6 +10076,7 @@ mod tests {
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
                 terminal_link_click: None,
+                skip_session_confirmations: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -10294,6 +10340,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
@@ -11158,6 +11205,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
@@ -11288,6 +11336,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
@@ -11320,6 +11369,7 @@ mod tests {
                 skip_host_setup_confirmation: None,
                 feedback_contact: None,
                 terminal_link_click: None,
+                skip_session_confirmations: None,
             },
             "the new field defaults absent while both existing choices survive"
         );
@@ -11355,6 +11405,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  INSERT INTO preferences (singleton, list_sort, last_selected, compact)
                  VALUES (1, 'title', 'session-before-permissions-memory', 1);
@@ -11383,9 +11434,79 @@ mod tests {
                 skip_host_setup_confirmation: None,
                 feedback_contact: None,
                 terminal_link_click: None,
+                skip_session_confirmations: None,
             },
             "the new field defaults absent while every existing choice survives"
         );
+    }
+
+    /// Schema 48 must preserve old preferences and default to asking. Reopening
+    /// after sparse writes proves storage, rather than a connection-local mirror;
+    /// omitted, false and null keep their distinct meaning on the shared row.
+    #[farhelm_testtrace::test]
+    async fn session_confirmations_migration_and_sparse_round_trip() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("helm.db");
+        store
+            .update_preferences(
+                serde_json::from_str(r#"{"compact":true,"skip_host_remove_confirmation":true}"#)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("ALTER TABLE preferences DROP COLUMN skip_session_confirmations; PRAGMA user_version = 47;").unwrap();
+            assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'skip_session_confirmations'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        }
+        let migrated = HelmStore::open(&path).await.unwrap();
+        let expected = Preferences {
+            compact: Some(true),
+            skip_host_remove_confirmation: Some(true),
+            ..Preferences::default()
+        };
+        assert_eq!(migrated.preferences().await.unwrap(), expected);
+        assert_eq!(
+            migrated
+                .conn
+                .lock()
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        drop(migrated);
+        for (json, value) in [
+            (r#"{"skip_session_confirmations":true}"#, Some(true)),
+            (r#"{"skip_session_confirmations":false}"#, Some(false)),
+            (r#"{"skip_session_confirmations":null}"#, None),
+        ] {
+            let store = HelmStore::open(&path).await.unwrap();
+            store
+                .update_preferences(serde_json::from_str(json).unwrap())
+                .await
+                .unwrap();
+            store
+                .update_preferences(serde_json::from_str(r#"{"list_sort":"title"}"#).unwrap())
+                .await
+                .unwrap();
+            drop(store);
+            let reopened = HelmStore::open(&path).await.unwrap();
+            assert_eq!(
+                reopened.preferences().await.unwrap(),
+                Preferences {
+                    list_sort: Some("title".into()),
+                    skip_session_confirmations: value,
+                    ..expected.clone()
+                }
+            );
+        }
+        for invalid in [
+            r#"{"skip_session_confirmations":"true"}"#,
+            r#"{"skip_session_confirmations":1}"#,
+        ] {
+            assert!(serde_json::from_str::<PreferencePatch>(invalid).is_err());
+        }
     }
 
     /// Schema 45 acquires the default link ownership without changing other
@@ -11405,7 +11526,8 @@ mod tests {
         drop(store);
         {
             let conn = Connection::open(&path).unwrap();
-            conn.execute_batch("ALTER TABLE preferences DROP COLUMN terminal_link_click; PRAGMA user_version = 45;").unwrap();
+            conn.execute_batch("ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations; PRAGMA user_version = 45;").unwrap();
             assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('preferences') WHERE name = 'terminal_link_click'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
         }
         let migrated = HelmStore::open(&path).await.unwrap();
@@ -11479,6 +11601,7 @@ mod tests {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact; PRAGMA user_version = 42;",
             )
             .unwrap();
@@ -11561,6 +11684,7 @@ mod tests {
                 "ALTER TABLE hosts RENAME COLUMN yolo_without_asking TO yolo_safe;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  PRAGMA user_version = 32;",
             )
@@ -11698,6 +11822,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
@@ -13181,6 +13306,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
