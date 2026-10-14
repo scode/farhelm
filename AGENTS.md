@@ -12,9 +12,14 @@ personal information such as personal usernames, hostnames, details about the lo
 
 When asked **`brick test release vX.Y.Z`**, follow
 [releasing/mac-vm-test/BRICK-TEST.md](releasing/mac-vm-test/BRICK-TEST.md). Discover the private machine profile there,
-read its operator policy and journal, and run the complete planned fresh/upgrade procedure with guest-only product
-mutations. Missing prerequisites mean could not run; resolve them with the maintainer instead of guessing machine
-bindings. A test request does not authorize publication or release promotion.
+read its operator policy and journal, and run **P0 checks first**, in the five-step order in BRICK-TEST.md, with
+guest-only product mutations. P0 covers fresh install/start, a separate installer upgrade, click-to-upgrade
+discovery/relaunch, local supervisor upgrade with one successful agent, then remote supervisor upgrade with one
+successful agent. Stop at the first failure or missing prerequisite. Everything else is bonus coverage, started only
+after P0 succeeds. A request to **stop after P0 checks** ends after recording P0 evidence and cleaning up its successful
+fixtures; do not start bonus fixtures. Answer **did P0 checks succeed?** from the separate P0 verdict and five results,
+naming anything incomplete. Missing prerequisites mean could not run; resolve them with the maintainer instead of
+guessing machine bindings. A test request does not authorize publication or release promotion.
 
 Run this gate **before** moving `/latest` to the candidate. It is expected that `/latest` still names the preceding
 promoted stable; do not treat that difference as a blocker or ask to promote first. Upgrade baselines run from v0.23.0

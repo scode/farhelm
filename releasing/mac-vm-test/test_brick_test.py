@@ -54,23 +54,28 @@ class PlanningTests(unittest.TestCase):
         """Testing only the latest old stable must not silently waive older upgrade contracts."""
         result = plan('v0.25.0', 'v0.24.0', FakeSource())
         self.assertEqual([v['id'] for v in result['passes']],
-                         ['fresh', 'upgrade-v0.24.0', 'upgrade-v0.23.0'])
-        self.assertEqual(result['passes'][1]['update_path'], 'manual')
+                         ['p0-fresh', 'p0-installer-upgrade', 'p0-updater-upgrade',
+                          'fresh', 'upgrade-v0.24.0', 'upgrade-v0.23.0'])
+        self.assertEqual(result['p0_sequence'], [v['id'] for v in result['passes'][:3]])
+        self.assertEqual(result['passes'][4]['update_path'], 'manual')
 
     def test_override_uses_old_source_and_never_selects_an_rc(self):
         """A candidate's support cannot make an unsupported old app use its override."""
         source = FakeSource(['v0.24.0'])
         stable = plan('v0.25.0', 'v0.24.0', source)
-        self.assertEqual(stable['passes'][1]['update_path'], 'override')
-        self.assertEqual(stable['passes'][2]['update_path'], 'manual')
+        self.assertEqual(stable['passes'][1]['update_path'], 'manual')
+        self.assertEqual(stable['passes'][2]['update_path'], 'override')
+        self.assertEqual(stable['passes'][4]['update_path'], 'override')
+        self.assertEqual(stable['passes'][5]['update_path'], 'manual')
         rc = plan('v0.25.0-rc.1', 'v0.24.0', source)
-        self.assertTrue(all(v['update_path'] == 'manual' for v in rc['passes'][1:]))
+        self.assertTrue(all(v['update_path'] == 'manual' for v in rc['passes'] if v['update_path'] is not None))
 
     def test_promoted_candidate_is_an_ordinary_rehearsal(self):
         """After-publication testing still uses older versions, never candidate-to-itself."""
         result = plan('v0.24.0', 'v0.24.0', FakeSource())
-        self.assertEqual([v['previous'] for v in result['passes']], ['v0.23.0', 'v0.23.0'])
-        self.assertEqual(result['passes'][1]['update_path'], 'ordinary')
+        self.assertTrue(all(v['previous'] == 'v0.23.0' for v in result['passes']))
+        self.assertEqual(result['passes'][1]['update_path'], 'manual')
+        self.assertEqual(result['passes'][2]['update_path'], 'ordinary')
 
     def test_downgrades_missing_old_source_and_unsafe_tags_are_refused(self):
         """Invalid gate inputs must fail before any VM can be created."""
@@ -233,6 +238,11 @@ class WorkflowTests(unittest.TestCase):
         self.run = Run(self.evidence / ('brick-' + str(uuid.uuid4())), self.profile,
                        factory=self.model.factory, disk_usage=lambda path: usage(self.free), connector=self.model.connect)
         self.plan = plan('v0.25.0', 'v0.24.0', FakeSource())
+        # These lifecycle/evidence regressions resume a historical manifest.
+        # Keep that premise explicit so the new P0 scheduling fence cannot
+        # mask the ownership or evidence failure each test exists to observe.
+        self.plan.pop('p0_sequence')
+        self.plan['passes'] = [v for v in self.plan['passes'] if v['priority'] != 'P0']
         self.plan['sha256sums_sha256'] = 'fixture-checksum'
         self.run.create(self.plan)
         self.assertTrue(all(state == 'stopped' for state in self.model.states.values()))
@@ -581,6 +591,175 @@ artifact corruption as competing causes of the new refusal.
         self.assertEqual(set(self.model.states), {'mac-base', 'linux-base'})
         self.assertTrue(all(state == 'stopped' for state in self.model.states.values()))
         self.assertTrue(all(child.poll() == 0 for child in self.model.children))
+
+    def enable_p0(self, p0_only=False, supported=True, candidate='v0.25.0'):
+        """Create a new priority-aware run without rewriting the legacy fixture's history.
+
+The modeled bases are independently stopped. No real release bytes, guest
+authentication, GUI outcome or product verdict is borrowed by these tests.
+"""
+        self.assertTrue(all(state == 'stopped' for state in self.model.states.values()))
+        self.run = Run(self.evidence / ('brick-' + str(uuid.uuid4())), self.profile,
+                       factory=self.model.factory, connector=self.model.connect)
+        release = plan(candidate, 'v0.24.0', FakeSource(['v0.24.0'] if supported else []))
+        release['sha256sums_sha256'] = 'fixture-checksum'
+        self.run.create(release, p0_only=p0_only)
+
+    def complete_p0(self, pass_id, through=None):
+        """Exercise all real record and cleanup gates with explicitly synthetic observations.
+
+Tiny PNGs prove evidence format only. The fake substrate's stopped/absent
+state independently checks cleanup before the next fixture is permitted.
+An explicit boundary leaves the pair live for an unsettled evidence-gate test.
+"""
+        children = self.prepare(pass_id)
+        image = self.evidence_file(pass_id + '.png', PNG)
+        command = self.evidence_file(pass_id + '.txt', b'synthetic version and agent evidence')
+        receipt = self.evidence_file(pass_id + '.json', json.dumps({
+            'version': self.run.data['plan']['candidate'], 'previous_trust_ring': 'v0.24.0',
+            'sha256sums_sha256': 'fixture-checksum', 'signature': 'verified',
+            'trusted_comment': 'verified', 'installer_checksum': 'verified'}).encode())
+        with self.run.locked():
+            if pass_id != 'p0-fresh':
+                self.run.select_update(pass_id, 'v0.24.0')
+            entry = self.run.selected(pass_id)
+            for check in entry['required']:
+                refs = [receipt] if check == 'artifact-verification' else [image, command]
+                self.run.record(pass_id, check, 'pass', refs, 'Synthetic evidence contract, not a product observation.')
+                if check == through:
+                    return children
+            self.assertEqual(self.run.verdict(entry), 'pass')
+            self.run.cleanup(pass_id)
+        self.assertTrue(all(child.poll() == 0 for child in children))
+        self.assertEqual(set(self.model.states), {'mac-base', 'linux-base'})
+
+    def test_p0_precedes_bonus_and_uses_distinct_upgrade_fixtures(self):
+        """Broader functionality and one successful upgrade path cannot mask another untested path."""
+        self.enable_p0()
+        for pass_id in ('fresh', 'p0-installer-upgrade', 'p0-updater-upgrade'):
+            with self.run.locked(), self.assertRaisesRegex(Refused, 'complete P0'):
+                self.run.prepare(pass_id, [])
+        self.assertEqual(self.model.calls, [])
+        self.complete_p0('p0-fresh')
+        self.complete_p0('p0-installer-upgrade')
+        with self.run.locked():
+            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
+            self.assertEqual(self.run.selected('p0-installer-upgrade')['update_path'], 'manual')
+            with self.assertRaisesRegex(Refused, 'complete P0'):
+                self.run.prepare('fresh', [])
+        self.complete_p0('p0-updater-upgrade')
+        with self.run.locked():
+            self.assertEqual(self.run.selected('p0-updater-upgrade')['update_path'], 'override')
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'pass')
+            self.assertEqual(list(report['p0']['checks']),
+                             ['fresh-install-start', 'installer-upgrade', 'click-to-upgrade',
+                              'local-supervisor-agent', 'remote-supervisor-agent'])
+            self.assertEqual(set(report['p0']['checks'].values()), {'pass'})
+            self.assertEqual(report['verdict'], 'could not run')
+        self.prepare('fresh')
+
+    def test_p0_only_scope_and_changed_evidence_fence_bonus_cloning(self):
+        """A requested P0 stop stays effective, and stale successful evidence never authorizes more work."""
+        self.enable_p0(p0_only=True)
+        for pass_id in self.run.data['plan']['p0_sequence']:
+            self.complete_p0(pass_id)
+        calls = len(self.model.calls)
+        with self.run.locked():
+            report = self.run.report()
+            self.assertEqual(report['requested_verdict'], 'pass')
+            self.assertEqual(report['verdict'], 'could not run')
+            with self.assertRaisesRegex(Refused, 'outside this run scope'):
+                self.run.prepare('fresh', [])
+            # Revalidate bytes even after successful cleanup: a corrupt export
+            # invalidates the P0 answer without resurrecting any guest.
+            (self.run.directory / 'p0-fresh.png').write_bytes(b'changed image')
+            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
+        self.assertEqual(len(self.model.calls), calls)
+
+    def test_p0_failure_or_missing_fixture_stops_further_observations(self):
+        """Unavailable authentication and product failures both stop scheduling, but yield different verdicts."""
+        for status, expected in (('fail', 'fail'), ('could-not-run', 'could not run')):
+            with self.subTest(status=status):
+                self.enable_p0()
+                self.prepare('p0-fresh')
+                with self.run.locked():
+                    self.run.record('p0-fresh', 'app-start', status, [], 'Synthetic failed or unavailable GUI.')
+                    self.assertEqual(self.run.report()['p0']['verdict'], expected)
+                    with self.assertRaisesRegex(Refused, 'stop after the first'):
+                        self.run.record('p0-fresh', 'fixture-clean', 'pass', [], 'Must not continue.')
+                    with self.assertRaisesRegex(Refused, 'stop after the first'):
+                        self.run.prepare('p0-installer-upgrade', [])
+                    self.run.cleanup('p0-fresh', discard_failed=True)
+
+    def test_p0_order_discovery_and_agent_evidence_are_real_boundaries(self):
+        """Neither a relaunch nor a screenshot can substitute updater discovery or an actual agent response."""
+        self.enable_p0(candidate='v0.25.0-rc.1')
+        self.complete_p0('p0-fresh')
+        self.complete_p0('p0-installer-upgrade')
+        self.prepare('p0-updater-upgrade')
+        image = self.evidence_file('rc.png', PNG)
+        command = self.evidence_file('rc.txt', b'synthetic command evidence')
+        receipt = self.evidence_file('rc.json', json.dumps({
+            'version': 'v0.25.0-rc.1', 'previous_trust_ring': 'v0.24.0',
+            'sha256sums_sha256': 'fixture-checksum', 'signature': 'verified',
+            'trusted_comment': 'verified', 'installer_checksum': 'verified'}).encode())
+        with self.run.locked():
+            with self.assertRaisesRegex(Refused, 'preceding P0'):
+                self.run.record('p0-updater-upgrade', 'local-supervisor-agent', 'pass', [image, command], 'Out of order.')
+            self.run.record('p0-updater-upgrade', 'artifact-verification', 'pass', [receipt], 'Synthetic trust receipt.')
+            self.run.record('p0-updater-upgrade', 'old-fixture', 'pass', [image, command], 'Synthetic old fixture.')
+            self.run.select_update('p0-updater-upgrade', 'v0.24.0')
+            with self.assertRaisesRegex(Refused, 'manual installer cannot prove'):
+                self.run.record('p0-updater-upgrade', 'update-discovery', 'pass', [image, command], 'Manual is not discovery.')
+            with self.assertRaisesRegex(Refused, 'bonus passes'):
+                self.run.add_check('p0-updater-upgrade', 'extra-settings', gui=True)
+
+    def test_each_p0_agent_check_needs_command_evidence_and_reports_separately(self):
+        """A local success cannot conceal an untested remote agent, and GUI evidence alone is insufficient."""
+        self.enable_p0()
+        self.complete_p0('p0-fresh')
+        self.complete_p0('p0-installer-upgrade')
+        children = self.complete_p0('p0-updater-upgrade', through='update-relaunch')
+        self.assertTrue(all(child.poll() is None for child in children))
+        image = self.evidence_file('agent.png', PNG)
+        command = self.evidence_file('agent.txt', b'synthetic agent response receipt')
+        with self.run.locked():
+            for check in ('local-supervisor-agent', 'remote-supervisor-agent'):
+                with self.assertRaisesRegex(Refused, 'command/identity evidence'):
+                    self.run.record('p0-updater-upgrade', check, 'pass', [image], 'GUI alone is not execution evidence.')
+                self.run.record('p0-updater-upgrade', check, 'pass', [image, command], 'Synthetic evidence format only.')
+                if check == 'local-supervisor-agent':
+                    report = self.run.report()['p0']
+                    self.assertEqual(report['checks']['local-supervisor-agent'], 'pass')
+                    self.assertEqual(report['checks']['remote-supervisor-agent'], 'could not run')
+                    self.assertEqual(report['verdict'], 'could not run')
+            self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
+            self.run.cleanup('p0-updater-upgrade')
+
+    def test_mid_session_stop_and_stale_evidence_refuse_new_bonus_work(self):
+        """A later stop request persists, while corrupt evidence fences a full run without relying on P0-only scope."""
+        self.enable_p0()
+        for pass_id in self.run.data['plan']['p0_sequence']:
+            self.complete_p0(pass_id)
+        calls = len(self.model.calls)
+        (self.run.directory / 'p0-fresh.png').write_bytes(b'changed image')
+        with self.run.locked(), self.assertRaisesRegex(Refused, 'complete P0'):
+            self.run.prepare('fresh', [])
+        self.assertEqual(len(self.model.calls), calls)
+        self.enable_p0()
+        self.complete_p0('p0-fresh')
+        with self.run.locked():
+            self.run.limit_to_p0()
+        with self.run.locked():
+            self.assertEqual(self.run.report()['scope'], 'p0-only')
+            with self.assertRaisesRegex(Refused, 'outside this run scope'):
+                self.run.prepare('fresh', [])
+
+    def test_legacy_report_does_not_relabel_old_observations_as_p0(self):
+        """Resuming historical manifests preserves their original coverage instead of inventing missing upgrade paths."""
+        with self.run.locked():
+            self.assertEqual(self.run.report()['p0']['verdict'], 'not planned')
 
 
 if __name__ == '__main__':
