@@ -23,4 +23,6 @@ service the project runs ([Send feedback](/docs/using/send-feedback/)), and the 
 get.farhelm.io for new releases and downloads them, checking each one's signature, by itself unless you turn that off
 ([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). And downloading a file from a session's terminal:
 the helm can read any file the session's account can read on that host
-([Work in a session](/docs/using/work-in-a-session/#copy-paste-and-links)).
+([Work in a session](/docs/using/work-in-a-session/#copy-paste-and-links)). And opening links: with your approval, or a
+host's link permission, an agent on that host can make your browser open a web address, and the local-network permission
+lets it reach addresses on your own machine and network without asking.

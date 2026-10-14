@@ -9,9 +9,10 @@ An agent running in a Farhelm session can do more than work in its own terminal.
 uses when you ask it to (with `$farhelm` in your message) but can also run on its own, it can look at your hosts and
 sessions, start new sessions on any host, in an existing directory or a new
 [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), copy a session to the same host or
-another, rename, stop, or restart sessions, and change your [launch templates](/docs/using/launch-templates/). Farhelm
-asks you before any of those changes happens, whoever typed the command; a command you type yourself in a session's
-terminal is asked about the same way. Looking never asks.
+another, rename, stop, or restart sessions, and change your [launch templates](/docs/using/launch-templates/). It can
+also ask to open a web link in your browser ([Open links from a remote session](#open-links-from-a-remote-session)).
+Farhelm asks you before any of those changes happens, whoever typed the command; a command you type yourself in a
+session's terminal is asked about the same way. Looking never asks.
 
 An agent can only do this from a session that is open in the Farhelm window. If it is not, the agent is told to ask you
 to open it.
@@ -30,7 +31,9 @@ that matter:
   (no approval prompts). For a new [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the
   card also names the repository it would clone, such as `GitHub: acme/web`, above the exact directory the clone would
   go into;
-- for a template change, the whole template as it would be saved, including any command line.
+- for a template change, the whole template as it would be saved, including any command line;
+- for a link, the site your browser would contact, above the full URL. Check the site: a URL can be written to look like
+  a different site than the one it opens.
 
 Most of what a card shows was written by the agent: session titles, directories, commands. Read those as the agent's
 words, not Farhelm's; each one sits under its own label.
@@ -77,26 +80,27 @@ YOLO setting and both link settings: you have not decided about the new installa
 ## Open links from a remote session
 
 When an agent or a command in a remote session tries to open a web link through `BROWSER`, Farhelm asks to open it on
-your machine. The card names the session and host and shows the full URL. Only HTTP and HTTPS links are accepted.
-**allow** opens it in your default browser from the Mac app, or in a new tab from Farhelm's web UI. **deny** opens
-nothing. Commands can also ask directly with `farhelm agent open-url -- https://example.com`.
+your machine. The card names the session and host and shows the site it would open and the full URL. Only HTTP and HTTPS
+links are accepted. **allow** opens it in your default browser from the Mac app, or in a new tab from Farhelm's web UI.
+**deny** opens nothing. Commands can also ask directly with `farhelm agent open-url -- https://example.com`, from any
+session, including ones on your Mac.
 
 The host settings have two separate permissions, both off initially. **Open links without asking** covers public
 addresses. **Open local-network links without asking** covers addresses on your own machine or private network; those
 cards explain why they ask separately. **always allow from** turns on only the permission that link needs. The commands
-permission above covers neither. Classification uses the address in the URL, without looking up where a name points, so
-a public-looking name can still lead to your private network.
+permission above covers neither. Farhelm decides which permission a link needs from the address as written, without
+looking up where a name points, so a public-looking name can still lead to your private network.
 
 With the matching permission on, the Mac app opens the link immediately. Farhelm's web UI still shows an **open** button
 because your browser requires a click; **dismiss** refuses the request. Turning on the local-network permission lets
 agents on that remote host make your browser load addresses on your machine or network without another approval.
 
-A running agent gets forwarding at its next launch; new terminal tabs get it immediately. Sessions on **this machine**
-keep their existing browser behavior. Your own `BROWSER` setting wins, even when empty. Unusual Farhelm install paths
-that common browser tools cannot read safely get no forwarding. A command that waits for Farhelm learns whether you
-allowed or refused; a caller that starts it in the background can report success before you answer. Codex's browser
-login does that. Claude Code 2.1.296 on Linux expects a single program name rather than this command template, so its
-own opener does not forward; use the explicit Farhelm command instead.
+A running agent gets forwarding at its next launch; new terminal tabs get it immediately. Sessions on your Mac open
+links in your browser directly, as they always have. Your own `BROWSER` setting wins, even when empty. If Farhelm is
+installed under a path with spaces or other special characters on the host, its sessions get no forwarding. A command
+that waits for Farhelm learns whether you allowed or refused; a caller that starts it in the background can report
+success before you answer. Codex's browser login does that. Claude Code 2.1.296 on Linux does not read `BROWSER` the way
+most programs do, so its own opener does not forward; use the explicit Farhelm command instead.
 
 A login that redirects to `localhost` on the remote host still cannot finish in your local browser. Opening the link
 does not connect that remote login callback to your machine.

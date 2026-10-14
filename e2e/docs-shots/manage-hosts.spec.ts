@@ -42,6 +42,9 @@ test("host menu", async ({ page, request }) => {
 });
 
 test("host settings", async ({ page, request }) => {
+  // Tall enough that the whole dialog shows: its settings scroll inside it,
+  // and at the default height the link switches at the bottom are cut off.
+  await page.setViewportSize({ width: 1600, height: 1700 });
   const { scenario, director } = await open(page, request);
   const remote = scenario.hosts.find((host) => host.kind === "remote");
   if (!remote) throw new Error("the docs scenario needs a remote host");
@@ -70,12 +73,22 @@ test("host settings", async ({ page, request }) => {
   await director.callout(
     dialog.locator(".host-yolo-without-asking"),
     "On: YOLO launches here start without asking.",
-    { side: "right", dy: 60 },
+    { side: "right", dy: -10 },
   );
   await director.callout(
     dialog.locator(".host-commands-without-asking"),
     "On: agents here run farhelm commands without asking you first.",
-    { side: "right", dy: 50 },
+    { side: "right", dy: 0 },
+  );
+  await director.callout(
+    dialog.locator("label").filter({ has: page.locator(".host-links-without-asking-toggle") }),
+    "On: agents here open public links in your browser without asking. The web UI still needs one click on open.",
+    { side: "right", dy: 60 },
+  );
+  await director.callout(
+    dialog.locator("label").filter({ has: page.locator(".host-local-links-without-asking-toggle") }),
+    "Links to your own machine or private network have their own switch.",
+    { side: "right", dy: 120 },
   );
   await shot(page, `${PAGE}/host-settings`, [dialog], { maxWidth: 930 });
 });

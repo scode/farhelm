@@ -67,8 +67,8 @@ Each agent's own page notes anything its custom commands need beyond this, such 
 
 ## Opening links
 
-Commands in remote sessions also receive browser-link forwarding when they use the usual `BROWSER` command template.
-Your own browser setting wins; see
+Commands in remote sessions can open links in your browser when they open them through the `BROWSER` environment
+variable, as most programs do. Your own browser setting wins; see
 [Open links from a remote session](/docs/using/approve-agent-requests/#open-links-from-a-remote-session) for approvals
 and the limitations of remote login callbacks. A command can ask explicitly with `farhelm agent open-url -- <url>`.
 

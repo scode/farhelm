@@ -25,7 +25,7 @@ runs. That service sees your helm machine's IP address, which it uses only to li
 files your feedback where only the maintainer can read it. Farhelm gives the agents in your sessions no way to send
 feedback.
 
-When you enter how to reach you, **Re-use for future feedback** starts checked. After a successful send, your helm
+When you enter how to reach you, **re-use for future feedback** starts checked. After a successful send, your helm
 remembers that contact for the next feedback dialog, in both the desktop app and the web UI. Uncheck it, or empty a
 prefilled contact field, to forget the contact after sending. If the desktop app or another browser tab is already open,
 it shows the new remembered contact after you reload it.
