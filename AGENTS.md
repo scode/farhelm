@@ -21,6 +21,13 @@ fixtures; do not start bonus fixtures. Answer **did P0 checks succeed?** from th
 naming anything incomplete. Missing prerequisites mean could not run; resolve them with the maintainer instead of
 guessing machine bindings. A test request does not authorize publication or release promotion.
 
+Before creating a new test pair, inspect live Tart state and reconcile leftover brick-test guests using their original
+ownership manifests and journal. The new test request authorizes clean shutdown of abandoned previous test pairs without
+asking again, preserving their disks and evidence. Do not interrupt an active operator, delete retained data, force-stop
+guests or touch unrelated VMs. Verify the earlier pair is stopped and its foreground owner has exited, then verify
+computer use binds to the new Mac clone's exact window title before installing or seeding state. Follow BRICK-TEST.md's
+startup reconciliation procedure; bringing a window forward alone may not change the tool's binding.
+
 Run this gate **before** moving `/latest` to the candidate. It is expected that `/latest` still names the preceding
 promoted stable; do not treat that difference as a blocker or ask to promote first. Upgrade baselines run from v0.23.0
 through that public default, excluding unpromoted intervening tags. For an old app that supports it, quit and relaunch

@@ -71,6 +71,21 @@ resolve that prerequisite with the maintainer. Do not install host software or a
 Run commands from the Farhelm checkout with Python 3.11 or newer. Replace the release placeholder with the requested
 exact tag. Do not interpret `vX.Y.Z` literally.
 
+Before initializing a new run or cloning guests, inspect live `tart list`, the external journal and previous run
+manifests under the profile's evidence root. Reconcile any running brick-test pair first. A new brick-test request
+authorizes clean guest shutdown of an abandoned previous test pair, with its disks, manifests and evidence preserved; no
+additional confirmation is needed for that shutdown. Establish ownership from the original manifest and unchanged VM
+identities, and use that run's journaled `control.py shutdown` for each guest. Verify both stopped states and the old
+foreground owner's exit before starting the new pair. Do not delete retained clones or evidence, force-stop a guest,
+touch frozen bases or unrelated VMs, or interrupt another active operator's test. If ownership or active use is unclear,
+resolve it with the maintainer before cloning. A pending evidence-export approval does not require an abandoned guest to
+remain running: retain its disk and record where the unexported evidence lives.
+
+This check belongs at startup because separate Tart processes share an application identity. Computer use can bind to an
+earlier process even when the new guest window is in the foreground. After the new Mac clone starts, verify computer use
+reports its exact window title before installing Farhelm or seeding state. Resolve a wrong binding at that point instead
+of discovering it after fixture preparation.
+
 - Confirm release tags are available in the checkout; fetch missing tags from its normal Git remote if authorized.
   `python3 -B releasing/mac-vm-test/brick_test.py plan vX.Y.Z` performs read-only release discovery. It resolves the
   candidate commit, observes `https://get.farhelm.io/latest`, lists eligible stable upgrades from v0.23.0 onward and
