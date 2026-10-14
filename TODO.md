@@ -129,15 +129,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pressing it launches a session from that template right away, the same way the Cmd+P template quick launch (being
   planned, not yet on main) does once a template is picked. Build on that work once it lands. Browsers keep Cmd/Ctrl
   with a digit for switching tabs and Cmd/Ctrl+0 for resetting zoom, the same reason the web UI has no Cmd+N, so decide
-  what the web UI and the chord off macOS get.
+  what the web UI and the chord off macOS get. Plan: `plans/queue/template-number-shortcuts.md`.
 
 - **Release notes in the `?` menu.** Add an item to the `?` menu that opens the release notes on the docs website in one
   click. Today the only link to them is What's new, in the menu behind the version readout, which appears only while an
-  update is waiting to be applied.
+  update is waiting to be applied. Plan: `plans/queue/release-notes-menu-item.md`.
 
 - **In-app intro tour.** Introduce new users to the app from inside it. At minimum, point out how to send feedback and
   encourage reading the docs website's Get started section, with a link to it; it may grow into a fuller guided tour.
-  When it appears, how it is dismissed, and how much it covers are to be decided when the entry is planned.
+  When it appears, how it is dismissed, and how much it covers are to be decided when the entry is planned. Plan:
+  `plans/queue/intro-tour.md`.
 
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
