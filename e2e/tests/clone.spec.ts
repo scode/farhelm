@@ -1157,7 +1157,7 @@ test("Clone of a command launch fills in its YOLO answer, agent type and resume 
     await expect(form).toBeVisible();
     await expect(form.getByLabel("agent command")).toHaveValue(`${FAKE_AGENT} {farhelm_args}`);
     await expect(
-      form.getByRole("group", { name: "runs without approval prompts" }).getByLabel("no", { exact: true }),
+      form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("no", { exact: true }),
     ).toBeChecked();
     await expect(form.locator(".launch-command-agent")).toHaveValue("claude");
     await expect(form.locator(".launch-command-resume-toggle")).toBeChecked();

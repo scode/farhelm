@@ -374,11 +374,11 @@ pub(super) fn reset_checkboxes() {
 /// user decides about it and cannot be assumed to know the term.
 fn yolo_help(yolo_without_asking: bool) -> &'static str {
     if yolo_without_asking {
-        "YOLO means an agent runs with no approval prompts: any command, any file, without asking you. \
-         YOLO sessions start on this host without asking you to confirm."
+        "YOLO bypasses an agent's safety checks. Unclassified launches on the agent's own setting count as YOLO too. \
+         These sessions start on this host without asking you to confirm."
     } else {
-        "YOLO means an agent runs with no approval prompts: any command, any file, without asking you. \
-         Farhelm asks you to confirm each YOLO launch on this host."
+        "YOLO bypasses an agent's safety checks. Unclassified launches on the agent's own setting count as YOLO too. \
+         Farhelm asks you to confirm each of these launches on this host."
     }
 }
 

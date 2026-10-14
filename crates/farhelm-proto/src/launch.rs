@@ -192,24 +192,25 @@ impl LaunchHarness {
         }
     }
 
-    /// The permission implied when a structured launch omits its permission.
+    /// The permission selected for a new request that omits its permission.
     ///
     /// Pi, OpenCode, OMP, and Goose start in approval-free modes according to
     /// their stock behavior, so Farhelm records an omitted choice as YOLO for
-    /// those harnesses. Keeping this exhaustive table beside the offered
-    /// permission table gives the helm, browser, and saved selections one
-    /// source of truth for the effective mode.
+    /// those harnesses. Other supported harnesses get explicit guarded flags;
+    /// Cursor remains under its own configuration. This is an admission rule,
+    /// not a way to reinterpret an older stored command: use
+    /// [`Self::stored_permission`] for that.
     pub const fn omitted_permission(self) -> Option<LaunchPermission> {
         match self {
             LaunchHarness::Pi
             | LaunchHarness::OpenCode
             | LaunchHarness::Omp
             | LaunchHarness::Goose => Some(LaunchPermission::Yolo),
-            LaunchHarness::Cursor
-            | LaunchHarness::Codex
+            LaunchHarness::Cursor => None,
+            LaunchHarness::Codex
             | LaunchHarness::Claude
             | LaunchHarness::Muse
-            | LaunchHarness::Grok => None,
+            | LaunchHarness::Grok => Some(LaunchPermission::Guarded),
         }
     }
 
@@ -233,18 +234,64 @@ impl LaunchHarness {
         self.offers_permission(LaunchPermission::Yolo)
     }
 
-    /// Resolve a displayed or stored permission against this harness's choices.
+    /// Resolve a draft request against the harness's current offered modes.
     ///
     /// Unsupported older values fall back to the omitted mode. The helm uses
     /// stricter admission: it fills omissions but rejects unsupported explicit
     /// values instead of silently accepting this display fallback.
-    pub const fn effective_permission(
+    pub const fn request_permission(
         self,
         permission: Option<LaunchPermission>,
     ) -> Option<LaunchPermission> {
         match permission {
             Some(value) if self.offers_permission(value) => Some(value),
             _ => self.omitted_permission(),
+        }
+    }
+
+    /// Classify the permission a stored command was actually built with.
+    ///
+    /// An absent value predates guarded flags on Claude, Codex, Grok and Muse,
+    /// and remains the agent's own setting on Cursor. It cannot inherit the
+    /// current request default: restart, replace and agent copies reuse that
+    /// stored command. The older YOLO defaults on the other harnesses retain
+    /// their meaning. Unsupported values use the same historical fallback.
+    pub const fn stored_permission(
+        self,
+        permission: Option<LaunchPermission>,
+    ) -> Option<LaunchPermission> {
+        match permission {
+            Some(value) if self.offers_permission(value) => Some(value),
+            _ => match self {
+                LaunchHarness::Pi
+                | LaunchHarness::OpenCode
+                | LaunchHarness::Omp
+                | LaunchHarness::Goose => Some(LaunchPermission::Yolo),
+                LaunchHarness::Cursor
+                | LaunchHarness::Codex
+                | LaunchHarness::Claude
+                | LaunchHarness::Muse
+                | LaunchHarness::Grok => None,
+            },
+        }
+    }
+
+    /// The guarded argv shared by launch compilation and pre-launch help.
+    ///
+    /// These flags select the vendor's automatic guarded mode over a bypass
+    /// default. They do not override allow rules, plugins or later mode
+    /// switches. Empty slices name harnesses without this offered mode; callers
+    /// must still validate the requested permission before compiling it.
+    pub const fn guarded_flags(self) -> &'static [&'static str] {
+        match self {
+            LaunchHarness::Claude | LaunchHarness::Grok => &["--permission-mode", "auto"],
+            LaunchHarness::Codex => &["-a", "on-request", "-s", "workspace-write"],
+            LaunchHarness::Muse => &["--permission-profile", ":auto-review"],
+            LaunchHarness::Omp => &["--approval-mode", "write"],
+            LaunchHarness::Cursor
+            | LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::OpenCode => &[],
         }
     }
 
@@ -264,20 +311,29 @@ impl LaunchHarness {
     /// explicit permission buttons.
     pub const fn offers_permission(self, permission: LaunchPermission) -> bool {
         match self {
-            LaunchHarness::Goose => true,
+            LaunchHarness::Goose => matches!(
+                permission,
+                LaunchPermission::Yolo
+                    | LaunchPermission::Approve
+                    | LaunchPermission::SmartApprove
+                    | LaunchPermission::Chat
+            ),
             LaunchHarness::Omp => {
                 matches!(
                     permission,
-                    LaunchPermission::Yolo | LaunchPermission::Approve
+                    LaunchPermission::Yolo | LaunchPermission::Approve | LaunchPermission::Guarded
                 )
             }
             LaunchHarness::Codex
             | LaunchHarness::Claude
             | LaunchHarness::Muse
-            | LaunchHarness::Cursor
-            | LaunchHarness::Pi
-            | LaunchHarness::OpenCode
-            | LaunchHarness::Grok => matches!(permission, LaunchPermission::Yolo),
+            | LaunchHarness::Grok => matches!(
+                permission,
+                LaunchPermission::Yolo | LaunchPermission::Guarded
+            ),
+            LaunchHarness::Cursor | LaunchHarness::Pi | LaunchHarness::OpenCode => {
+                matches!(permission, LaunchPermission::Yolo)
+            }
         }
     }
 }
@@ -336,12 +392,14 @@ impl LaunchEffort {
 
 /// A permission choice that adds a deliberate harness flag.
 ///
-/// `None` on [`LaunchSelection::permissions`] is the harness default. There
-/// is no "safe" or effective-permission value here because this snapshot must
-/// not claim to know what a changing vendor configuration will do at runtime.
+/// `Guarded` records explicit flags, rather than inferring safety from an
+/// omitted field. Older omissions stay under the agent's own setting where
+/// Farhelm previously passed no permission flags. No value promises that vendor
+/// rules or a later in-session mode switch cannot loosen the launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchPermission {
+    Guarded,
     Yolo,
     Approve,
     SmartApprove,
@@ -353,7 +411,8 @@ impl LaunchPermission {
     /// person, like the helm's refusal of an
     /// unknown remembered-permissions word, so the list they print grows with
     /// the enum instead of being retyped.
-    pub const ALL: [LaunchPermission; 4] = [
+    pub const ALL: [LaunchPermission; 5] = [
+        LaunchPermission::Guarded,
         LaunchPermission::Yolo,
         LaunchPermission::Approve,
         LaunchPermission::SmartApprove,
@@ -365,6 +424,7 @@ impl LaunchPermission {
     /// preference.
     pub fn wire_word(self) -> &'static str {
         match self {
+            LaunchPermission::Guarded => "guarded",
             LaunchPermission::Yolo => "yolo",
             LaunchPermission::Approve => "approve",
             LaunchPermission::SmartApprove => "smart_approve",
@@ -402,6 +462,36 @@ pub struct LaunchSelection {
 mod tests {
     use super::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
+    /// New request defaults must not rewrite the meaning of an older stored
+    /// launch. Its restart, replace and inherited copies still carry the old
+    /// argv, so only a new compilation may establish guarded intent.
+    #[test]
+    fn stored_omissions_remain_distinct_from_request_defaults() {
+        for harness in [
+            LaunchHarness::Claude,
+            LaunchHarness::Codex,
+            LaunchHarness::Muse,
+            LaunchHarness::Grok,
+        ] {
+            assert_eq!(
+                harness.request_permission(None),
+                Some(LaunchPermission::Guarded)
+            );
+            assert_eq!(harness.stored_permission(None), None);
+            assert_eq!(
+                harness.stored_permission(Some(LaunchPermission::Guarded)),
+                Some(LaunchPermission::Guarded)
+            );
+        }
+        assert_eq!(LaunchHarness::Cursor.request_permission(None), None);
+        assert_eq!(LaunchHarness::Cursor.stored_permission(None), None);
+        assert_eq!(
+            LaunchHarness::Omp.request_permission(None),
+            Some(LaunchPermission::Yolo)
+        );
+        assert!(!LaunchHarness::Goose.offers_permission(LaunchPermission::Guarded));
+    }
+
     /// Spec: `LaunchPermission::ALL` lists every variant exactly once.
     ///
     /// Why: callers print it as "the words this helm accepts"; a variant
@@ -412,7 +502,8 @@ mod tests {
     fn all_permissions_lists_every_variant_once() {
         for permission in LaunchPermission::ALL {
             match permission {
-                LaunchPermission::Yolo
+                LaunchPermission::Guarded
+                | LaunchPermission::Yolo
                 | LaunchPermission::Approve
                 | LaunchPermission::SmartApprove
                 | LaunchPermission::Chat => {}
@@ -472,14 +563,14 @@ mod tests {
         // (harness, offers model, offers effort, omitted permission, only YOLO)
         let expected = [
             (Cursor, true, false, None, false),
-            (Codex, true, true, None, false),
-            (Claude, true, true, None, false),
-            (Muse, true, true, None, false),
+            (Codex, true, true, Some(LaunchPermission::Guarded), false),
+            (Claude, true, true, Some(LaunchPermission::Guarded), false),
+            (Muse, true, true, Some(LaunchPermission::Guarded), false),
             (Goose, true, true, Some(LaunchPermission::Yolo), false),
             (Pi, true, true, Some(LaunchPermission::Yolo), true),
             (Omp, true, true, Some(LaunchPermission::Yolo), false),
             (OpenCode, true, false, Some(LaunchPermission::Yolo), true),
-            (Grok, false, false, None, false),
+            (Grok, false, false, Some(LaunchPermission::Guarded), false),
         ];
         assert_eq!(expected.len(), LaunchHarness::ALL.len());
         for (harness, model, effort, omitted, only_yolo) in expected {
@@ -506,7 +597,7 @@ mod tests {
     /// a row.
     #[test]
     fn each_harness_offers_exactly_its_permissions() {
-        use LaunchPermission::{Approve, Chat, SmartApprove, Yolo};
+        use LaunchPermission::{Approve, Chat, Guarded, SmartApprove, Yolo};
         // Exhaustive on purpose: add the new harness to the matrix below.
         match LaunchHarness::Goose {
             LaunchHarness::Codex
@@ -519,20 +610,20 @@ mod tests {
             | LaunchHarness::OpenCode
             | LaunchHarness::Grok => {}
         }
-        let all = [Yolo, Approve, SmartApprove, Chat];
+        let all = [Guarded, Yolo, Approve, SmartApprove, Chat];
         for (harness, offered) in [
             (
                 LaunchHarness::Goose,
                 &[Yolo, Approve, SmartApprove, Chat][..],
             ),
-            (LaunchHarness::Omp, &[Yolo, Approve][..]),
-            (LaunchHarness::Codex, &[Yolo][..]),
-            (LaunchHarness::Claude, &[Yolo][..]),
-            (LaunchHarness::Muse, &[Yolo][..]),
+            (LaunchHarness::Omp, &[Guarded, Yolo, Approve][..]),
+            (LaunchHarness::Codex, &[Guarded, Yolo][..]),
+            (LaunchHarness::Claude, &[Guarded, Yolo][..]),
+            (LaunchHarness::Muse, &[Guarded, Yolo][..]),
             (LaunchHarness::Cursor, &[Yolo][..]),
             (LaunchHarness::Pi, &[Yolo][..]),
             (LaunchHarness::OpenCode, &[Yolo][..]),
-            (LaunchHarness::Grok, &[Yolo][..]),
+            (LaunchHarness::Grok, &[Guarded, Yolo][..]),
         ] {
             for permission in all {
                 assert_eq!(

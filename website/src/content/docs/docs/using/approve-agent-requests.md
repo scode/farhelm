@@ -28,9 +28,9 @@ that matter:
 - for a copy of a session, the session being copied;
 - for a new session, the host, the directory, the agent and its choices, the full command it would run and the command a
   later restart would run, and whether it would run in [YOLO mode](/docs/using/start-a-session/#confirm-a-yolo-launch)
-  (no approval prompts). For a new [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the
-  card also names the repository it would clone, such as `GitHub: acme/web`, above the exact directory the clone would
-  go into;
+  (the agent bypasses its safety checks). For a new
+  [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the card also names the repository it
+  would clone, such as `GitHub: acme/web`, above the exact directory the clone would go into;
 - for a template change, the whole template as it would be saved, including any command line;
 - for a link, the site your browser would contact, above the full URL. Check the site: a URL can be written to look like
   a different site than the one it opens.
@@ -110,9 +110,9 @@ does not connect that remote login callback to your machine.
 On a host that asks you to [confirm YOLO launches](/docs/using/start-a-session/#confirm-a-yolo-launch), an agent cannot
 start a YOLO session at all, with or without your approval. It cannot start a session that runs a
 [custom command](/docs/agents/custom-commands/) there either, because Farhelm never reads a command to check whether it
-runs without approval prompts, and an agent's word on that is not enough. The same goes for copying a session that an
-older version of Farhelm started, whose command line may not be the one Farhelm would put together today. To let agents
-do any of these on a host, turn on its **Start YOLO sessions without asking** setting.
+runs in YOLO mode, and an agent's word on that is not enough. The same goes for copying a session that an older version
+of Farhelm started, whose command line may not be the one Farhelm would put together today. To let agents do any of
+these on a host, turn on its **Start YOLO sessions without asking** setting.
 
 [Restarting](/docs/using/stop-restart-resume/) a session that already exists is not affected: a restart resumes the
 session with the settings it has saved, and is asked about like any other request.

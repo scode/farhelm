@@ -144,19 +144,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   cargo-dist release build jobs honor the pin: they install Rust only when it is missing and otherwise use the runner's
   own. Once pinned, drop the newest-stable clippy step from `.agents/run-all-tests.md`.
 
-- **Check that "not YOLO" is true in practice.** Farhelm decides and shows whether a session runs with approval prompts
-  from the flags it passed, but an agent's own configuration can make it run without them anyway. Observed 2026-10-11:
-  `grok` 1.0.50, started as Farhelm starts it with no YOLO choice (`grok --no-leader`), showed "always-approve" in its
-  status line because the host's Grok configuration defaults to it. The same can happen to any agent whose settings set
-  a default approval mode. Two parts, across all agents. First, assess the non-YOLO launch on real agents with
-  `scripts/agent-tui.py` (`.agents/real-agent-tui.md`): what each shows at start when it really is in its approval mode
-  (workspace trust, approval prompts), since for Grok only its always-approve mode has been seen. Second, decide how
-  Farhelm avoids claiming a session asks for approval when it does not: pass an explicit non-YOLO flag where the agent
-  has one, detect the effective mode from what the agent reports or from its configuration, or show the permission as
-  the agent's own setting when Farhelm cannot know. The plain shield on a row, the YOLO confirmation, and the host
-  setting that stops agents from starting YOLO sessions all rely on that claim being true. Plan:
-  `plans/queue/guarded-permission-mode.md`.
-
 - **Notice a session switched into YOLO partway through.** Claude, Grok, Cursor and Muse print their current permission
   mode in their status line, and each can be switched into a no-checks mode inside a running session (Grok's
   `/always-approve`, Cursor's `/run-everything`, Muse's `/permissions`, Claude's bypass mode when the user's settings
@@ -262,6 +249,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   launches, or make the recognition match what live npm shows.
 
 ## Tricky bugs
+
+- **Remote uninstall and uutils stat.** The absent-private-socket cleanup uses a GNU `stat` diagnostic pattern that
+  misses uutils coreutils 0.8.0's added `(os error 2)` suffix. An uninstall can therefore refuse after stopping the
+  supervisor even though the socket is absent. The existing provisioning test failed on Ubuntu 26.04 and passed on GNU
+  coreutils 9.4 in the exact four-test retry; evidence is in FLAKES.md's 2026-10-14 entry. Accept the precise
+  missing-path form without mistaking permission or I/O errors for absence.
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
   `include a SPEC.md` to a prompt quickly made the display show `include a SPE` followed by another line containing

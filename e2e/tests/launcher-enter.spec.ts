@@ -96,7 +96,7 @@ test("launcher shows the helm's refusal beside Launch", async ({ page, request }
   await expect(form).toBeVisible();
   await form.getByRole("button", { name: "Codex", exact: true }).click();
   await form.getByLabel("folder", { exact: true }).fill("/tmp");
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }).click();
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
   const launch = form.locator(".create-session-submit");
   await expect(launch).toHaveAttribute("aria-disabled", "false");
   await launch.click();
@@ -123,7 +123,7 @@ async function observeChoiceCreates(page: Page, request: APIRequestContext) {
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
   await form.getByLabel("folder", { exact: true }).fill("/tmp");
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }).click();
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
   return { form, bodies, build };
 }
 
@@ -159,7 +159,7 @@ test("launcher choice retries preserve keys only for unchanged values", async ({
   const unchanged = [
     codex,
     form.getByRole("tab", { name: "agent", exact: true }),
-    form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }),
+    form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }),
   ];
   for (const control of unchanged) {
     const retry = await enterCreateChoice(form, control, bodies);

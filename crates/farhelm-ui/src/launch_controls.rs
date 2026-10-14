@@ -180,6 +180,11 @@ pub(crate) fn LaunchControls(
         })
         .unwrap_or_else(|| "choose a harness".to_string());
     let model_results_id = format!("{model_id_prefix}-results");
+    // Shared controls can coexist in different dialogs. Scope accessible help
+    // with their existing model prefix so each button describes its own mode.
+    let permission_help_id = format!("{model_id_prefix}-permission-help");
+    let guarded_help_id = format!("{model_id_prefix}-guarded-help");
+    let own_help_id = format!("{model_id_prefix}-own-permission-help");
     let model_change = baseline.as_ref().and_then(|old| {
         changed_marker(&model, &old.model, model_marker_label(old.model.as_deref()))
     });
@@ -201,7 +206,7 @@ pub(crate) fn LaunchControls(
             DetailPart::text(
                 old.permissions
                     .map(launch_composer::permission_value)
-                    .unwrap_or("default"),
+                    .unwrap_or("agent's own setting"),
             ),
         )
     });
@@ -380,16 +385,54 @@ pub(crate) fn LaunchControls(
                 span { class: "launch-composer-section-label", "permissions" }
                 if let Some(parts) = permission_change { PeerLine { class: "launch-composer-changed-marker", parts } }
                 div { class: "launch-composer-segmented",
-                    if omitted_permission.is_none() {
+                    if harness.is_some_and(|harness| harness.omitted_permission().is_none()) {
+                        span { class: "visually-hidden", id: "{own_help_id}",
+                            {launch_composer::permission_help(harness.expect("own-setting has a harness"), None)}
+                        }
                         button {
                             r#type: "button",
                             class: if permissions.is_none() { "selected" } else { "" },
-                            "data-tooltip": "use the agent's default permission mode",
+                            "data-tooltip": "agent's own setting: Farhelm cannot force or classify this permission mode",
+                            aria_describedby: "{own_help_id}",
                             aria_pressed: permissions.is_none(),
                             disabled: busy,
                             onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(None), on_choice_enter),
                             onclick: move |_| on_permissions.call(None),
-                            "default"
+                            "agent's own setting"
+                        }
+                    }
+                    if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Guarded)) {
+                        span { class: "visually-hidden", id: "{guarded_help_id}",
+                            {harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "guarded: choose an agent to see its automatic safety mode".to_string())}
+                        }
+                        button {
+                            r#type: "button",
+                            class: if permissions == Some(LaunchPermission::Guarded)
+                                || (permissions.is_none() && (harness.is_none() || omitted_permission == Some(LaunchPermission::Guarded))) { "selected" } else { "" },
+                            "data-tooltip": harness.map(|harness| launch_composer::permission_help(harness, Some(LaunchPermission::Guarded))).unwrap_or_else(|| "guarded: choose an agent to see its automatic safety mode".to_string()),
+                            "data-tooltip-paragraphs": "true",
+                            aria_describedby: "{guarded_help_id}",
+                            aria_pressed: permissions == Some(LaunchPermission::Guarded)
+                                || (permissions.is_none() && (harness.is_none() || omitted_permission == Some(LaunchPermission::Guarded))),
+                            disabled: busy,
+                            onkeydown: move |event| enter_choice(event, busy, || on_permissions.call(Some(LaunchPermission::Guarded)), on_choice_enter),
+                            onclick: move |_| on_permissions.call(Some(LaunchPermission::Guarded)),
+                            "guarded"
+                        }
+                    }
+                    if let Some(harness) = harness {
+                        span { class: "visually-hidden", id: "{permission_help_id}",
+                            "{launch_composer::permission_help(harness, harness.request_permission(permissions))}"
+                        }
+                        button {
+                            r#type: "button",
+                            class: "launch-permission-help",
+                            aria_label: "About permission modes",
+                            aria_describedby: "{permission_help_id}",
+                            "data-tooltip": launch_composer::permission_help(harness, harness.request_permission(permissions)),
+                            "data-tooltip-paragraphs": "true",
+                            onclick: move |_| crate::app_bar::open_external_page("https://farhelm.io/docs/agents/#permission-modes"),
+                            "?"
                         }
                     }
                     if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Yolo)) {
@@ -410,7 +453,7 @@ pub(crate) fn LaunchControls(
                             "yolo"
                         }
                     }
-                    // The approval modes after default and YOLO, in their
+                    // The approval modes after guarded and YOLO, in their
                     // fixed order, shown for whichever harness offers them
                     // (Goose all three, OMP Approve alone). Filtered in the
                     // iterator so each keyed button stays the loop's root.

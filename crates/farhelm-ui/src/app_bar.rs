@@ -161,7 +161,7 @@ const RELEASE_NOTES_URL: &str = "https://farhelm.io/docs/release-notes/";
 /// repeats the opener's two branches (navigate the `dioxus:` page, which the
 /// desktop shell turns into a system-browser open; otherwise a `noopener`
 /// tab) so the item never silently does nothing.
-fn open_external_page(url: &'static str) {
+pub(crate) fn open_external_page(url: &'static str) {
     let url = serde_json::to_string(url).expect("a string always serializes");
     document::eval(&format!(
         "(() => {{

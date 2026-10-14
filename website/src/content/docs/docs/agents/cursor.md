@@ -16,6 +16,9 @@ Farhelm does not use that name, because other tools install a command called `ag
 
 ## Gotchas and quirks
 
+- **Agent's own setting** leaves permission to Cursor's configuration: `--auto-review` does not override a configured
+  Run Everything mode. Farhelm shows a grey dashed shield and treats this launch as YOLO on hosts that ask first. See
+  [Permission modes](/docs/agents/#permission-modes).
 - Cursor asks whether you trust a directory the first time it starts there, also in YOLO mode. Answer it in the
   session's terminal; Cursor remembers your answer for that directory. (Seen with Cursor CLI 2026.09.18.)
 - YOLO starts Cursor with `--force`, which still refuses commands your Cursor configuration explicitly denies.

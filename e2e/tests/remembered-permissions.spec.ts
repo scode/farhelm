@@ -43,7 +43,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
       (await readPreferences(request)).remembered_permissions,
       "the fixture premise: nothing remembered before this test's first launch",
     ).toBeUndefined();
-    await expect(permissions().getByRole("button", { name: "default", exact: true })).toHaveAttribute(
+    await expect(permissions().getByRole("button", { name: "guarded", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -98,7 +98,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     // clears the memory again.
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await form.getByLabel("folder", { exact: true }).fill(cwd);
-    await permissions().getByRole("button", { name: "default", exact: true }).click();
+    await permissions().getByRole("button", { name: "guarded", exact: true }).click();
     const [defaultResponse] = await Promise.all([
       page.waitForResponse(
         (candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions"),
@@ -108,7 +108,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     expect(defaultResponse.ok(), `the default-permissions launch must be admitted: ${await defaultResponse.text()}`).toBe(true);
     const defaultSession = await defaultResponse.json();
     created.push(defaultSession.id);
-    expect(defaultSession.launch.selection).toMatchObject({ harness: "codex", permissions: null });
+    expect(defaultSession.launch.selection).toMatchObject({ harness: "codex", permissions: "guarded" });
     await expect(form, "a successful launch closes the composer").toHaveCount(0);
     await expect
       .poll(async () => (await readPreferences(request)).remembered_permissions, {
@@ -116,10 +116,10 @@ test("the remembered structured-launch permissions mode survives an open, a rese
       })
       .toBeUndefined();
 
-    // Reopening New once more preselects "default" again.
+    // Reopening New once more preselects guarded, the new-request default.
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
-    await expect(permissions().getByRole("button", { name: "default", exact: true })).toHaveAttribute(
+    await expect(permissions().getByRole("button", { name: "guarded", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -183,13 +183,13 @@ test("a create reply claiming yolo does not change what the next New dialog pres
     await page.locator(".new-session-button").click();
     await form.getByLabel("folder", { exact: true }).fill(cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-    await permissions().getByRole("button", { name: "default", exact: true }).click();
-    expect((await submit()).launch).toMatchObject({ harness: "codex", permissions: null });
+    await permissions().getByRole("button", { name: "guarded", exact: true }).click();
+    expect((await submit()).launch).toMatchObject({ harness: "codex", permissions: "guarded" });
 
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
     await expect(
-      permissions().getByRole("button", { name: "default", exact: true }),
+      permissions().getByRole("button", { name: "guarded", exact: true }),
       "the reply's yolo must not become this page's preselection",
     ).toHaveAttribute("aria-pressed", "true");
 
@@ -204,7 +204,7 @@ test("a create reply claiming yolo does not change what the next New dialog pres
     await expect(form).toBeVisible();
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await expect(
-      permissions().getByRole("button", { name: "default", exact: true }),
+      permissions().getByRole("button", { name: "guarded", exact: true }),
       "a command create's reply must not change the preselection either",
     ).toHaveAttribute("aria-pressed", "true");
     expect(
@@ -235,7 +235,7 @@ for (const [label, harness] of [["Pi", "pi"], ["OpenCode", "open_code"], ["OMP",
       await harnesses.getByRole("button", { name: label, exact: true }).click();
       await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
       await harnesses.getByRole("button", { name: "Codex", exact: true }).click();
-      await expect(permissions.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
       await harnesses.getByRole("button", { name: label, exact: true }).click();
       await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
       await form.getByLabel("folder", { exact: true }).fill(stackScratchDir("default-yolo-memory-"));
@@ -252,7 +252,7 @@ for (const [label, harness] of [["Pi", "pi"], ["OpenCode", "open_code"], ["OMP",
       await page.locator(".new-session-button").click();
       await expect(form).toBeVisible();
       await harnesses.getByRole("button", { name: "Codex", exact: true }).click();
-      await expect(permissions.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     } finally {
       await setLocalYoloWithoutAsking(request, false);
       for (const id of created) await cleanupSession(request, id);

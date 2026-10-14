@@ -152,7 +152,9 @@ pub(crate) enum HarnessGlyph {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PermissionGlyph {
     Yolo,
-    Default,
+    Guarded,
+    /// A stored launch for which Farhelm passed no forcing permission flags.
+    OwnSetting,
     /// A legacy session's command, never classified.
     Unknown,
     Approve,
@@ -320,17 +322,20 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
     }
 }
 
-/// Draw one of three silhouettes; a shield never means inferred approval.
+/// Draw a permission's silhouette without inferring safety from missing flags.
 ///
 /// The slash deliberately crosses the whole YOLO shield so it cannot be read
 /// as protection at sidebar size. Unknown commands get a question mark rather
-/// than borrowing the shield from a structured approval choice.
+/// than borrowing the shield from a structured approval choice. A stored
+/// own-setting launch gets a grey dashed shield: admission treats it as YOLO,
+/// while the mark says its actual mode is not known.
 #[component]
 pub(crate) fn PermissionIcon(glyph: PermissionGlyph) -> Element {
     let token = match glyph {
         PermissionGlyph::Yolo | PermissionGlyph::AssertedYolo => "yolo",
         PermissionGlyph::Unknown => "unknown",
-        PermissionGlyph::Default
+        PermissionGlyph::OwnSetting => "own-setting",
+        PermissionGlyph::Guarded
         | PermissionGlyph::Approve
         | PermissionGlyph::SmartApprove
         | PermissionGlyph::Chat
@@ -342,7 +347,7 @@ pub(crate) fn PermissionIcon(glyph: PermissionGlyph) -> Element {
                 path { d: "M3.8 3.5a2.2 2.2 0 0 1 4.4 0c0 1.8-2.2 1.7-2.2 3.5" }
                 path { d: "M6 9.5v.1" }
             } else {
-                path { d: "M6 1.3 10 2.8v3c0 2.3-2.2 4-4 4.9-1.8-.9-4-2.6-4-4.9v-3z" }
+                path { d: "M6 1.3 10 2.8v3c0 2.3-2.2 4-4 4.9-1.8-.9-4-2.6-4-4.9v-3z", stroke_dasharray: if glyph == PermissionGlyph::OwnSetting { "1.6 1.4" } else { "none" } }
                 if matches!(glyph, PermissionGlyph::Yolo | PermissionGlyph::AssertedYolo) {
                     path { d: "M1.3 1.3 10.7 10.7" }
                 }

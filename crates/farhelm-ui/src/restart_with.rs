@@ -90,12 +90,10 @@ fn restart_baseline(session: &Session) -> Option<RestartEdit> {
     match &session.launch {
         Some(crate::SessionLaunch::Agent { selection, .. }) => {
             let mut selection = selection.clone();
-            // Old sessions can omit a permission that now means YOLO. Compare
-            // the effective choices, so pressing the already-selected mode is
-            // not a change.
-            selection.permissions = selection
-                .harness
-                .effective_permission(selection.permissions);
+            // The baseline describes the old command, not a new request.
+            // Preserve a no-flag omission so choosing guarded is a real edit;
+            // historical YOLO omissions still compare equal to explicit YOLO.
+            selection.permissions = selection.harness.stored_permission(selection.permissions);
             Some(RestartEdit::Agent(selection))
         }
         Some(crate::SessionLaunch::Command(command))
@@ -519,11 +517,11 @@ pub(crate) fn RestartWithDialog(
                         }
                         fieldset { class: "launch-command-yolo",
                             legend {
-                                "runs without approval prompts"
+                                "runs in YOLO mode"
                                 if yolo_changed { span { class: "restart-with-edited", " (edited)" } }
                             }
                             label {
-                                "data-tooltip": "yes: you assert this command acts without asking for approval; Farhelm marks it YOLO and does not check",
+                                "data-tooltip": "yes: you assert this command bypasses human, classifier and sandbox safety checks; Farhelm marks it YOLO and does not check",
                                 input {
                                     r#type: "radio",
                                     name: "restart-with-command-yolo",
@@ -535,7 +533,7 @@ pub(crate) fn RestartWithDialog(
                                 "yes (YOLO)"
                             }
                             label {
-                                "data-tooltip": "no: you assert this command asks before acting; Farhelm does not check",
+                                "data-tooltip": "no: you assert this command retains a safety check that may refuse or ask you; Farhelm does not check",
                                 input {
                                     r#type: "radio",
                                     name: "restart-with-command-yolo",

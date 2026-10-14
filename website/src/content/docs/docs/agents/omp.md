@@ -10,6 +10,9 @@ specific to OMP.
 
 ## Gotchas and quirks
 
+- Guarded uses `--approval-mode write`, automatically approving workspace edits and asking before other actions. The
+  separate approve choice asks before every tool action. Project rules and plugins can loosen either; see
+  [Permission modes](/docs/agents/#permission-modes).
 - OMP runs without approval prompts by default, so an OMP launch with no permission choice counts as YOLO, and Farhelm
   asks you to confirm it on hosts that ask before YOLO launches.
 - After `/new`, the new conversation can be restarted right away, before OMP has replied to it.

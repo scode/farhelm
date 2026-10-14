@@ -1,7 +1,7 @@
 //! The loud confirmation a YOLO launch asks for on a host that asks first.
 //!
-//! The helm refuses to start a YOLO session (an agent running without
-//! approval prompts) on a host the user has not set to start YOLO sessions
+//! The helm refuses to start a YOLO or own-setting session on a host
+//! the user has not set to start YOLO sessions
 //! without asking, and says so with a header only its own code sets
 //! (`api::asks_yolo_confirmation`). Every GUI flow that can hit that refusal
 //! (create, replace, replace with, restart with) shows this block instead of
@@ -15,8 +15,9 @@
 //!
 //! It explains itself rather than assuming the user knows the term: what
 //! YOLO means, why THIS launch is one (the user picked YOLO where the harness
-//! offers other modes, the harness has no mode with approval prompts, or the
-//! command line turns them off), and that nothing has started. The helm's own
+//! offers other modes, the harness offers only YOLO, the command was asserted
+//! to bypass checks, or the agent's own setting cannot be classified), and
+//! that nothing has started. The helm's own
 //! refusal sentence is not shown: it is written for the command line (it
 //! names a CLI flag), and the GUI has everything it needs to say it better.
 //!
@@ -40,8 +41,9 @@ use crate::HostId;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 
 /// Why the launch being confirmed counts as YOLO, as far as the GUI can tell
-/// from what it sent. The helm has already decided the launch IS a YOLO
-/// launch by the time this is asked, so this only picks the explanation.
+/// from what it sent. The helm has already decided this launch requires the
+/// conservative YOLO gate, so this only picks the explanation; own-setting
+/// remains distinct from a known bypass mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum YoloReason {
     /// A structured launch whose harness offers other permission modes, with
@@ -52,6 +54,8 @@ pub(crate) enum YoloReason {
     /// A command launch its user (or an agent) asserted is YOLO. Farhelm
     /// never reads the command to check the assertion.
     Asserted,
+    /// A stored launch or Cursor request whose vendor configuration decides.
+    OwnSetting,
 }
 
 impl YoloReason {
@@ -68,6 +72,14 @@ impl YoloReason {
             Some(selection) if selection.harness.offers_only_yolo() => {
                 YoloReason::OnlyMode(selection.harness)
             }
+            Some(selection)
+                if selection
+                    .harness
+                    .stored_permission(selection.permissions)
+                    .is_none() =>
+            {
+                YoloReason::OwnSetting
+            }
             Some(_) => YoloReason::ChosenPermission,
         }
     }
@@ -75,14 +87,15 @@ impl YoloReason {
     /// The sentence the confirmation shows for this reason.
     fn sentence(self) -> String {
         match self {
-            YoloReason::ChosenPermission => "This launch uses YOLO permissions. Another permission mode would ask for approval instead.".to_string(),
+            YoloReason::ChosenPermission => "This launch uses YOLO permissions. Another permission mode would keep the agent's safety checks instead.".to_string(),
             YoloReason::OnlyMode(harness) => {
                 let name = crate::launch_composer::harness_label(harness);
                 format!("Farhelm offers {name} only in YOLO mode, so every {name} session runs this way.")
             }
             YoloReason::Asserted => {
-                "This command was asserted to run without approval prompts.".to_string()
+                "This command was asserted to bypass its safety checks.".to_string()
             }
+            YoloReason::OwnSetting => "This launch uses the agent's own setting, which Farhelm cannot override or classify. It is treated as YOLO on this host.".to_string(),
         }
     }
 }
@@ -229,7 +242,7 @@ pub(crate) fn YoloConfirmation(
             onmounted: move |_| scroll_into_view(instance),
             p { class: "yolo-confirmation-heading", "Confirm YOLO launch" }
             p { class: "yolo-confirmation-consequence",
-                "YOLO means the agent runs with no approval prompts: it can run any command and change any file on "
+                "YOLO means the agent bypasses its safety checks: no person, classifier, AI reviewer or sandbox stops its actions on "
                 span { class: "peer-value", dir: "ltr", "{host}" }
                 " without asking you."
             }

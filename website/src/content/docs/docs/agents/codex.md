@@ -10,6 +10,9 @@ specific to Codex.
 
 ## Gotchas and quirks
 
+- Guarded passes `-a on-request -s workspace-write`, so Codex works within its workspace sandbox and requests approval
+  to step outside it. Your configured reviewer can decide those requests, and your sandbox settings or later mode
+  switches can loosen the mode. See [Permission modes](/docs/agents/#permission-modes).
 - Codex prints a warning about a hook at the start of every session Farhelm launches. That hook is how Farhelm learns
   which conversation you are in, and the warning is harmless.
 - **restart** becomes available only after you submit your first prompt. A Codex session you never prompted cannot be

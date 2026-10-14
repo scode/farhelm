@@ -38,9 +38,9 @@ function launchRequest(id: string, host = "devbox", title = "fix-flaky-ci"): App
       source: null,
       launch: {
         kind: "agent",
-        selection: { harness: "claude", model: "opus", effort: "high", permissions: "approve" },
+        selection: { harness: "claude", model: "opus", effort: "high", permissions: "guarded" },
         start: [
-          "claude", "--model", "opus", "--effort", "high", "--permission-mode", "default", "{farhelm_args}",
+          "claude", "--model", "opus", "--effort", "high", "--permission-mode", "auto", "{farhelm_args}",
           "--", "Investigate why tests/e2e/ingest_retry.rs fails on CI and propose a fix",
         ],
         resume: null,
@@ -133,7 +133,12 @@ test("a compact card follows the main pane and keeps the answer buttons visible"
   }, { message: "card centered below the tab strip and clear of the sidebar" }).toBe(true);
   const wide = await placement(page);
   expect(wide.card.width).toBeCloseTo(660, 0);
-  expect(wide.card.height, "mockup-sized request stays compact").toBeLessThan(380);
+  // The bound grew from 380 when guarded launches began naming the agent's
+  // own mode ("Guarded · Claude auto mode") in the permissions cell, which
+  // wraps over a few lines in its third-of-a-card column. Naming that mode on
+  // the card that approves the launch is deliberate; the bound still catches
+  // a card that spills its full help text or grows by whole rows.
+  expect(wide.card.height, "mockup-sized request stays compact").toBeLessThan(440);
   expect(wide.actions.bottom, "answers visible without scrolling").toBeLessThanOrEqual(wide.region.bottom);
   expect(wide.region.bottom, "the terminal's bottom remains clear").toBeLessThan(wide.main.bottom - 100);
   await page.screenshot({ path: info.outputPath("approval-common.png") });

@@ -129,9 +129,15 @@ fn render(agent: &Command) -> String {
          a title Farhelm picks the next free web-N. A taken or over-long name is refused,\n\
          never suffixed. The checkout folder and post-clone command come from helm settings.\n\
          An agent launch is --agent TYPE with optional\n\
-         --model, --effort, --permissions and --trust; Farhelm composes its command. A command\n\
+         --model, --effort, --permissions and --trust; Farhelm composes its command. Guarded\n\
+         permissions select the agent's automatic safety mode with explicit flags, not a\n\
+         promise to ask before every action: Claude uses auto mode, Grok auto-review, Codex uses\n\
+         workspace-write with on-request approval, Muse uses its auto-review profile, and\n\
+         OMP's guarded choice approves workspace edits and asks about other actions. Your\n\
+         own rules and in-session mode switches can loosen these modes. Older stored launches without those flags and\n\
+         Cursor's own setting count as YOLO on hosts that ask first. A command\n\
          launch is --command with the command line to run and --yolo or --no-yolo: your\n\
-         statement of whether it runs without approval prompts. Farhelm believes it and never\n\
+         statement of whether it bypasses human, classifier and sandbox safety checks. Farhelm believes it and never\n\
          checks the command, so say it truthfully. On a command launch --agent TYPE declares\n\
          the agent type the command runs; the command must then contain {farhelm_args} as one\n\
          argument where Farhelm adds its own. --resume-command (needs --agent) is the command\n\
@@ -170,7 +176,7 @@ fn render(agent: &Command) -> String {
          was done after any refusal.\n\
          \n\
          On a host that asks before YOLO launches, an agent may not start a YOLO launch (one\n\
-         that skips approval prompts) or any command launch, and nothing you pass changes that:\n\
+         that bypasses safety checks or uses the agent's own setting) or any command launch, and nothing you pass changes that:\n\
          there is no override. If such a launch is refused, tell the user which host refused;\n\
          they can allow it by turning on \"start YOLO sessions here without asking\" for that\n\
          host. A plain restart is never refused this way.\n\

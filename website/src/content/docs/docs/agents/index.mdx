@@ -20,7 +20,7 @@ export const groups = [
     { key: 'launch', label: 'Start from the launcher', desc: "Pick the agent on the launcher's agent tab, and Farhelm builds its command line. Anything else runs from the command tab." },
     { key: 'model', label: 'Choose the model', desc: "Pick a model from the launcher's suggestions, or type any model name." },
     { key: 'effort', label: 'Choose the effort', desc: 'Pick how much effort the model puts in, from the levels that agent offers.' },
-    { key: 'perms', label: 'Approval prompts or YOLO', desc: "Run with the agent's own approval prompts, or in YOLO mode with none. Some agents only run in YOLO mode." },
+    { key: 'perms', label: 'Guarded or YOLO', desc: "Guarded lets the agent approve actions through a safety check; YOLO skips those checks. Cursor's own setting cannot be classified. See Permission modes below." },
     { key: 'trust', label: 'Workspace trust', desc: "Answer the agent’s “do you trust this directory?” question in the launcher, so the session starts working without stopping to ask it. An agent that never asks counts as supported." },
   ] },
   { name: 'Status', caps: [
@@ -42,19 +42,19 @@ export const agents = [
   { name: 'Goose', href: '/docs/agents/goose/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'y', warn: 'y', farhelm: 'y' },
     tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO by default; also approve, smart approve, and chat.', status: basic, resume: 'Available as soon as it starts.' } },
   { name: 'OMP', href: '/docs/agents/omp/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'y', warn: 'p', farhelm: 'y' },
-    tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO by default, or approve.', status: basic, resume: "Available after the agent's first reply.", warn: 'Warns when its reporter cannot be added or does not match, but not when it never reports.' } },
+    tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO by default; guarded approves workspace edits, while approve asks about every action.', status: basic, resume: "Available after the agent's first reply.", warn: 'Warns when its reporter cannot be added or does not match, but not when it never reports.' } },
   { name: 'Pi', href: '/docs/agents/pi/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'p', trust: 'p', status: 'p', waiting: 'n', resume: 'y', warn: 'p', farhelm: 'y' },
     tip: { perms: 'YOLO only: Pi has no approval prompts to turn on.', trust: "Approves the project's own settings and extensions, not the agent's actions.", status: basic, resume: "Available after the agent's first reply.", warn: 'Warns when its reporter cannot be added, but not when it never reports.' } },
   { name: 'Muse', href: '/docs/agents/muse/', tier: 2, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'p', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
     tip: { trust: 'Only true: false adds nothing, and cannot take back trust that YOLO already gives.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
   { name: 'Grok', href: '/docs/agents/grok/', tier: 1, v: { launch: 'y', model: 'n', effort: 'n', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'p', warn: 'p', farhelm: 'n' },
     tip: { trust: 'Never asks, so there is nothing to answer.', model: "Grok uses the model in its own settings.", status: basic, resume: 'Only after you install its hooks yourself; then available after your first prompt.', warn: 'Only when its conversation file is missing at restart; nothing if its hooks were never installed.' } },
-  { name: 'Cursor', href: '/docs/agents/cursor/', tier: 2, v: { launch: 'y', model: 'y', effort: 'n', perms: 'y', trust: 'n', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
-    tip: { trust: 'Cursor asks whether to trust a new directory, even in YOLO mode, and the launcher cannot answer that for you.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
+  { name: 'Cursor', href: '/docs/agents/cursor/', tier: 2, v: { launch: 'y', model: 'y', effort: 'n', perms: 'p', trust: 'n', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
+    tip: { perms: "YOLO or the agent's own setting; Farhelm cannot force a guarded mode.", trust: 'Cursor asks whether to trust a new directory, even in YOLO mode, and the launcher cannot answer that for you.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
   { name: 'OpenCode', href: '/docs/agents/opencode/', tier: 2, v: { launch: 'y', model: 'y', effort: 'n', perms: 'p', trust: 'y', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
     tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO only.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
   { name: 'Command', href: '/docs/agents/custom-commands/', head: 'Any other program, run as a custom command.', tier: 3, v: { launch: 'p', model: 'n', effort: 'n', perms: 'p', trust: 'n', status: 'p', waiting: 'n', resume: 'p', warn: 'p', farhelm: 'n' },
-    tip: { warn: 'If you declare which agent it runs, the same warnings as that agent.', trust: "Put the agent's own trust option in the command, if it has one.", launch: "From the launcher's command tab.", model: 'Write it into the command.', effort: 'Write it into the command.', perms: 'You say whether the command runs without approval prompts.', status: "Basic, or Claude's or Codex's reading if you declare the command runs one of them.", resume: 'If you declare which agent it runs and give a resume command, for an agent Farhelm can follow.' } },
+    tip: { warn: 'If you declare which agent it runs, the same warnings as that agent.', trust: "Put the agent's own trust option in the command, if it has one.", launch: "From the launcher's command tab.", model: 'Write it into the command.', effort: 'Write it into the command.', perms: 'You say whether the command runs in YOLO mode.', status: "Basic, or Claude's or Codex's reading if you declare the command runs one of them.", resume: 'If you declare which agent it runs and give a resume command, for an agent Farhelm can follow.' } },
 ];
 export const sym = { y: '✓', p: '◐', n: '–' };
 export const word = { y: 'Yes', p: 'Partly', n: 'No' };
@@ -99,3 +99,36 @@ export const ncols = agents.length + 1;
 <p class="agent-matrix-legend"><span class="agent-matrix-y">✓</span> yes · <span class="agent-matrix-p">◐</span> partly · <span class="agent-matrix-n">–</span> no.
 Hover a feature name (marked <span class="agent-matrix-i agent-matrix-i-inline">i</span>) or an underlined cell, or tab to it, for the
 details.</p>
+
+## Permission modes
+
+**Guarded** lets an agent approve work on its own through a safety check that can still refuse an action or ask you.
+It does not mean it asks about everything. **YOLO** skips those checks. The shield beside a session tells you which
+choice Farhelm started it with; its hover names the agent's mode and the command it ran.
+
+| Agent | Guarded mode | Flags Farhelm passes |
+| --- | --- | --- |
+| Claude | Auto mode: its classifier approves or blocks actions | `--permission-mode auto` |
+| Codex | Sandboxed auto: workspace commands run in a sandbox; requests to leave it follow your approval policy | `-a on-request -s workspace-write` |
+| Grok | Auto-review: its classifier approves or blocks actions | `--permission-mode auto` |
+| Muse | Auto-review: its AI reviewer checks eligible actions, with a workspace sandbox | `--permission-profile :auto-review` |
+| OMP | Write: workspace edits are approved automatically; other actions ask you | `--approval-mode write` |
+| Cursor | Agent's own setting: Farhelm cannot override its configured Run Everything mode | No forcing permission flag |
+
+Goose keeps its approve, smart approve and chat choices. Goose and OMP start in YOLO unless you choose another mode;
+Pi and OpenCode offer YOLO only. [Custom commands](/docs/agents/custom-commands/) use your own assertion about whether
+the command is YOLO.
+
+Farhelm passes these flags, but cannot guarantee the agent's behavior. Claude and Grok can allow actions through your
+allow rules or hooks; Muse can loosen its sandbox or approval rules; OMP accepts project rules and plugins. For every
+agent, always-allow answers, managed settings, plugins and switching modes inside the session can change what is
+allowed, and the agent may change between versions. Check its own mode when that matters. A green shield describes
+the launch choice, not a live audit of its actions.
+
+Cursor's **agent's own setting** has a grey dashed shield. Hosts that ask before YOLO launches treat it as YOLO,
+because Farhelm cannot promise a safety check. The same applies to older Claude, Codex, Grok and Muse sessions started without permission flags:
+restart, plain Replace and copies keep their old command. Use **Clone**, **Replace with** or **Restart with** to build
+a new guarded launch. On a host that asks first, plain Replace of an older session asks for confirmation too.
+
+After this upgrade, [update your remote hosts](/docs/using/manage-hosts/) before starting sessions there. Launches saved
+as guarded cannot be read by older Farhelm releases.

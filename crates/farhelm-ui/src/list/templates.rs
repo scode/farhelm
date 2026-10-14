@@ -263,22 +263,18 @@ impl Field {
     }
 }
 
-/// Default remains a value inside the control. Its label explains whether the
-/// harness's omission asks for approval or runs without prompts.
+/// The reset value follows the receiving harness's request default, while an
+/// explicit supported permission remains saveable even when it currently has
+/// that same effect. Hiding it would reject otherwise valid stored templates.
 /// An unset agent offers every choice: partial templates defer compatibility
 /// to the agent selected when they are applied, rather than guessing here.
 fn permission_options(agent: Option<LaunchHarness>) -> Vec<(String, String)> {
     let mut options = vec![(
         DEFAULT.into(),
-        if agent.is_none() {
-            "default (the agent's own)"
-        } else if agent.and_then(LaunchHarness::omitted_permission) == Some(LaunchPermission::Yolo)
-        {
-            "default (YOLO)"
-        } else {
-            "default (asks)"
-        }
-        .into(),
+        format!(
+            "{} (reset)",
+            crate::launch_composer::permission_label(agent, None)
+        ),
     )];
     options.extend(
         LaunchPermission::ALL
@@ -288,11 +284,7 @@ fn permission_options(agent: Option<LaunchHarness>) -> Vec<(String, String)> {
             .map(|p| {
                 (
                     word(p),
-                    if p == LaunchPermission::Yolo {
-                        "YOLO".into()
-                    } else {
-                        p.wire_word().replace('_', " ")
-                    },
+                    crate::launch_composer::permission_label(agent, Some(p)),
                 )
             }),
     );
@@ -484,7 +476,10 @@ pub(super) fn template_summary(fields: &TemplateFields) -> String {
         parts.push(choice("effort", effort.map(word)));
     }
     if let Some(permissions) = fields.permissions {
-        parts.push(choice("approvals", permissions.map(word)));
+        parts.push(format!(
+            "approvals {}",
+            crate::launch_composer::permission_label(fields.agent, permissions)
+        ));
     }
     if let Some(trust) = fields.workspace_trust {
         parts.push(choice(
@@ -634,7 +629,7 @@ fn FieldEditor(
         },
         Field::Yolo => rsx! {
             Choice { label, value: current.yolo.map(|v| v.to_string()).unwrap_or_default(),
-                options: vec![("false".into(), "asks for approval".into()), ("true".into(), "runs without prompts (YOLO)".into())], disabled,
+                options: vec![("false".into(), "keeps safety checks".into()), ("true".into(), "YOLO".into())], disabled,
                 on_change: move |v: String| draft.with_mut(|d| d.fields.yolo = v.parse().ok()),
             }
             span { class: "templates-hint", "Your statement about this command; Farhelm does not inspect it." }
@@ -1241,6 +1236,37 @@ pub(super) fn TemplatesDialog(
 mod tests {
     use super::*;
 
+    /// Explicit supported choices must remain saveable even when their mode
+    /// equals a request default. Otherwise saving a guarded launcher selection
+    /// or an older OMP/Goose YOLO template fails only in the editor.
+    #[test]
+    fn explicit_supported_permissions_remain_saveable() {
+        for &harness in LaunchHarness::ALL {
+            if harness.offers_only_yolo() {
+                continue;
+            }
+            for permission in LaunchPermission::ALL {
+                if !harness.offers_permission(permission) {
+                    continue;
+                }
+                let template = LaunchTemplate {
+                    name: "explicit-permission".into(),
+                    fields: TemplateFields {
+                        kind: Some(LauncherKind::Agent),
+                        agent: Some(harness),
+                        permissions: Some(Some(permission)),
+                        ..Default::default()
+                    },
+                };
+                assert_eq!(
+                    saved_fields_refusal(&template, None),
+                    None,
+                    "{harness:?} {permission:?}"
+                );
+            }
+        }
+    }
+
     /// Both template selection surfaces share this summary. A host's model
     /// text must not hide or reverse the approval wording beside it; ordinary
     /// model ids and explicit defaults keep their established spelling.
@@ -1382,8 +1408,12 @@ mod tests {
         assert_eq!(
             permission_options(Some(LaunchHarness::Claude)),
             vec![
-                ("default".into(), "default (asks)".into()),
-                ("yolo".into(), "YOLO".into())
+                (
+                    "default".into(),
+                    "Guarded · Claude auto mode (reset)".into()
+                ),
+                ("guarded".into(), "Guarded · Claude auto mode".into()),
+                ("yolo".into(), "yolo".into())
             ]
         );
         assert!(

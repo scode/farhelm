@@ -302,12 +302,14 @@ pub(crate) fn catalog() -> &'static [CatalogModel] {
 /// The durable form of a submitted structured selection: what history,
 /// remembered defaults, and retries record for it.
 ///
-/// An omitted permission becomes the harness's effective default, including
-/// YOLO for Pi, OpenCode, OMP and Goose. Shared by
+/// New request omissions become explicit Guarded choices on supported
+/// harnesses, or YOLO for Pi, OpenCode, OMP and Goose. Shared by
 /// [`compile`] and by acceptance paths that never compile (a fresh-checkout
 /// create reconciled after a lost reply), so the same request records the
 /// same selection whichever path accepts it. Pure: no catalog lookup, so a
-/// previously accepted request stays recoverable after catalog changes.
+/// previously accepted request stays recoverable after catalog changes. This
+/// must never be applied to a stored command copied by plain replace or an
+/// agent clone/inherit: its missing flags are historical facts.
 pub(crate) fn normalize_selection(mut selection: LaunchSelection) -> LaunchSelection {
     if selection.permissions.is_none() {
         selection.permissions = selection.harness.omitted_permission();
@@ -347,6 +349,7 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
                 LaunchPermission::Approve => "approve",
                 LaunchPermission::SmartApprove => "smart_approve",
                 LaunchPermission::Chat => "chat",
+                LaunchPermission::Guarded => unreachable!("Goose does not offer guarded"),
             };
             argv.push(format!("GOOSE_MODE={mode}"));
         }
@@ -419,6 +422,17 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
             }
             _ => {}
         }
+    }
+    // Guarded is durable intent: keep these options before Codex's resume
+    // subcommand and copy them into every other supported resume argv too.
+    if selection.permissions == Some(LaunchPermission::Guarded) {
+        argv.extend(
+            selection
+                .harness
+                .guarded_flags()
+                .iter()
+                .map(|flag| flag.to_string()),
+        );
     }
     if selection.permissions == Some(LaunchPermission::Yolo) {
         let flag = match selection.harness {
@@ -801,24 +815,87 @@ mod tests {
         assert!(compile(input).is_err());
     }
 
-    /// Omitted choices must omit flags, because “default” is the vendor's
-    /// decision and cannot be represented by a guessed model or mode.
+    /// New omissions select explicit guarded flags while model and effort
+    /// remain the vendor's choice. Pin the actual argv rather than deriving
+    /// the expectation from the shared flag table, so UI and compiler cannot
+    /// agree on the same wrong mapping unnoticed.
     #[test]
-    fn defaults_compile_to_the_harness_program_only() {
+    fn request_defaults_compile_to_guarded_flags() {
         assert_eq!(
             compile(selection(LaunchHarness::Codex)).unwrap().invocation,
-            "codex"
+            "codex -a on-request -s workspace-write"
         );
         assert_eq!(
             compile(selection(LaunchHarness::Claude))
                 .unwrap()
                 .invocation,
-            "claude"
+            "claude --permission-mode auto"
         );
         assert_eq!(
             compile(selection(LaunchHarness::Muse)).unwrap().invocation,
-            "muse"
+            "muse --permission-profile :auto-review"
         );
+    }
+
+    /// Guarded flags survive every supported resume selector, and cannot
+    /// silently become a vendor default on a fresh launch either. OMP keeps
+    /// its historical YOLO omission while offering guarded explicitly.
+    #[test]
+    fn guarded_modes_pin_fresh_and_resume_argv() {
+        for (harness, flags, selector) in [
+            (
+                LaunchHarness::Claude,
+                vec!["--permission-mode", "auto"],
+                Some("--resume"),
+            ),
+            (
+                LaunchHarness::Codex,
+                vec!["-a", "on-request", "-s", "workspace-write"],
+                Some("resume"),
+            ),
+            (
+                LaunchHarness::Grok,
+                vec!["--no-leader", "--permission-mode", "auto"],
+                Some("--resume"),
+            ),
+            (
+                LaunchHarness::Muse,
+                vec!["--permission-profile", ":auto-review"],
+                None,
+            ),
+            (
+                LaunchHarness::Omp,
+                vec!["--approval-mode", "write"],
+                Some("--resume"),
+            ),
+        ] {
+            let mut input = selection(harness);
+            input.permissions = Some(LaunchPermission::Guarded);
+            let launch = super::compile(input).unwrap();
+            let SessionLaunch::Agent {
+                selection,
+                start,
+                resume,
+            } = launch
+            else {
+                panic!("agent launch")
+            };
+            assert_eq!(selection.permissions, Some(LaunchPermission::Guarded));
+            let mut expected = vec![super::program(harness).to_string()];
+            expected.extend(flags.iter().map(|flag| flag.to_string()));
+            expected.push(FARHELM_ARGS_PLACEHOLDER.to_string());
+            assert_eq!(start, expected, "{harness:?} fresh");
+            let expected_resume = selector.map(|selector| {
+                let mut argv = expected[..expected.len() - 1].to_vec();
+                argv.extend([
+                    selector.to_string(),
+                    CONVERSATION_PLACEHOLDER.to_string(),
+                    FARHELM_ARGS_PLACEHOLDER.to_string(),
+                ]);
+                argv
+            });
+            assert_eq!(resume, expected_resume, "{harness:?} resume");
+        }
     }
 
     /// Each harness has a different CLI spelling even though the composer
@@ -1097,7 +1174,9 @@ mod tests {
                 "--model",
                 "release/candidate'42;$literal",
                 "--reasoning-effort",
-                "xhigh"
+                "xhigh",
+                "--permission-profile",
+                ":auto-review"
             ]
         );
     }
@@ -1500,13 +1579,15 @@ mod tests {
     #[test]
     fn grok_compiles_native_launch_and_resume_template() {
         let fresh = compile(selection(LaunchHarness::Grok)).expect("compile Grok launch");
-        assert_eq!(fresh.invocation, "grok --no-leader");
+        assert_eq!(fresh.invocation, "grok --no-leader --permission-mode auto");
         assert_eq!(fresh.agent_kind, AgentKind::Grok);
         assert_eq!(
             fresh.resume_template,
             Some(vec![
                 "grok".to_string(),
                 "--no-leader".to_string(),
+                "--permission-mode".to_string(),
+                "auto".to_string(),
                 "--resume".to_string(),
                 "{conversation}".to_string(),
             ])
@@ -1605,9 +1686,10 @@ mod tests {
             assert_eq!(compiled.selection.workspace_trust, trust);
             if harness == LaunchHarness::Codex {
                 assert_eq!(argv[0], "codex");
-                assert_eq!(argv[1], "-c");
+                assert_eq!(&argv[1..5], ["-a", "on-request", "-s", "workspace-write"]);
+                assert_eq!(argv[5], "-c");
                 assert_eq!(
-                    argv[2],
+                    argv[6],
                     if trust == Some(true) {
                         farhelm_supervisor::agent_kind::CODEX_TRUSTED_CWD_PLACEHOLDER
                     } else {

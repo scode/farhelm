@@ -10,5 +10,8 @@ specific to Muse.
 
 ## Gotchas and quirks
 
+- Guarded selects Muse's auto-review profile with `--permission-profile :auto-review`, overriding an unrestricted
+  default. Your approval rules, sandbox settings and later mode switches still matter; see
+  [Permission modes](/docs/agents/#permission-modes).
 - YOLO also makes Muse trust the session's directory, so choosing **false** for workspace trust changes nothing on a
   YOLO launch, or when Muse's own settings already trust the directory.

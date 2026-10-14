@@ -243,11 +243,12 @@ Every one of those abbreviations is lossy, so the untouched string rides along i
 summary, and the full truth stays one hover away.
 
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
-Permission marks use three hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`)
-and a question mark (`unknown`) use `--warn`; a plain shield (`shielded`) uses `--ok`. The badge's permission is
-non-optional. Agent-launch non-YOLO modes share the plain shield but retain their own mode-specific descriptions; a
-command launch gets the plain shield only from its own not-YOLO assertion, and a legacy command gets the question mark.
-Both slots remain fixed-width.
+Permission marks use hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`) and a
+question mark (`unknown`) use `--warn`; a plain shield (`shielded`) uses `--ok`. The badge's permission is non-optional.
+Agent-launch non-YOLO modes share the plain shield but retain their own mode-specific descriptions; a command launch
+gets the plain shield only from its own not-YOLO assertion, and a legacy command gets the question mark. An own-setting
+launch gets a dashed shield (`own-setting`) in `--fg-1`, while still counting as YOLO for the host guard. Both slots
+remain fixed-width.
 
 The agent and permission SVGs sit in separate tooltip targets, so hovering the permission mark explains its mode instead
 of returning only the combined agent summary. The combined summary remains on the agent track for provenance and the
@@ -569,7 +570,7 @@ click. A `use_effect` inside the form compares that generation against the last 
 whenever the two disagree; comparing generations rather than mere presence is what makes cloning the SAME row twice in a
 row reseed a second time, since an unrelated rerender of that effect (a host reconnect, a catalog refresh) must not
 overwrite an edit in progress. An agent-launch source seeds the agent tab from its stored declarative selection,
-resolving omitted permissions through `LaunchHarness::effective_permission` rather than parsing the composed command,
+resolving new-request permissions through `LaunchHarness::request_permission` rather than parsing the composed command,
 and also fills the command tab's command with the composed start command, YOLO unanswered, as a starting point for
 turning the setup into a command launch; the launch still comes from whichever tab is selected at submit. A
 command-launch source opens the command tab with its command, YOLO answer, declared agent type and resume command, and a
@@ -609,10 +610,10 @@ GUI labels an unaliased local row `local (this machine)` in the selector, Hosts 
 while preserving aliases and the registry's own `this machine` name. A session row without confirmed locality retains
 the name supplied by the helm; the GUI does not infer locality from its text.
 
-The `perms:` scope offers only the default and YOLO choices that the active harness can normalize. Bare `yolo` joins the
-ordinary combined search and gets exact-word preselection; bare `default` stays ordinary text. Applying a permission row
-updates the same explicit-choice bookkeeping as the segmented control and leaves the other draft fields intact. Command
-mode has no active structured harness, so it offers no permission actions.
+The `perms:` scope offers guarded, YOLO and own-setting choices only where the active harness supports them. Bare `yolo`
+joins the ordinary combined search and gets exact-word preselection; guarded and own-setting use `perms:guarded` and
+`perms:own`. Applying a permission row updates the same explicit-choice bookkeeping as the segmented control and leaves
+the other draft fields intact. Command mode has no active structured harness, so it offers no permission actions.
 
 The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
 `HostId` is a registry row that outlives a retarget or an adopt) before the selector trusts it. A row whose install this
@@ -2573,15 +2574,20 @@ accepted cwd for diagnostics but skip the folder projection. Repository setups g
 repository and complete selection, independently of their previous ephemeral cwd. Adoption purges the old install's
 repository suggestions with its other history; ordinary history rows retain their existing semantics.
 
-`LaunchHarness::omitted_permission` is the one per-harness fact for default permission modes. The helm fills omissions
-before validation and still refuses unsupported explicit choices; display and reconciliation use `effective_permission`,
-which falls back to the harness default for unsupported older values. The classifier and browser share that helper. The
-helm's remembered permission and the browser's local mirror discard a permission equal to the harness's omitted mode.
-This prevents default or forced YOLO from becoming another harness's preselection while preserving explicit YOLO on
-harnesses with a non-YOLO default. Harness switching applies the same boundary: passing through a default-YOLO harness
-loses any earlier explicit YOLO provenance, so switching back selects the real default. Preferences written before this
-change retain their value until the next structured launch; the stored word does not say which harness supplied it. No
-second default-mode table or preference provenance is kept.
+`LaunchHarness::omitted_permission` is the one per-harness fact for new request defaults. The helm fills omissions
+before validation and still refuses unsupported explicit choices; draft reconciliation uses `request_permission`. Stored
+launches use `stored_permission` instead: missing fields keep their historical no-flag meaning on Claude, Codex, Grok,
+Muse and Cursor, and their historical YOLO meaning on Pi, OpenCode, OMP and Goose. Own-setting launches count as YOLO
+for admission but get a grey dashed shield rather than a positive bypass claim. Protocol 48 adds the closed `Guarded`
+permission variant; older supervisors cannot decode it, and older releases cannot read new stored guarded launches.
+`LaunchHarness::guarded_flags` supplies both the compiler's argv and the launcher's help, so the two cannot describe
+different flags. A resume copies these before its selector, including before Codex's subcommand. The helm's remembered
+permission and the browser's local mirror discard a permission equal to the harness's omitted mode. This prevents
+default or forced YOLO from becoming another harness's preselection while preserving explicit YOLO on harnesses with a
+non-YOLO default. Harness switching applies the same boundary: passing through a default-YOLO harness loses any earlier
+explicit YOLO provenance, so switching back selects the real default. Preferences written before this change retain
+their value until the next structured launch; the stored word does not say which harness supplied it. No second
+default-mode table or preference provenance is kept.
 
 Schema 30 adds nullable `remembered_workspace_trust` to the preference row. The helm updates it in the same admitted
 create transaction as structured launch history, only for an explicit Codex, Muse, or Pi choice from a user-originated
@@ -2638,20 +2644,20 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   existing Generic kind, with no resume template or capture machinery. The structured harness launches `cursor-agent`.
   Models use `--model`, with no separate effort flag. The UI preserves its harness in launch intent while explicitly
   disclosing the lack of tracking and Resume. Protocol 27 adds the Cursor harness variant, not a new runtime integration
-  kind. Protocol 29 adds Grok as both a structured harness and a durable agent kind. Its compiler emits
-  `grok --no-leader`, maps YOLO to `--always-approve`, refuses model and effort choices, and stores
-  `grok --no-leader [--always-approve] --resume {conversation} {farhelm_args}` as argv elements. The dedicated kind
-  preserves the ownership policy across helm and supervisor storage. It uses the generic activity classifier while the
-  manually configured reporter supplies ownership-proven conversation capture. OMP is also a structured harness only at
-  launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider flags for the
-  harness default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent explicit;
-  a literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise of literal
-  upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix` interpretations on the
-  id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`). `--thinking <effort>` carries the
-  seven-level list (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask` carries the
-  YOLO/Approve choices. An omitted permission normalizes to YOLO, as for Pi, OpenCode and Goose; explicit Approve
-  remains Approve. SmartApprove and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen so it
-  cannot read as Pi's "P" at sidebar size.
+  kind. Protocol 29 adds Grok as both a structured harness and a durable agent kind. Its compiler now emits
+  `grok --no-leader --permission-mode auto` for guarded and `grok --no-leader --always-approve` for YOLO, refuses model
+  and effort choices, and retains those flags before `--resume {conversation} {farhelm_args}` as argv elements. The
+  dedicated kind preserves the ownership policy across helm and supervisor storage. It uses the generic activity
+  classifier while the manually configured reporter supplies ownership-proven conversation capture. OMP is also a
+  structured harness only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model
+  and provider flags for the harness default, and compiles an explicit model as `omp --provider openrouter --model <id>`
+  (provider intent explicit; a literal custom id stays one argv element and is stored verbatim — provider qualification
+  is not a promise of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and
+  `:suffix` interpretations on the id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`).
+  `--thinking <effort>` carries the seven-level list (`off` through `max`; OMP's `auto` is not offered), and
+  `--approval-mode yolo|always-ask|write` carries the YOLO/Approve/Guarded choices. An omitted permission normalizes to
+  YOLO, as for Pi, OpenCode and Goose; explicit Approve and Guarded remain explicit. SmartApprove and Chat are refused
+  for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at sidebar size.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter

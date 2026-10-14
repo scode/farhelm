@@ -85,7 +85,7 @@ pub enum SessionLaunch {
 pub struct CommandLaunch {
     pub command: String,
     /// The user's statement of whether the command (and its resume
-    /// command) runs without approval prompts. Farhelm believes it.
+    /// command) bypasses its safety checks. Farhelm believes it.
     pub yolo: bool,
     /// The agent type the command runs, when declared. Buys that type's
     /// status reading, conversation reporting and, with `resume`, Restart.
@@ -275,9 +275,9 @@ impl SessionLaunch {
         }
     }
 
-    /// Whether this launch runs without approval prompts, as the launch
-    /// itself says: an agent launch by its effective permission, a command
-    /// launch by the user's assertion, and `None` for a legacy session,
+    /// Whether admission must treat this launch as YOLO: an agent launch by
+    /// its stored permission (including own-setting, which cannot prove a
+    /// safety gate), a command launch by the user's assertion, and `None` for a legacy session,
     /// which carries no assertion and is shown as unclassified.
     pub fn yolo(&self) -> Option<bool> {
         match self {

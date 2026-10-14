@@ -59,8 +59,9 @@ restart Grok. The hooks do nothing for a Grok you start outside Farhelm.
 - Farhelm follows one top-level conversation per session. `/new` is followed; `/fork`, several top-level conversations
   in one session, and switching between them are not. Use a separate session for each conversation you want to keep.
 - If Grok exits right after `/new`, restart can resume the conversation before it.
-- If your Grok configuration defaults to always approving, a session launched without YOLO still runs without approval
-  prompts, though Farhelm shows it as one that asks. Grok's status line says which mode it is in.
+- Guarded starts Grok with `--permission-mode auto`, selecting auto-review even when its configured default is
+  always-approve. Your own allow rules and later mode switches can still loosen it; see
+  [Permission modes](/docs/agents/#permission-modes).
 - Starting Grok through a wrapper, a package-manager launcher, or a renamed binary runs it normally, but Farhelm cannot
   follow its conversation, so **restart** stays greyed out.
 - Grok is not told about `$farhelm` requests, because Farhelm's hooks for it are the ones you install.

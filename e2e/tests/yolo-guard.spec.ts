@@ -73,7 +73,7 @@ test("a YOLO launch asks first and starts only when confirmed", async ({ page, r
     // and that nothing started. The helm's sentence is for the command line
     // and is not shown.
     await expect(confirmation).toContainText("Confirm YOLO launch");
-    await expect(confirmation).toContainText("YOLO means the agent runs with no approval prompts");
+    await expect(confirmation).toContainText("YOLO means the agent bypasses its safety checks");
     await expect(confirmation).toContainText("This launch uses YOLO permissions.");
     await expect(confirmation).toContainText("asks before every YOLO launch. Nothing has been started.");
     await expect(confirmation).not.toContainText("--confirm-yolo");

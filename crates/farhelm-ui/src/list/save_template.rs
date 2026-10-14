@@ -114,16 +114,18 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
         Field::Agent => fields.agent.map(word),
         Field::Model => fields.model.clone().flatten(),
         Field::Effort => fields.effort.flatten().map(word),
-        Field::Permissions => fields
-            .permissions
-            .flatten()
-            .map(|v| v.wire_word().replace('_', " ")),
+        Field::Permissions => Some(crate::launch_composer::permission_label(
+            fields.agent,
+            fields.permissions.flatten(),
+        )),
         Field::Trust => fields
             .workspace_trust
             .flatten()
             .map(|v| if v { "trust" } else { "ask" }.into()),
         Field::Command => fields.command.clone(),
-        Field::Yolo => fields.yolo.map(|v| if v { "YOLO" } else { "asks" }.into()),
+        Field::Yolo => fields
+            .yolo
+            .map(|v| if v { "YOLO" } else { "keeps safety checks" }.into()),
         Field::Resume => fields.resume_command.clone().flatten(),
         // The identity is the persisted binding, but the launcher label is
         // what lets a user recognize the host they are choosing to keep.
