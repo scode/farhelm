@@ -465,6 +465,17 @@ boundary and applies it to the related planning and landing flows as well.
 `review_feedback_queue/AGENTS.md`; when asked to address a queued item, remove the item (or narrow it, if partially
 addressed) in the same commit, change, or PR as the fix.
 
+## Trailing code review
+
+"Perform trailing code review", or similar wording around "trailing code review", means adversarially review every
+commit after the last trailing-reviewed commit through the current tip of `main`, then feed the findings into this
+queue's existing recording flow. The saved checkpoint is in `review_feedback_queue/TRAILING_REVIEW.md`; the procedure is
+in `review_feedback_queue/AGENTS.md`.
+
+By default, use a separate adversarial review agent running the same model as the current agent, with an emphasis on
+security and correctness. Honor any requested agents, models, or review emphasis. Do not ask the user to choose a
+reviewer when they have not specified one.
+
 ## Triage step
 
 "Triage review feedback" means decide what to do with individual items, WITH the user. It does not authorize fixes or PR
