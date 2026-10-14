@@ -50,14 +50,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   internal socket naming. Make it discoverable by printing the exact `ssh` command that starts each shared connection,
   carrying the helm's connection overrides and its `ControlPath`. Showing only the socket paths is not enough: a master
   started from the user's own ssh config puts that config's port forwards on Farhelm's connection, where no client can
-  cancel them. Say so when a host has no socket at all because the state directory's path is too long.
+  cancel them. Say so when a host has no socket at all because the state directory's path is too long. Plan:
+  `plans/queue/ssh-2fa-help.md`.
 
 - **Release-gate coverage for sending feedback.** A Farhelm release has to be able to send feedback to the endpoint that
   is live at farhelm.io, but nothing in the release gate checks that. The endpoint handler's tests run only in the
   on-demand CI website job, the browser test for the feedback dialog is in the disabled browser job, and nothing checks
   that what a release's helm sends is still accepted by the deployed endpoint, which ships separately and can change
   without an app release. Decide what the release gate should cover, including whether it sends to the live endpoint
-  (and how such sends stay out of the maintainer's inbox) or tests against a local copy of the handler.
+  (and how such sends stay out of the maintainer's inbox) or tests against a local copy of the handler. Plan:
+  `plans/queue/feedback-brick-test.md`.
 
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
