@@ -61,6 +61,8 @@ const WORDMARK_SVG: &str = include_str!("../../../packaging/farhelm-desktop/word
 enum BarMenuItem {
     SendFeedback,
     Documentation,
+    /// Always available help, even when no installed update waits for restart.
+    ReleaseNotes,
     /// The `?` menu's, offered only by a desktop app whose updater runs
     /// (SPEC.md "Installation and updates").
     CheckForUpdates,
@@ -75,6 +77,7 @@ impl BarMenuItem {
         match self {
             BarMenuItem::SendFeedback => "send feedback",
             BarMenuItem::Documentation => "documentation",
+            BarMenuItem::ReleaseNotes => "release notes",
             BarMenuItem::CheckForUpdates => "check for updates",
             BarMenuItem::RestartToUpdate => "restart to update",
             BarMenuItem::WhatsNew => "what's new",
@@ -93,6 +96,9 @@ impl BarMenuItem {
             BarMenuItem::Documentation => {
                 "documentation: open the Farhelm documentation at farhelm.io/docs in your browser"
             }
+            BarMenuItem::ReleaseNotes => {
+                "release notes: open Farhelm's release notes at farhelm.io/docs in your browser, each release with what changed"
+            }
             BarMenuItem::CheckForUpdates => {
                 "check for updates: look for a newer Farhelm release now and install it in the background; the version readout shows how it went"
             }
@@ -110,6 +116,7 @@ impl BarMenuItem {
         match self {
             BarMenuItem::SendFeedback => "privately, to Farhelm's maintainer",
             BarMenuItem::Documentation => "opens farhelm.io/docs in your browser",
+            BarMenuItem::ReleaseNotes => "opens the release notes in your browser",
             BarMenuItem::CheckForUpdates => "installs a newer Farhelm if there is one",
             BarMenuItem::RestartToUpdate => "sessions keep running",
             BarMenuItem::WhatsNew => "opens the release notes in your browser",
@@ -117,9 +124,10 @@ impl BarMenuItem {
     }
 }
 
-const BAR_MENU_ITEMS: [BarMenuItem; 5] = [
+const BAR_MENU_ITEMS: [BarMenuItem; 6] = [
     BarMenuItem::SendFeedback,
     BarMenuItem::Documentation,
+    BarMenuItem::ReleaseNotes,
     BarMenuItem::CheckForUpdates,
     BarMenuItem::RestartToUpdate,
     BarMenuItem::WhatsNew,
@@ -130,7 +138,11 @@ type BarMenuOrder = MenuOrder<BarMenuItem, { BAR_MENU_ITEMS.len() }>;
 
 /// What the `?` menu offers: the update check only where an updater runs.
 fn help_menu_items(has_updater: bool) -> Vec<BarMenuItem> {
-    let mut items = vec![BarMenuItem::SendFeedback, BarMenuItem::Documentation];
+    let mut items = vec![
+        BarMenuItem::SendFeedback,
+        BarMenuItem::Documentation,
+        BarMenuItem::ReleaseNotes,
+    ];
     if has_updater {
         items.push(BarMenuItem::CheckForUpdates);
     }
@@ -143,7 +155,7 @@ const UPDATE_MENU_ITEMS: [BarMenuItem; 2] = [BarMenuItem::RestartToUpdate, BarMe
 /// The docs site the Documentation item opens.
 const DOCS_URL: &str = "https://farhelm.io/docs/";
 
-/// The release notes the What's new item opens: every stable release with
+/// The release notes both Release notes and What's new open: every stable release with
 /// what changed in it, on the docs site (generated there from CHANGELOG.md,
 /// the same text the GitHub releases carry). The docs site rather than the
 /// GitHub releases page because that is where the rest of Farhelm's help
@@ -586,9 +598,9 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let has_updater = updater.is_some();
     let help_items = help_menu_items(has_updater);
     let help_tooltip = if has_updater {
-        "help: send feedback, open the documentation, or check for updates"
+        "help: send feedback, open the documentation or release notes, or check for updates"
     } else {
-        "help: send feedback or open the documentation"
+        "help: send feedback or open the documentation or release notes"
     };
     let help_updater = updater.clone();
     let update_updater = updater.clone();
@@ -677,6 +689,7 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                     feedback_open.set(true);
                 }
                 BarMenuItem::Documentation => open_external_page(DOCS_URL),
+                BarMenuItem::ReleaseNotes => open_external_page(RELEASE_NOTES_URL),
                 BarMenuItem::CheckForUpdates => {
                     if let Some(updater) = &help_updater {
                         updater.check_now();
@@ -703,6 +716,7 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                     // The help menu's items; never in this menu's list.
                     BarMenuItem::SendFeedback
                     | BarMenuItem::Documentation
+                    | BarMenuItem::ReleaseNotes
                     | BarMenuItem::CheckForUpdates => {}
                 },
             }
@@ -746,5 +760,24 @@ mod tests {
     fn reported_skew_shows_the_helm_build() {
         let skew = Skew::Reported("0.9.0-rc.1".to_string());
         assert_eq!(displayed_version(Some(&skew)), "0.9.0-rc.1");
+    }
+
+    /// Spec (Feedback): the `?` menu lists send feedback, documentation and
+    /// release notes in that order, and only a desktop app whose updater
+    /// runs adds check for updates as the fourth item. The browser suite
+    /// never has an updater, so this is the one place the desktop order is
+    /// pinned.
+    #[farhelm_testtrace::test]
+    fn the_help_menu_lists_release_notes_before_the_update_check() {
+        let common = [
+            BarMenuItem::SendFeedback,
+            BarMenuItem::Documentation,
+            BarMenuItem::ReleaseNotes,
+        ];
+        assert_eq!(help_menu_items(false), common);
+        assert_eq!(
+            help_menu_items(true),
+            [&common[..], &[BarMenuItem::CheckForUpdates]].concat()
+        );
     }
 }

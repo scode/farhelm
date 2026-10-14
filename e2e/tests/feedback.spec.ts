@@ -16,6 +16,7 @@ import { openHostMenu, openRowMenu, patchPreferences, readPreferences, resetPref
 import { expect, test } from "./helpers/evidence";
 
 const DOCS_URL = "https://farhelm.io/docs/";
+const RELEASE_NOTES_URL = "https://farhelm.io/docs/release-notes/";
 
 // The premise every test here rests on: no feedback request reaches the real
 // helm. Routes registered later by a test take precedence over this one.
@@ -147,7 +148,7 @@ async function interceptFeedback(page: Page, answer: (route: Route) => Promise<v
  * The help menu lives in the bar to the right of the gear and behaves like
  * the other sidebar menus. A pointer opens and closes it from its toggle.
  * From the keyboard, ArrowDown on the toggle opens it with focus on its
- * first item, arrow keys move between its two items, and Escape closes it
+ * first item, arrow keys and Home/End reach all three items, and Escape closes it
  * and gives focus back to the toggle (focus is asserted on the keyboard
  * path, as the row menus' own tests do, because a pointer open does not
  * move focus the same way in every engine). A pointer press outside closes
@@ -162,9 +163,10 @@ test("the help menu sits right of the gear and follows the menu conventions", as
   expect(toggleBox!.x).toBeGreaterThan(gearBox!.x);
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const items = menu.getByRole("menuitem");
-  await expect(items).toHaveCount(2);
+  await expect(items).toHaveCount(3);
   await expect(items.nth(0)).toContainText("send feedback");
   await expect(items.nth(1)).toContainText("documentation");
+  await expect(items.nth(2)).toContainText("release notes");
   await toggle.click();
   await expect(menu).toHaveCount(0);
 
@@ -175,6 +177,12 @@ test("the help menu sits right of the gear and follows the menu conventions", as
   await expect(items.nth(0)).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(2)).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(items.nth(0)).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(items.nth(2)).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
   await expect(toggle).toBeFocused();
@@ -304,32 +312,34 @@ test("sidebar menu flyouts sit under no stacking context inside the sidebar", as
 });
 
 /**
- * Documentation opens the docs site through the page's shared link opener,
+ * Documentation and release notes open their pages through the shared link opener,
  * the one that reaches the system browser from the desktop webview. The
  * opener is replaced with a recorder so the test checks the target and the
  * call without navigating anywhere.
  */
-test("documentation opens the docs site through the shared link opener", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("button", { name: "help", exact: true })).toBeVisible();
-  // The opener is its own script asset, loaded asynchronously; replace it
-  // only once it exists, or the help menu would use its fallback instead.
-  await page.waitForFunction(() => "farhelmTerminalLinks" in window);
-  await page.evaluate(() => {
-    const links = (window as unknown as { farhelmTerminalLinks: { openTerminalUrl: (uri: string) => void } })
-      .farhelmTerminalLinks;
-    const opened: string[] = [];
-    (window as unknown as { openedLinks: string[] }).openedLinks = opened;
-    links.openTerminalUrl = (uri: string) => {
-      opened.push(uri);
-    };
+for (const [label, url] of [["documentation", DOCS_URL], ["release notes", RELEASE_NOTES_URL]]) {
+  test(`${label} opens the docs site through the shared link opener`, async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "help", exact: true })).toBeVisible();
+    // The opener is its own script asset, loaded asynchronously; replace it
+    // only once it exists, or the help menu would use its fallback instead.
+    await page.waitForFunction(() => "farhelmTerminalLinks" in window);
+    await page.evaluate(() => {
+      const links = (window as unknown as { farhelmTerminalLinks: { openTerminalUrl: (uri: string) => void } })
+        .farhelmTerminalLinks;
+      const opened: string[] = [];
+      (window as unknown as { openedLinks: string[] }).openedLinks = opened;
+      links.openTerminalUrl = (uri: string) => {
+        opened.push(uri);
+      };
+    });
+    const { menu } = await openHelpMenu(page);
+    await menu.locator(`[data-bar-menu-item="${label}"]`).click();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { openedLinks: string[] }).openedLinks))
+      .toEqual([url]);
+    await expect(menu).toHaveCount(0);
   });
-  const { menu } = await openHelpMenu(page);
-  await menu.locator('[data-bar-menu-item="documentation"]').click();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { openedLinks: string[] }).openedLinks))
-    .toEqual([DOCS_URL]);
-  await expect(menu).toHaveCount(0);
-});
+}
 
 /**
  * The submission the browser sends is exactly the message, the contact and
