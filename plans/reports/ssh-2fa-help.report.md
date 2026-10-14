@@ -94,3 +94,61 @@ Implementation stayed in the main agent under the plan's no-workhorse requiremen
 gpt-6.1-sol/high, wording reads used gpt-6.1-sol/medium, and report delivery receives the separate native own-model cold
 read. Private review records retain decisions and outcomes. Exact native and main-agent usage is unavailable; external
 counters are retained without assuming model attribution or billing totals.
+
+### Landing
+
+Landed alone in its round as #2018. Since the plan was based, main had gained only queue bookkeeping; the plan was
+already built on the welcome card (#2015) and the release notes item (#2006), which share the help menu.
+
+#### Release-relevant
+
+No schema or protocol change. The helm gains one protected, read-only endpoint that composes the commands; it starts no
+ssh and changes no host.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. It confirmed:
+
+- the manual command is built from the same options and connection path the helm uses for its own ssh calls, differing
+  only in what lets it run interactively and stay up, and a unit test pins that both ways;
+- every part is single-quoted, so it is safe to paste in sh, bash and zsh, and a destination starting with `-` or
+  containing NUL is refused;
+- unusable state paths get an explanation instead of a command;
+- the endpoint sits behind the device session and the loopback origin and Host guard, and agents have no route to it;
+- the dialog returns focus to Add host with the form's draft and keyboard isolation intact;
+- copying uses the shared clipboard path;
+- the help menu's order agrees in the code, the spec, the tests and the docs.
+
+#### Possible follow-up
+
+The pasted command is only safe in POSIX shells. In fish, a backslash inside single quotes is an escape, so a registered
+destination such as `a\'; id #` would let `id` run when its command is pasted. A destination containing terminal control
+characters could inject keystrokes on paste in any shell; the dialog shows those escaped, but the copy button copies
+them raw with no warning. Only the authenticated operator, or an `--ensure-hosts` file, can register a host, and that
+user can already run anything in a session, so the impact is low. The fix would be to show an explanation instead of a
+command when a destination contains a backslash or a control or other unsafe character, or at least to say the commands
+are for sh, bash and zsh.
+
+#### Other review notes left as they are
+
+- The help code assumes every SSH row has a destination and panics otherwise. The schema makes that unreachable, but
+  returning an error, as the transport does, would be more consistent.
+- Re-running a command while its connection is still up leaves a harmless idle extra connection.
+- One unit test depends on the test process's working directory being UTF-8.
+- The dialog uses "master connection" and "socket", which the docs avoid.
+
+#### Checks
+
+- Run now:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog format lint and the sleep checker;
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+    `cargo check -p farhelm-ui --features desktop`;
+  - the helm, UI and protocol packages in full through the recorder (pinned tmux, four slots, no retries): 1721 passed,
+    none skipped, run `a72d17af-113d-49a0-ac07-45a1aeaff29e`;
+  - the asset JavaScript harness (244 passed) and the website build;
+  - on Chromium and WebKit, the ssh help, feedback, welcome, hover coverage, provisioning and settings specs: 190
+    passed, none failed, run `97d24053-7b3a-4ae8-91b9-53b300913ddf`.
+- Reused: the executor's one-time OpenSSH check against a private loopback server. Not a real second-factor service or
+  remote host, as its report says.
+- Not run: the full workspace and browser batteries, the desktop runtime, installer and release gates. Nothing in those
+  paths changed.
