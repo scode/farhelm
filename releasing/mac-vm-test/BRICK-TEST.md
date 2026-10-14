@@ -10,6 +10,20 @@ This is a **pre-promotion gate**: run it after the candidate's version-path arti
 prerequisite and does not call for promotion; it selects the override or manual update path below. An after-promotion
 run remains useful, but cannot gate the candidate's initial exposure.
 
+**P0 checks** are the first product checks after environment readiness and basic coverage planning. Run them in this
+order: fresh installation and app startup; installer upgrade from the previous promoted stable; click-to-upgrade
+discovery and relaunch from that stable; local supervisor upgrade with one successful genuine agent; remote supervisor
+upgrade with one successful genuine agent. Stop on the first failure or unavailable prerequisite. Broader functionality
+and historical-version coverage are bonus work after P0, never prerequisites inserted between these five checks.
+
+The coordinator reports `p0.verdict` and the five named `p0.checks` separately from the full `verdict`. **Did P0 checks
+succeed?** means all five ran and passed with retained evidence. **Stop after P0 checks** means record that scope with
+`init vX.Y.Z --stop-after-p0`, complete P0, export its evidence, clean up its successful fixtures, and end the session
+before bonus work. If requested during a run, persist the scope with `brick_test.py stop-after-p0 "$test_run"`, finish
+only the remaining P0 work and cleanup, and retain the request in the private working log. If bonus work already began,
+stop that work and preserve its partial evidence; the scope command fences future fixtures but does not itself cancel
+GUI actions or shut down guests. A P0 pass does not claim that bonus checks or every historical upgrade ran.
+
 Read [RECIPE.md](RECIPE.md) for the product checks and [OPERATIONS.md](OPERATIONS.md) for guest commands, GUI mechanics
 and evidence collection. [BRING-UP.md](BRING-UP.md) covers preparing another machine. A previously successful run proves
 that run's versions and paths; a new candidate needs its own checks against its actual artifacts.
@@ -67,17 +81,19 @@ exact tag. Do not interpret `vX.Y.Z` literally.
   artifacts or treat its omission as a coverage gap. The candidate's own published artifacts are still required.
 - Run `python3 -B releasing/mac-vm-test/brick_test.py init vX.Y.Z`. Save the returned private `run_dir` as `test_run`.
   The output names every pass and required checkpoint. The run gets its own directory under the configured evidence
-  root, a profile snapshot, candidate input copies and initial free-space observation. No guests start yet.
+  root, a profile snapshot, candidate input copies and initial free-space observation. No guests start yet. Add
+  `--stop-after-p0` when requested; the coordinator refuses bonus fixtures in that scope.
 - Read the candidate's release notes, changelog fragments and protocol/schema changes. Fill RECIPE's addendum inside
   `test_run`. Record all planned pairs, Codex selection, omitted agents and concrete extra checks. Add each extra
-  obligation with `brick_test.py add-check "$test_run" <pass> extra-<name>`, adding `--gui` for a GUI check. Baseline
-  checkpoints cannot be replaced. If historical tags or bytes are missing, report the gap; do not silently narrow the
-  upgrade range and claim a standard pass.
-- In a supervised foreground tool session, run `python3 -B releasing/mac-vm-test/brick_test.py serve "$test_run" fresh`.
-  Keep this session alive. The driver verifies both frozen bases' identities and stopped states before cloning, starts
-  the owned pair, establishes command readiness and pinned guest-to-guest SSH, and stages
-  `~/farhelm-brick-test/continuity.py` in Linux. Wait for its ready report. Linux is headless; macOS has a Tart window
-  for computer use. The `--headless` option is for command-only work, not a substitute for desktop evidence.
+  obligation on a bonus pass with `brick_test.py add-check "$test_run" <pass> extra-<name>`, adding `--gui` for a GUI
+  check. Keep P0's prerequisites minimal; defer historical-source investigation and feature-specific fixtures until P0
+  passes. Missing older inputs are a bonus coverage gap, not a reason to delay the previous-stable P0 checks.
+- In a supervised foreground tool session, run
+  `python3 -B releasing/mac-vm-test/brick_test.py serve "$test_run" p0-fresh`. Keep this session alive. The driver
+  verifies both frozen bases' identities and stopped states before cloning, starts the owned pair, establishes command
+  readiness and pinned guest-to-guest SSH, and stages `~/farhelm-brick-test/continuity.py` in Linux. Wait for its ready
+  report. Linux is headless; macOS has a Tart window for computer use. The `--headless` option is for command-only work,
+  not a substitute for desktop evidence.
 
 Use `python3 -B releasing/mac-vm-test/brick_test.py status "$test_run"` to inspect progress and save private
 `report.json`. Each prepared pass exposes `guests`, `ssh` and a shell-quoted `control_prefix` for the existing
@@ -87,9 +103,17 @@ continuous disk quota. Measure free space during large installations too, follow
 
 ## Perform the product checks
 
-Run RECIPE's fresh pass, then its upgrade pass for **each** planned previous version. After exporting and recording one
-successful pass, clean it up before starting the next with `serve "$test_run" upgrade-v<previous>`. Each upgrade gets
-new clones. Never start or provision frozen bases.
+Run RECIPE's P0 procedure first: `p0-fresh`, then `p0-installer-upgrade`, then `p0-updater-upgrade`. The last fixture
+holds P0 steps 3–5, in that order. The two upgrade fixtures are independent: a successful installer run cannot prove
+discovery by the old app's updater. The coordinator fences later P0 fixtures and bonus work on preceding valid P0
+evidence, refuses additional observations after a failed or unavailable check, and prevents adding extra feature checks
+to P0. Export and record each successful fixture, then clean it up before starting the next. Never provision frozen
+bases.
+
+After P0 succeeds, report its verdict promptly. Unless asked to stop after P0, continue RECIPE's full fresh pass
+(`fresh`) and full upgrade passes (`upgrade-v<previous>`), newest baseline first, as bonus coverage. These also get
+separate clones. Historical manifests without explicit P0 fixtures report `p0.verdict: not planned`; do not relabel
+their observations or erase history to fit the new procedure.
 
 For each pass, copy the needed verification helper and tag source into the Mac guest through the documented command
 channel. Run `verify_release.py --previous v<previous> --version v<candidate> --output <guest-private-directory>` from
@@ -99,7 +123,21 @@ The coordinator requires the correct candidate, previous trust ring, verified si
 the same checksum-file hash seen at planning. A source build or verification against candidate/main keys cannot satisfy
 this check. Install and provision the actual published payloads inside guests.
 
-The checkpoint names group RECIPE obligations; they do not reduce them:
+P0's checkpoints group these obligations; each passing GUI check also needs command evidence:
+
+| Fixture                | Ordered checkpoints                                                                                                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `p0-fresh`             | `artifact-verification`, `fixture-clean`, `install`, `app-start`                                                                   |
+| `p0-installer-upgrade` | `artifact-verification`, `old-fixture`, `update-relaunch`                                                                          |
+| `p0-updater-upgrade`   | `artifact-verification`, `old-fixture`, `update-discovery`, `update-relaunch`, `local-supervisor-agent`, `remote-supervisor-agent` |
+
+`update-discovery` requires the old app's actual in-app check to discover and install the candidate. It cannot pass on a
+manual installer path. The two supervisor/agent checks require connected candidate supervisors, version evidence and a
+meaningful response from a genuine agent launched through Farhelm on the corresponding host. A plain command or CLI
+version alone cannot satisfy them. P0 requires no template, changed setting, old conversation, resume test or counter
+continuity workload.
+
+The bonus checkpoint names retain RECIPE's broader acceptance obligations:
 
 | Pass    | Checkpoint              | Required observation                                                                           |
 | ------- | ----------------------- | ---------------------------------------------------------------------------------------------- |
@@ -121,12 +159,15 @@ The checkpoint names group RECIPE obligations; they do not reduce them:
 | Both    | `addendum`              | Filled addendum and applicable extra checks.                                                   |
 
 Immediately before selecting an upgrade, run
-`python3 -B releasing/mac-vm-test/brick_test.py select-update "$test_run" upgrade-v<previous>`. It reobserves `/latest`
-and saves `latest-at-selection.json`. Follow the reported `ordinary`, `override` or `manual` branch in RECIPE. Override
-support comes from that actual **old** tag's source. Native forwarding, its startup announcement and removal after
-relaunch still need actual evidence. Manual installation skips the old updater's probe and trust checks; separate
-minisign verification does not erase that coverage gap. If promotion happened meanwhile, report after-publication
-coverage. If `/latest` advanced beyond the candidate, stop and replan with the maintainer.
+`python3 -B releasing/mac-vm-test/brick_test.py select-update "$test_run" <upgrade-pass>`. It reobserves `/latest` and
+saves `latest-at-selection.json`. Follow the reported `ordinary`, `override` or `manual` branch in RECIPE. Override
+support comes from that actual **old** tag's source. `p0-installer-upgrade` always selects the manual installer branch;
+`p0-updater-upgrade` must use ordinary or override discovery. An unsupported old updater or prerelease that cannot be
+discovered before promotion makes P0 could not run; do not replace that check with another manual installation. Native
+forwarding, its startup announcement and removal after relaunch still need actual evidence. Manual installation skips
+the old updater's probe and trust checks; separate minisign verification does not erase that coverage gap. If promotion
+happened meanwhile, report after-publication coverage. If `/latest` advanced beyond the candidate, stop and replan with
+the maintainer.
 
 Save a PNG for every GUI checkpoint using guest `screencapture` when authorized. Retain command/service/version/identity
 evidence as well for combined GUI and command checks. Bind computer use to the exact Mac clone's Tart window. Capture
@@ -176,12 +217,15 @@ maintainer. Only after that agreement use `cleanup ... --discard-failed`; it pre
 requires ownership and clean shutdown. A manifest with an interrupted clone cannot be guessed into deletion authority.
 Do not kill a Tart process or force-stop a guest to get around a failed check.
 
-After every planned pass, run `status` and inspect its saved report. **Pass** requires all baseline and extra checks
-across all planned pairs. Any product failure makes the verdict fail; missing checks or fixtures make it could not run.
-Report exact versions, checksum hash, update paths, before/after-public-default coverage, omitted agents, diagnostic
-gaps, cleanup and private evidence retention. Publish only a redacted summary if separately requested. Never commit
-profiles, raw evidence, guest names, private paths, addresses or credentials. This procedure grants no GitHub writes or
-release promotion.
+After every planned pass, run `status` and inspect its saved report. **P0 pass** requires all five critical checks; a
+**full pass** additionally requires every planned bonus check. Any product failure makes the relevant verdict fail;
+missing checks or fixtures make it could not run. In P0-only scope, `requested_verdict` follows P0, while the full
+`verdict` remains incomplete if bonus work did not run. A bonus failure does not erase valid P0 evidence, and a P0 pass
+does not excuse that bonus failure. Stop on a failure, preserve diagnostics, and resolve it before continuing. Report
+exact versions, checksum hash, update paths, before/after-public-default coverage, omitted agents, diagnostic gaps,
+cleanup and private evidence retention. Publish only a redacted summary if separately requested. Never commit profiles,
+raw evidence, guest names, private paths, addresses or credentials. This procedure grants no GitHub writes or release
+promotion.
 
 ## Validate changes to this coordinator
 

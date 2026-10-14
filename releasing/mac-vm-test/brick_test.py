@@ -109,7 +109,8 @@ def plan(candidate, latest, source):
     """Cover every source-known eligible stable through the promoted stable.
 
 A standard gate cannot silently test a downgrade or choose the candidate as its
-own previous release. The current stable pair leads, followed by older pairs.
+own previous release. Three independent P0 fixtures exercise fresh install,
+installer upgrade and updater upgrade before the broader acceptance passes.
 The filled release addendum must identify any historical availability gap.
 """
     target = version(candidate)
@@ -129,15 +130,22 @@ The filled release addendum must identify any historical availability gap.
         raise Refused('no eligible previous stable from v0.23.0 onward is available in source')
     if latest != candidate and latest not in eligible:
         raise Refused('the promoted stable is missing from the eligible source tags')
-    passes = [{'id': 'fresh', 'previous': eligible[0], 'update_path': None}]
+    previous = eligible[0]
+    supported = source.override(previous)
+    old = {'previous': previous, 'previous_commit': source.commit(previous),
+           'old_supports_override': supported, 'priority': 'P0'}
+    p0 = [dict(old, id='p0-fresh', update_path=None),
+          dict(old, id='p0-installer-upgrade', update_path='manual'),
+          dict(old, id='p0-updater-upgrade', update_path=update_path(candidate, latest, supported))]
+    passes = p0 + [{'id': 'fresh', 'previous': previous, 'update_path': None, 'priority': 'bonus'}]
     for previous in eligible:
         supported = source.override(previous)
         path = update_path(candidate, latest, supported)
         passes.append({'id': 'upgrade-' + previous, 'previous': previous,
                        'previous_commit': source.commit(previous), 'old_supports_override': supported,
-                       'update_path': path})
+                       'update_path': path, 'priority': 'bonus'})
     return {'candidate': candidate, 'candidate_commit': source.commit(candidate),
-            'latest_at_plan': latest, 'passes': passes}
+            'latest_at_plan': latest, 'p0_sequence': [v['id'] for v in p0], 'passes': passes}
 
 
 def metadata(candidate, fetch=download):
@@ -170,6 +178,18 @@ Continuity checkpoints require independent before/after receipts as well.
 """
     if smoke:
         return {'commands': {'gui': False, 'continuity': False}}
+    if pass_id.startswith('p0-'):
+        # Separate upgrade fixtures keep installer success from standing in for
+        # discovery by the old updater. P0 deliberately has no resume/settings
+        # or continuity workload prerequisites; those remain bonus coverage.
+        items = ({'artifact-verification': False, 'fixture-clean': False,
+                  'install': False, 'app-start': True} if pass_id == 'p0-fresh' else
+                 {'artifact-verification': False, 'old-fixture': True,
+                  **({'update-discovery': True} if pass_id == 'p0-updater-upgrade' else {}),
+                  'update-relaunch': True,
+                  **({'local-supervisor-agent': True, 'remote-supervisor-agent': True}
+                     if pass_id == 'p0-updater-upgrade' else {})})
+        return {key: {'gui': gui, 'command': gui, 'continuity': False} for key, gui in items.items()}
     items = ({'artifact-verification': False, 'fixture-clean': False, 'install': False,
               'app-start': True, 'remote-provision': True, 'codex-conversation': True,
               'remote-terminal': True, 'addendum': False} if pass_id == 'fresh' else
@@ -327,10 +347,18 @@ consume space too, so growth is conservative, and no continuous quota is claimed
             raise Refused('observed run disk growth exceeds the configured budget')
         return free
 
-    def create(self, release_plan=None, inputs=None, smoke=False):
-        """Mint private state and requirements before any clone can be claimed."""
+    def create(self, release_plan=None, inputs=None, smoke=False, p0_only=False):
+        """Bind scope and evidence obligations before any clone can be claimed.
+
+P0-only scope retains the bonus plan for honest coverage reporting, while
+preventing its fixtures from starting. It cannot be attached to a legacy plan
+that never declared the independent P0 installation paths.
+"""
+        if p0_only and (smoke or not release_plan or not release_plan.get('p0_sequence')):
+            raise Refused('P0-only scope requires a plan with explicit P0 fixtures')
         self.data = {'format': 1, 'run_id': str(uuid.uuid4()), 'kind': 'fixture-smoke' if smoke else 'release',
-                     'profile': self.profile.values, 'plan': release_plan, 'passes': {}}
+                     'profile': self.profile.values, 'plan': release_plan, 'passes': {},
+                     'scope': 'p0-only' if p0_only else 'full'}
         self.data['initial_free_bytes'] = self.budget()
         specifications = [{'id': 'smoke', 'previous': None, 'update_path': None}] if smoke else release_plan['passes']
         for spec in specifications:
@@ -387,8 +415,11 @@ consume space too, so growth is conservative, and no continuous quota is claimed
 
 The caller keeps the returned Tart children supervised. Preparation failure is
 recorded with partial state; neither cleanup authority nor a retry is invented.
+P0 scheduling and scope are checked before budget probes or clone mutations.
 """
         entry = self.selected(pass_id)
+        if self.data['plan'] and self.data['plan'].get('p0_sequence'):
+            self.require_priority(pass_id)
         if entry['phase'] != 'pending':
             raise Refused('pass already attempted; inspect its state instead of replaying preparation')
         if any(v['phase'] in ('preparing', 'ready', 'failed') for v in self.data['passes'].values()):
@@ -446,6 +477,8 @@ recorded with partial state; neither cleanup authority nor a retry is invented.
 Image presence does not interpret its contents: the agent's detail is the GUI
 attestation. Verification and continuity receipts receive additional structural
 checks, and later report generation revalidates retained artifact references.
+New P0 plans additionally fence check order and stop accepting observations
+after a failed or unavailable check; historical manifests retain their rules.
 """
         entry = self.selected(pass_id)
         if entry['phase'] != 'ready' or check_id not in entry['required']:
@@ -456,6 +489,15 @@ checks, and later report generation revalidates retained artifact references.
             raise Refused('provide a supported result and an actual observation')
         if len(detail) > 4000 or len(references) > 20:
             raise Refused('observation or evidence list exceeds its bound')
+        if self.data['plan'] and self.data['plan'].get('p0_sequence'):
+            if any(v['status'] != 'pass' for e in self.data['passes'].values() for v in e['results'].values()):
+                raise Refused('stop after the first failed or unavailable check; preserve this run')
+            if entry.get('priority') == 'P0' and status == 'pass':
+                preceding = list(entry['required'])[:list(entry['required']).index(check_id)]
+                prefix = dict(entry, required={key: entry['required'][key] for key in preceding},
+                              results={key: entry['results'][key] for key in preceding if key in entry['results']})
+                if self.verdict(prefix) != 'pass':
+                    raise Refused('complete preceding P0 checks with valid evidence first')
         bound = set(references) | {ref for ref in (before, after) if ref is not None}
         validated = {ref: artifact(self.directory, ref) for ref in bound}
         contents = [validated[ref] for ref in references]
@@ -465,8 +507,10 @@ checks, and later report generation revalidates retained artifact references.
                 raise Refused('a passing check requires evidence, including an actual PNG for GUI checks')
             if spec.get('command') and not any(v and not is_image(v) for v in contents):
                 raise Refused('this check also requires retained command/identity evidence')
-            if check_id == 'update-relaunch' and 'latest_at_selection' not in entry:
+            if check_id in ('update-relaunch', 'update-discovery') and 'latest_at_selection' not in entry:
                 raise Refused('select the update path from a fresh latest observation first')
+            if check_id == 'update-discovery' and entry['update_path'] not in ('ordinary', 'override'):
+                raise Refused('a manual installer cannot prove click-to-upgrade discovery')
             if spec['continuity']:
                 if before is None or after is None:
                     raise Refused('continuity requires independent before/after receipts')
@@ -503,13 +547,20 @@ checks, and later report generation revalidates retained artifact references.
 If promotion happened while state was seeded, the ordinary path is selected and
 reported as after-publication coverage. A default beyond the candidate refuses
 continuation. No endpoint is modified by this operation.
+The independent P0 installer fixture always uses the manual branch, even when
+the old app supports discovery. Its success cannot stand in for the updater.
 """
         entry = self.selected(pass_id)
-        if entry['phase'] != 'ready' or not pass_id.startswith('upgrade-'):
+        if entry['phase'] != 'ready' or not (pass_id.startswith('upgrade-') or
+                                            pass_id in ('p0-installer-upgrade', 'p0-updater-upgrade')):
             raise Refused('select an update only for a prepared upgrade pass')
+        if self.data['plan'].get('p0_sequence'):
+            self.require_priority(pass_id)
         if 'latest_at_selection' in entry:
             raise Refused('update selection already recorded; inspect the original observation')
         selected = update_path(self.data['plan']['candidate'], latest, entry['old_supports_override'])
+        if pass_id == 'p0-installer-upgrade':
+            selected = 'manual'
         receipt = self.directory / pass_id / 'latest-at-selection.json'
         atomic_json(receipt, {'latest': latest, 'update_path': selected})
         entry.update(latest_at_selection=latest, update_path=selected)
@@ -517,8 +568,10 @@ continuation. No endpoint is modified by this operation.
         self.note('decision', f'Pass `{pass_id}` selected `{selected}` from observed public default `{latest}`.')
 
     def add_check(self, pass_id, check_id, gui=False):
-        """Make release-specific addendum checks mandatory without replacing baseline checks."""
+        """Keep release-specific obligations in bonus coverage without expanding P0."""
         entry = self.selected(pass_id)
+        if entry.get('priority') == 'P0':
+            raise Refused('add broader functionality checks to bonus passes, not P0')
         if entry['phase'] not in ('pending', 'ready'):
             raise Refused('add obligations before completing or failing a pass')
         if not re.fullmatch(r'extra-[a-z0-9-]+', check_id) or check_id in entry['required']:
@@ -526,6 +579,40 @@ continuation. No endpoint is modified by this operation.
         entry['required'][check_id] = {'gui': gui, 'command': False, 'continuity': False}
         self.save()
         self.note('decision', f'Added required addendum check `{check_id}` to `{pass_id}`.')
+
+    def limit_to_p0(self):
+        """Persist a mid-session P0 stop without changing recorded results.
+
+This fences future bonus preparation; the supervising agent still owns any
+in-flight GUI work and clean guest shutdown. Historical plans cannot acquire
+missing P0 coverage through a scope edit.
+"""
+        if not self.data['plan'] or not self.data['plan'].get('p0_sequence'):
+            raise Refused('this historical run has no explicit P0 fixtures; start a new P0 plan')
+        self.data['scope'] = 'p0-only'
+        self.save()
+        self.note('decision', 'Stop after P0 checks requested; future bonus fixtures are outside scope.')
+
+    def require_priority(self, pass_id):
+        """Fence bonus work and later P0 fixtures before any guest is cloned.
+
+Revalidate preceding evidence instead of treating an old pass label as proof.
+Historical runs without an explicit P0 plan keep their original obligations;
+their observations are never retroactively relabeled as P0 coverage.
+"""
+        entry = self.selected(pass_id)
+        if any(e.get('preparation_error') or any(v['status'] != 'pass' for v in e['results'].values())
+               for e in self.data['passes'].values()):
+            raise Refused('stop after the first failed or unavailable check; preserve this run')
+        sequence = self.data['plan']['p0_sequence']
+        if entry.get('priority') == 'P0':
+            preceding = sequence[:sequence.index(pass_id)]
+        else:
+            if self.data.get('scope') == 'p0-only':
+                raise Refused('stop after P0 checks: bonus fixtures are outside this run scope')
+            preceding = sequence
+        if any(self.verdict(self.selected(key)) != 'pass' for key in preceding):
+            raise Refused('complete P0 fixtures in order before later checks')
 
     def verdict(self, entry):
         """Missing, invalidated or skipped checks cannot become a release pass."""
@@ -548,7 +635,12 @@ continuation. No endpoint is modified by this operation.
         return 'pass'
 
     def report(self):
-        """Return private progress and handles, explicitly separating smoke from acceptance."""
+        """Report P0, requested scope and full coverage without conflating their verdicts.
+
+Every answer rechecks retained bytes. Legacy observations and fixture smoke
+remain distinguishable from the five declared P0 product checks; unfinished
+bonus work cannot erase a P0 pass or become a full acceptance pass.
+"""
         output = {'kind': self.data['kind'], 'run_dir': str(self.directory),
                   'operator_policy': self.profile.values['operator_policy'], 'plan': self.data['plan'], 'passes': {}}
         for pass_id, entry in self.data['passes'].items():
@@ -567,9 +659,35 @@ continuation. No endpoint is modified by this operation.
         outcome = 'fail' if 'fail' in verdicts else 'pass' if all(v == 'pass' for v in verdicts) else 'could not run'
         output['verdict'] = outcome if self.data['kind'] == 'release' else 'fixture smoke: ' + outcome
         if self.data['kind'] == 'release':
+            p0_ids = self.data['plan'].get('p0_sequence', [])
+            p0_verdicts = [output['passes'][key]['verdict'] for key in p0_ids]
+            output['scope'] = self.data.get('scope', 'full')
+            output['p0'] = {'verdict': ('not planned' if not p0_ids else
+                                       'fail' if 'fail' in p0_verdicts else
+                                       'pass' if all(v == 'pass' for v in p0_verdicts) else 'could not run'),
+                            'passes': p0_ids}
+            if p0_ids:
+                # Publish the user's five questions, including separate local
+                # and remote agent results, without weakening prerequisite or
+                # retained-evidence validation of the complete P0 verdict.
+                questions = [('fresh-install-start', 'p0-fresh', None),
+                             ('installer-upgrade', 'p0-installer-upgrade', None),
+                             ('click-to-upgrade', 'p0-updater-upgrade',
+                              ['artifact-verification', 'old-fixture', 'update-discovery', 'update-relaunch']),
+                             ('local-supervisor-agent', 'p0-updater-upgrade', ['local-supervisor-agent']),
+                             ('remote-supervisor-agent', 'p0-updater-upgrade', ['remote-supervisor-agent'])]
+                output['p0']['checks'] = {}
+                for label, pass_id, keys in questions:
+                    entry = self.selected(pass_id)
+                    if keys is not None:
+                        entry = dict(entry, required={key: entry['required'][key] for key in keys},
+                                     results={key: entry['results'][key] for key in keys if key in entry['results']})
+                    output['p0']['checks'][label] = self.verdict(entry)
+            output['requested_verdict'] = output['p0']['verdict'] if output['scope'] == 'p0-only' else outcome
             candidate = self.data['plan']['candidate']
             observations = [self.data['plan']['latest_at_plan']] + [v.get('latest_at_selection')
-                            for key, v in self.data['passes'].items() if key.startswith('upgrade-')]
+                            for key, v in self.data['passes'].items() if key.startswith('upgrade-') or
+                            key in ('p0-installer-upgrade', 'p0-updater-upgrade')]
             output['promotion_coverage'] = ('after-publication' if candidate in observations else
                                             'pending' if None in observations else 'before-public-default')
         return output
@@ -653,12 +771,16 @@ def main():
     parser.add_argument('--profile', type=Path)
     sub = parser.add_subparsers(dest='action', required=True)
     for name in ('plan', 'init'):
-        sub.add_parser(name).add_argument('candidate')
+        child = sub.add_parser(name)
+        child.add_argument('candidate')
+        if name == 'init':
+            child.add_argument('--stop-after-p0', action='store_true',
+                               help='complete the five P0 checks and refuse bonus fixtures')
     sub.add_parser('smoke')
-    for name in ('serve', 'status', 'select-update', 'record', 'add-check', 'cleanup'):
+    for name in ('serve', 'status', 'select-update', 'record', 'add-check', 'cleanup', 'stop-after-p0'):
         child = sub.add_parser(name)
         child.add_argument('run_dir', type=Path)
-        if name != 'status':
+        if name not in ('status', 'stop-after-p0'):
             child.add_argument('pass_id')
         if name == 'serve':
             child.add_argument('--headless', action='store_true')
@@ -690,7 +812,8 @@ def main():
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
         run = Run(root / ('brick-' + str(uuid.uuid4())), profile)
         run.create(release if args.action == 'init' else None,
-                   inputs if args.action == 'init' else None, smoke=args.action == 'smoke')
+                   inputs if args.action == 'init' else None, smoke=args.action == 'smoke',
+                   p0_only=args.action == 'init' and args.stop_after_p0)
         if args.action == 'smoke':
             smoke(run)
         else:
@@ -721,6 +844,8 @@ def main():
             run.cleanup(args.pass_id, args.discard_failed)
         elif args.action == 'select-update':
             run.select_update(args.pass_id, download(ORIGIN + '/latest').decode().strip())
+        elif args.action == 'stop-after-p0':
+            run.limit_to_p0()
         report = run.report()
         if args.action == 'status':
             atomic_json(run.directory / 'report.json', report)

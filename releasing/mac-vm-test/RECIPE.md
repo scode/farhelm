@@ -44,7 +44,65 @@ Before each pass, use BRICK-TEST's supervised `serve` sequence, or OPERATIONS.md
 Linux systemd user manager. Record guest OS/image versions privately. Confirm no Farhelm binaries or state exist in
 either fresh clone. A broken fixture is “could not run,” not a product pass.
 
-## Pass 1: fresh install
+## P0 checks: install, upgrade and basic agent execution
+
+Run these five checks immediately after environment readiness and basic coverage planning, in order. P0 is a named
+group: report all five results and a separate P0 verdict. Stop at the first failed or unavailable check and retain its
+diagnostics. A successful step never substitutes for a later step. A request to **stop after P0 checks** ends after P0
+evidence is recorded and its successful fixtures are cleaned up. Otherwise, report P0 promptly and continue bonus work.
+
+Use three independent guest pairs: `p0-fresh` for step 1, `p0-installer-upgrade` for step 2, and `p0-updater-upgrade`
+for steps 3–5. Both upgrades start from the previous promoted stable and use its actual installed state. For each pair,
+verify the candidate's published bytes against that stable's compiled trust ring as described in BRICK-TEST.md.
+Export/record evidence and clean up each successful pair before starting the next.
+
+Identify genuine agent CLI/authentication prerequisites for the Mac and Linux hosts during environment readiness; Codex
+is the baseline. Prepare them when needed for steps 4–5; do not delay available install/start checks while doing broader
+agent setup. Resolve missing fixtures under the private operator policy. Authorization to copy a credential into Mac
+clones does not authorize copying it into Linux clones. Keep credentials out of evidence. Agent version output or login
+status establishes only a prerequisite, not successful agent execution.
+
+1. **Fresh install and start.** Confirm both guests have no Farhelm binaries or state (`fixture-clean`). Install the
+   candidate through its public version-path installer (`install`), open the installed Mac app, and require the
+   candidate app version, a usable session list and a connected local supervisor at the candidate version (`app-start`).
+   Save installer output, CLI version, GUI and supervisor evidence. End this fixture here: remote provisioning,
+   conversations, templates, settings and feature checks wait until their designated P0 step or bonus coverage.
+2. **Installer upgrade.** On a new pair, install and launch the previous stable with automatic updates disabled before
+   first startup. Verify the old app and local supervisor versions (`old-fixture`); no old conversation, template,
+   changed setting or remote workload is needed. Reobserve `/latest` with `select-update`, then run the verified
+   candidate installer while the old app runs, with both `FARHELM_VERSION` and `FARHELM_INSTALL_SUMS_FILE` set as in the
+   manual branch below. Require the old app to offer **Restart to update**, use that action, and require a usable
+   candidate app and connected candidate local supervisor (`update-relaunch`). Do not manually open the candidate to
+   hide a failed relaunch. This proves installer upgrade, not updater discovery.
+3. **Click-to-upgrade discovery and relaunch.** On another new pair, install the previous stable with automatic updates
+   disabled and provision Linux through that old app. Verify old app/local/remote versions (`old-fixture`). Prepare only
+   the fixture needed for steps 3–5; no saved template, changed preference, old conversation or counter command is
+   needed. Reobserve `/latest`, select the ordinary or stable-override path below, and explicitly click **Check for
+   updates** in the old app. Require it to discover and install the candidate (`update-discovery`), then use the actual
+   **Restart to update** action and require the candidate app to return (`update-relaunch`). Verify override forwarding
+   and removal when applicable. An RC/dev candidate or old app without override support may lack a genuine pre-promotion
+   discovery path; report that step and P0 as could not run and stop. A manual installer cannot satisfy step 3.
+4. **Local supervisor upgrade and one successful agent.** On the step 3 fixture, require the local supervisor to connect
+   at the candidate version. The Mac app normally upgrades its managed local supervisor when it relaunches; observe that
+   transition rather than requiring an extra Update click. If the product offers a local Update action, exercise it and
+   verify the result. A stranded local host with an unusable Update action is a failure. Launch one genuine
+   authenticated agent through Farhelm on the local host, send a small prompt, and require a meaningful reply and
+   responsive terminal (`local-supervisor-agent`). Keep version and GUI/command evidence. Conversation capture,
+   restart/resume and preference preservation are bonus checks.
+5. **Remote supervisor upgrade and one successful agent.** On that same fixture, use the app's remote **Update** action.
+   Require the formerly old remote supervisor to return connected at the candidate version and independently verify its
+   running service. Launch one genuine authenticated agent through Farhelm on that remote host, send a small prompt, and
+   require a meaningful reply and responsive terminal (`remote-supervisor-agent`). A plain shell command does not count
+   as an agent. Save version, service and GUI/command evidence. Original-process survival and final quit/reopen belong
+   to bonus coverage.
+
+Keep setup, signature verification and bounded evidence capture alongside the P0 step they support. Do not expand P0
+with release-specific feature checks or wait for historical-version investigations. Once all five checks pass, answer
+**did P0 checks succeed?** with that P0 result, candidate and previous stable, and the evidence references. Do not imply
+that broader checks ran. Older manifests without these separate fixtures have no P0 verdict; retain their observations
+as historical coverage rather than rewriting them.
+
+## Bonus: full fresh install
 
 1. Inside the Mac guest, fetch the candidate's public version-path installer and install with
    `FARHELM_VERSION=v<version>`. For example, after replacing the placeholder:
@@ -62,7 +120,7 @@ either fresh clone. A broken fixture is “could not run,” not a product pass.
    evidence with `control.py collect`, verify each exported archive, then `shutdown` and `delete` only this pass's owned
    clones. Bases remain stopped and unchanged.
 
-## Pass 2: upgrade on existing state
+## Bonus: full upgrade on existing state
 
 1. Start fresh clones again and install the **previous stable** in the Mac guest with its version-path installer and
    `FARHELM_VERSION`. Use the verified bring-up mechanism to disable automatic updates before its first startup check;
@@ -174,7 +232,7 @@ Coverage gaps: unrun checks, manual-verification omissions, untested version pai
 Cleanup: owned clones deleted or retained by agreement; evidence retained
 ```
 
-“Pass” requires every required check to run and pass. A product failure makes the verdict fail; a missing test
-environment with no demonstrated product failure makes it could not run. Never treat a skipped check or a clean process
-exit as a pass. This result covers the actual versions, artifacts and paths exercised, not zero risk for every supported
-installation.
+“P0 pass” requires all five P0 checks to run and pass. “Full pass” additionally requires every planned bonus check to
+run and pass. A product failure makes the relevant verdict fail; a missing test environment with no demonstrated product
+failure makes it could not run. Never treat a skipped check or a clean process exit as a pass. This result covers the
+actual versions, artifacts and paths exercised, not zero risk for every supported installation.
