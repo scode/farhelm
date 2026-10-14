@@ -2119,13 +2119,13 @@ fn a_template_create_sends_its_fields_and_refuses_template() {
             req_id,
             outcome: AgentOutcome::Ok {
                 reply: AgentReply::TemplateWritten {
-                    template: AgentTemplate::listed(
+                    template: Box::new(AgentTemplate::listed(
                         &farhelm_proto::launcher::LaunchTemplate {
                             name: "my-template".to_string(),
                             fields,
                         },
                         Some("builder".to_string()),
-                    ),
+                    )),
                 },
             },
         })
@@ -2208,13 +2208,13 @@ fn template_edit_and_delete_send_their_verbs() {
             req_id,
             outcome: AgentOutcome::Ok {
                 reply: AgentReply::TemplateWritten {
-                    template: farhelm_proto::AgentTemplate::listed(
+                    template: Box::new(farhelm_proto::AgentTemplate::listed(
                         &farhelm_proto::launcher::LaunchTemplate {
                             name: "my-template".to_string(),
                             fields,
                         },
                         None,
-                    ),
+                    )),
                 },
             },
         })

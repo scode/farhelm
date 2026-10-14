@@ -290,6 +290,7 @@ struct TemplateTargets {
     composer_reset_reason: Signal<Option<String>>,
     structured_effort: Signal<Option<LaunchEffort>>,
     structured_permissions: Signal<Option<LaunchPermission>>,
+    structured_permission_flags: Signal<String>,
     structured_permissions_is_explicit: Signal<bool>,
     structured_workspace_trust: Signal<Option<bool>>,
     structured_workspace_trust_is_explicit: Signal<bool>,
@@ -342,6 +343,10 @@ fn launcher_snapshot(
         model_owner: *t.custom_model_harness.peek(),
         effort: *t.structured_effort.peek(),
         permissions: *t.structured_permissions.peek(),
+        permission_flags: crate::launch_composer::permission_words(
+            *t.structured_permissions.peek(),
+            &t.structured_permission_flags.peek(),
+        ),
         workspace_trust: *t.structured_workspace_trust.peek(),
         command: submitted_field(
             &t.invocation.peek(),
@@ -514,16 +519,23 @@ fn template_edits(
         }))),
         None => {}
     }
+    let template_flags = fields
+        .permission_flags
+        .as_ref()
+        .map(shell_words::join)
+        .unwrap_or_default();
     match fields.permissions {
         Some(Some(LaunchPermission::Yolo)) => edits.push(TemplateEdit::Search(
             ComposerSearchResult::Permissions(ComposerPermission::Yolo),
         )),
         Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
             t.structured_permissions.set(None);
+            t.structured_permission_flags.set(String::new());
             t.structured_permissions_is_explicit.set(true);
         }))),
         Some(Some(permission)) => edits.push(TemplateEdit::Set(Box::new(move || {
             t.structured_permissions.set(Some(permission));
+            t.structured_permission_flags.set(template_flags.clone());
             t.structured_permissions_is_explicit.set(true);
         }))),
         None => {}
@@ -623,6 +635,7 @@ fn apply_composer_search_result(
     mut custom_model_harness: Signal<Option<LaunchHarness>>,
     mut structured_effort: Signal<Option<LaunchEffort>>,
     mut structured_permissions: Signal<Option<LaunchPermission>>,
+    mut structured_permission_flags: Signal<String>,
     mut structured_permissions_is_explicit: Signal<bool>,
     mut structured_workspace_trust: Signal<Option<bool>>,
     mut structured_workspace_trust_is_explicit: Signal<bool>,
@@ -713,6 +726,10 @@ fn apply_composer_search_result(
         crate::launch_composer::ComposerSearchResult::Harness(harness) => {
             launch_tab.set(LaunchTab::Agent);
             let before = LaunchSelection {
+                permission_flags: crate::launch_composer::permission_words(
+                    structured_permissions(),
+                    &structured_permission_flags(),
+                ),
                 harness: structured_harness().unwrap_or(harness),
                 model: structured_model(),
                 effort: structured_effort(),
@@ -736,6 +753,13 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            structured_permission_flags.set(
+                selection
+                    .permission_flags
+                    .as_ref()
+                    .map(shell_words::join)
+                    .unwrap_or_default(),
+            );
             structured_workspace_trust.set(selection.workspace_trust);
             custom_model_harness.set(owner);
         }
@@ -745,6 +769,10 @@ fn apply_composer_search_result(
             // structured draft hidden behind command controls.
             launch_tab.set(LaunchTab::Agent);
             let before = LaunchSelection {
+                permission_flags: crate::launch_composer::permission_words(
+                    structured_permissions(),
+                    &structured_permission_flags(),
+                ),
                 harness: structured_harness().unwrap_or(harness),
                 model: structured_model(),
                 effort: structured_effort(),
@@ -774,6 +802,13 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            structured_permission_flags.set(
+                selection
+                    .permission_flags
+                    .as_ref()
+                    .map(shell_words::join)
+                    .unwrap_or_default(),
+            );
             structured_workspace_trust.set(selection.workspace_trust);
             custom_model_harness.set(owner);
         }
@@ -791,12 +826,22 @@ fn apply_composer_search_result(
             structured_workspace_trust_is_explicit.set(true);
         }
         crate::launch_composer::ComposerSearchResult::Permissions(permission) => {
+            if permission != crate::launch_composer::ComposerPermission::Custom {
+                structured_permission_flags.set(String::new());
+            }
             match permission {
+                crate::launch_composer::ComposerPermission::Custom => {
+                    structured_permissions.set(Some(LaunchPermission::Custom));
+                    document::eval(
+                        "requestAnimationFrame(() => document.querySelector('.custom-permission-flags')?.focus())",
+                    );
+                }
                 crate::launch_composer::ComposerPermission::Guarded => {
                     structured_permissions.set(Some(LaunchPermission::Guarded));
                 }
                 crate::launch_composer::ComposerPermission::OwnSetting => {
                     structured_permissions.set(None);
+                    structured_permission_flags.set(String::new());
                 }
                 crate::launch_composer::ComposerPermission::Yolo => {
                     structured_permissions.set(Some(LaunchPermission::Yolo));
@@ -823,6 +868,13 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            structured_permission_flags.set(
+                selection
+                    .permission_flags
+                    .as_ref()
+                    .map(shell_words::join)
+                    .unwrap_or_default(),
+            );
             structured_workspace_trust.set(selection.workspace_trust);
             structured_workspace_trust_is_explicit.set(true);
             // A search-applied recent replaces the whole draft with a real
@@ -1894,6 +1946,9 @@ fn search_result_tooltip(
         ComposerSearchResult::Permissions(ComposerPermission::OwnSetting) => {
             "use the agent's own setting, which Farhelm cannot force or classify".to_string()
         }
+        ComposerSearchResult::Permissions(ComposerPermission::Custom) => {
+            crate::launch_composer::permission_tooltip(LaunchPermission::Custom).into()
+        }
         ComposerSearchResult::Permissions(ComposerPermission::Yolo) => {
             crate::launch_composer::permission_tooltip(LaunchPermission::Yolo).to_string()
         }
@@ -2292,6 +2347,8 @@ pub(super) fn CreateSessionForm(
     // — SPEC.md keeps them unpreselected on a fresh open — so only
     // permissions needs this second signal.
     let mut structured_permissions_is_explicit = use_signal(|| false);
+    // Raw text remains editable through quote errors; only split words reach a launch.
+    let mut structured_permission_flags = use_signal(String::new);
     // The helm records only an explicit choice from a supported harness.
     // Seeding the draft does not send it through unsupported harnesses.
     let mut structured_workspace_trust = use_signal(|| {
@@ -2752,6 +2809,13 @@ pub(super) fn CreateSessionForm(
                     // needs the source harness so it cannot leak across one.
                     custom_model_harness.set(launch.model.as_ref().map(|_| launch.harness));
                     structured_effort.set(launch.effort);
+                    structured_permission_flags.set(
+                        launch
+                            .permission_flags
+                            .as_ref()
+                            .map(shell_words::join)
+                            .unwrap_or_default(),
+                    );
                     structured_permissions.set(crate::launch_composer::normalized_permissions(
                         launch.harness,
                         launch.permissions,
@@ -2776,6 +2840,7 @@ pub(super) fn CreateSessionForm(
                     custom_model_harness.set(None);
                     structured_effort.set(None);
                     structured_permissions.set(None);
+                    structured_permission_flags.set(String::new());
                     structured_workspace_trust.set(None);
                     structured_workspace_trust_is_explicit.set(false);
                     structured_permissions_is_explicit.set(true);
@@ -3063,6 +3128,7 @@ pub(super) fn CreateSessionForm(
     // omitted-permission compatibility rule was already applied while seeding.
     let structured_choice_error = structured_harness().and_then(|harness| {
         let selection = LaunchSelection {
+            permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
             harness,
             model: structured_model(),
             effort: structured_effort(),
@@ -3106,6 +3172,10 @@ pub(super) fn CreateSessionForm(
     let current_launch = if launch_tab() == LaunchTab::Agent {
         structured_harness().map(|harness| {
             LaunchIntent::Structured(LaunchSelection {
+                permission_flags: crate::launch_composer::permission_words(
+                    structured_permissions(),
+                    &structured_permission_flags(),
+                ),
                 harness,
                 model: structured_model(),
                 effort: structured_effort(),
@@ -3359,6 +3429,13 @@ pub(super) fn CreateSessionForm(
             ));
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            structured_permission_flags.set(
+                selection
+                    .permission_flags
+                    .as_ref()
+                    .map(shell_words::join)
+                    .unwrap_or_default(),
+            );
             structured_workspace_trust.set(selection.workspace_trust);
             structured_workspace_trust_is_explicit.set(true);
             // Applying a recent is a deliberate whole-draft replacement, not
@@ -3461,6 +3538,10 @@ pub(super) fn CreateSessionForm(
                         custom_model_harness.set(None);
                     } else {
                         let before = LaunchSelection {
+                            permission_flags: crate::launch_composer::permission_words(
+                                structured_permissions(),
+                                &structured_permission_flags(),
+                            ),
                             harness: structured_harness().unwrap_or(harness),
                             model: structured_model(),
                             effort: structured_effort(),
@@ -3488,6 +3569,13 @@ pub(super) fn CreateSessionForm(
                         structured_model.set(selection.model);
                         structured_effort.set(selection.effort);
                         structured_permissions.set(selection.permissions);
+                        structured_permission_flags.set(
+                            selection
+                                .permission_flags
+                                .as_ref()
+                                .map(shell_words::join)
+                                .unwrap_or_default(),
+                        );
                         structured_workspace_trust.set(selection.workspace_trust);
                         custom_model_harness.set(owner);
                     }
@@ -3701,6 +3789,7 @@ pub(super) fn CreateSessionForm(
         structured_effort,
         structured_permissions,
         structured_permissions_is_explicit,
+        structured_permission_flags,
         structured_workspace_trust,
         structured_workspace_trust_is_explicit,
         invocation,
@@ -3810,6 +3899,7 @@ pub(super) fn CreateSessionForm(
                             custom_model_harness,
                             structured_effort,
                             structured_permissions,
+                            structured_permission_flags,
                             structured_permissions_is_explicit,
                             structured_workspace_trust,
                             structured_workspace_trust_is_explicit,
@@ -3910,6 +4000,10 @@ pub(super) fn CreateSessionForm(
             }
             promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
             let selection = LaunchSelection {
+                permission_flags: crate::launch_composer::permission_words(
+                    structured_permissions(),
+                    &structured_permission_flags(),
+                ),
                 harness: structured_harness().unwrap_or(harness),
                 model: structured_model(),
                 effort: structured_effort(),
@@ -3931,6 +4025,10 @@ pub(super) fn CreateSessionForm(
                 || selection != previous_selection;
             composer_reset_reason.set(draft_reconciliation_reason(
                 &LaunchSelection {
+                    permission_flags: crate::launch_composer::permission_words(
+                        structured_permissions(),
+                        &structured_permission_flags(),
+                    ),
                     harness: structured_harness().unwrap_or(harness),
                     model: structured_model(),
                     effort: structured_effort(),
@@ -3946,6 +4044,13 @@ pub(super) fn CreateSessionForm(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            structured_permission_flags.set(
+                selection
+                    .permission_flags
+                    .as_ref()
+                    .map(shell_words::join)
+                    .unwrap_or_default(),
+            );
             structured_workspace_trust.set(selection.workspace_trust);
             custom_model_harness.set(owner);
             launch_tab.set(LaunchTab::Agent);
@@ -4289,6 +4394,7 @@ pub(super) fn CreateSessionForm(
                         return;
                     };
                     let mut selection = LaunchSelection {
+                        permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
                         harness,
                         model: structured_model.peek().clone(),
                         effort: *structured_effort.peek(),
@@ -4616,6 +4722,7 @@ pub(super) fn CreateSessionForm(
                                 return;
                             };
                             let selection = LaunchSelection {
+                                permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
                                 harness,
                                 model: structured_model.peek().clone(),
                                 effort: *structured_effort.peek(),
@@ -5368,6 +5475,7 @@ pub(super) fn CreateSessionForm(
                                                                 crate::launch_composer::ComposerPermission::Guarded => "guarded",
                                                                 crate::launch_composer::ComposerPermission::OwnSetting => "agent's own setting",
                                                                 crate::launch_composer::ComposerPermission::Yolo => "yolo",
+                                                                crate::launch_composer::ComposerPermission::Custom => "custom",
                                                             }}
                                                         },
                                                         crate::launch_composer::ComposerSearchResult::Trust(value) => rsx! { "Trust workspace: {value}" },
@@ -5989,6 +6097,8 @@ pub(super) fn CreateSessionForm(
                                 model_edited: structured_model_edited(),
                                 effort: structured_effort(),
                                 permissions: structured_permissions(),
+                                permission_flags: structured_permission_flags(),
+                                on_permission_flags: move |text| { structured_permission_flags.set(text); intent_key.set(None); structured_permissions_is_explicit.set(true); },
                                 workspace_trust: structured_workspace_trust(),
                                 catalog: catalog_models.clone(),
                                 busy,
@@ -6048,6 +6158,7 @@ pub(super) fn CreateSessionForm(
                                                     offered_history, create_target, fetched_history,
                                                 );
                                                 let before = LaunchSelection {
+                                                    permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
                                                     harness,
                                                     model: structured_model(),
                                                     effort: structured_effort(),
@@ -6055,6 +6166,7 @@ pub(super) fn CreateSessionForm(
                                                     workspace_trust: structured_workspace_trust(),
                                                 };
                                                 let selection = LaunchSelection {
+                                                    permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
                                                     harness,
                                                     model: Some(model),
                                                     effort: structured_effort(),
@@ -6128,6 +6240,7 @@ pub(super) fn CreateSessionForm(
                                         intent_key.set(None);
                                     }
                                     structured_permissions.set(permission);
+                                    if permission != Some(LaunchPermission::Custom) { structured_permission_flags.set(String::new()); }
                                     structured_permissions_is_explicit.set(true);
                                 },
                                 on_workspace_trust: move |choice| {
@@ -6685,6 +6798,7 @@ mod tests {
             },
             IntentBinding {
                 agent: LaunchIntent::Structured(LaunchSelection {
+                    permission_flags: None,
                     harness: LaunchHarness::Codex,
                     model: None,
                     effort: None,
@@ -6996,6 +7110,7 @@ mod tests {
                 start: Vec::new(),
                 resume: None,
                 selection: LaunchSelection {
+                    permission_flags: None,
                     harness: LaunchHarness::Claude,
                     model: None,
                     effort: None,
@@ -7014,6 +7129,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn prefill_from_carries_a_structured_launch_snapshot_verbatim() {
         let launch = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Muse,
             model: Some("muse-spark-1.3-contributor".to_string()),
             effort: None,

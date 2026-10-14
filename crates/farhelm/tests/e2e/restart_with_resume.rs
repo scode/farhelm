@@ -51,6 +51,7 @@ async fn restart_with_harness() -> (Harness, FakeHarness, ServeTask) {
 /// shape the helm's compiler composes, around the fixture's program.
 async fn structured_claude_session(h: &Harness, fixture: &FakeHarness) -> SessionInfo {
     let selection = farhelm_proto::LaunchSelection {
+        permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Claude,
         model: None,
         effort: None,
@@ -216,6 +217,7 @@ async fn restart_with_refuses_a_launch_kind_change_without_changing_settings() {
     let (h, fixture, _accepting) = restart_with_harness().await;
     let work = farhelm_teststate::tempdir().expect("command workdir");
     let selection = farhelm_proto::LaunchSelection {
+        permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Claude,
         model: None,
         effort: None,
@@ -992,6 +994,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
     let resume_template =
         (!structured).then(|| fixture_resume_template(&bin.path().join(kind), kind, home.path()));
     let selection = structured.then(|| farhelm_proto::LaunchSelection {
+        permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Claude,
         model: Some("claude-fable-5".to_string()),
         effort: Some(farhelm_proto::LaunchEffort::High),

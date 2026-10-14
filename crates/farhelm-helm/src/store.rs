@@ -222,6 +222,7 @@ fn record_launch_history(
     let permissions_word = selection
         .permissions
         .filter(|permission| Some(*permission) != selection.harness.omitted_permission())
+        .filter(|permission| *permission != farhelm_proto::LaunchPermission::Custom)
         .map(farhelm_proto::LaunchPermission::wire_word);
     let workspace_trust = if selection.harness.offers_workspace_trust() {
         selection.workspace_trust
@@ -923,11 +924,15 @@ pub fn parse_sort_key(text: &str) -> Option<ListSort> {
 
 /// The `remembered_permissions` wire vocabulary this build knows.
 ///
-/// These are the wire spellings emitted by structured launch history. A
+/// These are the wire spellings that can seed a complete next launch. Custom
+/// needs its words and is retained only in history, never as a bare default. A
 /// function rather than repeated inline matches keeps the route's write-time
 /// refusal ([`crate::preferences::put_preferences`]) and this module's
 /// read-time normalization ([`HelmStore::preferences`]) on one vocabulary.
 pub fn is_known_remembered_permissions_word(text: &str) -> bool {
+    if text == farhelm_proto::LaunchPermission::Custom.wire_word() {
+        return false;
+    }
     // Decoded through `LaunchPermission`'s own serde spelling, which
     // `LaunchPermission::wire_word` is pinned to, so a new permission is known
     // here the moment the shared enum gains it.
@@ -7429,6 +7434,7 @@ mod tests {
         let other = farhelm_proto::parse_github_repo("acme/other").unwrap();
         let mut entry = session("repo-first", 100);
         entry.launch = crate::launches::test_agent_launch(LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -7737,6 +7743,7 @@ mod tests {
         let entry = SessionInfo {
             creation_seq: Some(7),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: Some("gpt-6-astra".to_string()),
                 effort: Some(farhelm_proto::LaunchEffort::High),
@@ -7802,6 +7809,7 @@ mod tests {
         let yolo = |id: &str, seq: u64| SessionInfo {
             creation_seq: Some(seq),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -7866,6 +7874,53 @@ mod tests {
             "an explicit selection sets the memory"
         );
 
+        let custom = SessionInfo {
+            cwd: "/custom".into(),
+            ..yolo("custom-origin", 3)
+        };
+        let custom_selection = LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: Some(farhelm_proto::LaunchPermission::Custom),
+            permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
+            workspace_trust: None,
+        };
+        store
+            .record_create_history_with_destination(
+                host,
+                "identity-a",
+                &custom,
+                HistoryPaths {
+                    canonical_cwd: &custom.cwd,
+                    display_cwd: &custom.cwd,
+                },
+                None,
+                Some(&custom_selection),
+            )
+            .await
+            .unwrap();
+        assert!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .remembered_permissions
+                .is_none(),
+            "custom clears the default memory rather than leaking its words into a new dialog"
+        );
+        assert_eq!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .unwrap()
+                .iter()
+                .find(|entry| entry.cwd == "/custom")
+                .map(|entry| &entry.selection),
+            Some(&custom_selection),
+            "the recent setup retains the complete custom choice while its default is not remembered"
+        );
+
         // The reply claims yolo; the user submitted approve. The submitted
         // selection is what history and the memory record.
         let divergent = SessionInfo {
@@ -7873,6 +7928,7 @@ mod tests {
             ..yolo("divergent-reply", 100)
         };
         let submitted = LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -7927,6 +7983,7 @@ mod tests {
             let entry = SessionInfo {
                 creation_seq: Some(index as u64 + 3),
                 launch: crate::launches::test_agent_launch(LaunchSelection {
+                    permission_flags: None,
                     harness: farhelm_proto::LaunchHarness::Goose,
                     model: Some("z-ai/glm-5.3".into()),
                     effort: None,
@@ -8021,6 +8078,7 @@ mod tests {
             let entry = SessionInfo {
                 creation_seq: Some(seq),
                 launch: crate::launches::test_agent_launch(LaunchSelection {
+                    permission_flags: None,
                     harness,
                     model: None,
                     effort: None,
@@ -8219,6 +8277,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "aliases.example", "identity-a").await;
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -8558,6 +8617,7 @@ mod tests {
             canonical_cwd: Some("/real/project".to_string()),
             creation_seq: Some(1),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -8633,6 +8693,7 @@ mod tests {
             canonical_cwd: Some("/real/project".to_string()),
             creation_seq: Some(1),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -8778,6 +8839,7 @@ mod tests {
         let entry = SessionInfo {
             creation_seq: Some(1),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -8855,6 +8917,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "eviction.example", "identity-a").await;
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
             effort: None,
@@ -8924,6 +8987,7 @@ mod tests {
         let structured = SessionInfo {
             creation_seq: Some(1),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -8981,6 +9045,7 @@ mod tests {
         let path = dir.path().join("helm.db");
         let host = host_with_identity(&store, "reopen.example", "identity-a").await;
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Muse,
             model: None,
             effort: None,
@@ -9179,6 +9244,7 @@ mod tests {
         let path = dir.path().join("helm.db");
         let host = host_with_identity(&store, "dual-frontier.example", "identity-a").await;
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -9312,6 +9378,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "rollback.example", "identity-a").await;
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -9376,6 +9443,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "adopt-history.example", "identity-a").await;
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
             effort: None,
@@ -11341,6 +11409,7 @@ mod tests {
         let admitted = SessionInfo {
             creation_seq: Some(2),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,

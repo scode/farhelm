@@ -329,7 +329,15 @@ impl SessionLaunch {
     /// where that knowledge lives.
     pub fn validate_new(&self) -> Result<(), String> {
         match self {
-            SessionLaunch::Agent { start, resume, .. } => {
+            SessionLaunch::Agent {
+                selection,
+                start,
+                resume,
+            } => {
+                crate::check_permission_flags(
+                    selection.permissions,
+                    selection.permission_flags.as_deref(),
+                )?;
                 check_argv("the agent launch's start command", start)?;
                 require_exactly_once(
                     "the agent launch's start command",
@@ -568,6 +576,7 @@ mod tests {
                 .contains("before launch kinds")
         );
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Claude,
             model: None,
             effort: None,
@@ -618,6 +627,7 @@ mod tests {
     fn yolo_and_kind_come_from_the_launch() {
         let yolo_agent = SessionLaunch::Agent {
             selection: LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Claude,
                 model: None,
                 effort: None,
@@ -654,6 +664,7 @@ mod tests {
     #[test]
     fn pre_launch_kind_rows_convert_by_shape() {
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Claude,
             model: None,
             effort: None,
@@ -750,6 +761,7 @@ mod tests {
     /// A Muse selection with every choice at its default.
     fn selection_for_muse() -> LaunchSelection {
         LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Muse,
             model: None,
             effort: None,

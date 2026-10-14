@@ -3619,6 +3619,7 @@ mod tests {
         let agent = |harness| {
             Some(crate::SessionLaunch::Agent {
                 selection: crate::LaunchSelection {
+                    permission_flags: None,
                     harness,
                     model: None,
                     effort: None,

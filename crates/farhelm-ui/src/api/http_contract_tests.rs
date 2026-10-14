@@ -46,6 +46,7 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     assert_eq!(
         row.agent_selection(),
         Some(&LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Codex,
             model: Some("gpt-5".to_string()),
             effort: Some(LaunchEffort::High),

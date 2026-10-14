@@ -167,6 +167,7 @@ mod tests {
         let harness = crate::rest_harness::idle_helm().await;
         let host = crate::rest_harness::local_id(&harness.store).await;
         let old = crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
             effort: None,
@@ -191,6 +192,48 @@ mod tests {
             );
             assert!(check_agent(&harness.state, host, &copied).await.is_err());
         }
+    }
+
+    /// Custom words can name a guarded vendor mode without proving one. The
+    /// user's YOLO consent is therefore required, and an agent cannot borrow
+    /// the exact-rebuild guarded exemption merely because the words look safe.
+    #[farhelm_testtrace::test]
+    async fn custom_flags_require_the_yolo_gate_and_cannot_be_agent_preapproved() {
+        let harness = crate::rest_harness::idle_helm().await;
+        let host = crate::rest_harness::local_id(&harness.store).await;
+        let launch = crate::launches::compile(farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: Some(farhelm_proto::LaunchPermission::Custom),
+            permission_flags: Some(vec!["--permission-mode".into(), "auto".into()]),
+            workspace_trust: None,
+        })
+        .unwrap();
+        assert_eq!(launch.yolo(), Some(true));
+        assert!(
+            !harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == host)
+                .unwrap()
+                .yolo_without_asking
+        );
+        assert!(
+            check(&harness.state, host, create_is_yolo(&launch), false)
+                .await
+                .unwrap_err()
+                .is::<YoloNeedsConfirmation>()
+        );
+        assert!(
+            check(&harness.state, host, create_is_yolo(&launch), true)
+                .await
+                .is_ok()
+        );
+        assert!(check_agent(&harness.state, host, &launch).await.is_err());
     }
 
     /// Spec: a YOLO launch checked against a host id the registry has no row for is refused
@@ -246,6 +289,7 @@ mod tests {
         let harness = crate::rest_harness::idle_helm().await;
         let local = crate::rest_harness::local_id(&harness.store).await;
         let selection = farhelm_proto::LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
             effort: None,

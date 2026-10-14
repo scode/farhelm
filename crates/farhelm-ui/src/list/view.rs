@@ -4158,6 +4158,7 @@ fn mirror_submitted_launch(
     preferences.remembered_permissions = launch
         .permissions
         .filter(|permission| Some(*permission) != launch.harness.omitted_permission())
+        .filter(|permission| *permission != crate::LaunchPermission::Custom)
         .map(|permission| permission.wire_word().to_string());
     if launch.harness.offers_workspace_trust()
         && let Some(trust) = launch.workspace_trust
@@ -4351,6 +4352,7 @@ mod tests {
         assert_eq!(preferences.remembered_workspace_trust, Some(false));
 
         let submitted = farhelm_proto::LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -4369,6 +4371,7 @@ mod tests {
         );
 
         let omitted_yolo_default = farhelm_proto::LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Goose,
             model: None,
             effort: None,

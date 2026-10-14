@@ -5459,6 +5459,48 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   font-size: 12px;
 }
 
+/* Keep the custom words visible as individual arguments rather than implying
+   that this permission-only preview is the whole command Farhelm will run. */
+.custom-permission-choice {
+  min-width: 0;
+  border-left: 2px solid var(--warn);
+  padding-left: 10px;
+}
+
+.custom-permission-choice label {
+  display: grid;
+  gap: 4px;
+}
+
+.custom-permission-flags {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--fg-0);
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  padding: 5px 7px;
+}
+
+.custom-permission-choice p {
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.custom-permission-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.custom-permission-words code {
+  border: 1px solid var(--border);
+  padding: 0 5px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .launch-composer-choice-pair {
   /* The two segmented decisions sit beside one another when the choice
      column has room for both at their full width, and permissions drops to

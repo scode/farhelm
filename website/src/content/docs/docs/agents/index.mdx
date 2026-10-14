@@ -102,6 +102,15 @@ details.</p>
 
 ## Permission modes
 
+Choose **custom** to supply your own permission flags for Claude, Codex, Grok, Muse, Cursor or OMP. They replace
+Farhelm's permission flags; you are responsible for making sure they only change permissions. Farhelm does not check
+what they do, so the session gets the amber YOLO shield and hosts that ask before YOLO launches still ask.
+
+The field accepts quotes and backslash escapes to group words, without expanding variables or running commands. Its
+preview shows the words passed to the agent. Templates save them; Clone, Replace with and Restart with let you edit
+them, while a plain Restart reuses them. Custom is never remembered as the next launch's default permission. Goose,
+Pi and OpenCode do not offer this choice. See [Start a session](/docs/using/start-a-session/).
+
 **Guarded** lets an agent approve work on its own through a safety check that can still refuse an action or ask you.
 It does not mean it asks about everything. **YOLO** skips those checks. The shield beside a session tells you which
 choice Farhelm started it with; its hover names the agent's mode and the command it ran.

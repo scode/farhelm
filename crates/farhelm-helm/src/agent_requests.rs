@@ -1898,7 +1898,7 @@ async fn write_template_for_agent(
         return Err(template_changed());
     }
     Ok(AgentReply::TemplateWritten {
-        template: farhelm_proto::AgentTemplate::listed(&template, shown_host),
+        template: Box::new(farhelm_proto::AgentTemplate::listed(&template, shown_host)),
     })
 }
 
@@ -1985,6 +1985,7 @@ fn merge_template_fields(
         model,
         effort,
         permissions,
+        permission_flags,
         workspace_trust,
         command,
         yolo,
@@ -1999,6 +2000,13 @@ fn merge_template_fields(
         model: model.or(existing.model),
         effort: effort.or(existing.effort),
         permissions: permissions.or(existing.permissions),
+        // A permission edit replaces the whole custom choice, not just its
+        // mode. Other template edits retain the existing literal words.
+        permission_flags: if permissions.is_some() {
+            permission_flags
+        } else {
+            permission_flags.or(existing.permission_flags)
+        },
         workspace_trust: workspace_trust.or(existing.workspace_trust),
         command: command.or(existing.command),
         yolo: yolo.or(existing.yolo),
@@ -5636,6 +5644,7 @@ mod tests {
         });
         let agent = farhelm_proto::SessionLaunch::Agent {
             selection: farhelm_proto::LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Claude,
                 model: None,
                 effort: None,
@@ -6723,6 +6732,7 @@ mod tests {
         let handler = HelmAgentRequests::for_state(&h.state);
         let inherited = farhelm_proto::SessionLaunch::Agent {
             selection: farhelm_proto::LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Claude,
                 model: None,
                 effort: None,

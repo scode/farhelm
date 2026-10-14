@@ -49,6 +49,7 @@ pub(crate) const fn permission_value(permission: LaunchPermission) -> &'static s
     match permission {
         LaunchPermission::Guarded => "guarded",
         LaunchPermission::Yolo => "yolo",
+        LaunchPermission::Custom => "custom",
         LaunchPermission::Approve => "approve",
         LaunchPermission::SmartApprove => "smart approve",
         LaunchPermission::Chat => "chat",
@@ -67,6 +68,9 @@ pub(crate) const fn permission_tooltip(permission: LaunchPermission) -> &'static
             "guarded: the agent can approve actions through a safety mechanism that may refuse or ask you"
         }
         LaunchPermission::Yolo => "YOLO: the agent bypasses its approval and sandbox safety checks",
+        LaunchPermission::Custom => {
+            "custom permission flags: your flags replace Farhelm's permission flags; Farhelm does not check them and treats this as YOLO"
+        }
         LaunchPermission::Approve => "approve: the agent asks before every tool action",
         LaunchPermission::SmartApprove => {
             "smart approve: the agent asks only before actions it judges risky"
@@ -162,6 +166,18 @@ pub(crate) const fn normalized_permissions(
     permissions: Option<LaunchPermission>,
 ) -> Option<LaunchPermission> {
     harness.request_permission(permissions)
+}
+
+/// Editable text stays in the form until it becomes literal stored arguments.
+/// Non-custom modes carry no words; malformed drafts carry no valid selection
+/// and are refused by the shared shape check before submission or template save.
+pub(crate) fn permission_words(
+    permission: Option<LaunchPermission>,
+    text: &str,
+) -> Option<Vec<String>> {
+    (permission == Some(LaunchPermission::Custom))
+        .then(|| farhelm_proto::split_permission_flags(text).ok())
+        .flatten()
 }
 
 /// Normalize the effective permission before comparing saved setups.
@@ -414,6 +430,7 @@ pub(crate) enum ComposerPermission {
     Guarded,
     OwnSetting,
     Yolo,
+    Custom,
 }
 
 /// The host facts search needs without taking ownership of list-view state.
@@ -736,6 +753,12 @@ pub(crate) fn selection_summary_without_harness(selection: &LaunchSelection) -> 
         selection_summary_before_permissions(selection),
         selection_permission_value(selection),
     );
+    if let Some(words) = &selection.permission_flags {
+        summary.push_str(&format!(
+            " · {}",
+            crate::peer::display_peer(&shell_words::join(words))
+        ));
+    }
     if let Some(trust) = selection.workspace_trust {
         summary.push_str(&format!(" · trust: {trust}"));
     }
@@ -1023,6 +1046,7 @@ pub(crate) fn search_results(
             ("yolo", ComposerPermission::Yolo),
             ("guarded", ComposerPermission::Guarded),
             ("own", ComposerPermission::OwnSetting),
+            ("custom", ComposerPermission::Custom),
         ];
         for (word, choice) in choices {
             let supported = match choice {
@@ -1031,6 +1055,7 @@ pub(crate) fn search_results(
                 }
                 ComposerPermission::Guarded => harness.offers_permission(LaunchPermission::Guarded),
                 ComposerPermission::OwnSetting => harness.omitted_permission().is_none(),
+                ComposerPermission::Custom => harness.offers_permission(LaunchPermission::Custom),
             };
             if supported
                 && (query.is_empty()
@@ -1184,6 +1209,7 @@ fn exact_word_group(
                 ComposerPermission::Guarded => folded_query == "guarded",
                 ComposerPermission::OwnSetting => folded_query == "own",
                 ComposerPermission::Yolo => folded_query == "yolo",
+                ComposerPermission::Custom => folded_query == "custom",
             } =>
         {
             Some(ComposerSearchGroup::Permissions)
@@ -1404,6 +1430,14 @@ pub(crate) fn selection_is_compatible(
     catalog: &[LaunchCatalogModel],
 ) -> bool {
     // A harness without a model choice takes neither a model nor an effort.
+    if farhelm_proto::check_permission_flags(
+        selection.permissions,
+        selection.permission_flags.as_deref(),
+    )
+    .is_err()
+    {
+        return false;
+    }
     if !selection.harness.offers_model()
         && (selection.model.is_some() || selection.effort.is_some())
     {
@@ -1566,7 +1600,10 @@ pub(crate) fn reconciliation_reset_reason(
             Some(LaunchPermission::Yolo) => "replaced by YOLO, this harness's default",
             Some(LaunchPermission::Guarded) => "replaced by guarded, this harness's default",
             Some(
-                LaunchPermission::Approve | LaunchPermission::SmartApprove | LaunchPermission::Chat,
+                LaunchPermission::Approve
+                | LaunchPermission::SmartApprove
+                | LaunchPermission::Chat
+                | LaunchPermission::Custom,
             ) => "replaced by this harness's supported mode",
             None => "cleared",
         };
@@ -1719,6 +1756,7 @@ mod tests {
             vec![
                 ComposerSearchResult::Permissions(ComposerPermission::Yolo),
                 ComposerSearchResult::Permissions(ComposerPermission::Guarded),
+                ComposerSearchResult::Permissions(ComposerPermission::Custom),
             ]
         );
         assert_eq!(
@@ -1785,6 +1823,7 @@ mod tests {
         effort: Option<LaunchEffort>,
     ) -> LaunchSelection {
         LaunchSelection {
+            permission_flags: None,
             harness,
             model: model.map(str::to_string),
             effort,
@@ -1878,6 +1917,7 @@ mod tests {
         assert_eq!(harness_label(LaunchHarness::Omp), "OMP");
         assert_eq!(harness_word(LaunchHarness::Omp), "omp");
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Omp,
             model: None,
             effort: None,
@@ -1902,6 +1942,7 @@ mod tests {
     #[test]
     fn selection_summary_without_harness_preserves_the_saved_tail() {
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Codex,
             model: Some("gpt-6-astra".into()),
             effort: Some(LaunchEffort::High),
@@ -1936,6 +1977,7 @@ mod tests {
     #[test]
     fn the_explicit_summary_names_only_what_the_selection_sets() {
         let selection = |model: Option<&str>, effort: Option<LaunchEffort>| LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Codex,
             model: model.map(Into::into),
             effort,
@@ -2537,6 +2579,7 @@ mod tests {
     #[test]
     fn harness_transition_normalizes_permissions_and_reports_replacements() {
         let goose = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Goose,
             model: None,
             effort: None,
@@ -2595,6 +2638,7 @@ mod tests {
         ] {
             assert!(selection_is_compatible(
                 &LaunchSelection {
+                    permission_flags: None,
                     harness: LaunchHarness::Goose,
                     model: Some("custom/provider-model".into()),
                     effort: None,
@@ -2612,6 +2656,7 @@ mod tests {
             ] {
                 assert!(!selection_is_compatible(
                     &LaunchSelection {
+                        permission_flags: None,
                         harness,
                         model: Some("custom/provider-model".into()),
                         effort: None,
@@ -2625,6 +2670,7 @@ mod tests {
         for permissions in [None, Some(LaunchPermission::Yolo)] {
             assert!(selection_is_compatible(
                 &LaunchSelection {
+                    permission_flags: None,
                     harness: LaunchHarness::Pi,
                     model: Some("custom/provider-model".into()),
                     effort: None,
@@ -2648,6 +2694,7 @@ mod tests {
         ] {
             let (omp, _) = reconcile_harness_selection(
                 LaunchSelection {
+                    permission_flags: None,
                     harness: LaunchHarness::Goose,
                     model: None,
                     effort: None,
@@ -2666,6 +2713,7 @@ mod tests {
         }
         for cleared in [LaunchPermission::SmartApprove, LaunchPermission::Chat] {
             let goose = LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Goose,
                 model: None,
                 effort: None,
@@ -2684,6 +2732,7 @@ mod tests {
             assert!(
                 !selection_is_compatible(
                     &LaunchSelection {
+                        permission_flags: None,
                         harness: LaunchHarness::Omp,
                         model: Some("custom/provider-model".into()),
                         effort: None,
@@ -2697,6 +2746,7 @@ mod tests {
         }
         assert!(selection_is_compatible(
             &LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Omp,
                 model: Some("custom/provider-model".into()),
                 effort: None,
@@ -2708,6 +2758,7 @@ mod tests {
         // An OMP omission uses its effective YOLO default, as the helm does.
         assert!(selection_is_compatible(
             &LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Omp,
                 model: None,
                 effort: None,
@@ -2719,6 +2770,7 @@ mod tests {
         // The displayed permission is the effective selection: an omitted OMP
         // permission reads as YOLO, matching the launch compiler.
         let omitted = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
@@ -2755,6 +2807,7 @@ mod tests {
     #[test]
     fn permission_summaries_resolve_omitted_modes() {
         let pi = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Pi,
             model: Some("x-ai/grok-4.6".into()),
             effort: None,
@@ -2765,6 +2818,7 @@ mod tests {
         assert!(selection_summary(&pi).ends_with("permissions: yolo"));
 
         let goose = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Goose,
             permissions: Some(LaunchPermission::SmartApprove),
             workspace_trust: None,
@@ -3051,6 +3105,7 @@ mod tests {
 
         for typed in ["gpt-6-luna", "opencode/gpt-6-luna"] {
             let selection = LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::OpenCode,
                 model: Some(typed.into()),
                 effort: None,
@@ -3074,6 +3129,7 @@ mod tests {
         );
         let moved = reconcile_harness_selection(
             LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Codex,
                 model: Some("gpt-6-luna".into()),
                 effort: None,
@@ -3091,6 +3147,7 @@ mod tests {
         // destination merely because the destination's spelling is unknown.
         let from_claude = reconcile_harness_selection(
             LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Claude,
                 model: Some("claude-fable-5".into()),
                 effort: None,
@@ -3103,6 +3160,7 @@ mod tests {
         );
         assert_eq!(from_claude.0.model, None, "Claude's model is cleared");
         let bare_glm = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: Some("glm-5.3".into()),
             effort: None,
@@ -3912,6 +3970,7 @@ mod tests {
         );
         assert!(selection_is_compatible(
             &LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Grok,
                 model: None,
                 effort: None,
@@ -3922,6 +3981,7 @@ mod tests {
         ));
         assert!(selection_is_compatible(
             &LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Grok,
                 model: None,
                 effort: None,
@@ -3932,6 +3992,7 @@ mod tests {
         ));
         assert!(!selection_is_compatible(
             &LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Grok,
                 model: Some("experimental-model".into()),
                 effort: None,
@@ -3942,6 +4003,7 @@ mod tests {
         ));
         let (selection, owner) = reconcile_harness_selection(
             LaunchSelection {
+                permission_flags: None,
                 harness: LaunchHarness::Codex,
                 model: Some("experimental-model".into()),
                 effort: Some(LaunchEffort::High),

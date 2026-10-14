@@ -4213,6 +4213,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn restart_request_only_includes_selection_for_restart_with() {
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Claude,
             model: Some("example-model".into()),
             effort: None,
@@ -4459,6 +4460,7 @@ mod tests {
         assert_eq!(raw["host"], serde_json::json!(7));
 
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -4498,6 +4500,7 @@ mod tests {
             preview,
         };
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Codex,
             model: None,
             effort: None,

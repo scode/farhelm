@@ -704,6 +704,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
 
     for harness in defaults {
         let selection = LaunchSelection {
+            permission_flags: None,
             harness,
             model: None,
             effort: None,
@@ -727,6 +728,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
 
     let explicit = [
         LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Cursor,
             model: Some("composer-2.5".to_string()),
             effort: None,
@@ -734,6 +736,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             workspace_trust: None,
         },
         LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Grok,
             model: None,
             effort: None,
@@ -741,6 +744,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             workspace_trust: None,
         },
         LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Codex,
             model: Some("release/candidate'42;$literal".to_string()),
             effort: Some(LaunchEffort::High),
@@ -748,6 +752,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             workspace_trust: None,
         },
         LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Claude,
             model: Some("claude-fable-5".to_string()),
             effort: Some(LaunchEffort::High),
@@ -755,6 +760,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             workspace_trust: None,
         },
         LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Muse,
             model: Some("muse-spark-1.3-contributor".to_string()),
             effort: Some(LaunchEffort::Xhigh),
@@ -762,6 +768,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             workspace_trust: None,
         },
         LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: Some("opencode/grok-4.6".to_string()),
             effort: None,
@@ -899,6 +906,7 @@ async fn explicit_spawn_inheritance_relays_the_parents_stored_launch() {
     let h = harness().await;
     let fixture = fake_harness();
     let selection = LaunchSelection {
+        permission_flags: None,
         harness: LaunchHarness::Codex,
         model: Some("gpt-6-astra".to_string()),
         effort: Some(LaunchEffort::High),
@@ -1003,6 +1011,7 @@ async fn restricted_raw_data_is_refused() {
     let h = harness().await;
     let fixture = fake_harness();
     let selection = LaunchSelection {
+        permission_flags: None,
         harness: LaunchHarness::Codex,
         model: Some("gpt-6-astra".to_string()),
         effort: Some(LaunchEffort::High),
@@ -1296,6 +1305,7 @@ mod decoder_tests {
     #[test]
     fn omp_approval_mode_witness_rejects_wrong_shapes() {
         let base = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("z-ai/glm-5.3".to_string()),
             effort: None,

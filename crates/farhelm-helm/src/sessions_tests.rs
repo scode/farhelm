@@ -21,6 +21,7 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
     let created = farhelm_proto::SessionInfo {
         creation_seq: Some(9),
         launch: crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
+            permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: Some("gpt-6-astra".to_string()),
             effort: Some(farhelm_proto::LaunchEffort::High),
@@ -498,6 +499,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                         invocation: "codex --model gpt-6-astra".into(),
                         launch: crate::launches::test_agent_launch(
                             farhelm_proto::LaunchSelection {
+                                permission_flags: None,
                                 harness: farhelm_proto::LaunchHarness::Codex,
                                 model: Some("gpt-6-astra".into()),
                                 effort: Some(farhelm_proto::LaunchEffort::High),
@@ -608,6 +610,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
             (
                 "yolo-launch",
                 Some(LaunchSelection {
+                    permission_flags: None,
                     harness: farhelm_proto::LaunchHarness::Codex,
                     model: None,
                     effort: None,
@@ -619,6 +622,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
             (
                 "default-launch",
                 Some(LaunchSelection {
+                    permission_flags: None,
                     harness: farhelm_proto::LaunchHarness::Codex,
                     model: None,
                     effort: None,
@@ -629,6 +633,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
             (
                 "goose-default-launch",
                 Some(LaunchSelection {
+                    permission_flags: None,
                     harness: farhelm_proto::LaunchHarness::Goose,
                     model: None,
                     effort: None,
@@ -792,6 +797,7 @@ async fn remembered_defaults_follow_the_submitted_launch_not_the_reply() {
             let mut session = rest_harness::session(id, 1_700_000_000);
             session.creation_seq = Some(index as u64 + 1);
             session.launch = crate::launches::test_agent_launch(LaunchSelection {
+                permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -2149,6 +2155,7 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
     use farhelm_proto::{ControlMsg, Frame, LaunchPermission, LaunchSelection};
 
     let yolo = LaunchSelection {
+        permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Codex,
         model: None,
         effort: None,
@@ -2728,6 +2735,7 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
 
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
     let selection = LaunchSelection {
+        permission_flags: None,
         harness: LaunchHarness::Claude,
         model: Some("claude-opus-4-6".to_string()),
         effort: Some(LaunchEffort::High),

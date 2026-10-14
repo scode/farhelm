@@ -321,7 +321,10 @@ impl LaunchHarness {
             LaunchHarness::Omp => {
                 matches!(
                     permission,
-                    LaunchPermission::Yolo | LaunchPermission::Approve | LaunchPermission::Guarded
+                    LaunchPermission::Yolo
+                        | LaunchPermission::Approve
+                        | LaunchPermission::Guarded
+                        | LaunchPermission::Custom
                 )
             }
             LaunchHarness::Codex
@@ -329,9 +332,13 @@ impl LaunchHarness {
             | LaunchHarness::Muse
             | LaunchHarness::Grok => matches!(
                 permission,
-                LaunchPermission::Yolo | LaunchPermission::Guarded
+                LaunchPermission::Yolo | LaunchPermission::Guarded | LaunchPermission::Custom
             ),
-            LaunchHarness::Cursor | LaunchHarness::Pi | LaunchHarness::OpenCode => {
+            LaunchHarness::Cursor => matches!(
+                permission,
+                LaunchPermission::Yolo | LaunchPermission::Custom
+            ),
+            LaunchHarness::Pi | LaunchHarness::OpenCode => {
                 matches!(permission, LaunchPermission::Yolo)
             }
         }
@@ -401,6 +408,9 @@ impl LaunchEffort {
 pub enum LaunchPermission {
     Guarded,
     Yolo,
+    /// User-supplied words replace Farhelm's permission flags. Their meaning is
+    /// deliberately unchecked, so every custom launch is classified as YOLO.
+    Custom,
     Approve,
     SmartApprove,
     Chat,
@@ -411,9 +421,10 @@ impl LaunchPermission {
     /// person, like the helm's refusal of an
     /// unknown remembered-permissions word, so the list they print grows with
     /// the enum instead of being retyped.
-    pub const ALL: [LaunchPermission; 5] = [
+    pub const ALL: [LaunchPermission; 6] = [
         LaunchPermission::Guarded,
         LaunchPermission::Yolo,
+        LaunchPermission::Custom,
         LaunchPermission::Approve,
         LaunchPermission::SmartApprove,
         LaunchPermission::Chat,
@@ -426,6 +437,7 @@ impl LaunchPermission {
         match self {
             LaunchPermission::Guarded => "guarded",
             LaunchPermission::Yolo => "yolo",
+            LaunchPermission::Custom => "custom",
             LaunchPermission::Approve => "approve",
             LaunchPermission::SmartApprove => "smart_approve",
             LaunchPermission::Chat => "chat",
@@ -448,6 +460,11 @@ pub struct LaunchSelection {
     pub model: Option<String>,
     pub effort: Option<LaunchEffort>,
     pub permissions: Option<LaunchPermission>,
+    /// Literal permission arguments, present exactly for a Custom choice.
+    /// Stored as words so clones and resumes preserve argument boundaries;
+    /// quoting style and shell expansion have no part in the persisted intent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_flags: Option<Vec<String>>,
     /// An explicit per-run choice about project-local settings and extensions.
     ///
     /// This is separate from tool approval and from Farhelm's hook-trust
@@ -458,9 +475,73 @@ pub struct LaunchSelection {
     pub workspace_trust: Option<bool>,
 }
 
+/// Split editable permission text without evaluating expansions or commands.
+/// Shell-style quotes and escapes only determine word boundaries; a `#` at
+/// the start of a word begins a comment. Empty/comment-only input is refused
+/// rather than silently selecting the agent's own permission setting.
+pub fn split_permission_flags(text: &str) -> Result<Vec<String>, String> {
+    let words =
+        shell_words::split(text).map_err(|error| format!("invalid permission flags: {error}"))?;
+    if words.is_empty() {
+        return Err("custom permission flags must contain at least one word".into());
+    }
+    if words.iter().any(|word| word.contains('\0')) {
+        return Err("permission flags cannot contain NUL".into());
+    }
+    Ok(words)
+}
+
+/// Enforce the stored permission/argument relationship at every admission path.
+/// The same splitter used by editors validates a joined wire vector, preserving
+/// even quoted spaces and literal expansion syntax. Semantic flag meanings and
+/// supervisor placeholders remain the compiler's responsibility.
+pub fn check_permission_flags(
+    permission: Option<LaunchPermission>,
+    flags: Option<&[String]>,
+) -> Result<(), String> {
+    match (permission, flags) {
+        (Some(LaunchPermission::Custom), Some(words)) => {
+            split_permission_flags(&shell_words::join(words)).map(|_| ())
+        }
+        (Some(LaunchPermission::Custom), None) => {
+            Err("custom permissions need permission flags".into())
+        }
+        (_, Some(_)) => Err("permission flags are only allowed with custom permissions".into()),
+        (_, None) => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+
+    /// Quoting chooses argv boundaries, never execution. Comments and malformed
+    /// quotes cannot turn an empty custom draft into the agent's own setting.
+    #[test]
+    fn custom_flags_preserve_literal_words_and_require_a_complete_choice() {
+        let words =
+            super::split_permission_flags(r#"--mode 'ask me' "$HOME" '$(touch x)' # ignored"#)
+                .unwrap();
+        assert_eq!(words, ["--mode", "ask me", "$HOME", "$(touch x)"]);
+        assert_eq!(
+            super::split_permission_flags(&shell_words::join(&words)).unwrap(),
+            words
+        );
+        for text in ["", "  ", "# comment", "--mode '", "--mode \0"] {
+            assert!(super::split_permission_flags(text).is_err(), "{text:?}");
+        }
+        assert!(
+            super::check_permission_flags(Some(LaunchPermission::Custom), Some(&words)).is_ok()
+        );
+        for (mode, flags) in [
+            (Some(LaunchPermission::Custom), None),
+            (Some(LaunchPermission::Custom), Some(&[][..])),
+            (Some(LaunchPermission::Guarded), Some(words.as_slice())),
+            (None, Some(words.as_slice())),
+        ] {
+            assert!(super::check_permission_flags(mode, flags).is_err());
+        }
+    }
 
     /// New request defaults must not rewrite the meaning of an older stored
     /// launch. Its restart, replace and inherited copies still carry the old
@@ -504,6 +585,7 @@ mod tests {
             match permission {
                 LaunchPermission::Guarded
                 | LaunchPermission::Yolo
+                | LaunchPermission::Custom
                 | LaunchPermission::Approve
                 | LaunchPermission::SmartApprove
                 | LaunchPermission::Chat => {}
@@ -597,7 +679,7 @@ mod tests {
     /// a row.
     #[test]
     fn each_harness_offers_exactly_its_permissions() {
-        use LaunchPermission::{Approve, Chat, Guarded, SmartApprove, Yolo};
+        use LaunchPermission::{Approve, Chat, Custom, Guarded, SmartApprove, Yolo};
         // Exhaustive on purpose: add the new harness to the matrix below.
         match LaunchHarness::Goose {
             LaunchHarness::Codex
@@ -610,20 +692,20 @@ mod tests {
             | LaunchHarness::OpenCode
             | LaunchHarness::Grok => {}
         }
-        let all = [Guarded, Yolo, Approve, SmartApprove, Chat];
+        let all = [Guarded, Yolo, Custom, Approve, SmartApprove, Chat];
         for (harness, offered) in [
             (
                 LaunchHarness::Goose,
                 &[Yolo, Approve, SmartApprove, Chat][..],
             ),
-            (LaunchHarness::Omp, &[Guarded, Yolo, Approve][..]),
-            (LaunchHarness::Codex, &[Guarded, Yolo][..]),
-            (LaunchHarness::Claude, &[Guarded, Yolo][..]),
-            (LaunchHarness::Muse, &[Guarded, Yolo][..]),
-            (LaunchHarness::Cursor, &[Yolo][..]),
+            (LaunchHarness::Omp, &[Guarded, Yolo, Custom, Approve][..]),
+            (LaunchHarness::Codex, &[Guarded, Yolo, Custom][..]),
+            (LaunchHarness::Claude, &[Guarded, Yolo, Custom][..]),
+            (LaunchHarness::Muse, &[Guarded, Yolo, Custom][..]),
+            (LaunchHarness::Cursor, &[Yolo, Custom][..]),
             (LaunchHarness::Pi, &[Yolo][..]),
             (LaunchHarness::OpenCode, &[Yolo][..]),
-            (LaunchHarness::Grok, &[Guarded, Yolo][..]),
+            (LaunchHarness::Grok, &[Guarded, Yolo, Custom][..]),
         ] {
             for permission in all {
                 assert_eq!(
@@ -640,6 +722,7 @@ mod tests {
     #[test]
     fn omitted_optional_choices_round_trip_as_none() {
         let selection = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: None,
             effort: None,
@@ -678,6 +761,7 @@ mod tests {
     #[test]
     fn explicit_workspace_trust_values_serialize() {
         let mut selection = LaunchSelection {
+            permission_flags: None,
             harness: LaunchHarness::Muse,
             model: None,
             effort: None,
