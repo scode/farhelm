@@ -48,7 +48,7 @@ fn restore_automatic_checkbox(in_force: bool) {
     ));
 }
 
-/// Expose host choices, terminal link ownership, sounds and checkout settings.
+/// Expose session/host choices, terminal link ownership, sounds and checkout settings.
 ///
 /// Writes use the ordinary preference queue and its silent failure behavior.
 /// Controls stay enabled: preferences have no host-operation lock or outcome
@@ -61,9 +61,11 @@ fn restore_automatic_checkbox(in_force: bool) {
 pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
     let base = use_context::<ApiBase>().0;
     let setup_base = base.clone();
+    let session_base = base.clone();
     let mut preferences = use_context::<SharedPreferences>();
     let setup = preferences.0.read().skip_host_setup_confirmation == Some(true);
     let remove = preferences.0.read().skip_host_remove_confirmation == Some(true);
+    let skip_sessions = preferences.0.read().skip_session_confirmations == Some(true);
     let updater = use_app_updater();
     // Read once when the dialog opens and then kept locally: the file is
     // this app's own, so nothing else changes it while the dialog is up.
@@ -104,6 +106,30 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                     on_dismiss: move |_| on_close.call(()),
                 }
                 div { class: "host-settings-body",
+                    section { class: "host-settings-section", aria_label: "sessions",
+                        h3 { class: "host-settings-section-title", "sessions" }
+                        label {
+                            class: "app-settings-choice",
+                            "data-tooltip": "delete, replace, restart and close terminal tabs on the first click",
+                            span { "skip session confirmations" }
+                            input {
+                                r#type: "checkbox",
+                                class: "host-settings-switch",
+                                checked: skip_sessions,
+                                aria_describedby: "session-confirmations-help",
+                                onchange: move |event| {
+                                    preferences.0.write().skip_session_confirmations = Some(event.checked());
+                                    store_preference(
+                                        &session_base,
+                                        PreferenceValue::SessionConfirmations(event.checked()),
+                                    );
+                                },
+                            }
+                        }
+                        p { id: "session-confirmations-help", class: "host-settings-help",
+                            "Delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash confirmations still follow their own rules. This choice applies to this helm; other open clients pick it up when they reload."
+                        }
+                    }
                     section { class: "host-settings-section", aria_label: "hosts",
                         h3 { class: "host-settings-section-title", "hosts" }
                         p { class: "host-settings-help",

@@ -41,6 +41,8 @@ import {
   listSessions,
   observeFeedReaders,
   openRowMenu,
+  patchPreferences,
+  readPreferences,
   stopSession,
   stubFeed,
   waitForFeedReadersSettled,
@@ -55,14 +57,22 @@ const REFUSAL = "cannot delete without confirmation: the agent is still running"
  * failing. Spec: a Delete on an ended, tabless row opens no confirmation and
  * sends `only_if_nothing_alive=true`; a 409 reply shows as
  * "delete: <message>" on the row, keeps the row, opens no confirmation, and
- * triggers a listing read.
+ * triggers a listing read. The opt-out case shows an ended agent with an open
+ * tab and must send AgentEnded, retaining that narrower consent despite skipping.
  */
-test("an unconfirmed delete sends the precondition and shows the supervisor's refusal", async ({
+for (const skip of [false, true]) {
+test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precondition and shows the supervisor's refusal`, async ({
   page,
   request,
 }) => {
   const session = await createSession(request, { title: "delete-precondition" });
+  const previous = await readPreferences(request);
   try {
+    await patchPreferences(request, { skip_session_confirmations: skip });
+    if (skip) {
+      const tab = await request.post(`/api/sessions/${session.id}/tabs`);
+      expect(tab.ok(), await tab.text()).toBe(true);
+    }
     await stopSession(request, session.id);
     // Settled server-side before the page looks: the stop returns when the
     // kill is issued, not when "exited" reaches the helm's cache.
@@ -72,6 +82,7 @@ test("an unconfirmed delete sends the precondition and shows the supervisor's re
         { timeout: 20_000 },
       )
       .toBe("exited");
+    expect((await listSessions(request)).sessions.find((one) => one.id === session.id)?.tabs?.length ?? 0).toBe(skip ? 1 : 0);
     const build = (await request.get("/api/hosts")).headers()["x-farhelm-build"];
     expect(build, "the helm stamps every reply with its build").toBeTruthy();
 
@@ -82,10 +93,9 @@ test("an unconfirmed delete sends the precondition and shows the supervisor's re
     feed.notify(1);
     const row = page.locator(`.session-row[data-session-id="${session.id}"]`);
 
-    // Premise: the row itself shows the agent ended (and the session never
-    // opened a tab), which is what makes the next Delete the unconfirmed
-    // kind. Without this, a row still drawn as live would open the
-    // confirmation and the assertions below would fail for the wrong reason.
+    // The row shows the ended state already verified above. With opt-out off
+    // it has no tabs; with it on, the one real tab is what distinguishes the
+    // newly skipped question and its AgentEnded guard from NothingAlive.
     await expect(row.locator(".status-badge")).toHaveText(/exited/, { timeout: 20_000 });
     // Setup reads (the handshake's listing, the selected session's detail)
     // must retire before the baseline below, or one of them could be counted
@@ -115,7 +125,8 @@ test("an unconfirmed delete sends the precondition and shows the supervisor's re
 
     await expect(row.locator(".action-error")).toContainText(`delete: ${REFUSAL}`);
     expect(deleteUrls).toHaveLength(1);
-    expect(new URL(deleteUrls[0]).searchParams.get("only_if_nothing_alive")).toBe("true");
+    expect(new URL(deleteUrls[0]).searchParams.get("only_if_nothing_alive")).toBe(skip ? null : "true");
+    expect(new URL(deleteUrls[0]).searchParams.get("only_if_agent_ended")).toBe(skip ? "true" : null);
     await expect(row).toBeVisible();
     await expect(row.locator(".confirm-delete")).toHaveCount(0);
     await expect(page.locator(".build-skew")).toHaveCount(0);
@@ -126,8 +137,10 @@ test("an unconfirmed delete sends the precondition and shows the supervisor's re
     await page.unroute(matchesSession, refuse);
   } finally {
     await cleanupSession(request, session.id);
+    await patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null });
   }
 });
+}
 
 /**
  * Open the sidebar delete prompt on a running session, then end its agent

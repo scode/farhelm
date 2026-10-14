@@ -5,7 +5,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { localHostId, stubFeed } from "./helpers/fleet";
+import { localHostId, patchPreferences, readPreferences, stubFeed } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
 installTerminalSuiteHooks();
@@ -172,120 +172,131 @@ for (const width of [1000, 360]) {
      * a later one-host retry must begin a fresh denominator.
      */
     test(`trash deletion progress survives ${firstFails ? "failure" : "success"} at width ${width}`, async ({ page, request }) => {
-      const { ids, removed } = await stubArchives(page, request, ["progress-local", "progress-remote"], 1);
-      const held = ids.map(() => {
-        let release!: () => void;
-        const ready = new Promise<void>((resolve) => { release = resolve; });
-        return { ready, release };
-      });
-      let releaseRetry!: () => void;
-      const retryReady = new Promise<void>((resolve) => { releaseRetry = resolve; });
-      const attempts = new Map<number, number>();
-      await page.route("**/api/checkout-trash/delete", async (route) => {
-        const { host, ids: selected, expected_incarnation } = route.request().postDataJSON();
-        const index = ids.indexOf(host);
-        expect(index, "only the fixture's hosts can receive cleanup").toBeGreaterThanOrEqual(0);
-        expect(selected, "cleanup freezes the rendered archive IDs").toEqual([`archive-${host}-0`]);
-        expect(expected_incarnation, "cleanup retains its connected incarnation").toBeGreaterThan(0);
-        const attempt = (attempts.get(host) ?? 0) + 1;
-        attempts.set(host, attempt);
-        await (attempt === 1 ? held[index].ready : retryReady);
-        if (index === 0 && firstFails && attempt === 1) {
-          await fulfillAsHelm(route, { status: 503, contentType: "text/plain", body: "fixture cleanup unavailable" });
-        } else {
-          removed.set(host, new Set(selected));
-          await fulfillAsHelm(route, { json: { removed: selected, issues: [] } });
-        }
-      });
+      const previous = await readPreferences(request);
       try {
-        await page.setViewportSize({ width, height: 300 });
-        await page.goto("/");
-        const trigger = page.locator(".checkout-trash-button");
-        await expect(trigger).toHaveAttribute("data-count", "2");
-        await trigger.click();
-        const dialog = page.locator(".checkout-trash-dialog");
-        const sections = ids.map((id) => dialog.locator(`.checkout-trash-host[data-host-id="${id}"]`));
-        await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(2);
-        const all = dialog.locator(".trash-delete-all");
-        const close = dialog.locator(".trash-close");
-        await expect(all).toBeEnabled();
-        await all.click();
-        const confirmation = dialog.locator(".checkout-trash-confirm");
-        await expect(confirmation).toContainText("Delete 2 archived checkouts");
-        await expect(confirmation.locator(".trash-confirm-submit")).toBeFocused();
-        // The live region must already exist, empty, before the delete starts:
-        // only a text change in a mounted region is announced reliably.
-        const status = dialog.locator(".checkout-trash-progress");
-        await expect(status).toHaveAttribute("role", "status");
-        await expect(status).toHaveText("");
-        await page.keyboard.press("Enter");
-        await expect.poll(() => ids.map((id) => attempts.get(id) ?? 0), { message: "both host requests reached the held boundary" }).toEqual([1, 1]);
-        await expect(status).toHaveText("deleting on 2 of 2 hosts…");
-        for (const section of sections) await expect(section.locator(".trash-host-progress")).toHaveText("deleting…");
-        await expect(close).toBeDisabled();
-        await expect(all).toBeDisabled();
-        await expect(dialog.locator(".trash-host-delete:enabled")).toHaveCount(0);
-        await page.mouse.move(0, 0);
-        for (const control of [status, all, close]) await expectExposed(control);
-        await test.info().attach("trash-deleting-two-hosts", { body: await page.screenshot(), contentType: "image/png" });
-        // Submission removes the focused button; explicitly focus the dialog
-        // before testing Escape so this input reaches its actual close guard.
-        await dialog.focus();
-        await expect(dialog).toBeFocused();
-        await page.keyboard.press("Escape");
-        await expect(dialog).toBeVisible();
-        await expect(status).toHaveText("deleting on 2 of 2 hosts…");
-
-        held[0].release();
-        await expect(status).toHaveText("deleting on 1 of 2 hosts…");
-        await expect(sections[0].locator(".trash-host-progress")).toHaveCount(0);
-        await expect(sections[1].locator(".trash-host-progress")).toHaveText("deleting…");
-        if (firstFails) await expect(sections[0].locator(".checkout-trash-issue")).toContainText("fixture cleanup unavailable");
-        else await expect(sections[0]).toHaveCount(0);
-        await expect(close).toBeDisabled();
-        await test.info().attach("trash-deleting-one-host", { body: await page.screenshot(), contentType: "image/png" });
-        // Short windows can leave the host indicator below the description.
-        // Capture its actual paint while also checking the pinned live count.
-        await sections[1].locator(".trash-host-progress").scrollIntoViewIfNeeded();
-        await expectExposed(sections[1].locator(".trash-host-progress"));
-        for (const control of [status, all, close]) await expectExposed(control);
-        await test.info().attach("trash-pending-host", { body: await page.screenshot(), contentType: "image/png" });
-        held[1].release();
-        await expect(status).toHaveText("");
-        await expect(dialog.locator(".trash-host-progress")).toHaveCount(0);
-        await expect(close).toBeEnabled();
-        await expect(close).toBeFocused();
-        await expect(trigger).toHaveAttribute("data-count", firstFails ? "1" : "0");
-        await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(firstFails ? 1 : 0);
-        await expect(sections[1]).toHaveCount(0);
-        if (firstFails) {
-          await expect(sections[0].locator(".checkout-trash-issue")).toContainText("cleanup reply could not be confirmed");
+        // Permanent checkout loss remains explicit despite the session opt-out.
+        await patchPreferences(request, { skip_session_confirmations: true });
+        const { ids, removed } = await stubArchives(page, request, ["progress-local", "progress-remote"], 1);
+        const held = ids.map(() => {
+          let release!: () => void;
+          const ready = new Promise<void>((resolve) => { release = resolve; });
+          return { ready, release };
+        });
+        let releaseRetry!: () => void;
+        const retryReady = new Promise<void>((resolve) => { releaseRetry = resolve; });
+        const attempts = new Map<number, number>();
+        await page.route("**/api/checkout-trash/delete", async (route) => {
+          const { host, ids: selected, expected_incarnation } = route.request().postDataJSON();
+          const index = ids.indexOf(host);
+          expect(index, "only the fixture's hosts can receive cleanup").toBeGreaterThanOrEqual(0);
+          expect(selected, "cleanup freezes the rendered archive IDs").toEqual([`archive-${host}-0`]);
+          expect(expected_incarnation, "cleanup retains its connected incarnation").toBeGreaterThan(0);
+          const attempt = (attempts.get(host) ?? 0) + 1;
+          attempts.set(host, attempt);
+          await (attempt === 1 ? held[index].ready : retryReady);
+          if (index === 0 && firstFails && attempt === 1) {
+            await fulfillAsHelm(route, { status: 503, contentType: "text/plain", body: "fixture cleanup unavailable" });
+          } else {
+            removed.set(host, new Set(selected));
+            await fulfillAsHelm(route, { json: { removed: selected, issues: [] } });
+          }
+        });
+        try {
+          await page.setViewportSize({ width, height: 300 });
+          await page.goto("/");
+          const trigger = page.locator(".checkout-trash-button");
+          await expect(trigger).toHaveAttribute("data-count", "2");
+          await trigger.click();
+          const dialog = page.locator(".checkout-trash-dialog");
+          const sections = ids.map((id) => dialog.locator(`.checkout-trash-host[data-host-id="${id}"]`));
+          await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(2);
+          const all = dialog.locator(".trash-delete-all");
+          const close = dialog.locator(".trash-close");
           await expect(all).toBeEnabled();
           await all.click();
-          await expect(confirmation).toContainText("Delete 1 archived checkout");
+          const confirmation = dialog.locator(".checkout-trash-confirm");
+          await expect(confirmation).toContainText("Delete 2 archived checkouts");
           await expect(confirmation.locator(".trash-confirm-submit")).toBeFocused();
+          // The live region must already exist, empty, before the delete starts:
+          // only a text change in a mounted region is announced reliably.
+          const status = dialog.locator(".checkout-trash-progress");
+          await expect(status).toHaveAttribute("role", "status");
+          await expect(status).toHaveText("");
           await page.keyboard.press("Enter");
-          await expect.poll(() => attempts.get(ids[0]), { message: "one-host retry reached its held boundary" }).toBe(2);
-          await expect(status).toHaveText("deleting…");
-          await expect(sections[0].locator(".trash-host-progress")).toHaveText("deleting…");
-          await expect(sections[1].locator(".trash-host-progress")).toHaveCount(0);
-          releaseRetry();
+          await expect.poll(() => ids.map((id) => attempts.get(id) ?? 0), { message: "both host requests reached the held boundary" }).toEqual([1, 1]);
+          await expect(status).toHaveText("deleting on 2 of 2 hosts…");
+          for (const section of sections) await expect(section.locator(".trash-host-progress")).toHaveText("deleting…");
+          await expect(close).toBeDisabled();
+          await expect(all).toBeDisabled();
+          await expect(dialog.locator(".trash-host-delete:enabled")).toHaveCount(0);
+          await page.mouse.move(0, 0);
+          for (const control of [status, all, close]) await expectExposed(control);
+          await test.info().attach("trash-deleting-two-hosts", { body: await page.screenshot(), contentType: "image/png" });
+          // Submission removes the focused button; explicitly focus the dialog
+          // before testing Escape so this input reaches its actual close guard.
+          await dialog.focus();
+          await expect(dialog).toBeFocused();
+          await page.keyboard.press("Escape");
+          await expect(dialog).toBeVisible();
+          await expect(status).toHaveText("deleting on 2 of 2 hosts…");
+
+          held[0].release();
+          await expect(status).toHaveText("deleting on 1 of 2 hosts…");
+          await expect(sections[0].locator(".trash-host-progress")).toHaveCount(0);
+          await expect(sections[1].locator(".trash-host-progress")).toHaveText("deleting…");
+          if (firstFails) await expect(sections[0].locator(".checkout-trash-issue")).toContainText("fixture cleanup unavailable");
+          else await expect(sections[0]).toHaveCount(0);
+          await expect(close).toBeDisabled();
+          await test.info().attach("trash-deleting-one-host", { body: await page.screenshot(), contentType: "image/png" });
+          // Short windows can leave the host indicator below the description.
+          // Capture its actual paint while also checking the pinned live count.
+          await sections[1].locator(".trash-host-progress").scrollIntoViewIfNeeded();
+          await expectExposed(sections[1].locator(".trash-host-progress"));
+          for (const control of [status, all, close]) await expectExposed(control);
+          await test.info().attach("trash-pending-host", { body: await page.screenshot(), contentType: "image/png" });
+          held[1].release();
           await expect(status).toHaveText("");
           await expect(dialog.locator(".trash-host-progress")).toHaveCount(0);
+          await expect(close).toBeEnabled();
           await expect(close).toBeFocused();
-          await expect(trigger).toHaveAttribute("data-count", "0");
+          await expect(trigger).toHaveAttribute("data-count", firstFails ? "1" : "0");
+          await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(firstFails ? 1 : 0);
+          await expect(sections[1]).toHaveCount(0);
+          if (firstFails) {
+            await expect(sections[0].locator(".checkout-trash-issue")).toContainText("cleanup reply could not be confirmed");
+            await expect(all).toBeEnabled();
+            await all.click();
+            await expect(confirmation).toContainText("Delete 1 archived checkout");
+            await expect(confirmation.locator(".trash-confirm-submit")).toBeFocused();
+            await page.keyboard.press("Enter");
+            await expect.poll(() => attempts.get(ids[0]), { message: "one-host retry reached its held boundary" }).toBe(2);
+            await expect(status).toHaveText("deleting…");
+            await expect(sections[0].locator(".trash-host-progress")).toHaveText("deleting…");
+            await expect(sections[1].locator(".trash-host-progress")).toHaveCount(0);
+            releaseRetry();
+            await expect(status).toHaveText("");
+            await expect(dialog.locator(".trash-host-progress")).toHaveCount(0);
+            await expect(close).toBeFocused();
+            await expect(trigger).toHaveAttribute("data-count", "0");
+          }
+          await expect(dialog.locator(".checkout-trash-empty")).toHaveText("The trash is empty on reachable hosts.");
+          await test.info().attach("trash-deletion-finished", { body: await page.screenshot(), contentType: "image/png" });
+          await close.click();
+          await expect(dialog).toHaveCount(0);
+          await expect(trigger).toBeFocused();
+        } finally {
+          // Let every intercepted request finish while its page remains alive,
+          // even when an earlier assertion fails at a deliberately held boundary.
+          for (const host of held) host.release();
+          releaseRetry();
+          await page.unrouteAll({ behavior: "wait" });
         }
-        await expect(dialog.locator(".checkout-trash-empty")).toHaveText("The trash is empty on reachable hosts.");
-        await test.info().attach("trash-deletion-finished", { body: await page.screenshot(), contentType: "image/png" });
-        await close.click();
-        await expect(dialog).toHaveCount(0);
-        await expect(trigger).toBeFocused();
       } finally {
-        // Let every intercepted request finish while its page remains alive,
-        // even when an earlier assertion fails at a deliberately held boundary.
-        for (const host of held) host.release();
-        releaseRetry();
-        await page.unrouteAll({ behavior: "wait" });
+        try {
+          await page.unrouteAll({ behavior: "wait" });
+        } finally {
+          await patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null });
+        }
       }
     });
   }

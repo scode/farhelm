@@ -371,6 +371,9 @@ pub(crate) struct Preferences {
     pub(crate) skip_host_remove_confirmation: Option<bool>,
     /// Whether adding a host can submit setup immediately after probing.
     pub(crate) skip_host_setup_confirmation: Option<bool>,
+    /// Skip everyday session questions; supervisor guards and YOLO still apply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) skip_session_confirmations: Option<bool>,
     /// Shared contact memory; dialogs seed this authenticated snapshot once.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) feedback_contact: Option<String>,
@@ -570,6 +573,7 @@ pub(crate) enum PreferenceField {
     Compact,
     HostRemoveConfirmation,
     HostSetupConfirmation,
+    SessionConfirmations,
     FeedbackContact,
     TerminalLinkClick,
 }
@@ -583,6 +587,7 @@ impl PreferenceField {
             PreferenceField::Compact => "compact",
             PreferenceField::HostRemoveConfirmation => "skip_host_remove_confirmation",
             PreferenceField::HostSetupConfirmation => "skip_host_setup_confirmation",
+            PreferenceField::SessionConfirmations => "skip_session_confirmations",
             PreferenceField::FeedbackContact => "feedback_contact",
             PreferenceField::TerminalLinkClick => "terminal_link_click",
         }
@@ -602,6 +607,7 @@ pub(crate) enum PreferenceValue {
     Compact(bool),
     HostRemoveConfirmation(bool),
     HostSetupConfirmation(bool),
+    SessionConfirmations(bool),
     /// None is an explicit clear, not an omitted patch field.
     FeedbackContact(Option<String>),
     TerminalLinkClick(TerminalLinkClick),
@@ -616,6 +622,7 @@ impl PreferenceValue {
             Self::Compact(_) => PreferenceField::Compact,
             Self::HostRemoveConfirmation(_) => PreferenceField::HostRemoveConfirmation,
             Self::HostSetupConfirmation(_) => PreferenceField::HostSetupConfirmation,
+            Self::SessionConfirmations(_) => PreferenceField::SessionConfirmations,
             Self::FeedbackContact(_) => PreferenceField::FeedbackContact,
             Self::TerminalLinkClick(_) => PreferenceField::TerminalLinkClick,
         }
@@ -629,6 +636,7 @@ impl PreferenceValue {
             Self::TerminalLinkClick(value) => serde_json::json!(value.key()),
             Self::Compact(value)
             | Self::HostRemoveConfirmation(value)
+            | Self::SessionConfirmations(value)
             | Self::HostSetupConfirmation(value) => serde_json::json!(value),
         }
     }
@@ -643,6 +651,7 @@ impl PreferenceValue {
                 seed.skip_host_remove_confirmation = Some(*value)
             }
             Self::HostSetupConfirmation(value) => seed.skip_host_setup_confirmation = Some(*value),
+            Self::SessionConfirmations(value) => seed.skip_session_confirmations = Some(*value),
             Self::FeedbackContact(value) => seed.feedback_contact = value.clone(),
             Self::TerminalLinkClick(value) => seed.terminal_link_click = Some(value.key().into()),
         }
@@ -694,6 +703,7 @@ struct PreferenceWrites {
     compact: FieldWrite,
     host_remove_confirmation: FieldWrite,
     host_setup_confirmation: FieldWrite,
+    session_confirmations: FieldWrite,
     feedback_contact: FieldWrite,
     terminal_link_click: FieldWrite,
 }
@@ -706,6 +716,7 @@ impl PreferenceWrites {
             PreferenceField::Compact => &mut self.compact,
             PreferenceField::HostRemoveConfirmation => &mut self.host_remove_confirmation,
             PreferenceField::HostSetupConfirmation => &mut self.host_setup_confirmation,
+            PreferenceField::SessionConfirmations => &mut self.session_confirmations,
             PreferenceField::FeedbackContact => &mut self.feedback_contact,
             PreferenceField::TerminalLinkClick => &mut self.terminal_link_click,
         }
@@ -772,6 +783,7 @@ impl PreferenceWrites {
             PreferenceField::Compact => &self.compact,
             PreferenceField::HostRemoveConfirmation => &self.host_remove_confirmation,
             PreferenceField::HostSetupConfirmation => &self.host_setup_confirmation,
+            PreferenceField::SessionConfirmations => &self.session_confirmations,
             PreferenceField::FeedbackContact => &self.feedback_contact,
             PreferenceField::TerminalLinkClick => &self.terminal_link_click,
         };
@@ -861,6 +873,7 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
         PreferenceField::Compact,
         PreferenceField::HostRemoveConfirmation,
         PreferenceField::HostSetupConfirmation,
+        PreferenceField::SessionConfirmations,
         PreferenceField::FeedbackContact,
         PreferenceField::TerminalLinkClick,
     ] {
@@ -4732,6 +4745,33 @@ mod preference_write_tests {
     use super::{
         PreferenceField, PreferenceValue, PreferenceWrites, Preferences, TerminalLinkClick,
     };
+
+    /// Session opt-out writes own their queue slot and replay after a failed
+    /// save without replacing independent host choices. False is a real choice.
+    #[farhelm_testtrace::test]
+    fn session_confirmations_have_an_independent_replay_slot() {
+        let mut queue = PreferenceWrites::default();
+        let skip = PreferenceValue::SessionConfirmations(true);
+        assert_eq!(skip.field().key(), "skip_session_confirmations");
+        assert_eq!(skip.wire_value(), serde_json::json!(true));
+        assert!(queue.record(skip.clone()));
+        assert!(queue.record(PreferenceValue::HostRemoveConfirmation(true)));
+        assert!(!queue.finished(skip.field(), &skip, false));
+        let mut seed = Preferences::default();
+        queue.dirty(skip.field()).unwrap().overlay(&mut seed);
+        assert_eq!(seed.skip_session_confirmations, Some(true));
+        assert_eq!(seed.skip_host_remove_confirmation, None);
+        assert_eq!(queue.begin_replay(skip.field()), Some(skip.clone()));
+        let ask = PreferenceValue::SessionConfirmations(false);
+        assert!(!queue.record(ask.clone()));
+        assert!(queue.finished(skip.field(), &skip, true));
+        assert_eq!(queue.next_to_send(skip.field()), Some(ask.clone()));
+        assert_eq!(ask.wire_value(), serde_json::json!(false));
+        assert!(!queue.finished(ask.field(), &ask, true));
+        assert_eq!(queue.dirty(ask.field()), None);
+        ask.overlay(&mut seed);
+        assert_eq!(seed.skip_session_confirmations, Some(false));
+    }
 
     /// A failed link choice survives reauthentication and serializes as its
     /// own sparse field. Unknown persisted values retain default interception.

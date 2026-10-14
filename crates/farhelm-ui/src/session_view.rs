@@ -160,6 +160,14 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
     *status == SessionStatus::Running
 }
 
+/// A direct click consents to stopping a working agent only when it skips
+/// that working screen's question. Idle, waiting and unknown never supplied
+/// that consent before the opt-out, and must still refuse a race into working.
+/// An already-open prompt has different wording and uses its own consent.
+fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) -> bool {
+    skip_confirmations && restart_needs_confirmation(status)
+}
+
 /// One session: a single header row (status, identity, age, copyable fields,
 /// and actions) over
 /// a tab strip over one terminal per open terminal — the sidebar beside this
@@ -1552,6 +1560,8 @@ pub(crate) fn SessionView(
     };
     let mut confirm_replace = replace.clone();
     let mut header_confirm_replace = replace.clone();
+    let mut direct_card_replace = replace.clone();
+    let mut direct_header_replace = replace.clone();
     let mut yolo_confirm_replace = replace.clone();
     let mut yolo_stop_asking_replace = replace.clone();
 
@@ -1612,7 +1622,7 @@ pub(crate) fn SessionView(
         });
     };
 
-    // The DELETE itself, reached only through the confirmation below.
+    // One tab-close request path, whether the question was answered or skipped.
     let close_base = base.clone();
     let close_session_id = session.id.clone();
     let mut do_close_tab = move |tab_id: String| {
@@ -1663,22 +1673,30 @@ pub(crate) fn SessionView(
     };
 
     // The close affordance's first click: opens the in-page confirmation
-    // and never calls the API. In-page for the reason every confirmation
+    // unless session questions are skipped. In-page for the reason every
+    // confirmation
     // in this UI is (wry ships no native JS dialogs on macOS's WKWebView,
     // where a `window.confirm()` silently does nothing), and confirmed
     // unconditionally rather than only for a busy shell: the UI cannot see
-    // what a tab's shell is running, and close kills it either way.
+    // what a tab's shell is running, and close kills it either way. Skipping
+    // uses that same tab id and retains per-tab re-entry/error handling.
     //
     // Refuses a tab whose close is already in flight, the cross-guard
     // mirroring `ListView`'s: the button is only disabled once a rerender
     // following the `closing_tabs` insert lands, so a click queued just
     // ahead of that could otherwise open a prompt for an operation already
     // under way.
+    let mut direct_close_tab = do_close_tab.clone();
+    let skip_session_confirmations = preferences.0.read().skip_session_confirmations == Some(true);
     let on_close_tab = move |tab_id: String| {
         if closing_tabs.read().contains(&tab_id) {
             return;
         }
-        confirming_close.open(tab_id, ());
+        if skip_session_confirmations {
+            direct_close_tab(tab_id);
+        } else {
+            confirming_close.open(tab_id, ());
+        }
     };
 
     // The confirm button. Proceeds ONLY when this tab is still the one
@@ -1896,10 +1914,12 @@ pub(crate) fn SessionView(
     crate::ops::use_clear_when_hidden(confirming_replace, interrupted_card_shown);
 
     let shown = current.read().clone();
-    let confirms_restart = restart_needs_confirmation(&shown.status);
+    let confirms_restart = restart_needs_confirmation(&shown.status) && !skip_session_confirmations;
+    let direct_restart_stops =
+        direct_restart_stops_agent(&shown.status, skip_session_confirmations);
     // Whether the restart prompt, as rendered by THIS pass, offered to stop
     // a running agent: its confirm consents to exactly that and no more. A
-    // prompt that drifted to an ended status did not offer it, so an agent
+    // prompt showing an ended status did not offer it, so an agent
     // that started working again before the click is refused by the
     // supervisor instead of stopped, and the next attempt asks (an idle,
     // waiting or unknown agent is still stopped unasked, as for a Restart
@@ -2008,6 +2028,8 @@ pub(crate) fn SessionView(
     // (`PendingYoloReplace`).
     let header_replace_source = shown.clone();
     let card_replace_source = shown.clone();
+    let direct_header_source = shown.clone();
+    let direct_card_source = shown.clone();
     let replace_prompt_guard = header_delete_guard;
     let header_deleting = deleting.read().contains(&shown.id);
     let with_reason = restart_with_reason(&shown);
@@ -2210,7 +2232,7 @@ pub(crate) fn SessionView(
                                     // sending that request.
                                     confirming.set(true);
                                 } else {
-                                    direct_restart(false, None, false, None);
+                                    direct_restart(direct_restart_stops, None, false, None);
                                 }
                             },
                             "restart"
@@ -2329,7 +2351,11 @@ pub(crate) fn SessionView(
                             "aria-expanded": "{confirming_header_replace.is_open()}",
                             onclick: move |_| {
                                 if let Some(claim) = lifecycle.claim_guard() {
-                                    confirming_header_replace.open((), claim);
+                                    if skip_session_confirmations {
+                                        direct_header_replace(claim, false, None, direct_header_source.clone(), replace_prompt_guard);
+                                    } else {
+                                        confirming_header_replace.open((), claim);
+                                    }
                                 }
                             },
                             "replace"
@@ -2400,8 +2426,9 @@ pub(crate) fn SessionView(
                         "replace with"
                     }
                     // A shortcut for deleting the open session without finding
-                    // its row in the sidebar. It always confirms, even for an
-                    // ended session the row would delete without asking: the
+                    // its row in the sidebar. Unless session questions are skipped,
+                    // it confirms even for an ended session the row would delete
+                    // without asking: the
                     // header is a single click away from the terminal, and
                     // the confirm button lands where the delete button was,
                     // the same two-clicks-in-one-place shape as replace. The
@@ -2412,12 +2439,27 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-danger header-delete",
-                            "data-tooltip": "delete: remove this session and its state, after you confirm",
+                            "data-tooltip": if skip_session_confirmations {
+                                "delete: remove this session and its state"
+                            } else {
+                                "delete: remove this session and its state, after you confirm"
+                            },
                             disabled: lifecycle.busy(),
                             "aria-expanded": "{confirming_header_delete.is_open()}",
-                            onclick: move |_| {
-                                if let Some(claim) = lifecycle.claim_guard() {
-                                    confirming_header_delete.open((), claim);
+                            onclick: {
+                                let id = shown.id.clone();
+                                move |_| {
+                                    if let Some(claim) = lifecycle.claim_guard() {
+                                        if skip_session_confirmations {
+                                            drop(claim);
+                                            header_delete.set(Some(crate::list::HeaderDeleteRequest {
+                                                id: id.clone(),
+                                                guard: header_delete_guard,
+                                            }));
+                                        } else {
+                                            confirming_header_delete.open((), claim);
+                                        }
+                                    }
                                 }
                             },
                             "delete"
@@ -2755,7 +2797,11 @@ pub(crate) fn SessionView(
                             "aria-expanded": "{confirming_replace.is_open()}",
                             onclick: move |_| {
                                 if let Some(claim) = lifecycle.claim_guard() {
-                                    confirming_replace.open((), claim);
+                                    if skip_session_confirmations {
+                                        direct_card_replace(claim, false, None, direct_card_source.clone(), replace_prompt_guard);
+                                    } else {
+                                        confirming_replace.open((), claim);
+                                    }
                                 }
                             },
                             "replace"
@@ -2834,7 +2880,7 @@ pub(crate) fn SessionView(
                             selected: active_tab.as_deref() == Some(tab_id.as_str()),
                             busy: closing_tabs.read().contains(tab_id),
                             on_select: move |id| selected.set(Some(id)),
-                            on_close: on_close_tab,
+                            on_close: on_close_tab.clone(),
                         }
                     }
                     button {
@@ -3678,6 +3724,31 @@ mod tests {
             SessionStatus::Exited { exit_code: Some(0) },
         ] {
             assert!(!restart_needs_confirmation(&status), "{status:?}");
+        }
+    }
+
+    /// Opting out supplies the answer to a working screen's question, never
+    /// blanket stop consent. Other direct clicks must still refuse an agent
+    /// that begins working after the render, with the preference off or on.
+    #[farhelm_testtrace::test]
+    fn direct_restart_consent_is_only_the_skipped_working_question() {
+        for skip in [false, true] {
+            for status in [
+                SessionStatus::Idle,
+                SessionStatus::Waiting,
+                SessionStatus::Unknown,
+                SessionStatus::Exited { exit_code: Some(0) },
+                SessionStatus::Interrupted,
+            ] {
+                assert!(
+                    !direct_restart_stops_agent(&status, skip),
+                    "{status:?}, skip={skip}"
+                );
+            }
+            assert_eq!(
+                direct_restart_stops_agent(&SessionStatus::Running, skip),
+                skip
+            );
         }
     }
 

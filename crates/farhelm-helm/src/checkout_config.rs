@@ -1967,7 +1967,8 @@ mod tests {
                 .unwrap();
             // Every table a later schema added goes, including schema 38's
             // `launch_templates`, schema 41's `session_notification_marks`
-            // and schema 47's `ntfy_alerts`:
+            // and schema 47's `ntfy_alerts`. Later preference columns also
+            // go, including the session-confirmation choice added in schema 48:
             // the test compares the result with the frozen v26 DDL, which
             // has none of them.
             conn.execute_batch(
@@ -1982,6 +1983,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;

@@ -56,6 +56,11 @@ right of the session header. Delete asks you to confirm, with one exception: fro
 already ended and has no shell tabs open is deleted at once.
 When a confirmation opens, Enter confirms it; **cancel** backs out. The YOLO question still starts on **cancel**.
 
+To delete, replace, restart and close shell tabs on the first click, turn on **skip session confirmations** in
+**settings**, behind the gear beside the sidebar version. It starts off and applies to your helm; other open windows
+pick it up when they reload. YOLO, host and trash questions keep their own rules, and **restart with** still opens its
+dialog.
+
 For a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the checkout stays while another
 session uses it; deleting its last session moves the directory, including uncommitted work, into
 `farhelm-archived-working-copies` in the directory managed checkouts go into. This archive is the checkout's trash: the

@@ -317,6 +317,59 @@ mod tests {
         assert_eq!(remembered.compact, Some(true));
     }
 
+    /// Only a real boolean opts out of session questions. The route must keep
+    /// host authority independent and distinguish explicit false, null and omission.
+    #[farhelm_testtrace::test]
+    async fn session_confirmations_are_a_sparse_boolean_preference() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read_raw(&harness).await, b"{}");
+        for value in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::Value::Null,
+        ] {
+            let reply = harness
+                .router()
+                .oneshot(put(serde_json::json!({
+                    "skip_session_confirmations": value,
+                })))
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::NO_CONTENT);
+            let reply = harness
+                .router()
+                .oneshot(put(serde_json::json!({
+                    "skip_host_setup_confirmation": true,
+                })))
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::NO_CONTENT);
+            let snapshot = read(&harness).await;
+            assert_eq!(snapshot.skip_session_confirmations, value.as_bool());
+            assert_eq!(snapshot.skip_host_setup_confirmation, Some(true));
+            assert_eq!(snapshot.skip_host_remove_confirmation, None);
+            let wire: serde_json::Value =
+                serde_json::from_slice(&read_raw(&harness).await).unwrap();
+            if value.is_null() {
+                assert!(wire.get("skip_session_confirmations").is_none());
+            } else {
+                assert_eq!(wire["skip_session_confirmations"], value);
+            }
+        }
+        let before = read(&harness).await;
+        for invalid in [serde_json::json!("true"), serde_json::json!(1)] {
+            let reply = harness
+                .router()
+                .oneshot(put(serde_json::json!({
+                    "skip_session_confirmations": invalid,
+                })))
+                .await
+                .unwrap();
+            assert!(reply.status().is_client_error());
+            assert_eq!(read(&harness).await, before);
+        }
+    }
+
     /// Compact may be the first preference a fresh client changes. Exercise
     /// insertion into an absent singleton row, not only the update path after
     /// sort or selection created it, and leave those unrelated choices unset.
@@ -409,6 +462,7 @@ mod tests {
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
                 terminal_link_click: None,
+                skip_session_confirmations: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -512,6 +566,7 @@ mod tests {
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
                 terminal_link_click: None,
+                skip_session_confirmations: None,
             },
             "an explicit null clears the field it names and only that one"
         );

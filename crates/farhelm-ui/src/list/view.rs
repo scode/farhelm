@@ -54,7 +54,7 @@ pub(crate) enum HeaderPrefillRequest {
 }
 
 /// One-shot request from a session header to delete the session it shows,
-/// sent after the header's own confirmation was answered.
+/// sent after its confirmation was answered or skipped by the session preference.
 ///
 /// The delete itself runs through the list's ordinary delete path, not a
 /// second implementation in the header: that path owns the per-row
@@ -66,7 +66,7 @@ pub(crate) enum HeaderPrefillRequest {
 #[derive(Clone, PartialEq)]
 pub(crate) struct HeaderDeleteRequest {
     pub(crate) id: String,
-    /// The precondition the header's prompt, as the user read it, covered
+    /// The precondition the header's render, as the user saw it, covered
     /// (see `status::delete_guard`).
     pub(crate) guard: crate::DeleteGuard,
 }
@@ -739,6 +739,9 @@ pub(crate) fn ListView(
     // The helm's shared preference, already read by `PreferencesGate` —
     // this component never mounts before it has (see `SharedPreferences`).
     let mut preferences = use_context::<SharedPreferences>();
+    // Capture the preference with this render's action handlers, alongside
+    // the row snapshots they act on. A skipped question still carries consent.
+    let skip_session_confirmations = preferences.0.read().skip_session_confirmations == Some(true);
     let mut row_ops = row_ops;
     // `row_ops` outlives this component (it lives in `AppBody`), but the row
     // tasks that would decrement it do not: unmounting the list, as the
@@ -1971,7 +1974,8 @@ pub(crate) fn ListView(
                     // A refusal changed nothing on the host, so no fleet
                     // event will correct a stale row; read the listing now,
                     // so a row the supervisor found alive shows that and
-                    // the next Delete asks for confirmation.
+                    // the next Delete decides from current state under the
+                    // same session-confirmation preference.
                     refresh(Trigger::Explicit);
                 }
                 None => {
@@ -2034,16 +2038,15 @@ pub(crate) fn ListView(
     };
 
     // The delete button's initial click: decides whether this id needs
-    // confirming at all, never itself calling the API.
+    // confirming at all. A skipped question uses the same request and guard
+    // as its confirm button, from the snapshot the clicked row supplied.
     //
     // SPEC.md's "Lifecycle operations": delete confirms first only when
-    // the agent might still be alive — an Exited session deletes
-    // immediately (see its own arm below for the residual risk that
-    // accepts). The live statuses and Unknown all confirm, entering the per-session
-    // `confirming` state that `SessionRow` reads to swap its action area
-    // (see that component's doc) — this closure itself does nothing more
-    // than flip that flag; `confirm_delete` below is what a confirmed
-    // click actually acts on.
+    // the agent might still be alive, unless session questions are skipped;
+    // an ended, tabless session deletes immediately (see the residual risk
+    // below). With the preference off, live and Unknown statuses enter the
+    // per-session `confirming` state that `SessionRow` reads to swap its action
+    // area; `confirm_delete` answers that prompt.
     //
     // Refuses an id already in `pending` (the cross-guard mirroring
     // `on_stop`'s `confirming` check above): the delete button is only
@@ -2070,19 +2073,19 @@ pub(crate) fn ListView(
         {
             return;
         }
-        // The agent half of the split is exactly `has_ended()` vs.
+        // With session questions enabled, the agent half of the split is `has_ended()` vs.
         // everything else, which is to say: a status the UI knows to be
         // finished can delete straight away, and the rest — the three live
         // statuses and `Unknown` — go through a confirmation. Asking the status rather than
         // listing the variants is what kept this correct THROUGH M6.75's
         // liveness split, which added two live variants and needed no edit
         // here (see `SessionStatus::has_ended`).
-        if let DeleteClick::DeleteGuarded = target.click() {
-            // Reached only for an ended agent with no listed tabs: open
-            // tabs are live processes the UI can see, so they always
-            // confirm (see `DeleteTarget::needs_confirmation`).
+        if let DeleteClick::DeleteGuarded(guard) = target.click(skip_session_confirmations) {
+            // With the preference off, only an ended agent with no tabs
+            // reaches this path. With it on, the rendered guard limits the
+            // direct click's consent: AgentEnded still protects a new agent.
             //
-            // Deliberately unconfirmed, a known residual: the AGENT
+            // The default unconfirmed path accepts a known residual: the AGENT
             // process has exited, but process-tree descendants it
             // spawned (a stray MCP server, a dev server) can outlive it,
             // and delete's process-tree sweep will kill whatever it
@@ -2108,7 +2111,7 @@ pub(crate) fn ListView(
             // spawned. There is no lingering process tree to worry about,
             // not because nothing ever ran, but because the one thing
             // that could have left descendants never got the chance to.
-            do_delete_on_confirm(target.id, crate::DeleteGuard::NothingAlive);
+            do_delete_on_confirm(target.id, guard);
         } else {
             // Unknown must not borrow a live status's "is still running" claim
             // it has no basis for — SPEC.md's no-guessing rule means an
@@ -2374,14 +2377,18 @@ pub(crate) fn ListView(
     // `on_clone` uses (`clone_is_refused`'s own doc explains why the two
     // share it — the difference between clone and replace is never in
     // whether either is refused, only in what happens once accepted), then
-    // opens `confirming_replace` unconditionally, unlike `on_delete`'s
+    // opens `confirming_replace` when session questions are enabled, unlike
+    // `on_delete`'s
     // `has_ended()` split. Delete's split exists because an already-finished
     // session has nothing left for the CONFIRMATION to be honest about
     // beyond "delete anyway"; replace always has something worth confirming
     // regardless of liveness — a fresh session is about to take this row's
     // place — so `status::replace_consequence` is total over every status
     // (no `Option` to skip on) and this handler never bypasses the prompt
-    // once the guard above lets it through.
+    // once the guard above lets it through, unless the user opted out.
+    // The direct route acquires the same row operation and uses the same
+    // rendered source and guard, including the existing YOLO refusal path.
+    let mut direct_do_replace = do_replace.clone();
     let on_replace = move |session: Session| {
         if clone_is_refused(
             ops.busy_now(),
@@ -2401,9 +2408,16 @@ pub(crate) fn ListView(
         {
             replace_key.set(None);
         }
-        row_phases
-            .write()
-            .insert(session.id, RowPhase::ConfirmingReplace);
+        if skip_session_confirmations {
+            let guard = crate::status::delete_guard(&session.status, session.tabs.len());
+            if begin_row_op(&session.id) {
+                direct_do_replace(session, guard, None);
+            }
+        } else {
+            row_phases
+                .write()
+                .insert(session.id, RowPhase::ConfirmingReplace);
+        }
     };
     // The loud YOLO confirmation's own way back into the same replace.
     let yolo_do_replace = do_replace.clone();

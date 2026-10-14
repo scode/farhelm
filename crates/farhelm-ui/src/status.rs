@@ -394,8 +394,9 @@ pub(crate) fn shows_nothing_alive(status: &SessionStatus, tabs: usize) -> bool {
 /// what the prompt the user answered said. Nothing alive (no prompt, or one
 /// that said nothing was running) is `NothingAlive`; an ended agent with tabs
 /// (a prompt that warned only about tabs) is `AgentEnded`; an agent that has
-/// not ended (a prompt that warned it runs, or may) is `Unconditional`. The
-/// caller must derive it from the same snapshot that drew the prompt, never
+/// not ended (a prompt that warned it runs, or may) is `Unconditional`.
+/// A skipped session prompt authorizes the same screen state. The
+/// caller must derive it from the same snapshot that drew the prompt or action, never
 /// from a fresh read at click time, or a prompt that drifted would be
 /// answered with a guard for a state the user was not shown.
 pub(crate) fn delete_guard(status: &SessionStatus, tabs: usize) -> crate::DeleteGuard {
