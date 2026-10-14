@@ -205,6 +205,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   https://snippets.scode.org/s/git-clone-dissociate-commit-graph-bug/ Plan:
   `plans/queue/git-clone-commit-graph-workaround.md`.
 
+- **A quick agent mode.** For when you just want an agent now, with as little fuss and as few choices as possible: a way
+  to start an agent session without working through the launcher's fields. What it skips, what it picks instead, and
+  where it lives in the UI are to be worked out.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
