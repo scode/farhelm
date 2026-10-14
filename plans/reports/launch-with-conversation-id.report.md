@@ -142,3 +142,72 @@ covered every touched file. Commit and PR wording passed a fresh cold read; repo
 read. Implementation and investigation stayed local under no-workhorse. Only required scope, correctness, wording and
 report reviews were delegated. Private galaxy-brain records retain routing/outcomes and available external usage;
 initial scope accounting was delayed, and native/orchestrator usage is unavailable. No cost comparison is claimed.
+
+### Landing
+
+Landed as #2012, the first of the round's two plans. The other, feedback-brick-test (#2011), changes only release-test
+tooling and landed right after it, with no interaction. Since the stack was based, main had gained the release
+advisories work (#1991, #2010). That touches only release signature verification, the desktop updater and unrelated spec
+sections, and the rebase was clean.
+
+#### Release-relevant
+
+The helm–supervisor protocol moves from 49 to 50, so this release requires updating remote hosts. An older supervisor
+would ignore the new field and start the wrong conversation, which is why the bump is needed. The changelog fragment
+carries the standard remote-hosts wording. Neither database schema version changed.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. It confirmed:
+
+- the conversation value is checked by both the helm and the supervisor on every path, with the existing strict grammar,
+  plus the `~` refusal for session files;
+- the value goes in as one literal argument, which a real-tmux test also shows;
+- an agent cannot name a conversation at all: the agent relay carries no selector, and the supervisor refuses a named
+  create from an agent;
+- a named Restart with of a YOLO or custom-flags launch still asks the YOLO question where the host asks;
+- the new per-agent facts follow the harness rule.
+
+#### Fix made while landing
+
+The plan moved the protocol to 50 but left the protocol's version-pin test asserting 49. The executor's filtered runs
+never selected it; the landing's package run did. The test is renamed and now pins 50.
+
+#### Possible follow-ups
+
+- No test covers, above the database level, a named Goose restart forgetting the old conversation. The live session list
+  must stop offering Restart into the old conversation, and a definitive failure before the agent starts must restore
+  it. Only the stored rows are tested today, so a refactor that published the old in-memory entry would go unnoticed. A
+  supervisor test of that path is the one gap the reviewer called should-fix.
+- The supervisor checks the shape of a named command but not that it matches the stored launch. That is fine because
+  only the trusted helm sends it, and the design notes say so; requiring the stored resume template with the value
+  filled in would be cheap hardening.
+- The harness map in the module docs of `agent_kind/mod.rs` does not yet list the three new per-agent facts, and still
+  reads as if Muse, Cursor and OpenCode get no selector.
+- A few tests could be tighter:
+  - the named-create retry test should also assert that no second agent started;
+  - the protocol crate should pin a JSON shape with the new field present;
+  - the helm's HTTP boundaries could each test their refusals directly.
+- The docs mention spaces and `~` in session-file paths but not that non-ASCII paths are refused.
+- Unverified: a Goose conversation Farhelm itself created may report again after a named start. That would be benign,
+  but the "Restart will not be available" help would then be wrong.
+
+#### Checks
+
+- Run now, on the final tree:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog format lint and the sleep checker;
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+    `cargo check -p farhelm-ui --features desktop`;
+  - the supervisor, helm, UI, protocol and CLI unit and binary tests, plus the structured launch, agent relay, wrapper
+    launch, restart-with-resume, create idempotency, GitHub checkout, session lifecycle, Codex identity and hook
+    identity e2e modules, through the recorder with pinned tmux, four slots and no retries: 3174 passed, run
+    `4c9a4765-ad3e-4ed5-a2fd-157818385d6d`. Its 198 skips are tests outside the selection. The run before the pin-test
+    fix, `239250de-8f36-468f-b165-eb8aadb677c6`, failed only that test and is kept;
+  - helm, protocol and CLI doctests, run `caf3df3b-06e2-4168-888c-ab385b4faee2`;
+  - the asset JavaScript harness (241 passed) and the website build;
+  - on Chromium and WebKit, the named conversations, Restart with, clone, launcher tabs, launcher Enter, custom
+    permissions, YOLO guard, quick launch and Replace specs: 216 passed, none failed, run
+    `3e7a75e2-9270-405e-8203-b9990667d563`.
+- Not run: the full workspace battery, the full browser battery, desktop runtime, installer and release gates. Nothing
+  in those paths changed.
+- Reused: the executor's real-agent TUI checks of all nine agents' resume forms.
