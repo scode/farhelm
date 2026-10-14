@@ -63,6 +63,8 @@ enum BarMenuItem {
     Documentation,
     /// Always available help, even when no installed update waits for restart.
     ReleaseNotes,
+    /// Manual commands for hosts whose SSH authentication needs interaction.
+    SshHelp,
     /// Reopen the introduction without resetting its shared dismissal.
     Welcome,
     /// The `?` menu's, offered only by a desktop app whose updater runs
@@ -80,6 +82,7 @@ impl BarMenuItem {
             BarMenuItem::SendFeedback => "send feedback",
             BarMenuItem::Documentation => "documentation",
             BarMenuItem::ReleaseNotes => "release notes",
+            BarMenuItem::SshHelp => "ssh needs 2FA?",
             BarMenuItem::Welcome => "welcome",
             BarMenuItem::CheckForUpdates => "check for updates",
             BarMenuItem::RestartToUpdate => "restart to update",
@@ -105,6 +108,9 @@ impl BarMenuItem {
             BarMenuItem::Welcome => {
                 "welcome: show the welcome card with Get started and how to send feedback"
             }
+            BarMenuItem::SshHelp => {
+                "ssh needs 2FA?: commands to start Farhelm's connections by hand when a host asks for approval on every ssh login"
+            }
             BarMenuItem::CheckForUpdates => {
                 "check for updates: look for a newer Farhelm release now and install it in the background; the version readout shows how it went"
             }
@@ -123,6 +129,7 @@ impl BarMenuItem {
             BarMenuItem::SendFeedback => "privately, to Farhelm's maintainer",
             BarMenuItem::Documentation => "opens farhelm.io/docs in your browser",
             BarMenuItem::ReleaseNotes => "opens the release notes in your browser",
+            BarMenuItem::SshHelp => "start a host's ssh connections yourself",
             BarMenuItem::Welcome => "shows the welcome card again",
             BarMenuItem::CheckForUpdates => "installs a newer Farhelm if there is one",
             BarMenuItem::RestartToUpdate => "sessions keep running",
@@ -131,10 +138,11 @@ impl BarMenuItem {
     }
 }
 
-const BAR_MENU_ITEMS: [BarMenuItem; 7] = [
+const BAR_MENU_ITEMS: [BarMenuItem; 8] = [
     BarMenuItem::SendFeedback,
     BarMenuItem::Documentation,
     BarMenuItem::ReleaseNotes,
+    BarMenuItem::SshHelp,
     BarMenuItem::Welcome,
     BarMenuItem::CheckForUpdates,
     BarMenuItem::RestartToUpdate,
@@ -150,6 +158,7 @@ fn help_menu_items(has_updater: bool) -> Vec<BarMenuItem> {
         BarMenuItem::SendFeedback,
         BarMenuItem::Documentation,
         BarMenuItem::ReleaseNotes,
+        BarMenuItem::SshHelp,
         BarMenuItem::Welcome,
     ];
     if has_updater {
@@ -520,6 +529,7 @@ const ANNOUNCE_AFTER_CLOSE_MS: u64 = 100;
 #[component]
 pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let mut settings_open = use_signal(|| false);
+    let mut ssh_help_open = use_signal(|| false);
     let mut feedback_open = use_signal(|| false);
     let base = use_context::<crate::ApiBase>().0;
     let mut preferences = use_context::<crate::list::SharedPreferences>();
@@ -633,9 +643,9 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let has_updater = updater.is_some();
     let help_items = help_menu_items(has_updater);
     let help_tooltip = if has_updater {
-        "help: send feedback, open the documentation or release notes, show welcome, or check for updates"
+        "help: send feedback, open the documentation or release notes, get ssh 2FA help, show welcome, or check for updates"
     } else {
-        "help: send feedback, open the documentation or release notes, or show welcome"
+        "help: send feedback, open the documentation or release notes, get ssh 2FA help, or show welcome"
     };
     let help_updater = updater.clone();
     let update_updater = updater.clone();
@@ -725,6 +735,7 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                 }
                 BarMenuItem::Documentation => open_external_page(DOCS_URL),
                 BarMenuItem::ReleaseNotes => open_external_page(RELEASE_NOTES_URL),
+                BarMenuItem::SshHelp => ssh_help_open.set(true),
                 BarMenuItem::Welcome => {
                     welcome_from_load.set(false);
                     welcome_open.set(true);
@@ -756,6 +767,7 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
                     BarMenuItem::SendFeedback
                     | BarMenuItem::Documentation
                     | BarMenuItem::ReleaseNotes
+                    | BarMenuItem::SshHelp
                     | BarMenuItem::Welcome
                     | BarMenuItem::CheckForUpdates => {}
                 },
@@ -763,6 +775,12 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
         }
         if settings_open() {
             crate::settings::SettingsDialog { on_close: close_settings }
+        }
+        if ssh_help_open() {
+            crate::ssh_help::SshHelpDialog {
+                destination: None,
+                on_close: move |_| { crate::ssh_help::return_focus(false); ssh_help_open.set(false); },
+            }
         }
         if feedback_open() {
             crate::feedback::FeedbackDialog {
@@ -809,8 +827,8 @@ mod tests {
     }
 
     /// Spec (Feedback): the `?` menu lists send feedback, documentation and
-    /// release notes and welcome in that order. Only a desktop app whose updater
-    /// runs adds check for updates as the fifth item. The browser suite
+    /// release notes, SSH help and welcome in that order. Only a desktop app whose updater
+    /// runs adds check for updates as the sixth item. The browser suite
     /// never has an updater, so this is the one place the desktop order is
     /// pinned.
     #[farhelm_testtrace::test]
@@ -819,6 +837,7 @@ mod tests {
             BarMenuItem::SendFeedback,
             BarMenuItem::Documentation,
             BarMenuItem::ReleaseNotes,
+            BarMenuItem::SshHelp,
             BarMenuItem::Welcome,
         ];
         assert_eq!(help_menu_items(false), common);

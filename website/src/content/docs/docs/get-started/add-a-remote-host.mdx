@@ -17,7 +17,11 @@ your Mac, and they keep running on the host while your Mac sleeps or Farhelm is 
 - Passwordless ssh from your Mac: `ssh <destination> true` has to work in a terminal without asking for a password.
   Farhelm uses your own ssh setup, so keys, the agent, and the aliases in `~/.ssh/config` all apply. A host that asks
   for a second factor or another approval on every ssh login works only on a best-effort basis, and only if you start
-  Farhelm's ssh connections to it by hand, which these pages do not cover yet. Adding or updating a host also opens one
+  Farhelm's ssh connections to it by hand. Choose **? → ssh needs 2FA?** for the two commands, or follow the link in
+  **add host** for the destination you are about to add. Run both on your Mac when using the Mac app; in the web UI,
+  run them on the machine running your [helm](/docs/how-it-works/the-pieces/), as its user. Each asks for approval once
+  and stays connected in the background. Run its command again when a connection drops. The dialog also explains when
+  a connection cannot be shared from your helm. Adding or updating a host also opens one
   ssh login of its own, so a key that asks for a touch on each login asks once more then.
 - Not BusyBox: hosts whose basic command-line tools come from BusyBox are not supported.
 - Your Mac downloads Farhelm for the host and copies it over ssh. The download starts at get.farhelm.io, which hands

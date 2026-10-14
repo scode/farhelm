@@ -46,6 +46,8 @@
 //! Ownership is exact. Only elements that did NOT already carry `inert` are
 //! marked and recorded, and release removes the attribute from exactly those,
 //! so a page that inerts something for its own reasons keeps it.
+//! A still-mounted parent can release temporarily for a child modal, then
+//! install again when the child closes; release retires its installed marker.
 //!
 //! Release is idempotent and has two triggers. The dialog's close path calls
 //! it synchronously (see [`release_js`]) before it schedules focus back to
@@ -165,6 +167,9 @@ const ISOLATE_TEMPLATE: &str = r#"(() => {
     function release() {
         if (dialog.__farhelmModalRelease !== release) return;
         dialog.__farhelmModalRelease = null;
+        // A nested dialog may temporarily release a still-mounted parent.
+        // Let that same parent claim isolation again when the child closes.
+        dialog.__farhelmModalIsolated = false;
         observer.disconnect();
         document.removeEventListener('keydown', onKeydown, true);
         for (const node of owned) node.removeAttribute('inert');

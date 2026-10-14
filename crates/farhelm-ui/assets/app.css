@@ -7474,3 +7474,24 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   border: 1px dashed var(--fg-1);
   border-radius: var(--radius-sm);
 }
+/* Commands can be long; keep their exact text reachable without widening the modal. */
+.ssh-help-dialog { width: min(640px, 100%); font-size: 13px; line-height: 1.5; }
+.ssh-help-dialog > .ssh-help-body { gap: 12px; }
+.ssh-help-body p,
+.ssh-help-host h3,
+.ssh-help-command pre { margin: 0; }
+.ssh-help-host { gap: 8px; }
+.ssh-help-command { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.ssh-help-command strong { grid-column: 1 / -1; }
+.ssh-help-command pre { font-size: 11px; }
+.host-add-dialog[hidden] {
+  display: none;
+}
+
+.ssh-help-command pre {
+  overflow-x: auto;
+  padding: 0.75rem;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}

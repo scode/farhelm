@@ -47,15 +47,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Click to open agent-provided paths.** Extend click-to-download for paths agents provide to also support
   click-to-open. How and implementation details are TBD.
 
-- **Help users start the shared ssh connections themselves.** A host that needs an interactive approval for every new
-  ssh connection (a second factor, say) only works if the user starts the helm's shared connections for it by hand, at
-  the helm's socket paths, because the helm itself runs ssh non-interactively. Today that means knowing Farhelm's
-  internal socket naming. Make it discoverable by printing the exact `ssh` command that starts each shared connection,
-  carrying the helm's connection overrides and its `ControlPath`. Showing only the socket paths is not enough: a master
-  started from the user's own ssh config puts that config's port forwards on Farhelm's connection, where no client can
-  cancel them. Say so when a host has no socket at all because the state directory's path is too long. Plan:
-  `plans/queue/ssh-2fa-help.md`.
-
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
   the keyboard quick switcher. The nearest thing today is Stop followed later by Restart, which ends the agent but keeps

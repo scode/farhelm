@@ -150,6 +150,7 @@ mod feed;
 /// `/api/hosts` — the registry's REST surface, and the JSON shape a UI
 /// renders a host chip from.
 mod hosts;
+mod ssh_help;
 
 /// The one SemVer release order Farhelm uses to call a build newer, and the
 /// test for a development build that has no place in it.
@@ -779,6 +780,11 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(hosts::set_local_links_without_asking),
         )
         .route("/api/approvals", get(approvals::list_approvals))
+        .route(
+            "/api/ssh-connections",
+            axum::routing::post(ssh_help::commands)
+                .layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
+        )
         .route(
             "/api/approvals/{id}",
             axum::routing::post(approvals::answer_approval),

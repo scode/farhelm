@@ -34,6 +34,8 @@ If sending fails, the dialog says so and keeps your text, so you can try again o
 as it was.
 
 The same menu's **documentation** item opens these docs in your browser, and **release notes** opens
-[what changed in each release](/docs/release-notes/). **Welcome** shows the introduction again, with a link to
-[your first session](/docs/get-started/first-session/). In the Farhelm app on your Mac its **check for updates** item
-looks for a new release and installs it ([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)).
+[what changed in each release](/docs/release-notes/). **ssh needs 2FA?** shows commands to start connections to
+[hosts that ask for approval on every ssh login](/docs/get-started/add-a-remote-host/). **Welcome** shows the
+introduction again, with a link to [your first session](/docs/get-started/first-session/). In the Farhelm app on your
+Mac its **check for updates** item looks for a new release and installs it
+([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)).

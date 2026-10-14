@@ -3848,6 +3848,9 @@ fn AddHostForm(
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<crate::list::SharedPreferences>();
     let mut ssh = use_signal(String::new);
+    // Keep the add component and its draft mounted while connection help owns
+    // the modal. Its extra destination is sampled when that child opens.
+    let mut ssh_help_open = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut probing = use_signal(|| false);
     // The setup question for the plan discovery returned: a `ConfirmSlot`
@@ -3928,6 +3931,7 @@ fn AddHostForm(
         div { class: "host-settings-backdrop", role: "presentation",
             form {
                 class: "host-settings-dialog host-add-dialog host-dialog-framed add-host-form",
+                hidden: ssh_help_open(),
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: "add host",
@@ -4028,6 +4032,15 @@ fn AddHostForm(
                 p { id: "add-host-destination-help", class: "host-dialog-help",
                     "user@host, or a Host alias from your ssh config. Farhelm checks that it can reach the destination before adding it."
                 }
+                p { class: "host-dialog-help",
+                    "Does this host ask for a second factor or other approval on every ssh login? "
+                    button { r#type: "button", class: "add-host-ssh-help welcome-feedback",
+                        "data-tooltip": "ssh needs 2FA?: see the commands for the destination you're adding",
+                        onclick: move |_| {
+                            document::eval(&crate::modal_isolation::release_js(r#".host-add-dialog[role="dialog"]"#));
+                            ssh_help_open.set(true);
+                        }, "Start its connections yourself first." }
+                }
                 if let Some(err) = error.read().clone() {
                     PeerLine {
                         class: "create-session-error add-host-error",
@@ -4055,6 +4068,15 @@ fn AddHostForm(
                 }
                 }
             }
+            }
+        }
+        if ssh_help_open() {
+            crate::ssh_help::SshHelpDialog {
+                destination: Some(ssh()),
+                on_close: move |_| {
+                    crate::ssh_help::return_focus(true);
+                    ssh_help_open.set(false);
+                },
             }
         }
     }

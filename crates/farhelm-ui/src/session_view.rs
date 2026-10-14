@@ -2054,15 +2054,7 @@ pub(crate) fn SessionView(
     let copied_command = use_signal(|| None::<u64>);
     let mut copy_clicks = use_signal(|| 0_u64);
     let mut copy_value = move |value: String, mut copied: Signal<Option<u64>>| {
-        let encoded = serde_json::to_string(&value).unwrap_or_else(|_| "\"\"".into());
-        // The desktop bridge is preferred because browser clipboard access is
-        // permission-gated in a webview. A bridge can still be present but
-        // fail synchronously or by rejected promise, so the browser path is
-        // a second attempt rather than an `else` branch that failure skips.
-        let js = format!(
-            "(() => {{ const v = {encoded}; const fallback = () => {{ try {{ navigator.clipboard?.writeText?.(v)?.catch(() => {{}}); }} catch (_) {{}} }}; try {{ const native = window.__farhelmNativeClipboardWrite; if (typeof native === \"function\") {{ const result = native(v); if (result && typeof result.catch === \"function\") result.catch(fallback); }} else {{ fallback(); }} }} catch (_) {{ fallback(); }} }})()"
-        );
-        document::eval(&js);
+        copy_to_clipboard(&value);
         let click = {
             let mut clicks = copy_clicks.write();
             *clicks += 1;
@@ -3529,6 +3521,17 @@ fn copy_warning(what: &str, value: &str) -> Option<String> {
         .chars()
         .any(farhelm_proto::text::is_presentation_unsafe)
         .then(|| format!("⚠ the copied {what} contains hidden characters, shown above as <U+…>"))
+}
+
+/// Copy exact bytes through the native bridge first, then the browser fallback.
+/// A present bridge may throw or reject, so its failure still tries the browser.
+/// The operation is best effort; callers' feedback confirms a click, not an OS
+/// receipt. Shared by session-header copies and SSH command help.
+pub(crate) fn copy_to_clipboard(value: &str) {
+    let encoded = serde_json::to_string(value).expect("a string always serializes");
+    document::eval(&format!(
+        "(() => {{ const v = {encoded}; const fallback = () => {{ try {{ navigator.clipboard?.writeText?.(v)?.catch(() => {{}}); }} catch (_) {{}} }}; try {{ const native = window.__farhelmNativeClipboardWrite; if (typeof native === \"function\") {{ const result = native(v); if (result && typeof result.catch === \"function\") result.catch(fallback); }} else {{ fallback(); }} }} catch (_) {{ fallback(); }} }})()"
+    ));
 }
 
 /// The terminal text-size controls at the right end of the tab strip: A-
