@@ -221,6 +221,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   decided when the entry is planned. Related: the keyboard focus entry above, whose audit of every confirmation in the
   app is the list this setting would apply to.
 
+- **Launch a session with a given conversation id.** When creating a session, let the user name the agent conversation
+  it should use (what some agents call a session id), for example to continue a conversation started outside Farhelm in
+  a Farhelm session. Today a session only ever resumes the conversation Farhelm captured for it.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
