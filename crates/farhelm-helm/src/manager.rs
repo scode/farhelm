@@ -285,6 +285,9 @@ pub enum UnreachableCause {
 /// while every refresh it makes is doomed identically.
 struct RefreshStep {
     health: RefreshHealth,
+    /// Fresh raw readings from an accepted list, never durable retained status.
+    /// None means this refresh added no evidence for the alert policy.
+    alert_observations: Option<Vec<crate::ntfy::Observation>>,
     /// `Some(reason)` tears the connection down and re-enters the connect
     /// path; the reason is log text, not a state (the state the user sees
     /// is whatever the reconnection produces).
@@ -1060,6 +1063,8 @@ enum ActorCompletion {
 /// and the only mutable state is the actor map behind a short-held std
 /// mutex (never across an await).
 pub struct ConnectionManager {
+    /// One bounded ntfy sender for the whole fleet, shared with configuration routes.
+    pub(crate) ntfy: crate::ntfy::Alerts,
     /// Source of [`ActorStatus::incarnation`] tokens: monotonic, never
     /// reset, never reused, shared by every actor this manager ever spawns.
     /// Starts at a random value from [`initial_incarnation`], never zero, so
@@ -1374,6 +1379,23 @@ impl ConnectionManager {
         Ok(manager)
     }
 
+    /// Start a fixture with its outbound capability installed before any actor
+    /// observes a list. Ordinary test managers remain offline by construction.
+    #[cfg(test)]
+    pub(crate) async fn start_with_ntfy(
+        store: HelmStore,
+        transport: Arc<dyn HostTransport>,
+        cadence: Cadence,
+        client: reqwest::Client,
+    ) -> anyhow::Result<Arc<ConnectionManager>> {
+        let mut manager = Self::unstarted(store.clone(), transport, cadence);
+        Arc::get_mut(&mut manager)
+            .expect("unstarted manager has one owner")
+            .ntfy = crate::ntfy::Alerts::with_client(store, Some(client));
+        manager.sync_registry().await?;
+        Ok(manager)
+    }
+
     /// The manager [`Self::start`] builds, before any actor is spawned.
     ///
     /// Separate so a test can install something every actor will see
@@ -1384,6 +1406,7 @@ impl ConnectionManager {
         cadence: Cadence,
     ) -> Arc<ConnectionManager> {
         Arc::new(ConnectionManager {
+            ntfy: crate::ntfy::Alerts::new(store.clone()),
             incarnations: Arc::new(std::sync::atomic::AtomicU64::new(initial_incarnation())),
             attempts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             store,
@@ -1702,6 +1725,7 @@ impl ConnectionManager {
         let cache_lock = self.cache_lock_entry(row.id);
         let seed_epoch = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let actor = HostActor {
+            ntfy: self.ntfy.clone(),
             id: row.id,
             store: self.store.clone(),
             transport: Arc::clone(&self.transport),
@@ -2951,6 +2975,8 @@ impl Drop for ConnectionManager {
 /// One host's connection actor: the loop that owns its transport
 /// connection, its state machine, and its cache slice.
 struct HostActor {
+    /// Refresh only enqueues; outbound network work belongs to the fleet sender.
+    ntfy: crate::ntfy::Alerts,
     id: HostId,
     store: HelmStore,
     transport: Arc<dyn HostTransport>,
@@ -3878,6 +3904,9 @@ impl HostActor {
     ) {
         // Anything sent before this connection existed is not about it.
         refresh.mark_unchanged();
+        // Connection-local rather than durable: reconnecting must baseline
+        // already-waiting sessions even when helm.db remembers a prior run.
+        let mut alert_policy = crate::ntfy::Policy::default();
         let connected_at = tokio::time::Instant::now();
         // An identity-less host serves from memory from the moment it is
         // connected, starting with an empty list, not from its first
@@ -3970,6 +3999,7 @@ impl HostActor {
                 break;
             }
             let end_connection = step.end_connection;
+            let alert_observations = step.alert_observations;
             let cache_changed = step.cache_changed;
             let discarded = step.discarded;
             // This refresh answers every hint it started after, if it
@@ -4008,6 +4038,22 @@ impl HostActor {
                 PublishGuard::WhileCurrent,
                 0,
             );
+            // The publication gate may have yielded to a retarget. Hold the
+            // same status read lock while consuming evidence and try-enqueueing:
+            // a withdrawn connection must not alert for its former host row.
+            {
+                let published = self.status.borrow();
+                if published
+                    .client
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &client))
+                    && let Some(observations) = alert_observations
+                {
+                    for title in alert_policy.observe(&observations, tokio::time::Instant::now()) {
+                        self.ntfy.enqueue(title, self.id);
+                    }
+                }
+            }
             // AFTER the publish, so a client that re-reads on this
             // revision sees a hosts list and a session list that already
             // agree: the rows are committed (the store's transaction
@@ -4157,6 +4203,7 @@ impl HostActor {
                 // request outlives this: the client's whole state goes when
                 // the actor stops holding it.
                 return RefreshStep {
+                    alert_observations: None,
                     // This side's own words, so nothing to sanitize — but
                     // the same shape as every other retained failure.
                     health: RefreshHealth::Failed {
@@ -4192,6 +4239,7 @@ impl HostActor {
                     "refreshing the host's session list failed; keeping the previous cache"
                 );
                 return RefreshStep {
+                    alert_observations: None,
                     health: RefreshHealth::Failed { error },
                     end_connection: None,
                     live: LiveSessions::Retain,
@@ -4217,6 +4265,7 @@ impl HostActor {
                     "a session was seeded while this walk was in flight; keeping the newer list"
                 );
                 return RefreshStep {
+                    alert_observations: None,
                     health: RefreshHealth::Ok { sessions },
                     end_connection: None,
                     live: LiveSessions::Retain,
@@ -4227,12 +4276,14 @@ impl HostActor {
                 };
             }
             // The durable branch performs this inside its cache transaction.
+            let observations = entries.iter().map(crate::ntfy::Observation::from).collect();
             // An identity-less host has only the actor's published list,
             // which the lock above protects from concurrent seed writes.
             if let Some(previous) = self.status.borrow().live_sessions.as_ref() {
                 retain_unknown_list_status(previous, &mut entries);
             }
             return RefreshStep {
+                alert_observations: Some(observations),
                 health: RefreshHealth::Ok { sessions },
                 end_connection: None,
                 live: LiveSessions::Set(Arc::new(entries)),
@@ -4260,6 +4311,7 @@ impl HostActor {
                 "a session was seeded while this walk was in flight; keeping the newer cache"
             );
             return RefreshStep {
+                alert_observations: None,
                 health: RefreshHealth::Ok { sessions },
                 end_connection: None,
                 live: LiveSessions::Clear,
@@ -4269,6 +4321,7 @@ impl HostActor {
                 discarded: true,
             };
         }
+        let mut observations: Vec<_> = entries.iter().map(crate::ntfy::Observation::from).collect();
         match self
             .store
             .replace_host_sessions(self.id, identity, entries, truncated)
@@ -4276,6 +4329,10 @@ impl HostActor {
         {
             Ok(replacement) => {
                 let CacheReplacement { contested, changed } = replacement;
+                // Colliding ids were not admitted to this host's list; they
+                // must not generate a second host's alert for the same session.
+                let rejected: std::collections::HashSet<_> = contested.iter().collect();
+                observations.retain(|entry| !rejected.contains(&entry.id));
                 debug!(sessions, changed, "replaced the host's cached session list");
                 if let Some(sample) = contested.first() {
                     // ONE summary line per refresh, not one per colliding
@@ -4291,6 +4348,7 @@ impl HostActor {
                     );
                 }
                 RefreshStep {
+                    alert_observations: Some(observations),
                     health: RefreshHealth::Ok { sessions },
                     end_connection: None,
                     live: LiveSessions::Clear,
@@ -4327,6 +4385,7 @@ impl HostActor {
                     "caching the host's session list failed; keeping the previous cache"
                 );
                 RefreshStep {
+                    alert_observations: None,
                     health: RefreshHealth::Failed { error },
                     end_connection: if superseded {
                         Some("this connection's identity is no longer the row's")
@@ -10398,6 +10457,7 @@ mod tests {
         // No previously released actor may publish into this observation.
         // Build the manager before registry reconciliation starts any actors.
         let manager = ConnectionManager {
+            ntfy: crate::ntfy::Alerts::new(store.clone()),
             incarnations: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             attempts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             store,

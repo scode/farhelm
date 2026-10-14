@@ -3094,6 +3094,38 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   ANOTHER helm, or dropped from a cache because its host was removed here, can leave a row behind, which is accepted as
   garbage bounded by the number of sessions that ever existed, at a few dozen bytes each.
 
+## Ntfy waiting alerts
+
+The helm observes fresh accepted session listings inside each host connection's refresh loop. Its connection-local
+policy takes a small projection of session id, title and raw status, with an injected monotonic time; it never derives
+transitions from the restart-persistent session cache. The first successful list baselines waiting sessions. Subsequent
+waiting spells settle for 10 seconds on successful refresh observations and emit once. Unknown does not advance a spell,
+resolved non-waiting ends it, and removed sessions discard it. A discarded walk, failed cache write, contested id or
+withdrawn connection contributes no evidence. The raw projection precedes Unknown retention in the cache, including for
+identity-less hosts, so a cached Waiting value cannot fabricate new evidence. Publication and enqueue are checked under
+the connection's status read lock after the guarded publish, preventing a retarget during publication from alerting for
+the withdrawn connection.
+
+The manager owns one bounded 32-item queue and one sender task, also shared with AppState. Refresh uses try-send only.
+The sender reads the current dedicated settings and host display name; title and host characters that
+`farhelm_proto::text::is_presentation_unsafe` names are stripped and each field is capped at 200 Unicode characters. A
+five-attempt fixed 60-second fleet window includes failed sends, drops excess, logs once per capped window and carries
+its dropped count into the next permitted alert. No timer sends a summary. Each HTTP request has a five-second timeout,
+no redirects and no retries. Failure reasons are fixed words or an HTTP status; reqwest errors have their URL stripped
+and their cause chains are never displayed. The ntfy response body is ignored. No diagnostic includes the topic, token
+or title. Dropping the final sender handle aborts the owned task; it holds no handle back to itself or the manager.
+Test-built helms default offline and inject a loopback client only for alert tests.
+
+Protected GET/PUT `/api/ntfy-alerts` read/save an independent schema-47 singleton, not replayed shared preferences. The
+JSON stored in helm.db includes the token; the response contains only `token_set`. Saves atomically preserve an
+omitted/null token, clear an empty token or replace a non-empty one. URL/topic/token validation uses fixed refusals,
+including malformed JSON, so the usual decoder diagnostic cannot echo secret input. Server URLs are http(s), at most
+2048 bytes, without credentials, query or fragment; topics use ntfy's 64-character ASCII letter/digit/underscore/dash
+grammar and may be empty only while disabled. Tokens contain at most 4096 visible ASCII bytes. The form saves explicitly
+and shows its outcome; it never receives the stored token. POST `/api/ntfy-alerts/test` posts with saved settings even
+while disabled, bypasses queue/policy/cap, and waits on one owned send under the same timeout. Modal dismissal does not
+retract a save or test; component state is updated only while mounted.
+
 ## Feedback forwarding
 
 SPEC.md's Feedback section is implemented as one protected UI route on the helm, `POST /api/feedback`, behind the same

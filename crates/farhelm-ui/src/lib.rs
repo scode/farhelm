@@ -149,6 +149,7 @@ mod launch_controls;
 mod list;
 mod menu_panel;
 mod modal_isolation;
+mod ntfy_settings;
 mod ops;
 mod peer;
 mod provisioning;

@@ -451,6 +451,48 @@ struct CheckoutRootBody {
     root: Option<String>,
 }
 
+/// Load the helm's ntfy form snapshot; the stored token never crosses this route.
+pub(crate) async fn fetch_ntfy_settings(
+    base: &str,
+) -> Result<farhelm_proto::ntfy::Settings, String> {
+    let url = format!("{base}/api/ntfy-alerts");
+    let response = send(client().get(&url)).await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("GET", &url, response).await);
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "could not read ntfy alert settings".to_string())
+}
+
+/// Explicit saves carry only a replacement token, never a fetched secret or a
+/// preference replay. The response's presence bit confirms replace/clear succeeded.
+pub(crate) async fn save_ntfy_settings(
+    base: &str,
+    settings: farhelm_proto::ntfy::SaveSettings,
+) -> Result<farhelm_proto::ntfy::Settings, String> {
+    let url = format!("{base}/api/ntfy-alerts");
+    let response = send(client().put(&url).json(&settings)).await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("PUT", &url, response).await);
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "could not read saved ntfy alert settings".to_string())
+}
+
+/// Test the saved helm configuration even while the form has unsaved changes.
+pub(crate) async fn test_ntfy_settings(base: &str) -> Result<(), String> {
+    let url = format!("{base}/api/ntfy-alerts/test");
+    let response = send(client().post(&url)).await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("POST", &url, response).await);
+    }
+    Ok(())
+}
+
 /// Seed an explicitly saved field with the global folder, still unexpanded.
 /// A host's effective folder is a separate concern: its CLI override may win.
 pub(crate) async fn fetch_checkout_root(base: &str) -> Result<Option<String>, String> {

@@ -1039,23 +1039,27 @@ links open in Farhelm without passing the click on (the default), open in Farhel
 pass the click on. The latter two choices explain the risk of a second browser tab and that a program without mouse
 reporting cannot act on a click. This choice covers every client of the helm and takes effect in every mounted terminal
 of the current client immediately; other open clients pick it up when they reload, like the host choices. Sounds has
-three device switches (see Status). The dialog also holds the explicitly saved all-hosts checkout folder and, below it,
-a monospace multi-line post-clone command field (see [Managed checkouts](#managed-checkouts)). The folder's help
-explains expansion on each host, first-use folder creation, and that command-line host overrides keep their folder. The
-command's help explains that it runs in each new checkout on its host, after cloning and before the agent starts, that
-changes affect future checkouts only, and that command-line host overrides keep their command. The installed desktop
-app's dialog also has a switch for installing updates automatically (see
-[Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of that app
-installation, kept with the app rather than by the helm, and a browser never shows it. The two host confirmation choices
-apply to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client
-keeps its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a
-browser tab and the desktop app open in the same order and on the same session. Per-client persistence — browser
-storage, a desktop state file, anything that lets two clients remember different answers — is not wanted for these
-shared preferences (sidebar width, terminal text size and sound switches, by contrast, are deliberately per device; see
-Session list, Terminal experience and Status). A client that asks the helm for no particular order gets creation time.
-No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest
-the list and implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record
-it, while `farhelm agent create` and `clone` need not record the asking session.
+three device switches (see Status). A separate **ntfy alerts** section has an off-by-default switch, server URL (default
+`https://ntfy.sh`), topic, optional access token, and priority (min, low, default, high, urgent; default default). These
+are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
+inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
+**Send test** uses the saved configuration, even while disabled, and reports success or failure inline. The dialog also
+holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command field (see
+[Managed checkouts](#managed-checkouts)). The folder's help explains expansion on each host, first-use folder creation,
+and that command-line host overrides keep their folder. The command's help explains that it runs in each new checkout on
+its host, after cloning and before the agent starts, that changes affect future checkouts only, and that command-line
+host overrides keep their command. The installed desktop app's dialog also has a switch for installing updates
+automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of
+that app installation, kept with the app rather than by the helm, and a browser never shows it. The two host
+confirmation choices apply to every host and client of this helm; existing controls with a natural place in the main UI
+stay there. No client keeps its own copy: every client reads the helm's preference once after authenticating and writes
+it on change, so a browser tab and the desktop app open in the same order and on the same session. Per-client
+persistence — browser storage, a desktop state file, anything that lets two clients remember different answers — is not
+wanted for these shared preferences (sidebar width, terminal text size and sound switches, by contrast, are deliberately
+per device; see Session list, Terminal experience and Status). A client that asks the helm for no particular order gets
+creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
+does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 240px and 600px, with 340px as the default. Double-click
 the edge to reset it, or focus the separator and use Left and Right to step by 10px. Its width is remembered per device,
@@ -1249,6 +1253,24 @@ install its three documented hook entries themselves, while an unconfigured Grok
 restarted. OMP and Grok both use generic activity only. Their approval prompts show the generic running/idle
 classification, never waiting — a settled scope decision, not a reader waiting to be written.
 
+**Ntfy alerts** optionally reach the user away from the screen. Once enabled and configured in settings, the helm sends
+one alert when a session becomes waiting and remains so for 10 seconds, once per waiting spell. Leaving and re-entering
+waiting starts another spell. A host's first successful observation after helm start or reconnect is a quiet baseline;
+new sessions first observed waiting afterwards count. Unknown readings add no evidence and do not send. Detection
+remains heuristic, with the same agent limits as the waiting sound. There are no alerts for Farhelm approval cards,
+finished turns or session-tracking notifications. Window focus does not suppress ntfy alerts.
+
+The alert contains the session's title and the host's display name, with control and other invisible or reordering
+characters removed and each capped at 200 characters: "<title> on <host> is waiting for you". A title generated from a
+directory is still sent as the title; no screen contents, prompts, command lines or other paths are added. Its ntfy
+title is Farhelm and its urgency is the saved priority. At most five background sends are attempted per minute across
+all hosts. Excess alerts and full-queue alerts are dropped; the next permitted alert can mention the number dropped by
+the rate cap, but there is no later summary alert. Failed sends are logged without the topic, token or title and
+dropped, never retried. Sending does not hold up host refreshes or terminal interaction. **Send test** bypasses these
+background limits and waits for one send under the short timeout. Anyone who knows an ntfy.sh topic can read it; keep
+the topic private. A standalone helm sends without a window open. The desktop app's helm stops when its window closes,
+so desktop-only alerts need that window open, though it can be in the background.
+
 When Farhelm loses track of a session's agent conversation in a way that will matter later, most often because Restart
 will then be unable to resume it, it says so on that session as a notification rather than only in a log. In this
 version every notification is a session-tracking problem: a launch whose conversation hook should have reported which
@@ -1289,7 +1311,8 @@ clicking away, pressing Escape, or clicking the bell again, marks everything it 
 A clear button removes them all, and the bell disappears until a new one arrives. Notifications persist across
 supervisor and helm restarts and reloads; each session keeps its 10 most recent, with no time-based expiry, and deleting
 a session deletes them. Read and cleared state is kept by the helm and shared by every client, the same way seen state
-is. Desktop or operating-system notifications, and notifications about a host or the whole app, are not part of v1.
+is. Other than ntfy waiting alerts, desktop or operating-system notifications, and notifications about a host or the
+whole app, are not part of v1.
 
 An older helm or UI shows resolved entries as ordinary unresolved notifications. A newer helm connected to an older
 supervisor receives no resolutions; the rest of the notification behavior stays available without a protocol change.
@@ -2090,8 +2113,8 @@ interpreting the transport and credential rules here.
 
 Steady-state operation between Farhelm's own components has exactly two network edges — the browser to a standalone helm
 (token-authenticated) and the helm to each supervisor (SSH) — plus the desktop app's deliberately local loopback edge.
-Besides provisioning's release downloads (see [Topology](#topology)), two more kinds of outbound connection exist. When
-the user sends feedback, the helm posts that submission, and nothing else, to the project's feedback endpoint (see
+Besides provisioning's release downloads (see [Topology](#topology)), three more kinds of outbound connection exist.
+When the user sends feedback, the helm posts that submission, and nothing else, to the project's feedback endpoint (see
 [Feedback](#feedback)); that happens only on explicit user action. And the installed desktop app's updater (see
 [Installation and updates](#installation-and-updates)) asks get.farhelm.io which stable release is the latest and, when
 it is newer, verifies that release's signed checksums and its installer against the keys compiled into the app before
@@ -2100,7 +2123,10 @@ checksums. The updater does this automatically, at startup and about daily, unle
 off, and also whenever the user checks for updates. It sends nothing about the user or the machine beyond what any HTTPS
 request to get.farhelm.io carries. A release that fails that verification is not installed, and the app then says that
 it can no longer verify its updates and must be reinstalled with the installer, which, like any fresh install, trusts
-get.farhelm.io over TLS alone.
+get.farhelm.io over TLS alone. When ntfy alerts are configured, the helm also posts waiting alerts and explicit test
+alerts to the saved server and topic, with the optional access token (see Status). This connection sends session titles
+and host display names; it follows no redirects. Settings allow HTTP for a private server, which sends those values and
+any token without TLS protection.
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine
@@ -2178,7 +2204,8 @@ Further requirements:
 
 ## Non-goals for v1
 
-- Notifications outside a session (about a host or the whole app), and desktop or operating-system notifications.
+- Notifications outside a session (about a host or the whole app), and desktop or operating-system notifications other
+  than configured ntfy waiting alerts.
 - Automatic initial-prompt delivery (at creation or spawn).
 - Terminal history persistence beyond what the live terminal retains. A durable history store is a possible future
   add-on; v1 leans on agent conversation resume instead.

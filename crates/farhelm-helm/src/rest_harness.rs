@@ -1093,11 +1093,19 @@ pub(crate) struct FleetBuilder {
     /// stand-in endpoint; `None` gives the helm an offline forwarder whose
     /// every send fails, never the production one.
     feedback: Option<crate::feedback::FeedbackForwarder>,
+    /// Alert tests inject a loopback client; all other fixture helms stay offline.
+    ntfy_client: Option<reqwest::Client>,
     /// How long agent requests wait for approval; `None` is production's.
     approval_wait: Option<std::time::Duration>,
 }
 
 impl FleetBuilder {
+    /// Install the alert sender's client before host actors start, without
+    /// changing process configuration or allowing unrelated tests outbound access.
+    pub(crate) fn ntfy_client(mut self, client: reqwest::Client) -> Self {
+        self.ntfy_client = Some(client);
+        self
+    }
     /// A fresh helm.db with only its reserved local row, and a local host
     /// scripted UNREACHABLE.
     ///
@@ -1122,6 +1130,7 @@ impl FleetBuilder {
             },
         );
         FleetBuilder {
+            ntfy_client: None,
             dir,
             store,
             fleet,
@@ -1257,12 +1266,22 @@ impl FleetBuilder {
             refresh: self.refresh.unwrap_or(test_cadence().refresh),
             ..test_cadence()
         };
-        let manager = ConnectionManager::start(
-            self.store.clone(),
-            Arc::clone(&self.fleet) as Arc<dyn HostTransport>,
-            cadence,
-        )
-        .await
+        let manager = if let Some(client) = self.ntfy_client {
+            ConnectionManager::start_with_ntfy(
+                self.store.clone(),
+                Arc::clone(&self.fleet) as Arc<dyn HostTransport>,
+                cadence,
+                client,
+            )
+            .await
+        } else {
+            ConnectionManager::start(
+                self.store.clone(),
+                Arc::clone(&self.fleet) as Arc<dyn HostTransport>,
+                cadence,
+            )
+            .await
+        }
         .expect("start manager");
         let state = Arc::new(AppState {
             // The only override any fixture makes, and it exists so the

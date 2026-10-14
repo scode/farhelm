@@ -2,13 +2,13 @@
 //! project's feedback endpoint (SPEC.md "Feedback", SPEC_impl.md "Feedback
 //! forwarding").
 //!
-//! This is the helm's one outbound connection that carries user-written
+//! This is the helm's explicit feedback connection that carries user-written
 //! content, and it exists only for this route: nothing else calls
 //! [`FeedbackForwarder::forward`], no agent request verb reaches it, and the
 //! route sits inside the ordinary protected group, so only an authenticated
 //! UI can send. The browser and the desktop webview never post to the
 //! internet themselves; the helm does it for them, which keeps the one
-//! outbound edge in one place.
+//! feedback edge in one place. Ntfy waiting alerts have their own bounded sender.
 //!
 //! The submission is forwarded exactly as the UI composed and displayed it:
 //! [`FeedbackSubmission`] is validated with the caps it shares with the UI

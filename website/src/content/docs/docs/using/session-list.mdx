@@ -26,6 +26,24 @@ a clone Farhelm made for a session. Its repository appears where other rows show
 the branch mark follows the session's name instead. Hover it to see the full directory and what happens when you delete
 the last session using it. The same mark appears beside the directory at the top of an open session.
 
+## Ntfy alerts
+
+To hear when a session needs you away from Farhelm, subscribe to a private topic in the
+[ntfy app](https://docs.ntfy.sh/subscribe/phone/), then configure **ntfy alerts** in Farhelm's settings. The server
+defaults to ntfy.sh; use the same server and topic you subscribed to. For a server that requires authentication, add
+an access token. Priority controls how urgently ntfy announces the alert. **save** keeps these choices for every
+window using your [helm](/docs/how-it-works/the-pieces/), the program that shows you all your hosts' sessions.
+**send test** uses the saved choices, including while alerts are switched off, and says whether it succeeded.
+When ready to receive automatic alerts, turn on **send ntfy alerts** and select **save**.
+
+Choose a hard-to-guess topic and keep it private: anyone who knows an ntfy.sh topic can read its alerts. An alert
+contains the session's title and host, so avoid sensitive text in titles if you do not want it sent to that server.
+Farhelm waits briefly to avoid alerting on a passing waiting reading and sends once while a session keeps waiting.
+Approval cards and finished turns do not send ntfy alerts.
+
+Keep the desktop app's window open to receive alerts; it can be in the background. With a standalone helm running,
+you can close every browser window. See [The pieces](/docs/how-it-works/the-pieces/) for which part keeps running.
+
 ## Managed checkout trash
 
 The trash can immediately left of **new** holds [managed

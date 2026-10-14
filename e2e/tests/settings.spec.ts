@@ -29,13 +29,13 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await page.setViewportSize({ width, height: 560 });
     await gear.click();
     await expect(dialog.getByRole("checkbox", { name: "set up new hosts without asking", exact: true })).toBeFocused();
-    await expect(dialog.getByRole("checkbox")).toHaveCount(5);
+    await expect(dialog.getByRole("checkbox")).toHaveCount(7);
     await page.evaluate(() => document.fonts.ready);
     expect(await body.locator(":scope > section > h3").allTextContents()).toEqual([
-      "hosts", "terminal links", "managed checkouts", "sounds",
+      "hosts", "terminal links", "managed checkouts", "sounds", "ntfy alerts",
     ]);
     await expect(body.locator('section[aria-label="updates"]')).toHaveCount(0);
-    await expect(dismiss).toHaveAttribute("data-tooltip", "close: changes are already saved");
+    await expect(dismiss).toHaveAttribute("data-tooltip", "close settings; unsaved fields are discarded");
     await expect(dismiss).not.toHaveClass(/app-settings-close/);
     const overflow = await body.evaluate((el) => ({
       content: el.scrollHeight, height: el.clientHeight, width: el.clientWidth, contentWidth: el.scrollWidth,
@@ -75,9 +75,11 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await expect(dialog).toHaveCount(0);
     await expect(gear).toBeFocused();
   }
-  await page.setViewportSize({ width: 1280, height: 2000 });
+  // The explicit ntfy fields add a full section; this leg deliberately gives
+  // every section enough height, independently of the phone overflow proof.
+  await page.setViewportSize({ width: 1280, height: 2800 });
   await gear.click();
-  await expect(dialog.getByRole("checkbox")).toHaveCount(5);
+  await expect(dialog.getByRole("checkbox")).toHaveCount(7);
   const tall = await body.evaluate((el) => ({ content: el.scrollHeight, height: el.clientHeight }));
   expect(tall.height).toBeGreaterThan(0);
   expect(tall.content, "a tall window must fit the settings without scrolling").toBeLessThanOrEqual(tall.height);
@@ -542,7 +544,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     await expect(dialog).toBeVisible();
     await expect(page.locator('[role="menu"]')).toHaveCount(0);
-    await expect(dialog.getByRole("checkbox")).toHaveCount(5);
+    await expect(dialog.getByRole("checkbox")).toHaveCount(7);
     const setup = dialog.getByRole("checkbox", { name: "set up new hosts without asking", exact: true });
     await expect(setup).toBeFocused();
     await expect(setup).not.toBeChecked();
@@ -572,7 +574,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
           appearance: getComputedStyle(input).appearance,
         };
       }));
-      expect(rows).toHaveLength(5);
+      expect(rows).toHaveLength(7);
       for (const row of rows) {
         expect(row.textRight).toBeLessThan(row.controlLeft);
         expect(row.controlTop).toBeLessThan(row.textBottom);
