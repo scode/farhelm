@@ -242,6 +242,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   with a digit for switching tabs and Cmd/Ctrl+0 for resetting zoom, the same reason the web UI has no Cmd+N, so decide
   what the web UI and the chord off macOS get.
 
+- **Release notes in the `?` menu.** Add an item to the `?` menu that opens the release notes on the docs website in one
+  click. Today the only link to them is What's new, in the menu behind the version readout, which appears only while an
+  update is waiting to be applied.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
