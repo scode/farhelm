@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 48;
+const SCHEMA_VERSION: i64 = 49;
 
 /// One helm-wide configuration row, kept apart from replayed preferences:
 /// explicit saves validate these values, and reads must never return the token.
@@ -994,6 +994,10 @@ pub struct Preferences {
     /// Everyday session prompts may be skipped, but their guards still apply.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skip_session_confirmations: Option<bool>,
+    /// One shared template name, independent of any editor's saved fields.
+    /// A missing or deleted name is handled as no quick launch by clients.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quick_launch_template: Option<String>,
     /// Contact from the last successful feedback send that opted into reuse.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feedback_contact: Option<String>,
@@ -1071,6 +1075,13 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub skip_session_confirmations: Option<Option<bool>>,
+    /// Null removes the mark; omission preserves another client's choice.
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub quick_launch_template: Option<Option<String>>,
     /// A successful send may replace or explicitly forget the contact.
     #[serde(
         default,
@@ -1866,6 +1877,7 @@ pub struct HelmStore {
 /// - 47: a dedicated ntfy settings singleton, disabled and unconfigured until
 ///   explicitly saved; its token is never part of a preferences/API snapshot.
 /// - 48: a nullable session-confirmation opt-out; unset keeps the existing prompts.
+/// - 49: one nullable quick-launch template name; existing installations have no mark.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2078,7 +2090,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  skip_host_setup_confirmation INTEGER CHECK (skip_host_setup_confirmation IN (0, 1)),
                  feedback_contact TEXT,
                  terminal_link_click TEXT,
-                 skip_session_confirmations INTEGER CHECK (skip_session_confirmations IN (0, 1))
+                 skip_session_confirmations INTEGER CHECK (skip_session_confirmations IN (0, 1)),
+                 quick_launch_template TEXT
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2168,7 +2181,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 48;",
+              PRAGMA user_version = 49;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3240,6 +3253,21 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 48")?;
         version = 48;
     }
+    if version == 48 {
+        // Rewound migration fixtures can already contain newer columns. The
+        // actual upgrade adds an unset mark without choosing a template for users.
+        let present = tx.query_row(
+            "SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'quick_launch_template'",
+            [], |row| row.get::<_, i64>(0),
+        ).context("checking quick launch preference")? > 0;
+        if !present {
+            tx.execute_batch("ALTER TABLE preferences ADD COLUMN quick_launch_template TEXT;")
+                .context("migrating quick launch preference")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 49;")
+            .context("migrating helm.db to schema version 49")?;
+        version = 49;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -3798,6 +3826,8 @@ impl HelmStore {
                     }
                     tx.execute("DELETE FROM launch_templates WHERE name = ?1", [&name])
                         .context("deleting a launch template")?;
+                    tx.execute("UPDATE preferences SET quick_launch_template = NULL WHERE quick_launch_template = ?1", [&name])
+                        .context("clearing a deleted quick launch template")?;
                     tx.commit()
                         .context("committing the conditional template delete")?;
                     Ok(true)
@@ -3806,15 +3836,24 @@ impl HelmStore {
             .await
     }
 
-    /// Delete the template named `name`, reporting whether there was one.
+    /// Delete the template and its quick-launch mark in one transaction.
+    ///
+    /// API and agent deletes use this same path. Clearing only a matching name
+    /// preserves another client's choice of a different template; Undo restores
+    /// the template's fields, never the separate preference.
     pub(crate) async fn delete_launch_template(&self, name: String) -> anyhow::Result<bool> {
         self.conn
             .call(
                 "launch template delete task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
-                    let removed = conn
-                        .execute("DELETE FROM launch_templates WHERE name = ?1", [name])
+                    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .context("starting the template delete")?;
+                    let removed = tx
+                        .execute("DELETE FROM launch_templates WHERE name = ?1", [&name])
                         .context("deleting a launch template")?;
+                    tx.execute("UPDATE preferences SET quick_launch_template = NULL WHERE quick_launch_template = ?1", [&name])
+                        .context("clearing a deleted quick launch template")?;
+                    tx.commit().context("committing the template delete")?;
                     Ok(removed > 0)
                 },
             )
@@ -4137,7 +4176,7 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -4163,6 +4202,7 @@ impl HelmStore {
                             terminal_link_click: row.get::<_, Option<String>>(8)?
                                 .filter(|word| is_known_terminal_link_click_word(word)),
                             skip_session_confirmations: row.get(9)?,
+                            quick_launch_template: row.get(10)?,
                         })
                     },
                 )
@@ -4206,6 +4246,8 @@ impl HelmStore {
             let terminal_link_click = patch.terminal_link_click.flatten();
             let skip_session_confirmations_present = patch.skip_session_confirmations.is_some();
             let skip_session_confirmations = patch.skip_session_confirmations.flatten();
+            let quick_launch_template_present = patch.quick_launch_template.is_some();
+            let quick_launch_template = patch.quick_launch_template.flatten();
             let sort = patch.list_sort.flatten();
             let selected = patch.last_selected.flatten();
             let compact = patch.compact.flatten();
@@ -4216,8 +4258,8 @@ impl HelmStore {
             conn
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -4233,7 +4275,8 @@ impl HelmStore {
                              THEN excluded.skip_host_setup_confirmation ELSE skip_host_setup_confirmation END, \
                          feedback_contact = CASE WHEN ?17 THEN excluded.feedback_contact ELSE feedback_contact END, \
                          terminal_link_click = CASE WHEN ?18 THEN excluded.terminal_link_click ELSE terminal_link_click END, \
-                         skip_session_confirmations = CASE WHEN ?20 THEN excluded.skip_session_confirmations ELSE skip_session_confirmations END",
+                         skip_session_confirmations = CASE WHEN ?20 THEN excluded.skip_session_confirmations ELSE skip_session_confirmations END, \
+                         quick_launch_template = CASE WHEN ?22 THEN excluded.quick_launch_template ELSE quick_launch_template END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -4254,7 +4297,9 @@ impl HelmStore {
                         feedback_contact_present,
                         terminal_link_click_present,
                         skip_session_confirmations,
-                        skip_session_confirmations_present
+                        skip_session_confirmations_present,
+                        quick_launch_template,
+                        quick_launch_template_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -7639,6 +7684,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
@@ -9964,6 +10010,7 @@ mod tests {
                 feedback_contact: None,
                 terminal_link_click: None,
                 skip_session_confirmations: None,
+                quick_launch_template: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -9986,6 +10033,7 @@ mod tests {
                 feedback_contact: None,
                 terminal_link_click: None,
                 skip_session_confirmations: None,
+                quick_launch_template: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -10007,6 +10055,7 @@ mod tests {
                 feedback_contact: None,
                 terminal_link_click: None,
                 skip_session_confirmations: None,
+                quick_launch_template: None,
             },
             "an explicit null clears exactly the field it names"
         );
@@ -10077,6 +10126,7 @@ mod tests {
                 feedback_contact: None,
                 terminal_link_click: None,
                 skip_session_confirmations: None,
+                quick_launch_template: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -10340,6 +10390,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
@@ -11205,6 +11256,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
@@ -11336,6 +11388,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
@@ -11370,6 +11423,7 @@ mod tests {
                 feedback_contact: None,
                 terminal_link_click: None,
                 skip_session_confirmations: None,
+                quick_launch_template: None,
             },
             "the new field defaults absent while both existing choices survive"
         );
@@ -11405,6 +11459,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  INSERT INTO preferences (singleton, list_sort, last_selected, compact)
@@ -11435,6 +11490,7 @@ mod tests {
                 feedback_contact: None,
                 terminal_link_click: None,
                 skip_session_confirmations: None,
+                quick_launch_template: None,
             },
             "the new field defaults absent while every existing choice survives"
         );
@@ -11457,7 +11513,7 @@ mod tests {
         drop(store);
         {
             let conn = Connection::open(&path).unwrap();
-            conn.execute_batch("ALTER TABLE preferences DROP COLUMN skip_session_confirmations; PRAGMA user_version = 47;").unwrap();
+            conn.execute_batch("ALTER TABLE preferences DROP COLUMN quick_launch_template; ALTER TABLE preferences DROP COLUMN skip_session_confirmations; PRAGMA user_version = 47;").unwrap();
             assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'skip_session_confirmations'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
         }
         let migrated = HelmStore::open(&path).await.unwrap();
@@ -11527,6 +11583,7 @@ mod tests {
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch("ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations; PRAGMA user_version = 45;").unwrap();
             assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('preferences') WHERE name = 'terminal_link_click'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
         }
@@ -11601,6 +11658,7 @@ mod tests {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact; PRAGMA user_version = 42;",
             )
@@ -11684,6 +11742,7 @@ mod tests {
                 "ALTER TABLE hosts RENAME COLUMN yolo_without_asking TO yolo_safe;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  PRAGMA user_version = 32;",
@@ -11822,6 +11881,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
@@ -13306,6 +13366,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
@@ -15803,6 +15864,179 @@ mod tests {
                 .unwrap()
         );
         assert!(stored(&store).await.is_empty());
+    }
+
+    /// Deletion retires only the matching shared mark, and Undo must not
+    /// silently make a restored template the quick launch again. The guarded
+    /// agent-delete path must preserve both records when its definition is stale.
+    #[farhelm_testtrace::test]
+    async fn quick_launch_mark_follows_template_deletion_not_undo() {
+        use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
+        let (_dir, store) = fresh_store().await;
+        let template = |name: &str| LaunchTemplate {
+            name: name.into(),
+            fields: TemplateFields {
+                command: Some("agent".into()),
+                ..Default::default()
+            },
+        };
+        for name in ["a", "b"] {
+            store.put_launch_template(template(name)).await.unwrap();
+        }
+        store
+            .update_preferences(PreferencePatch {
+                quick_launch_template: Some(Some("a".into())),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .quick_launch_template
+                .as_deref(),
+            Some("a"),
+            "premise: a is marked"
+        );
+        assert!(store.delete_launch_template("b".into()).await.unwrap());
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .quick_launch_template
+                .as_deref(),
+            Some("a")
+        );
+        assert!(
+            !store
+                .delete_launch_template_if("a".into(), TemplateFields::default())
+                .await
+                .unwrap()
+        );
+        assert_eq!(store.launch_templates().await.unwrap(), vec![template("a")]);
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .quick_launch_template
+                .as_deref(),
+            Some("a")
+        );
+        assert!(
+            store
+                .delete_launch_template_if("a".into(), template("a").fields)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .quick_launch_template
+                .is_none()
+        );
+        store.put_launch_template(template("a")).await.unwrap();
+        assert!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .quick_launch_template
+                .is_none()
+        );
+        store
+            .update_preferences(PreferencePatch {
+                quick_launch_template: Some(Some("a".into())),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(store.delete_launch_template("a".into()).await.unwrap());
+        assert!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .quick_launch_template
+                .is_none()
+        );
+    }
+
+    /// A genuine schema-48 upgrade adds an unset mark without choosing a
+    /// template or erasing unrelated preferences. Reopening pins durability
+    /// and the sparse null-versus-omission contract used by concurrent clients.
+    #[farhelm_testtrace::test]
+    async fn schema_49_adds_a_durable_sparse_quick_launch_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        store
+            .update_preferences(PreferencePatch {
+                list_sort: Some(Some("title".into())),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE preferences DROP COLUMN quick_launch_template; PRAGMA user_version = 48;",
+        )
+        .unwrap();
+        assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'quick_launch_template'", [], |row| row.get::<_, i64>(0)).unwrap(), 0, "premise: preceding schema has no quick mark");
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            store.preferences().await.unwrap().list_sort.as_deref(),
+            Some("title")
+        );
+        assert!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .quick_launch_template
+                .is_none()
+        );
+        for name in ["first", "second"] {
+            store
+                .update_preferences(PreferencePatch {
+                    quick_launch_template: Some(Some(name.into())),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+        store
+            .update_preferences(PreferencePatch {
+                compact: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        drop(store);
+        let store = HelmStore::open(&path).await.unwrap();
+        let saved = store.preferences().await.unwrap();
+        assert_eq!(saved.quick_launch_template.as_deref(), Some("second"));
+        assert_eq!(saved.list_sort.as_deref(), Some("title"));
+        assert_eq!(saved.compact, Some(true));
+        let clear: PreferencePatch =
+            serde_json::from_str(r#"{"quick_launch_template":null}"#).unwrap();
+        assert_eq!(clear.quick_launch_template, Some(None));
+        store.update_preferences(clear).await.unwrap();
+        assert!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .quick_launch_template
+                .is_none()
+        );
     }
 
     /// Upgrading the preceding schema gives old hosts the existing cloud,

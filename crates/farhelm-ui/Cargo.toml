@@ -23,6 +23,10 @@ dioxus.workspace = true
 # net and process support, which does not build for wasm32. Native builds get
 # `io` back anyway through farhelm-helm; nothing in this crate uses it.
 farhelm-proto = { path = "../farhelm-proto", default-features = false }
+# A rename can await the existing preference writer on either renderer.
+# The sender carries no component state; dropping its receiver leaves the
+# process-wide writer and dirty-choice recovery intact.
+futures-channel = "0.3"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

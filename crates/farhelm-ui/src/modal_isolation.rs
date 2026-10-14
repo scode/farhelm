@@ -26,7 +26,9 @@
 //! - **A capture-phase `keydown` safety net.** If focus is nevertheless
 //!   outside the dialog when a key arrives (on `body` after a scrim click, or
 //!   in an engine without `inert`), the key is swallowed and focus goes back
-//!   to the dialog container. Losing one keystroke is the intended trade: the
+//!   to the visible dialog container. Hidden preparation consumes the key
+//!   without focusing fields it has not revealed. Losing one keystroke is the
+//!   intended trade: the
 //!   alternative is delivering it to whatever is behind the modal. Escape is
 //!   the exception that still does its job, by clicking the dialog's own
 //!   cancel control (so a cancel that is disabled while busy does nothing).
@@ -56,15 +58,16 @@
 //! Engines that do not implement `inert` ignore the attribute. They keep the
 //! safety net and whatever per-dialog layers the caller has.
 //!
-//! The restart-with dialog and the host settings dialog use this today. The
-//! rename dialog and the session launcher have the same shape and could
-//! adopt it.
+//! Restart-with, host settings and hidden quick-launch preparation use this.
+//! Ordinary New retains its own focus trap. A quick-launch fallback keeps this
+//! isolation through reveal, and releases it before returning focus on close.
 
 /// JavaScript that isolates the dialog matched by `dialog_selector`.
 ///
-/// Run it after the dialog's initial focus has landed inside it: inerting an
-/// ancestor of the focused element blurs it, and the dialog's own focus
-/// handoff must win over whatever held focus before the dialog opened.
+/// For a visible dialog, run it after initial focus has landed inside it:
+/// inerting a focused ancestor blurs it. Hidden quick-launch preparation may
+/// isolate before it has a focus surface; its safety net swallows input without
+/// attempting to focus hidden fields, and reveal supplies the ordinary handoff.
 /// Installing twice on the same element is a no-op, so an `onmounted` that
 /// fires again cannot stack listeners.
 ///
@@ -108,6 +111,9 @@ const ISOLATE_TEMPLATE: &str = r#"(() => {
     const dialog = document.querySelector(__DIALOG__);
     if (!dialog || dialog.__farhelmModalIsolated) return;
     dialog.__farhelmModalIsolated = true;
+    // An opening matters even if it closes before an asynchronous continuation
+    // next checks the DOM. Quick launch uses this epoch to retire an old read.
+    window.__farhelmModalOpening = (window.__farhelmModalOpening || 0) + 1;
     const escapeSelector = __ESCAPE__;
 
     // The dialog and its ancestors up to body stay live; every other element
@@ -138,7 +144,7 @@ const ISOLATE_TEMPLATE: &str = r#"(() => {
         if (active && (dialog.contains(active) || active.closest('[data-modal-exempt]'))) return;
         event.preventDefault();
         event.stopPropagation();
-        dialog.focus({ preventScroll: true });
+        if (dialog.getClientRects().length) dialog.focus({ preventScroll: true });
         if (event.key === 'Escape' && !event.isComposing && escapeSelector) {
             dialog.querySelector(escapeSelector)?.click();
         }

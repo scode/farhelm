@@ -43,6 +43,21 @@ Templates belong to the helm, the program that shows you every host's sessions
 ([The pieces](/docs/how-it-works/the-pieces/)), so every window and every host sees the same ones. A template that sets
 a command still needs that command to exist on the host you launch on.
 
+## Quick launch
+
+Mark a template with **⚡** to start it with Cmd+P on a Mac, or Ctrl+Shift+P elsewhere. The session starts and is selected
+without opening the session launcher. Only one template is marked: another bolt moves the mark, and the lit bolt clears
+it. A template must choose an agent or a command to be marked.
+
+Choices the template leaves out use **new**'s defaults, including the open session's host and directory. A template can
+start a fresh [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) this way too: marking it
+means you choose to create its new directory without first seeing the path. If Farhelm asks about YOLO or the launch
+fails, the session launcher opens with that setup and the question or error. With no marked template, the shortcut opens
+Templates to help you choose one. Renaming keeps the mark; deleting clears it, and **undo** restores only the template.
+
+The quick switcher's **Quick launch** row does the same thing. In Firefox, Ctrl+Shift+P may open a private window instead;
+use that row there. The shortcut leaves an open dialog alone.
+
 ## Save a setup from the launcher
 
 When you have set up a launch in **new** or **clone**, choose **save as template**, beside **reset choices**.

@@ -374,6 +374,9 @@ pub(crate) struct Preferences {
     /// Skip everyday session questions; supervisor guards and YOLO still apply.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) skip_session_confirmations: Option<bool>,
+    /// Shared quick-launch mark, separate from a template editor's fields.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) quick_launch_template: Option<String>,
     /// Shared contact memory; dialogs seed this authenticated snapshot once.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) feedback_contact: Option<String>,
@@ -574,6 +577,7 @@ pub(crate) enum PreferenceField {
     HostRemoveConfirmation,
     HostSetupConfirmation,
     SessionConfirmations,
+    QuickLaunchTemplate,
     FeedbackContact,
     TerminalLinkClick,
 }
@@ -588,6 +592,7 @@ impl PreferenceField {
             PreferenceField::HostRemoveConfirmation => "skip_host_remove_confirmation",
             PreferenceField::HostSetupConfirmation => "skip_host_setup_confirmation",
             PreferenceField::SessionConfirmations => "skip_session_confirmations",
+            PreferenceField::QuickLaunchTemplate => "quick_launch_template",
             PreferenceField::FeedbackContact => "feedback_contact",
             PreferenceField::TerminalLinkClick => "terminal_link_click",
         }
@@ -608,6 +613,8 @@ pub(crate) enum PreferenceValue {
     HostRemoveConfirmation(bool),
     HostSetupConfirmation(bool),
     SessionConfirmations(bool),
+    /// Explicit clear removes the sole mark without changing template fields.
+    QuickLaunchTemplate(Option<String>),
     /// None is an explicit clear, not an omitted patch field.
     FeedbackContact(Option<String>),
     TerminalLinkClick(TerminalLinkClick),
@@ -623,6 +630,7 @@ impl PreferenceValue {
             Self::HostRemoveConfirmation(_) => PreferenceField::HostRemoveConfirmation,
             Self::HostSetupConfirmation(_) => PreferenceField::HostSetupConfirmation,
             Self::SessionConfirmations(_) => PreferenceField::SessionConfirmations,
+            Self::QuickLaunchTemplate(_) => PreferenceField::QuickLaunchTemplate,
             Self::FeedbackContact(_) => PreferenceField::FeedbackContact,
             Self::TerminalLinkClick(_) => PreferenceField::TerminalLinkClick,
         }
@@ -632,7 +640,9 @@ impl PreferenceValue {
     fn wire_value(&self) -> serde_json::Value {
         match self {
             Self::Sort(value) | Self::Selected(value) => serde_json::json!(value),
-            Self::FeedbackContact(value) => serde_json::json!(value),
+            Self::FeedbackContact(value) | Self::QuickLaunchTemplate(value) => {
+                serde_json::json!(value)
+            }
             Self::TerminalLinkClick(value) => serde_json::json!(value.key()),
             Self::Compact(value)
             | Self::HostRemoveConfirmation(value)
@@ -652,6 +662,7 @@ impl PreferenceValue {
             }
             Self::HostSetupConfirmation(value) => seed.skip_host_setup_confirmation = Some(*value),
             Self::SessionConfirmations(value) => seed.skip_session_confirmations = Some(*value),
+            Self::QuickLaunchTemplate(value) => seed.quick_launch_template = value.clone(),
             Self::FeedbackContact(value) => seed.feedback_contact = value.clone(),
             Self::TerminalLinkClick(value) => seed.terminal_link_click = Some(value.key().into()),
         }
@@ -673,6 +684,17 @@ struct FieldWrite {
     /// A fresh choice needs its own write even if it returns to the value
     /// already being sent: another client may have committed in between.
     recorded_since_send: bool,
+    completion: Option<PreferenceCompletion>,
+}
+
+/// One optional caller waiting for the field's newest choice to settle.
+///
+/// Rename needs a successful persistence acknowledgment. Delete instead needs
+/// the old request to end and its matching dirty intent retired before DELETE;
+/// the helm then clears only a matching mark, preserving another client's choice.
+struct PreferenceCompletion {
+    sender: futures_channel::oneshot::Sender<bool>,
+    retire_template: Option<String>,
 }
 
 /// The write queue's whole state: a latest-wins slot per field.
@@ -704,6 +726,7 @@ struct PreferenceWrites {
     host_remove_confirmation: FieldWrite,
     host_setup_confirmation: FieldWrite,
     session_confirmations: FieldWrite,
+    quick_launch_template: FieldWrite,
     feedback_contact: FieldWrite,
     terminal_link_click: FieldWrite,
 }
@@ -717,6 +740,7 @@ impl PreferenceWrites {
             PreferenceField::HostRemoveConfirmation => &mut self.host_remove_confirmation,
             PreferenceField::HostSetupConfirmation => &mut self.host_setup_confirmation,
             PreferenceField::SessionConfirmations => &mut self.session_confirmations,
+            PreferenceField::QuickLaunchTemplate => &mut self.quick_launch_template,
             PreferenceField::FeedbackContact => &mut self.feedback_contact,
             PreferenceField::TerminalLinkClick => &mut self.terminal_link_click,
         }
@@ -725,8 +749,22 @@ impl PreferenceWrites {
     /// Record a new local choice. Returns whether the caller must start a
     /// writer (none is running for this field).
     fn record(&mut self, value: PreferenceValue) -> bool {
+        self.record_with_completion(value, None)
+    }
+
+    /// A new choice supersedes even an equal choice's waiter. Equality alone
+    /// cannot acknowledge an A-to-B-to-A sequence after another client's write.
+    fn record_with_completion(
+        &mut self,
+        value: PreferenceValue,
+        completion: Option<PreferenceCompletion>,
+    ) -> bool {
         let field = value.field();
         let slot = self.field(field);
+        if let Some(previous) = slot.completion.take() {
+            let _ = previous.sender.send(false);
+        }
+        slot.completion = completion;
         slot.latest = Some(value);
         slot.acked = false;
         if slot.in_flight {
@@ -761,6 +799,15 @@ impl PreferenceWrites {
         }
         slot.acked = success;
         slot.in_flight = false;
+        if let Some(completion) = slot.completion.take() {
+            let deleting = completion.retire_template.is_some();
+            if let Some(name) = completion.retire_template
+                && slot.latest.as_ref() == Some(&PreferenceValue::QuickLaunchTemplate(Some(name)))
+            {
+                slot.latest = None;
+            }
+            let _ = completion.sender.send(deleting || success);
+        }
         false
     }
 
@@ -768,7 +815,49 @@ impl PreferenceWrites {
     /// field so a later write can start a replacement, keeping the value
     /// dirty so nothing pretends it was persisted.
     fn writer_lost(&mut self, field: PreferenceField) {
-        self.field(field).in_flight = false;
+        let slot = self.field(field);
+        slot.in_flight = false;
+        if let Some(completion) = slot.completion.take() {
+            let _ = completion.sender.send(false);
+        }
+    }
+
+    /// Drain any already-owned mark request without recording another PUT.
+    ///
+    /// Retirement happens before releasing the waiter, so a reauthentication
+    /// between settlement and DELETE cannot replay the obsolete name. A dirty
+    /// idle choice can be retired immediately. Writer loss refuses deletion:
+    /// a cancelled request's remote outcome is unknown.
+    fn before_template_delete(
+        &mut self,
+        name: &str,
+    ) -> Option<futures_channel::oneshot::Receiver<bool>> {
+        let slot = self.field(PreferenceField::QuickLaunchTemplate);
+        if !slot.in_flight {
+            if slot.latest.as_ref()
+                == Some(&PreferenceValue::QuickLaunchTemplate(Some(name.into())))
+            {
+                slot.latest = None;
+            }
+            return None;
+        }
+        let (sender, receiver) = futures_channel::oneshot::channel();
+        if let Some(previous) = slot.completion.replace(PreferenceCompletion {
+            sender,
+            retire_template: Some(name.into()),
+        }) {
+            let _ = previous.sender.send(false);
+        }
+        Some(receiver)
+    }
+
+    /// An unconfirmed explicit mark still owns this client's display. Once
+    /// acknowledged, only the newly fetched helm mark decides rename or launch.
+    fn quick_launch_mark_after_read(&self, mut fetched: Preferences) -> Option<String> {
+        if let Some(value) = self.dirty(PreferenceField::QuickLaunchTemplate) {
+            value.overlay(&mut fetched);
+        }
+        fetched.quick_launch_template
     }
 
     /// This session's newest choice for `field` when no PUT has confirmed
@@ -784,6 +873,7 @@ impl PreferenceWrites {
             PreferenceField::HostRemoveConfirmation => &self.host_remove_confirmation,
             PreferenceField::HostSetupConfirmation => &self.host_setup_confirmation,
             PreferenceField::SessionConfirmations => &self.session_confirmations,
+            PreferenceField::QuickLaunchTemplate => &self.quick_launch_template,
             PreferenceField::FeedbackContact => &self.feedback_contact,
             PreferenceField::TerminalLinkClick => &self.terminal_link_click,
         };
@@ -874,6 +964,7 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
         PreferenceField::HostRemoveConfirmation,
         PreferenceField::HostSetupConfirmation,
         PreferenceField::SessionConfirmations,
+        PreferenceField::QuickLaunchTemplate,
         PreferenceField::FeedbackContact,
         PreferenceField::TerminalLinkClick,
     ] {
@@ -931,6 +1022,46 @@ async fn send_preference_patch(base: &str, value: &PreferenceValue) -> bool {
         "could not store the list preference on the helm: {outcome}"
     );
     false
+}
+
+/// Finish the mark write before a template rename deletes its old name.
+///
+/// The optional acknowledgment belongs to the existing latest-wins queue;
+/// failures and writer loss leave the choice dirty for credential recovery.
+/// Receiver cancellation never cancels that process-wide writer. A rename
+/// retains both names if its particular choice is not acknowledged.
+pub(crate) async fn write_quick_launch_template(base: &str, name: Option<String>) -> bool {
+    let (sender, receiver) = futures_channel::oneshot::channel();
+    let start = preference_writes().record_with_completion(
+        PreferenceValue::QuickLaunchTemplate(name),
+        Some(PreferenceCompletion {
+            sender,
+            retire_template: None,
+        }),
+    );
+    if start {
+        spawn_preference_writer(base.to_string(), PreferenceField::QuickLaunchTemplate);
+    }
+    receiver.await.unwrap_or(false)
+}
+
+/// Refresh the mark without discarding an unconfirmed explicit local choice.
+/// Only this field is overlaid; reading a mark is not credential recovery and
+/// must not replay unrelated dirty preferences. Rename and direct launch both
+/// honor this ownership; an acknowledged choice yields to the fresh shared read.
+pub(crate) fn quick_launch_mark_after_read(fetched: Preferences) -> Option<String> {
+    preference_writes().quick_launch_mark_after_read(fetched)
+}
+
+/// Order template deletion after existing mark writes and retire local intent.
+/// No null preference PUT is sent: only the helm's matching-name delete has
+/// authority to clear the shared mark. A lost writer requires a deliberate retry.
+pub(crate) async fn prepare_template_delete(name: &str) -> bool {
+    let waiting = preference_writes().before_template_delete(name);
+    match waiting {
+        Some(receiver) => receiver.await.unwrap_or(false),
+        None => true,
+    }
 }
 
 /// One listing request's whole query string: the order first, then the
@@ -4743,8 +4874,167 @@ mod tests {
 #[cfg(test)]
 mod preference_write_tests {
     use super::{
-        PreferenceField, PreferenceValue, PreferenceWrites, Preferences, TerminalLinkClick,
+        PreferenceCompletion, PreferenceField, PreferenceValue, PreferenceWrites, Preferences,
+        TerminalLinkClick,
     };
+
+    /// Attach a portable acknowledgment without a runtime or network. The
+    /// receiver observes settlement, while the real queue owns the writer slot.
+    fn record_waiting(
+        queue: &mut PreferenceWrites,
+        value: PreferenceValue,
+    ) -> futures_channel::oneshot::Receiver<bool> {
+        let (sender, receiver) = futures_channel::oneshot::channel();
+        queue.record_with_completion(
+            value,
+            Some(PreferenceCompletion {
+                sender,
+                retire_template: None,
+            }),
+        );
+        receiver
+    }
+
+    /// Refreshing rename must distinguish a dirty explicit choice from an old
+    /// sign-in seed. Dirty clears are real choices too; once acknowledged, a
+    /// later other-client mark is authoritative without rewriting that field.
+    #[farhelm_testtrace::test]
+    fn rename_mark_refresh_preserves_only_unconfirmed_local_intent() {
+        let mut queue = PreferenceWrites::default();
+        let field = PreferenceField::QuickLaunchTemplate;
+        let seed = Preferences {
+            quick_launch_template: Some("other-client".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            queue.quick_launch_mark_after_read(seed.clone()),
+            Some("other-client".into())
+        );
+        let choice = PreferenceValue::QuickLaunchTemplate(Some("local".into()));
+        assert!(queue.record(choice.clone()));
+        assert_eq!(
+            queue.quick_launch_mark_after_read(seed.clone()),
+            Some("local".into())
+        );
+        assert!(!queue.finished(field, &choice, false));
+        assert_eq!(
+            queue.quick_launch_mark_after_read(seed.clone()),
+            Some("local".into())
+        );
+        assert_eq!(queue.begin_replay(field), Some(choice.clone()));
+        assert!(!queue.finished(field, &choice, true));
+        assert_eq!(
+            queue.quick_launch_mark_after_read(seed.clone()),
+            Some("other-client".into())
+        );
+        assert!(queue.record(PreferenceValue::QuickLaunchTemplate(None)));
+        assert_eq!(queue.quick_launch_mark_after_read(seed), None);
+    }
+
+    /// Rename must acknowledge its own choice, not an equal older request.
+    /// Superseding choices resolve their predecessor false, and A-to-B-to-A
+    /// still needs the final PUT before the newest waiter can report success.
+    #[farhelm_testtrace::test]
+    fn preference_acknowledgment_tracks_the_newest_record() {
+        let mut queue = PreferenceWrites::default();
+        let field = PreferenceField::QuickLaunchTemplate;
+        let a = PreferenceValue::QuickLaunchTemplate(Some("a".into()));
+        let b = PreferenceValue::QuickLaunchTemplate(Some("b".into()));
+        let mut first = record_waiting(&mut queue, a.clone());
+        assert_eq!(queue.next_to_send(field), Some(a.clone()));
+        let mut equal = record_waiting(&mut queue, a.clone());
+        assert_eq!(first.try_recv(), Ok(Some(false)));
+        let mut middle = record_waiting(&mut queue, b);
+        assert_eq!(equal.try_recv(), Ok(Some(false)));
+        let mut newest = record_waiting(&mut queue, a.clone());
+        assert_eq!(middle.try_recv(), Ok(Some(false)));
+        assert!(queue.finished(field, &a, true));
+        assert_eq!(newest.try_recv(), Ok(None));
+        assert_eq!(queue.next_to_send(field), Some(a.clone()));
+        assert!(!queue.finished(field, &a, true));
+        assert_eq!(newest.try_recv(), Ok(Some(true)));
+        assert_eq!(queue.dirty(field), None);
+    }
+
+    /// Failure and writer loss must unblock rename while retaining recovery.
+    /// Losing only the receiver cannot cancel persistence or erase the choice.
+    #[farhelm_testtrace::test]
+    fn acknowledgment_failure_and_cancellation_preserve_dirty_recovery() {
+        let field = PreferenceField::QuickLaunchTemplate;
+        let value = PreferenceValue::QuickLaunchTemplate(Some("kept".into()));
+        for lost in [false, true] {
+            let mut queue = PreferenceWrites::default();
+            let mut waiting = record_waiting(&mut queue, value.clone());
+            assert_eq!(queue.next_to_send(field), Some(value.clone()));
+            if lost {
+                queue.writer_lost(field);
+            } else {
+                assert!(!queue.finished(field, &value, false));
+            }
+            assert_eq!(waiting.try_recv(), Ok(Some(false)));
+            assert_eq!(queue.dirty(field), Some(value.clone()));
+            assert_eq!(queue.begin_replay(field), Some(value.clone()));
+            assert_eq!(queue.next_to_send(field), Some(value.clone()));
+            assert!(!queue.finished(field, &value, true));
+            assert_eq!(queue.dirty(field), None);
+        }
+        let mut queue = PreferenceWrites::default();
+        drop(record_waiting(&mut queue, value.clone()));
+        assert_eq!(queue.dirty(field), Some(value.clone()));
+        assert_eq!(queue.begin_replay(field), None);
+        assert_eq!(queue.next_to_send(field), Some(value.clone()));
+        assert!(!queue.finished(field, &value, true));
+        assert_eq!(queue.dirty(field), None);
+    }
+
+    /// A settled old-name PUT must precede DELETE, even on failure. Retirement
+    /// is synchronous with settlement so credential recovery and Undo cannot
+    /// revive the deleted mark. No replacement null write is needed.
+    #[farhelm_testtrace::test]
+    fn deleting_a_template_retires_its_dirty_mark_before_replay() {
+        let field = PreferenceField::QuickLaunchTemplate;
+        let value = PreferenceValue::QuickLaunchTemplate(Some("deleted".into()));
+        for success in [false, true] {
+            let mut queue = PreferenceWrites::default();
+            assert!(queue.record(value.clone()));
+            assert_eq!(queue.next_to_send(field), Some(value.clone()));
+            let mut deleting = queue.before_template_delete("deleted").unwrap();
+            assert_eq!(deleting.try_recv(), Ok(None));
+            assert!(!queue.finished(field, &value, success));
+            assert_eq!(queue.dirty(field), None);
+            assert_eq!(queue.begin_replay(field), None);
+            assert_eq!(deleting.try_recv(), Ok(Some(true)));
+        }
+        let mut queue = PreferenceWrites::default();
+        assert!(queue.record(value.clone()));
+        assert!(!queue.finished(field, &value, false));
+        assert_eq!(queue.dirty(field), Some(value));
+        assert!(queue.before_template_delete("deleted").is_none());
+        assert_eq!(queue.begin_replay(field), None);
+    }
+
+    /// Deleting one name has no authority over another local mark. An unknown
+    /// request outcome refuses the delete rather than allowing a late PUT to
+    /// restore its mark after the helm's transactional clear.
+    #[farhelm_testtrace::test]
+    fn deletion_preserves_different_marks_and_refuses_writer_loss() {
+        let field = PreferenceField::QuickLaunchTemplate;
+        let value = PreferenceValue::QuickLaunchTemplate(Some("other".into()));
+        let mut queue = PreferenceWrites::default();
+        assert!(queue.record(value.clone()));
+        assert_eq!(queue.next_to_send(field), Some(value.clone()));
+        let mut deleting = queue.before_template_delete("deleted").unwrap();
+        assert!(!queue.finished(field, &value, false));
+        assert_eq!(deleting.try_recv(), Ok(Some(true)));
+        assert_eq!(queue.dirty(field), Some(value.clone()));
+        assert!(queue.before_template_delete("deleted").is_none());
+        assert_eq!(queue.dirty(field), Some(value.clone()));
+        assert_eq!(queue.begin_replay(field), Some(value.clone()));
+        let mut deleting = queue.before_template_delete("other").unwrap();
+        queue.writer_lost(field);
+        assert_eq!(deleting.try_recv(), Ok(Some(false)));
+        assert_eq!(queue.dirty(field), Some(value));
+    }
 
     /// Session opt-out writes own their queue slot and replay after a failed
     /// save without replacing independent host choices. False is a real choice.

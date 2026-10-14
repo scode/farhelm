@@ -172,10 +172,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
   this refers to and what matching it would mean; ask before starting.
 
-- **A quick agent mode.** For when you just want an agent now, with as little fuss and as few choices as possible: a way
-  to start an agent session without working through the launcher's fields. What it skips, what it picks instead, and
-  where it lives in the UI are to be worked out. Plan: `plans/queue/quick-launch-template.md`.
-
 - add a "custom" permission mode next to guarded/yolo. Plan: `plans/queue/custom-permission-flags.md`.
 
 - **Launch a session with a given conversation id.** When creating a session, let the user name the agent conversation

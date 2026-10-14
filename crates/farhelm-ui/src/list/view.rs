@@ -940,8 +940,20 @@ pub(crate) fn ListView(
     // A switcher choice is an accepted search action, not a clone seed.
     let mut initial_create_action =
         use_signal(|| None::<crate::launch_composer::ComposerSearchResult>);
+    // Quick launch owns one fetch/mount/submit handoff. New still composes the
+    // request; this flag only keeps its fields hidden until a fallback is needed.
+    let mut quick_launch_pending = use_signal(|| false);
+    let mut auto_launch = use_signal(|| false);
+    // One opening generation fences the fresh read and any queued DOM submit.
+    // Ordinary New, Clone/Replace and Templates revoke it synchronously.
+    let mut opening_generation = use_signal(|| 0_u64);
+    // Diagnostic settlement only, so held-read tests can observe a revoked
+    // continuation actually finishing instead of using a delay as proof.
+    let mut quick_read_completed = use_signal(|| 0_u64);
+    let mut initial_create_error = use_signal(|| None::<String>);
     // The Templates dialog, opened from the button beside New.
     let mut templates_open = use_signal(|| false);
+    let mut quick_launch_hint = use_signal(|| false);
     // A launcher save hands the actual stored snapshot to the next dialog;
     // loading the list must not decide which template the person just opened.
     let mut initial_template = use_signal(|| None::<farhelm_proto::launcher::LaunchTemplate>);
@@ -2502,6 +2514,9 @@ pub(crate) fn ListView(
             .peek()
             .as_ref()
             .map_or(0, |prefill| prefill.generation + 1);
+        opening_generation += 1;
+        quick_launch_pending.set(false);
+        auto_launch.set(false);
         initial_create_action.set(None);
         clone_prefill.set(Some(prefill_from(&session, generation)));
         show_create.set(true);
@@ -2570,6 +2585,9 @@ pub(crate) fn ListView(
         // A new opening starts from its own snapshot, never from what an
         // earlier launcher on the same source last saw.
         replace_source_seen.set(None);
+        opening_generation += 1;
+        quick_launch_pending.set(false);
+        auto_launch.set(false);
         initial_create_action.set(None);
         clone_prefill.set(Some(prefill));
         show_create.set(true);
@@ -2612,6 +2630,9 @@ pub(crate) fn ListView(
             mark_replace_with(&mut prefill, &session);
             replace_source_seen.set(None);
         }
+        opening_generation += 1;
+        quick_launch_pending.set(false);
+        auto_launch.set(false);
         initial_create_action.set(None);
         clone_prefill.set(Some(prefill));
         menu_open.set(None);
@@ -2636,6 +2657,11 @@ pub(crate) fn ListView(
         {
             return;
         }
+        // Rename has its own focus trap rather than shared modal isolation.
+        // Retire a held quick read here so cancelling Rename cannot revive it.
+        opening_generation += 1;
+        quick_launch_pending.set(false);
+        auto_launch.set(false);
         rename_draft.set(crate::peer::editable_peer(&title));
         rename_error.set(None);
         rename_focus_owned.set(false);
@@ -3280,6 +3306,8 @@ pub(crate) fn ListView(
             if ops.busy_now() {
                 return false;
             }
+            opening_generation += 1;
+            quick_launch_pending.set(false);
             let current_hosts = new_hosts.clone();
             let current_target =
                 effective_create_host(&current_hosts, *chosen_host.peek(), new_open_host.as_ref());
@@ -3292,11 +3320,81 @@ pub(crate) fn ListView(
                     .map(|_| destination.cwd.clone())
             }));
             clone_prefill.set(None);
+            auto_launch.set(false);
+            initial_create_error.set(None);
             initial_create_action.set(action);
             show_create.set(true);
             true
         },
     );
+    let quick_base = base.clone();
+    let quick_launch = use_callback(move |_: ()| {
+        if *quick_launch_pending.peek()
+            || *show_create.peek()
+            || *templates_open.peek()
+            || ops.busy_now()
+        {
+            return;
+        }
+        quick_launch_pending.set(true);
+        opening_generation += 1;
+        let opening = *opening_generation.peek();
+        let base = quick_base.clone();
+        spawn(async move {
+            let modal_opening = document::eval("return window.__farhelmModalOpening || 0")
+                .join::<u64>()
+                .await
+                .unwrap_or(u64::MAX);
+            // The mark and definition can change in another client without a
+            // reload here. A fresh read decides acknowledged state; an explicit
+            // local choice still awaiting persistence keeps its queue authority.
+            let result = async {
+                let fresh = crate::api::fetch_preferences(&base).await?;
+                let templates = crate::api::fetch_templates(&base).await?;
+                Ok::<_, String>((crate::api::quick_launch_mark_after_read(fresh), templates))
+            }
+            .await;
+            // A modal opened while the read was out must not be hidden behind
+            // this continuation. The entry chord's check alone cannot cover it.
+            let modal = document::eval(&format!("return (window.__farhelmModalOpening || 0) !== {modal_opening} || [...document.querySelectorAll('[role=\"dialog\"][aria-modal=\"true\"]')].some(node => node.getClientRects().length)")).join::<bool>().await.unwrap_or(true);
+            quick_read_completed.set(opening);
+            if *opening_generation.peek() != opening {
+                return;
+            }
+            quick_launch_pending.set(false);
+            if modal || *show_create.peek() || *templates_open.peek() || ops.busy_now() {
+                return;
+            }
+            match result {
+                Ok((name, templates)) => {
+                    preferences.0.write().quick_launch_template = name.clone();
+                    if let Some(template) = name
+                        .as_ref()
+                        .and_then(|name| templates.iter().find(|t| &t.name == name))
+                    {
+                        if open_new.call(Some(
+                            crate::launch_composer::ComposerSearchResult::Template(
+                                template.name.clone(),
+                            ),
+                        )) {
+                            auto_launch
+                                .set(super::templates::quick_launch_eligible(&template.fields));
+                        }
+                    } else {
+                        initial_template.set(None);
+                        quick_launch_hint.set(true);
+                        templates_open.set(true);
+                    }
+                }
+                Err(message) => {
+                    if open_new.call(None) {
+                        initial_create_error
+                            .set(Some(format!("couldn't prepare quick launch: {message}")));
+                    }
+                }
+            }
+        });
+    });
     let switcher_listing = request_listing.clone();
     let finish_switcher = use_callback(move |pick: Option<super::quick_switcher::SwitcherPick>| {
         if *quick_switcher_closing.peek() {
@@ -3328,6 +3426,10 @@ pub(crate) fn ListView(
                 Some(super::quick_switcher::SwitcherPick::New(action)) => {
                     restore = !open_new.call(Some(action));
                 }
+                Some(super::quick_switcher::SwitcherPick::QuickLaunch) => {
+                    quick_launch.call(());
+                    restore = false;
+                }
                 None => {}
             }
             super::quick_switcher::restore_focus(restore);
@@ -3336,6 +3438,13 @@ pub(crate) fn ListView(
     });
 
     rsx! {
+        button {
+            class: "quick-launch-trigger", r#type: "button", hidden: true, tabindex: "-1",
+            "data-opening-generation": "{opening_generation()}",
+            "data-read-completed-generation": "{quick_read_completed()}",
+            disabled: quick_launch_pending() || show_create() || templates_open() || busy,
+            onclick: move |_| quick_launch.call(()),
+        }
         // Status sounds follow the very replies these rows display. Keeping
         // the observer here avoids another session read or a mirrored listing.
         crate::sounds::SessionSounds { selected, listing, listing_scope }
@@ -3343,7 +3452,11 @@ pub(crate) fn ListView(
             class: "quick-switcher-trigger", r#type: "button", hidden: true,
             tabindex: "-1", disabled: quick_switcher_closing(),
             onclick: move |_| {
-                if !*quick_switcher_closing.peek() { quick_switcher_open.set(true); }
+                if !*quick_switcher_closing.peek() {
+                    opening_generation += 1;
+                    quick_launch_pending.set(false);
+                    quick_switcher_open.set(true);
+                }
             },
         }
         if quick_switcher_open() {
@@ -3551,10 +3664,10 @@ pub(crate) fn ListView(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral templates-button",
-                        "data-tooltip": "templates: saved session setups to start from",
+                        "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("templates: mark one with ⚡ for quick launch ({})", super::templates::QUICK_LAUNCH_CHORD), |name| format!("templates: quick launch {} ({})", crate::peer::display_peer(name), super::templates::QUICK_LAUNCH_CHORD)),
                         aria_haspopup: "dialog",
                         disabled: busy,
-                        onclick: move |_| { initial_template.set(None); templates_open.set(true); },
+                        onclick: move |_| { opening_generation += 1; quick_launch_pending.set(false); auto_launch.set(false); initial_template.set(None); quick_launch_hint.set(false); templates_open.set(true); },
                         "templates"
                     }
                 }
@@ -3563,6 +3676,7 @@ pub(crate) fn ListView(
                 super::templates::TemplatesDialog {
                     hosts: host_options.clone(),
                     initial_template: initial_template(),
+                    quick_launch_hint: quick_launch_hint(),
                     on_close: move |_| {
                         super::templates::return_focus_to_templates_button();
                         templates_open.set(false);
@@ -3578,10 +3692,14 @@ pub(crate) fn ListView(
                     hosts: host_options.clone(),
                     open_host: open_host.clone(),
                     hosts_loaded: hosts.read().hosts().is_some(),
+                    host_read_error: hosts.read().refresh_error().map(str::to_owned),
                     chosen_host,
                     create_target,
                     ops,
                     initial_cwd: ordinary_new_cwd(),
+                    auto_launch,
+                    opening_generation,
+                    initial_error: initial_create_error(),
                     prefill: clone_prefill(),
                     // Clone/Replace owns its seed even if it supersedes a
                     // switcher opening before the launcher unmounts.
@@ -3606,6 +3724,9 @@ pub(crate) fn ListView(
                             .or_else(|| prefill.replace_source_opened.clone())
                     }),
                     on_cancel: move |_| {
+                        document::eval(&crate::modal_isolation::release_js(".create-session-form"));
+                        opening_generation += 1;
+                        auto_launch.set(false);
                         // A cancelled composer must not carry its destination
                         // or clone provenance into the next fresh launch.
                         chosen_host.set(None);

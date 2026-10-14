@@ -2,7 +2,7 @@
 //! remembers for every client (SPEC.md, Session list): the chosen list order,
 //! last user-selected session, compact-row choice, and the remembered
 //! permissions and workspace-trust choices of successful structured launches,
-//! host confirmation choices, terminal web-link ownership, and contact reused after successful feedback.
+//! host confirmation choices, terminal web-link ownership, quick-launch template, and contact reused after successful feedback.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client persists its own copy, so a browser tab and the desktop
@@ -93,6 +93,18 @@ pub(crate) async fn put_preferences(
     State(state): State<Arc<AppState>>,
     axum::Json(patch): axum::Json<PreferencePatch>,
 ) -> impl IntoResponse {
+    // Like last_selected, a template name can become stale after a write. The
+    // reader handles that race; cap its size without inventing an existence or
+    // eligibility gate that would disagree with the template editor.
+    if let Some(Some(name)) = &patch.quick_launch_template
+        && name.len() > farhelm_proto::launcher::TEMPLATE_NAME_CAP
+    {
+        return http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::InvalidRequest,
+            message: "quick_launch_template exceeds the template name limit".into(),
+        }));
+    }
     if let Some(Some(sort)) = &patch.list_sort
         && store::parse_sort_key(sort).is_none()
     {
@@ -463,6 +475,7 @@ mod tests {
                 feedback_contact: None,
                 terminal_link_click: None,
                 skip_session_confirmations: None,
+                quick_launch_template: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -567,6 +580,7 @@ mod tests {
                 feedback_contact: None,
                 terminal_link_click: None,
                 skip_session_confirmations: None,
+                quick_launch_template: None,
             },
             "an explicit null clears the field it names and only that one"
         );

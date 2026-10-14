@@ -458,7 +458,9 @@ test("a template pick waits for launcher inputs before applying the template", a
     await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: model.efforts[0], exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.getByRole("combobox", { name: "host", exact: true })).toHaveAttribute("data-host-id", String(local!.id));
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
-    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+    // Null resets to the harness's current default. For Codex that is guarded;
+    // applying a template must not revive the removed default-mode control.
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".launch-composer-summary")).toContainText("trust: false");
     await expect(form.locator(".launch-composer-template-error")).toHaveCount(0);
     await form.getByLabel("name (optional)").fill("user-edited-name");

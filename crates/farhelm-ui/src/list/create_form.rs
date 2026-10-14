@@ -893,6 +893,15 @@ fn resubmit_composer() {
     );
 }
 
+/// A queued automatic submit belongs to one opening, never a later draft.
+/// The parent revokes the generation synchronously; the submit handler covers
+/// the pre-render gap, and this selector covers a replaced or remounted form.
+fn resubmit_quick_composer(generation: u64) {
+    document::eval(&format!(
+        "document.querySelector('.create-session-form[data-opening-generation=\"{generation}\"]')?.requestSubmit()"
+    ));
+}
+
 /// One opening of the launcher's YOLO question: the key its
 /// [`ConfirmSlot`] is open for.
 ///
@@ -1369,16 +1378,24 @@ fn install_composer_focus_trap() {
 ///
 /// Callers invoke this only when the dialog mounts, a mode button is pressed,
 /// or a search result is accepted. Ordinary rerenders must never reclaim focus
-/// from a field the user deliberately entered.
-fn focus_composer_surface() {
-    document::eval(
-        r#"(() => {
+/// from a field the user deliberately entered. A revealed readiness failure
+/// may still have only Cancel mounted; that remains a keyboard exit. Only reveal
+/// defers to a frame, since its effect can precede the DOM update. Ordinary
+/// interactions focus immediately so a queued handoff cannot steal later input.
+fn focus_composer_surface(defer_for_reveal: bool) {
+    let focus = r#"
             const dialog = document.querySelector('.create-session-form[role="dialog"]');
-            if (!dialog) return;
-            const target = dialog.querySelector('.launch-composer-search input:not([disabled])');
-            target?.focus({ preventScroll: true });
-        })()"#,
-    );
+            if (!dialog || !dialog.getClientRects().length) return;
+            const target = dialog.querySelector('.launch-composer-search input:not([disabled])')
+                || dialog.querySelector('.launch-composer-loading-cancel:not([disabled])')
+                || dialog;
+            target.focus({ preventScroll: true });
+        "#;
+    document::eval(&if defer_for_reveal {
+        format!("requestAnimationFrame(() => {{ {focus} }})")
+    } else {
+        format!("(() => {{ {focus} }})()")
+    });
 }
 
 /// Keep keyboard selection visible while a long combobox result list scrolls.
@@ -2102,6 +2119,10 @@ pub(super) fn CreateSessionForm(
     /// row) from "nothing has come back yet", which is what a submit has to
     /// be refused for.
     hosts_loaded: bool,
+    /// A completed initial host-read failure must reveal quick launch rather
+    /// than treating a failed read as indefinitely pending. Retained snapshots
+    /// still follow ordinary New's availability checks.
+    host_read_error: Option<String>,
     /// The user's explicit host choice, if they have made one. `None` means
     /// "no choice yet", not "no host" — the effective target is
     /// [`effective_create_host`]'s answer, recomputed per render against the
@@ -2131,6 +2152,15 @@ pub(super) fn CreateSessionForm(
     /// through the same search-accept path as a keyboard or mouse choice. This is not a clone
     /// prefill: remembered permissions and New's destination still seed normally.
     initial_action: Option<crate::launch_composer::ComposerSearchResult>,
+    /// Quick launch submits this ordinary draft once, after its template and
+    /// prerequisites settle. Failures reveal the same mounted form for retry.
+    auto_launch: Signal<bool>,
+    /// Shared with the parent's read admission and ordinary opening actions.
+    /// A superseding opening revokes even an already queued DOM submission.
+    opening_generation: Signal<u64>,
+    /// A failed quick-launch preparation is visible without losing New's defaults.
+    #[props(default)]
+    initial_error: Option<String>,
     /// For "replace with", the source session's status and terminal tab
     /// count as the page currently knows them: its row in the live listing,
     /// else the last state a listing showed for it, else
@@ -2325,6 +2355,18 @@ pub(super) fn CreateSessionForm(
     let mut title_raw_seed = use_signal(|| None::<String>);
     let mut title_edited = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    // Preparation describes the opening, not a refusal from a bound host.
+    // First binding and later host reconciliation must not erase its explanation.
+    let mut preparation_error = use_signal(move || initial_error);
+    let quick_origin = use_hook(|| *auto_launch.peek());
+    let mut quick_launch_hidden = use_signal(move || *auto_launch.peek());
+    let mut auto_launch_pending = use_signal(move || *auto_launch.peek());
+    use_effect(move || {
+        if !auto_launch() && quick_launch_hidden() {
+            auto_launch_pending.set(false);
+            quick_launch_hidden.set(false);
+        }
+    });
     // An untouched dialog is allowed to be incomplete. Once attempted, its
     // prerequisite reason follows the current draft and disappears when ready;
     // request failures retain the helm's own words until the next attempt.
@@ -2594,6 +2636,8 @@ pub(super) fn CreateSessionForm(
             // revoke the child's mount-time copy.
             if prefill.is_some() {
                 pending_initial_action.set(None);
+                auto_launch_pending.set(false);
+                quick_launch_hidden.set(false);
             }
             let hosts = &hosts_for_reseed;
             let target = create_target();
@@ -2745,6 +2789,7 @@ pub(super) fn CreateSessionForm(
                 // the form held then, which this prefill has just
                 // replaced wholesale.
                 error.set(None);
+                preparation_error.set(None);
                 // Compatibility prose belongs to the previous whole draft
                 // too. A mounted second clone must not inherit a warning
                 // about values this generation has already replaced.
@@ -3795,7 +3840,7 @@ pub(super) fn CreateSessionForm(
             }
             composer_search.set(String::new());
             composer_search_open.set(false);
-            focus_composer_surface();
+            focus_composer_surface(false);
             true
         },
     );
@@ -3907,7 +3952,7 @@ pub(super) fn CreateSessionForm(
             if changed {
                 intent_key.set(None);
             }
-            focus_composer_surface();
+            focus_composer_surface(false);
         }
     });
     let choose_launch_tab = EventHandler::<LaunchTab>::new(move |tab| {
@@ -3919,9 +3964,91 @@ pub(super) fn CreateSessionForm(
             intent_key.set(None);
         }
         launch_tab.set(tab);
-        focus_composer_surface();
+        focus_composer_surface(false);
     });
     let launch_from_choice = EventHandler::new(move |_| resubmit_composer());
+    // No timer guesses when a template or managed-checkout preview is ready.
+    // Each boundary is the same one the ordinary Launch button consumes. Once
+    // submitted, this flag is spent even after an ambiguous reply or path race.
+    let quick_target_ready =
+        target_matches_selection(selected, &hosts, create_target.read().as_ref());
+    use_effect(use_reactive(
+        (
+            &hosts_loaded,
+            &launch_refusal,
+            &quick_target_ready,
+            &busy,
+            &selected_host_available,
+            &host_read_error,
+        ),
+        move |(hosts_loaded, refusal, target_ready, busy, host_available, host_error)| {
+            if auto_launch_pending()
+                && !hosts_loaded
+                && let Some(message) = host_error
+            {
+                auto_launch_pending.set(false);
+                quick_launch_hidden.set(false);
+                preparation_error.set(Some(format!(
+                    "couldn't prepare quick launch: the host list failed: {message}"
+                )));
+                return;
+            }
+            if !auto_launch_pending()
+                || !mount_seeded()
+                || pending_initial_action().is_some()
+                || !hosts_loaded
+            {
+                return;
+            }
+            if busy {
+                return;
+            }
+            // An offline host cannot produce a bound target or preview. It is
+            // a fallback to show, rather than readiness to wait for invisibly.
+            if !host_available {
+                auto_launch_pending.set(false);
+                launch_attempted.set(true);
+                quick_launch_hidden.set(false);
+                return;
+            }
+            if !target_ready {
+                return;
+            }
+            let preview_pending = match destination_draft() {
+                DestinationDraft::Github { preview_state, .. } => {
+                    matches!(*preview_state, PreviewState::Pending)
+                }
+                _ => false,
+            };
+            if preview_pending {
+                return;
+            }
+            auto_launch_pending.set(false);
+            if refusal.is_some() || template_error().is_some() {
+                launch_attempted.set(true);
+                quick_launch_hidden.set(false);
+                return;
+            }
+            resubmit_quick_composer(*opening_generation.peek());
+        },
+    ));
+    use_effect(move || {
+        if quick_launch_hidden()
+            && (error().is_some()
+                || template_error().is_some()
+                || yolo_refusal.current_key().is_some()
+                || (launch_attempted() && !ops.busy_now()))
+        {
+            quick_launch_hidden.set(false);
+        }
+    });
+    // Focus only at the reveal boundary. A pending YOLO question mounts after
+    // reveal and owns its Cancel focus; ordinary rerenders never reclaim input.
+    use_effect(move || {
+        if !quick_launch_hidden() && quick_origin && yolo_refusal.current_key().is_none() {
+            focus_composer_surface(true);
+        }
+    });
     // HostPicker owns only transient browsing. Keep the old select's complete
     // destination transition here, including the synchronous history fence;
     // queued callbacks must observe the new target before a render happens.
@@ -4049,19 +4176,23 @@ pub(super) fn CreateSessionForm(
     });
     rsx! {
         div {
-            class: "launch-composer-backdrop",
+            class: if quick_launch_hidden() { "launch-composer-backdrop quick-launch-pending" } else { "launch-composer-backdrop" },
             role: "presentation",
             onclick: move |_| {
                 // This is a handler-time decision. The rendered `busy` value
                 // can be one turn stale immediately after submit, when
                 // unmounting would cancel the create future and strand its
                 // page-operation claim.
-                if !ops.busy_now() && !template_saving() {
+                if !quick_launch_hidden() && !ops.busy_now() && !template_saving() {
                     on_cancel.call(());
                 }
             },
         form {
             class: "create-session-form",
+            tabindex: "-1",
+            hidden: quick_launch_hidden(),
+            "data-opening-generation": "{opening_generation()}",
+            "data-create-target-fingerprint": create_target.read().as_ref().map(|target| target.fingerprint.clone()).unwrap_or_default(),
             // These are diagnostic state, not an authority channel. Keeping
             // the live connection and activation count on the mounted form
             // gives browser tests a synchronous observation point for races
@@ -4082,7 +4213,12 @@ pub(super) fn CreateSessionForm(
             aria_label: "launch a session",
             onmounted: move |_| {
                 install_composer_focus_trap();
-                focus_composer_surface();
+                if quick_launch_hidden() {
+                    // Hidden preparation cannot focus its fields. Structural
+                    // isolation still blurs/inerts the old terminal and header;
+                    // its capture safety net swallows background keyboard input.
+                    document::eval(&crate::modal_isolation::install_js(".create-session-form", Some(".launch-composer-cancel, .launch-composer-loading-cancel")));
+                } else { focus_composer_surface(false); }
             },
             onclick: move |evt| {
                 // A click that leaves the search surface must make its
@@ -4105,8 +4241,17 @@ pub(super) fn CreateSessionForm(
             },
             onsubmit: move |evt| {
                 evt.prevent_default();
+                // Parent actions revoke this before the render updates the
+                // generation attribute. An old queued auto-submit cannot use
+                // a newly supplied Clone/Replace draft in that gap.
+                if *quick_launch_hidden.peek() && !*auto_launch.peek() {
+                    auto_launch_pending.set(false);
+                    quick_launch_hidden.set(false);
+                    return;
+                }
                 launch_attempted.set(true);
                 error.set(None);
+                preparation_error.set(None);
                 if template_panel().is_some() || template_saving() { return; }
                 // The claim is the guard, and it is synchronous: it covers a
                 // second submit of THIS form (a double-click, a stray repeat
@@ -4654,6 +4799,7 @@ pub(super) fn CreateSessionForm(
                                 LaunchIntent::Structured(selection) => Some(selection.clone()),
                                 LaunchIntent::Command(_) => None,
                             };
+                            document::eval(&crate::modal_isolation::release_js(".create-session-form"));
                             on_created.call(CreatedSession {
                                 session: enrich_created_session(
                                     session,
@@ -4664,6 +4810,14 @@ pub(super) fn CreateSessionForm(
                             });
                         }
                         Err(e) => {
+                            // Every unsuccessful quick request ends hidden
+                            // preparation, even if its old target no longer owns
+                            // the refusal. Keep that refusal fenced below.
+                            let was_hidden = *quick_launch_hidden.peek();
+                            quick_launch_hidden.set(false);
+                            if was_hidden && create_target.peek().as_ref() != target_now.as_ref() {
+                                preparation_error.set(Some("the destination changed while quick launch was pending; review this setup before launching".into()));
+                            }
                             // Gated on the target this request was DISPATCHED
                             // for still being the one on screen: a refusal
                             // naming host A must not land under a form that
@@ -4724,10 +4878,13 @@ pub(super) fn CreateSessionForm(
                     }
                 });
             },
+            if let Some(message) = preparation_error() {
+                p { class: "create-session-error", role: "alert", "{display_peer(&message)}" }
+            }
             if pending_initial_action().is_some() {
                 p { role: "status", "loading session setup…" }
                 button {
-                    r#type: "button", class: "btn btn-neutral",
+                    r#type: "button", class: "btn btn-neutral launch-composer-loading-cancel",
                     "data-tooltip": "cancel: discard this session setup",
                     onclick: move |_| on_cancel.call(()), "cancel"
                 }
@@ -4865,7 +5022,7 @@ pub(super) fn CreateSessionForm(
             if let Some((candidate, host_label)) = template_panel() {
                 super::save_template::SaveTemplatePanel {
                     candidate, host_label, catalog: catalog_answer.clone(), saving: template_saving,
-                    on_cancel: move |_| { template_panel.set(None); focus_composer_surface(); },
+                    on_cancel: move |_| { template_panel.set(None); focus_composer_surface(false); },
                     on_saved: on_template_saved,
                 }
             }
@@ -4891,7 +5048,7 @@ pub(super) fn CreateSessionForm(
             // Shown only while the draft still holds the refused request's
             // key: an edit that changes what would launch retires the key,
             // and with it a question that no longer describes the draft.
-            if let Some(question) = yolo_refusal.current_key()
+            if let Some(question) = yolo_refusal.current_key().filter(|_| !quick_launch_hidden())
                 && intent_key.read().as_ref().is_some_and(|(key, _)| *key == question.refused_key)
             {
                 crate::yolo_confirm::YoloConfirmation {
@@ -6384,6 +6541,7 @@ mod tests {
             feedback_contact: None,
             terminal_link_click: None,
             skip_session_confirmations: None,
+            quick_launch_template: None,
         };
         assert_eq!(
             super::initial_structured_permissions(&with(Some("yolo"))),

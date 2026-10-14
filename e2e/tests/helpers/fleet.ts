@@ -1006,6 +1006,8 @@ export interface Preferences {
   skip_host_setup_confirmation?: boolean;
   /** Everyday session opt-out, independent of host and YOLO authority. */
   skip_session_confirmations?: boolean;
+  /** Sole shared shortcut template; template fields never contain this mark. */
+  quick_launch_template?: string;
   /** Contact reused by feedback dialogs after this client seeds from the helm. */
   feedback_contact?: string;
   /** Shared terminal web-link ownership; unset means interception. */
@@ -1040,6 +1042,7 @@ export async function patchPreferences(
     skip_host_remove_confirmation?: boolean | null;
     skip_host_setup_confirmation?: boolean | null;
     skip_session_confirmations?: boolean | null;
+    quick_launch_template?: string | null;
     feedback_contact?: string | null;
     terminal_link_click?: "intercept" | "both" | "program" | null;
   },
@@ -1073,6 +1076,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
     skip_host_remove_confirmation: null,
     skip_host_setup_confirmation: null,
     skip_session_confirmations: null,
+    quick_launch_template: null,
     feedback_contact: null,
     terminal_link_click: null,
   });

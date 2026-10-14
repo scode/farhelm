@@ -1473,6 +1473,33 @@ fn install_quick_switcher_shortcut() {
     );
 }
 
+/// Capture quick launch before terminal input, using the live list-owned trigger.
+///
+/// A hidden pending composer reserves this chord without pretending its fields
+/// are visible. Visible modals keep keyboard ownership, while repeat and a
+/// disabled trigger are consumed without starting another request.
+fn install_quick_launch_shortcut() {
+    document::eval(
+        r#"if (!window.__farhelmQuickLaunchShortcut) {
+        window.__farhelmQuickLaunchShortcut = true;
+        window.addEventListener('keydown', (event) => {
+            const mac = /Mac/.test(navigator.platform || '');
+            const chord = mac
+                ? event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+                : event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey;
+            if (!chord || event.code !== 'KeyP' || event.isComposing) return;
+            if ([...document.querySelectorAll('[role="dialog"][aria-modal="true"]')]
+                .some(node => node.getClientRects().length)) return;
+            const trigger = document.querySelector('.quick-launch-trigger');
+            if (!trigger) return;
+            event.preventDefault(); event.stopPropagation();
+            if (event.repeat || trigger.disabled) return;
+            trigger.click();
+        }, true);
+    }"#,
+    );
+}
+
 /// The renderer-independent application mounted only after desktop IPC auth
 /// has completed. Browser builds mount it immediately.
 #[component]
@@ -1482,6 +1509,7 @@ fn AppBody() -> Element {
     // component both builds mount, with every animation underneath it.
     use_hook(install_window_activity_tracking);
     use_hook(install_quick_switcher_shortcut);
+    use_hook(install_quick_launch_shortcut);
     #[cfg(native_desktop)]
     use_hook(|| {
         // cfg! keeps the Mac branch type-checked by the Linux desktop build
