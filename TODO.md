@@ -248,6 +248,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   click. Today the only link to them is What's new, in the menu behind the version readout, which appears only while an
   update is waiting to be applied.
 
+- **In-app intro tour.** Introduce new users to the app from inside it. At minimum, point out how to send feedback and
+  encourage reading the docs website's Get started section, with a link to it; it may grow into a fuller guided tour.
+  When it appears, how it is dismissed, and how much it covers are to be decided when the entry is planned.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
