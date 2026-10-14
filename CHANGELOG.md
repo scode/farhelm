@@ -2,6 +2,12 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.28.1 - 2026-10-13
+
+### 🔧 Fixes worth highlighting
+
+- Clicking a web link in a terminal opens one browser tab instead of two when the program in it, such as Codex, also opens links. Farhelm now keeps that click from reaching the program; if a program needs link clicks, choose **open in Farhelm and also pass the click on** or **pass the click on only** under **terminal links** in settings. (#1962)
+
 ## v0.28.0 - 2026-10-13
 
 ### 💥 Breaking
