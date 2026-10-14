@@ -189,7 +189,14 @@ Continuity checkpoints require independent before/after receipts as well.
                   'update-relaunch': True,
                   **({'local-supervisor-agent': True, 'remote-supervisor-agent': True}
                      if pass_id == 'p0-updater-upgrade' else {})})
-        return {key: {'gui': gui, 'command': gui, 'continuity': False} for key, gui in items.items()}
+        required = {key: {'gui': gui, 'command': gui, 'continuity': False, 'priority': 'P0'}
+                    for key, gui in items.items()}
+        if pass_id == 'p0-updater-upgrade':
+            # Feedback uses the candidate already running on this pair. Its
+            # result must not become a sixth P0 obligation or prevent cleanup.
+            required['p1-feedback-send'] = {'gui': True, 'command': False,
+                                             'continuity': False, 'priority': 'P1'}
+        return required
     items = ({'artifact-verification': False, 'fixture-clean': False, 'install': False,
               'app-start': True, 'remote-provision': True, 'codex-conversation': True,
               'remote-terminal': True, 'addendum': False} if pass_id == 'fresh' else
@@ -201,6 +208,19 @@ Continuity checkpoints require independent before/after receipts as well.
     return {key: {'gui': gui, 'command': key in hybrid,
                   'continuity': key in ('remote-update', 'reopen', 'continuity-before')}
             for key, gui in items.items()}
+
+
+def priority_entry(entry, priority):
+    """Project one priority's evidence without changing the saved observations.
+
+Older manifests declare priority only on the pass, so their existing checks
+keep that classification. An empty projection is not proof that the priority
+was planned; report callers must check its required set before calling verdict.
+"""
+    required = {key: spec for key, spec in entry['required'].items()
+                if spec.get('priority', entry.get('priority', 'bonus')) == priority}
+    return dict(entry, required=required,
+                results={key: entry['results'][key] for key in required if key in entry['results']})
 
 
 def artifact(root, reference):
@@ -347,18 +367,20 @@ consume space too, so growth is conservative, and no continuous quota is claimed
             raise Refused('observed run disk growth exceeds the configured budget')
         return free
 
-    def create(self, release_plan=None, inputs=None, smoke=False, p0_only=False):
+    def create(self, release_plan=None, inputs=None, smoke=False, p0_only=False, p1_only=False):
         """Bind scope and evidence obligations before any clone can be claimed.
 
-P0-only scope retains the bonus plan for honest coverage reporting, while
+Limited scope retains the bonus plan for honest coverage reporting, while
 preventing its fixtures from starting. It cannot be attached to a legacy plan
 that never declared the independent P0 installation paths.
 """
-        if p0_only and (smoke or not release_plan or not release_plan.get('p0_sequence')):
-            raise Refused('P0-only scope requires a plan with explicit P0 fixtures')
+        if p0_only and p1_only:
+            raise Refused('choose one stop scope, P0 or P1')
+        if (p0_only or p1_only) and (smoke or not release_plan or not release_plan.get('p0_sequence')):
+            raise Refused('limited scope requires a plan with explicit P0 fixtures')
         self.data = {'format': 1, 'run_id': str(uuid.uuid4()), 'kind': 'fixture-smoke' if smoke else 'release',
                      'profile': self.profile.values, 'plan': release_plan, 'passes': {},
-                     'scope': 'p0-only' if p0_only else 'full'}
+                     'scope': 'p0-only' if p0_only else 'p1-only' if p1_only else 'full'}
         self.data['initial_free_bytes'] = self.budget()
         specifications = [{'id': 'smoke', 'previous': None, 'update_path': None}] if smoke else release_plan['passes']
         for spec in specifications:
@@ -478,7 +500,8 @@ Image presence does not interpret its contents: the agent's detail is the GUI
 attestation. Verification and continuity receipts receive additional structural
 checks, and later report generation revalidates retained artifact references.
 New P0 plans additionally fence check order and stop accepting observations
-after a failed or unavailable check; historical manifests retain their rules.
+after a failed or unavailable check outside P1. P1 failures are retained but
+do not stop bonus coverage; historical manifests retain their declared rules.
 """
         entry = self.selected(pass_id)
         if entry['phase'] != 'ready' or check_id not in entry['required']:
@@ -489,10 +512,18 @@ after a failed or unavailable check; historical manifests retain their rules.
             raise Refused('provide a supported result and an actual observation')
         if len(detail) > 4000 or len(references) > 20:
             raise Refused('observation or evidence list exceeds its bound')
+        spec = entry['required'][check_id]
         if self.data['plan'] and self.data['plan'].get('p0_sequence'):
-            if any(v['status'] != 'pass' for e in self.data['passes'].values() for v in e['results'].values()):
-                raise Refused('stop after the first failed or unavailable check; preserve this run')
-            if entry.get('priority') == 'P0' and status == 'pass':
+            self.require_no_failure()
+            if spec.get('priority', entry.get('priority')) == 'P1':
+                if self.data.get('scope') == 'p0-only':
+                    raise Refused('stop after P0 checks: P1 is outside this run scope')
+                # A failed/unavailable P1 observation still asserts that P1
+                # was attempted at the right boundary, after every valid P0.
+                if any(self.verdict(priority_entry(self.selected(key), 'P0')) != 'pass'
+                       for key in self.data['plan']['p0_sequence']):
+                    raise Refused('complete all P0 checks with valid evidence before P1')
+            elif entry.get('priority') == 'P0' and status == 'pass':
                 preceding = list(entry['required'])[:list(entry['required']).index(check_id)]
                 prefix = dict(entry, required={key: entry['required'][key] for key in preceding},
                               results={key: entry['results'][key] for key in preceding if key in entry['results']})
@@ -501,7 +532,6 @@ after a failed or unavailable check; historical manifests retain their rules.
         bound = set(references) | {ref for ref in (before, after) if ref is not None}
         validated = {ref: artifact(self.directory, ref) for ref in bound}
         contents = [validated[ref] for ref in references]
-        spec = entry['required'][check_id]
         if status == 'pass':
             if not any(contents) or (spec['gui'] and not any(is_image(v) for v in contents)):
                 raise Refused('a passing check requires evidence, including an actual PNG for GUI checks')
@@ -593,6 +623,31 @@ missing P0 coverage through a scope edit.
         self.save()
         self.note('decision', 'Stop after P0 checks requested; future bonus fixtures are outside scope.')
 
+    def limit_to_p1(self):
+        """Stop after the declared P1 check without inventing it in an old run.
+
+Scope changes fence future fixtures, not GUI activity or guest shutdown; the
+operator still finishes evidence collection and cleans up the last P0 pair.
+"""
+        if not any(priority_entry(entry, 'P1')['required'] for entry in self.data['passes'].values()):
+            raise Refused('this historical run has no planned P1 check; start a new plan')
+        self.data['scope'] = 'p1-only'
+        self.save()
+        self.note('decision', 'Stop after P1 checks requested; future bonus fixtures are outside scope.')
+
+    def require_no_failure(self):
+        """Retain the stop-on-failure fence, with P1's deliberate exception.
+
+Preparation errors and failures of any other priority still stop progress.
+Ignoring P1 here never changes its separate or full-run verdict.
+"""
+        for entry in self.data['passes'].values():
+            if entry.get('preparation_error') or any(
+                    result['status'] != 'pass'
+                    for key, result in entry['results'].items()
+                    if entry['required'][key].get('priority', entry.get('priority')) != 'P1'):
+                raise Refused('stop after the first failed or unavailable check; preserve this run')
+
     def require_priority(self, pass_id):
         """Fence bonus work and later P0 fixtures before any guest is cloned.
 
@@ -601,17 +656,15 @@ Historical runs without an explicit P0 plan keep their original obligations;
 their observations are never retroactively relabeled as P0 coverage.
 """
         entry = self.selected(pass_id)
-        if any(e.get('preparation_error') or any(v['status'] != 'pass' for v in e['results'].values())
-               for e in self.data['passes'].values()):
-            raise Refused('stop after the first failed or unavailable check; preserve this run')
+        self.require_no_failure()
         sequence = self.data['plan']['p0_sequence']
         if entry.get('priority') == 'P0':
             preceding = sequence[:sequence.index(pass_id)]
         else:
-            if self.data.get('scope') == 'p0-only':
-                raise Refused('stop after P0 checks: bonus fixtures are outside this run scope')
+            if self.data.get('scope') in ('p0-only', 'p1-only'):
+                raise Refused('stop after P0 or P1 checks: bonus fixtures are outside this run scope')
             preceding = sequence
-        if any(self.verdict(self.selected(key)) != 'pass' for key in preceding):
+        if any(self.verdict(priority_entry(self.selected(key), 'P0')) != 'pass' for key in preceding):
             raise Refused('complete P0 fixtures in order before later checks')
 
     def verdict(self, entry):
@@ -635,11 +688,12 @@ their observations are never retroactively relabeled as P0 coverage.
         return 'pass'
 
     def report(self):
-        """Report P0, requested scope and full coverage without conflating their verdicts.
+        """Report P0, P1, requested scope and full coverage independently.
 
 Every answer rechecks retained bytes. Legacy observations and fixture smoke
 remain distinguishable from the five declared P0 product checks; unfinished
-bonus work cannot erase a P0 pass or become a full acceptance pass.
+bonus work cannot erase a P0 pass or become a full acceptance pass. P1 is part
+of its fixture's full verdict but excluded from P0's projections.
 """
         output = {'kind': self.data['kind'], 'run_dir': str(self.directory),
                   'operator_policy': self.profile.values['operator_policy'], 'plan': self.data['plan'], 'passes': {}}
@@ -660,7 +714,7 @@ bonus work cannot erase a P0 pass or become a full acceptance pass.
         output['verdict'] = outcome if self.data['kind'] == 'release' else 'fixture smoke: ' + outcome
         if self.data['kind'] == 'release':
             p0_ids = self.data['plan'].get('p0_sequence', [])
-            p0_verdicts = [output['passes'][key]['verdict'] for key in p0_ids]
+            p0_verdicts = [self.verdict(priority_entry(self.selected(key), 'P0')) for key in p0_ids]
             output['scope'] = self.data.get('scope', 'full')
             output['p0'] = {'verdict': ('not planned' if not p0_ids else
                                        'fail' if 'fail' in p0_verdicts else
@@ -678,12 +732,32 @@ bonus work cannot erase a P0 pass or become a full acceptance pass.
                              ('remote-supervisor-agent', 'p0-updater-upgrade', ['remote-supervisor-agent'])]
                 output['p0']['checks'] = {}
                 for label, pass_id, keys in questions:
-                    entry = self.selected(pass_id)
+                    entry = priority_entry(self.selected(pass_id), 'P0')
                     if keys is not None:
                         entry = dict(entry, required={key: entry['required'][key] for key in keys},
                                      results={key: entry['results'][key] for key in keys if key in entry['results']})
                     output['p0']['checks'][label] = self.verdict(entry)
-            output['requested_verdict'] = output['p0']['verdict'] if output['scope'] == 'p0-only' else outcome
+            # P1's verdict is never borrowed from its enclosing P0 fixture:
+            # otherwise a feedback failure would erase successful upgrades.
+            p1_entries = {key: priority_entry(entry, 'P1') for key, entry in self.data['passes'].items()
+                          if priority_entry(entry, 'P1')['required']}
+            p1_checks = {check: self.verdict(dict(entry, required={check: entry['required'][check]},
+                                                results={check: entry['results'][check]}
+                                                if check in entry['results'] else {}))
+                         for entry in p1_entries.values() for check in entry['required']}
+            p1_verdicts = [self.verdict(entry) for entry in p1_entries.values()]
+            output['p1'] = {'verdict': ('not planned' if not p1_entries else
+                                       'fail' if 'fail' in p1_verdicts else
+                                       'pass' if all(v == 'pass' for v in p1_verdicts) else 'could not run'),
+                            'checks': p1_checks}
+            requested = [output['p0']['verdict'], output['p1']['verdict']]
+            if output['scope'] == 'p0-only':
+                output['requested_verdict'] = output['p0']['verdict']
+            elif output['scope'] == 'p1-only':
+                output['requested_verdict'] = ('fail' if 'fail' in requested else
+                                               'pass' if all(v == 'pass' for v in requested) else 'could not run')
+            else:
+                output['requested_verdict'] = outcome
             candidate = self.data['plan']['candidate']
             observations = [self.data['plan']['latest_at_plan']] + [v.get('latest_at_selection')
                             for key, v in self.data['passes'].items() if key.startswith('upgrade-') or
@@ -693,13 +767,34 @@ bonus work cannot erase a P0 pass or become a full acceptance pass.
         return output
 
     def cleanup(self, pass_id, discard_failed=False):
-        """Delete only a tested successful pair, or an explicitly approved failed pair.
+        """Clean a validated pair while preserving P1's nonblocking result.
 
 Evidence is rechecked first. Clean guest shutdown remains mandatory, and each
 role's low-level manifest must prove unchanged ownership and observed absence.
+The final P0 pair needs an in-scope P1 observation, but a failed P1 does not
+require keeping clones alive. Other incomplete/failed pairs need explicit
+discard approval as before; none of these paths delete retained evidence.
 """
         entry = self.selected(pass_id)
-        if self.verdict(entry) != 'pass' and not discard_failed:
+        p1 = priority_entry(entry, 'P1')
+        if p1['required']:
+            successful = self.verdict(priority_entry(entry, 'P0')) == 'pass'
+            observed = set(p1['results']) == set(p1['required'])
+            retained = self.verdict(p1) == 'pass' or all(
+                result['status'] != 'pass' for result in p1['results'].values())
+            # A P0-only stop needs no P1 result, but once any P1 result is
+            # recorded (a full run narrowed to P0 late, say) the retention
+            # check below still applies: a scope edit must not let cleanup
+            # delete the guests behind a successful P1 whose export was lost.
+            finished = ((self.data.get('scope') == 'p0-only' and not p1['results'])
+                        or (observed and retained))
+            # P1 failed sends need evidence retention, not a live disposable
+            # pair. A recorded success whose export was lost is different:
+            # keep the guests so its evidence can still be recovered.
+            complete = successful and finished
+        else:
+            complete = self.verdict(entry) == 'pass'
+        if not complete and not discard_failed:
             raise Refused('pass is incomplete or failed; ask about retention before --discard-failed')
         c = self.pair(pass_id)
         with c.locked():
@@ -774,13 +869,16 @@ def main():
         child = sub.add_parser(name)
         child.add_argument('candidate')
         if name == 'init':
-            child.add_argument('--stop-after-p0', action='store_true',
+            scope = child.add_mutually_exclusive_group()
+            scope.add_argument('--stop-after-p0', action='store_true',
                                help='complete the five P0 checks and refuse bonus fixtures')
+            scope.add_argument('--stop-after-p1', action='store_true',
+                               help='complete P0 and the feedback P1 check, then stop')
     sub.add_parser('smoke')
-    for name in ('serve', 'status', 'select-update', 'record', 'add-check', 'cleanup', 'stop-after-p0'):
+    for name in ('serve', 'status', 'select-update', 'record', 'add-check', 'cleanup', 'stop-after-p0', 'stop-after-p1'):
         child = sub.add_parser(name)
         child.add_argument('run_dir', type=Path)
-        if name not in ('status', 'stop-after-p0'):
+        if name not in ('status', 'stop-after-p0', 'stop-after-p1'):
             child.add_argument('pass_id')
         if name == 'serve':
             child.add_argument('--headless', action='store_true')
@@ -813,7 +911,8 @@ def main():
         run = Run(root / ('brick-' + str(uuid.uuid4())), profile)
         run.create(release if args.action == 'init' else None,
                    inputs if args.action == 'init' else None, smoke=args.action == 'smoke',
-                   p0_only=args.action == 'init' and args.stop_after_p0)
+                   p0_only=args.action == 'init' and args.stop_after_p0,
+                   p1_only=args.action == 'init' and args.stop_after_p1)
         if args.action == 'smoke':
             smoke(run)
         else:
@@ -846,6 +945,8 @@ def main():
             run.select_update(args.pass_id, download(ORIGIN + '/latest').decode().strip())
         elif args.action == 'stop-after-p0':
             run.limit_to_p0()
+        elif args.action == 'stop-after-p1':
+            run.limit_to_p1()
         report = run.report()
         if args.action == 'status':
             atomic_json(run.directory / 'report.json', report)

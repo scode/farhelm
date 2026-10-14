@@ -14,15 +14,31 @@ run remains useful, but cannot gate the candidate's initial exposure.
 order: fresh installation and app startup; installer upgrade from the previous promoted stable; click-to-upgrade
 discovery and relaunch from that stable; local supervisor upgrade with one successful genuine agent; remote supervisor
 upgrade with one successful genuine agent. Stop on the first failure or unavailable prerequisite. Broader functionality
-and historical-version coverage are bonus work after P0, never prerequisites inserted between these five checks.
+and historical-version coverage are bonus work after P0 and the separate P1 check, never prerequisites inserted between
+these five checks.
+
+**P1** sends one real feedback submission through the candidate app after P0 passes, on the Mac guest of
+`p0-updater-upgrade`, before the final export and cleanup of that pair. Its first line is `[brick-test] vX.Y.Z`, naming
+the candidate, so the private inbox issue is titled `Feedback: [brick-test] vX.Y.Z`. Report `p1.verdict` and its
+`p1-feedback-send` result separately from P0. A P1 failure or unavailable check is reported promptly and does not stop
+bonus coverage; P0's verdict remains independent. The full `verdict` includes P1. If P0 fails or cannot run, do not
+attempt P1.
 
 The coordinator reports `p0.verdict` and the five named `p0.checks` separately from the full `verdict`. **Did P0 checks
 succeed?** means all five ran and passed with retained evidence. **Stop after P0 checks** means record that scope with
 `init vX.Y.Z --stop-after-p0`, complete P0, export its evidence, clean up its successful fixtures, and end the session
-before bonus work. If requested during a run, persist the scope with `brick_test.py stop-after-p0 "$test_run"`, finish
-only the remaining P0 work and cleanup, and retain the request in the private working log. If bonus work already began,
-stop that work and preserve its partial evidence; the scope command fences future fixtures but does not itself cancel
-GUI actions or shut down guests. A P0 pass does not claim that bonus checks or every historical upgrade ran.
+before P1 or bonus work; no feedback is sent. If requested during a run, persist the scope with
+`brick_test.py stop-after-p0 "$test_run"`, finish only the remaining P0 work and cleanup, and retain the request in the
+private working log. If bonus work already began, stop that work and preserve its partial evidence; the scope command
+fences future fixtures but does not itself cancel GUI actions or shut down guests. A P0 pass does not claim that bonus
+checks or every historical upgrade ran.
+
+**Stop after P1 checks** means use `init vX.Y.Z --stop-after-p1`, finish P0 and P1, retain their evidence, clean up the
+last pair even if P1 failed, and stop before bonus fixtures. A mid-run request is persisted with
+`brick_test.py stop-after-p1 "$test_run"`; like the P0 scope command, it fences future fixtures rather than cancelling
+ongoing GUI work. A run started as stop-after-P0 had no approval for the live feedback send in its preflight, so obtain
+that approval before widening it this way. `requested_verdict` then includes P0 and P1 together. **Did P1 checks
+succeed?** is answered from `p1.verdict` and the named check, never inferred from P0 or the full verdict.
 
 Read [RECIPE.md](RECIPE.md) for the product checks and [OPERATIONS.md](OPERATIONS.md) for guest commands, GUI mechanics
 and evidence collection. [BRING-UP.md](BRING-UP.md) covers preparing another machine. A previously successful run proves
@@ -86,6 +102,11 @@ remaining approvals together. Credential approval must name Mac and Linux separa
 cover the other. Scope copies to this run's disposable clones with mode 0600, keep credentials out of logs and exports,
 and leave frozen bases unchanged. Record the scope and response privately without credential contents.
 
+For full or stop-after-P1 scope, include approval to send the live P1 feedback through the candidate app to
+`farhelm.io`: it creates an issue in the maintainer's private feedback inbox, with the fixed brick-test title and no
+contact information. Reuse explicit authorization covering that send; otherwise ask alongside the other missing
+approvals. A stop-after-P0 scope does not include this send and needs no permission for it.
+
 Resolve known permission prerequisites before installing or launching Farhelm. Readiness probes in owned clones may
 reveal a missing requirement that the provisioning records could not establish; settle it before product checks rather
 than deferring it until the corresponding supervisor/agent step. This is permission planning, not an extra agent
@@ -123,7 +144,8 @@ of discovering it after fixture preparation.
 - Run `python3 -B releasing/mac-vm-test/brick_test.py init vX.Y.Z`. Save the returned private `run_dir` as `test_run`.
   The output names every pass and required checkpoint. The run gets its own directory under the configured evidence
   root, a profile snapshot, candidate input copies and initial free-space observation. No guests start yet. Add
-  `--stop-after-p0` when requested; the coordinator refuses bonus fixtures in that scope.
+  `--stop-after-p0` or `--stop-after-p1` when requested; both refuse bonus fixtures, and P0-only also refuses P1
+  records.
 - Read the candidate's release notes, changelog fragments and protocol/schema changes. Fill RECIPE's addendum inside
   `test_run`. Record all planned pairs, Codex selection, omitted agents and concrete extra checks. Add each extra
   obligation on a bonus pass with `brick_test.py add-check "$test_run" <pass> extra-<name>`, adding `--gui` for a GUI
@@ -147,14 +169,19 @@ continuous disk quota. Measure free space during large installations too, follow
 Run RECIPE's P0 procedure first: `p0-fresh`, then `p0-installer-upgrade`, then `p0-updater-upgrade`. The last fixture
 holds P0 steps 3–5, in that order. The two upgrade fixtures are independent: a successful installer run cannot prove
 discovery by the old app's updater. The coordinator fences later P0 fixtures and bonus work on preceding valid P0
-evidence, refuses additional observations after a failed or unavailable check, and prevents adding extra feature checks
-to P0. Export and record each successful fixture, then clean it up before starting the next. Never provision frozen
-bases.
+evidence, refuses additional observations after a failed or unavailable check outside P1, and prevents adding extra
+feature checks to P0. Export and record each successful fixture, then clean it up before starting the next; retain the
+last pair for P1 unless scope is P0-only. Never provision frozen bases.
 
-After P0 succeeds, report its verdict promptly. Unless asked to stop after P0, continue RECIPE's full fresh pass
-(`fresh`) and full upgrade passes (`upgrade-v<previous>`), newest baseline first, as bonus coverage. These also get
-separate clones. Historical manifests without explicit P0 fixtures report `p0.verdict: not planned`; do not relabel
-their observations or erase history to fit the new procedure.
+After P0 succeeds, report its verdict promptly. Unless asked to stop after P0, perform RECIPE's P1 feedback send on the
+candidate still running in `p0-updater-upgrade`, record its GUI evidence, report its separate verdict, then export and
+clean up the pair. A P1 failure does not require retaining the clones: its evidence and failure verdict remain saved.
+P0's per-check exports must already be retained to establish its verdict before P1; the final export adds P1's captures.
+Stop here in P1-only scope. Otherwise continue RECIPE's full fresh pass (`fresh`) and full upgrade passes
+(`upgrade-v<previous>`), newest baseline first, as bonus coverage. These also get separate clones. Historical manifests
+without explicit P0 fixtures report `p0.verdict: not planned`; do not relabel their observations or erase history to fit
+the new procedure. Manifests that never declared P1 report `p1.verdict: not planned`; do not add an obligation to a
+historical run.
 
 For each pass, copy the needed verification helper and tag source into the Mac guest through the documented command
 channel. Run `verify_release.py --previous v<previous> --version v<candidate> --output <guest-private-directory>` from
@@ -177,6 +204,11 @@ manual installer path. The two supervisor/agent checks require connected candida
 meaningful response from a genuine agent launched through Farhelm on the corresponding host. A plain command or CLI
 version alone cannot satisfy them. P0 requires no template, changed setting, old conversation, resume test or counter
 continuity workload.
+
+The final fixture also declares `p1-feedback-send` after its P0 checkpoints. This is GUI-only: retain a PNG of the
+filled dialog before Send and another showing it closed after success (or the failure state), with the agent's actual
+observation. It needs no command-side success receipt; the helm logs only failed sends. See RECIPE's P1 section for the
+fixed message, blank contact and candidate-version/surface premise.
 
 The bonus checkpoint names retain RECIPE's broader acceptance obligations:
 
@@ -252,6 +284,12 @@ down both owned guests, verifies stopped state, deletes only unchanged recorded 
 the corresponding foreground `serve` session to exit. The controller journals its mutations and outcomes externally;
 also journal computer use, decisions and interruptions as operator policy requires.
 
+On P0's last pair, cleanup requires valid P0 evidence and an in-scope P1 result recorded as pass, fail or could-not-run.
+In P0-only scope it requires no P1 result. P1 failure does not need `--discard-failed`; its verdict and evidence are
+preserved while the pair is cleaned normally. Other failed or incomplete checks keep the retention rule below. A
+recorded P1 success still requires intact exported evidence; changed or missing captures must be recovered before
+ordinary cleanup.
+
 Failure or interruption preserves partial manifests and live supervision. Inspect `status`, actual Tart state and the
 journal before acting again; preparation is never replayed automatically. Agree failed-clone retention with the
 maintainer. Only after that agreement use `cleanup ... --discard-failed`; it preserves the failure verdict and still
@@ -259,14 +297,15 @@ requires ownership and clean shutdown. A manifest with an interrupted clone cann
 Do not kill a Tart process or force-stop a guest to get around a failed check.
 
 After every planned pass, run `status` and inspect its saved report. **P0 pass** requires all five critical checks; a
-**full pass** additionally requires every planned bonus check. Any product failure makes the relevant verdict fail;
-missing checks or fixtures make it could not run. In P0-only scope, `requested_verdict` follows P0, while the full
-`verdict` remains incomplete if bonus work did not run. A bonus failure does not erase valid P0 evidence, and a P0 pass
-does not excuse that bonus failure. Stop on a failure, preserve diagnostics, and resolve it before continuing. Report
-exact versions, checksum hash, update paths, before/after-public-default coverage, omitted agents, diagnostic gaps,
-cleanup and private evidence retention. Publish only a redacted summary if separately requested. Never commit profiles,
-raw evidence, guest names, private paths, addresses or credentials. This procedure grants no GitHub writes or release
-promotion.
+**P1 pass** requires its feedback check, and a **full pass** additionally requires P1 and every planned bonus check. Any
+product failure makes the relevant verdict fail; missing checks or fixtures make it could not run. In P0-only scope,
+`requested_verdict` follows P0, while the full `verdict` remains incomplete if bonus work did not run. A bonus failure
+does not erase valid P0 evidence, and a P0 pass does not excuse that bonus failure. Stop on a failure outside P1,
+preserve diagnostics, and resolve it before continuing. For P1, report the failure promptly, retain evidence, clean up
+the pair and continue bonus coverage unless the requested scope ends there. Report exact versions, checksum hash, update
+paths, before/after-public-default coverage, omitted agents, diagnostic gaps, cleanup and private evidence retention.
+Publish only a redacted summary if separately requested. Never commit profiles, raw evidence, guest names, private
+paths, addresses or credentials. This procedure grants no GitHub writes or release promotion.
 
 ## Validate changes to this coordinator
 

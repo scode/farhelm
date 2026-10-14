@@ -15,17 +15,24 @@ When asked **`brick test release vX.Y.Z`**, follow
 read its operator policy and journal, and run **P0 checks first**, in the five-step order in BRICK-TEST.md, with
 guest-only product mutations. P0 covers fresh install/start, a separate installer upgrade, click-to-upgrade
 discovery/relaunch, local supervisor upgrade with one successful agent, then remote supervisor upgrade with one
-successful agent. Stop at the first failure or missing prerequisite. Everything else is bonus coverage, started only
-after P0 succeeds. A request to **stop after P0 checks** ends after recording P0 evidence and cleaning up its successful
-fixtures; do not start bonus fixtures. Answer **did P0 checks succeed?** from the separate P0 verdict and five results,
-naming anything incomplete. Missing prerequisites mean could not run; resolve them with the maintainer instead of
-guessing machine bindings. A test request does not authorize publication or release promotion.
+successful agent. Stop at the first failure or missing prerequisite. After P0 passes, P1 sends one live feedback
+submission from the candidate on P0's last Mac guest, before that fixture is exported and cleaned up; broader work is
+bonus coverage after P1. A P1 failure is reported promptly with its separate verdict and does not invalidate P0, block
+cleanup or fence bonus passes. A request to **stop after P0 checks** ends after recording P0 evidence and cleaning up
+its successful fixtures; no feedback is sent and no bonus fixture starts. **Stop after P1 checks** ends after P0 and P1
+evidence and the last fixture's cleanup. Answer **did P0 checks succeed?** from the separate P0 verdict and five
+results, naming anything incomplete. Answer **did P1 checks succeed?** from its own verdict and named feedback check.
+The full verdict includes P1; whether its failure blocks promotion is the maintainer's call for that release. Missing
+prerequisites mean could not run; resolve them with the maintainer instead of guessing machine bindings. A test request
+does not authorize publication or release promotion.
 
 During startup readiness and coverage planning, inventory permissions needed for the requested scope and ask for missing
 approvals together before product testing starts. Include agent setup on both Mac and Linux, credential copies or
-refreshes, guest GUI permissions and bounded private evidence export. Name the credential source, each destination and
-run scope; reuse existing explicit authorization when it covers them. Follow BRICK-TEST.md's permission preflight so a
-known agent prerequisite does not first become a permission question halfway through P0.
+refreshes, guest GUI permissions and bounded private evidence export. For full or P1-only scope, include the live
+feedback send to farhelm.io that creates an issue in the private inbox; P0-only scope does not authorize or require it.
+Name the credential source, each destination and run scope; reuse existing explicit authorization when it covers them.
+Follow BRICK-TEST.md's permission preflight so a known agent prerequisite does not first become a permission question
+halfway through P0.
 
 Before creating a new test pair, inspect live Tart state and reconcile leftover brick-test guests using their original
 ownership manifests and journal. The new test request authorizes clean shutdown of abandoned previous test pairs without
