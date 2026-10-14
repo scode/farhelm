@@ -65,12 +65,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   its terminal tabs running and shows the session as exited, the same as any other exit. Whether suspending also stops
   terminal tabs, what bringing a session back does, and how it looks in the list are details TBD.
 
-- **Lock down the release and update trust chain.** Installs and updates now come from get.farhelm.io with signed
-  checksums, and CI no longer signs. What remains: a Vercel user that holds only the get.farhelm.io project; disconnect
-  the docs project from Git (its automatic deploys are off only by a setting in agent-writable `website/vercel.json`);
-  tag rulesets and GitHub immutable releases; lock down the DNS, registrar and email accounts; and review the source
-  diff before signing, since the signature proves who published a release, not that its code is sound.
-
 - **Upgrade epochs.** Give every release an upgrade epoch, and only promise clean upgrades across one epoch: an
   installation on epoch N updates normally while the latest release is on N+1, and one whose latest release is N+2 is
   told to uninstall and reinstall. A change that needs new logic in the upgrade path itself ships that logic in a
@@ -89,13 +83,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   that a release keeps accepting what newer releases publish. This must ship before the first release that needs to say
   something new, the same way the upgrade epochs entry above handles new upgrade logic. Plan:
   `plans/queue/release-advisories.md`.
-
-- **Experiment: a different allocator for the release binaries.** EXPERIMENT ONLY; nothing changes without a measured
-  win. The release binaries are static musl, whose allocator hands memory back to the OS eagerly; about a quarter of the
-  supervisor's CPU was the kernel's cross-CPU interrupts from those `munmap` calls, though most of the churn comes from
-  polling the entries above remove. After they land, profile the supervisor, try mimalloc or jemalloc, and keep it only
-  if a before/after measurement on the same workload shows a clear CPU win worth building a C allocator for every
-  release target. Baseline numbers and method: `lore/2026-10-08-supervisor-idle-cpu.md`.
 
 - **Pin the Rust toolchain.** Nothing pins Rust today: there is no `rust-toolchain.toml`, CI's toolchain action installs
   whatever stable is current when the job runs, and a developer machine keeps whatever stable it last updated to. So
@@ -489,6 +476,20 @@ are large mostly because of their tests.
   changelog docstring and the cross-protocol test pruning that shared this entry are done.
 
 ## Maybe later
+
+- **Further harden the release and update trust chain.** The chain is already hardened: installs and updates come from
+  get.farhelm.io with signed checksums, and CI no longer signs. Further steps would raise the bar: a Vercel user that
+  holds only the get.farhelm.io project; disconnect the docs project from Git (its automatic deploys are off only by a
+  setting in agent-writable `website/vercel.json`); tag rulesets and GitHub immutable releases; lock down the DNS,
+  registrar and email accounts; and review the source diff before signing, since the signature proves who published a
+  release, not that its code is sound.
+
+- **Experiment: a different allocator for the release binaries.** EXPERIMENT ONLY; nothing changes without a measured
+  win. The release binaries are static musl, whose allocator hands memory back to the OS eagerly; about a quarter of the
+  supervisor's CPU was the kernel's cross-CPU interrupts from those `munmap` calls, though most of the churn came from
+  polling that has since been removed (#1738, #1766). Profile the supervisor again, try mimalloc or jemalloc, and keep
+  it only if a before/after measurement on the same workload shows a clear CPU win worth building a C allocator for
+  every release target. Baseline numbers and method: `lore/2026-10-08-supervisor-idle-cpu.md`.
 
 - **Install Claude and Codex on a host for the user.** Offer to install Claude Code and Codex (only those two) on a host
   on the user's behalf, always through each vendor's one-line curl installer, and optionally copy the user's credentials
