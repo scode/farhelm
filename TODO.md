@@ -44,10 +44,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Fix duplicate link opening.** Reported symptom: one click on a link in Farhelm opens two separate browser tabs for
-  the same URL. The recent change intended to support browser-open forwarding is a suspected cause, not a confirmed
-  diagnosis. Fix it so one click opens only one intended browser tab. Plan: `plans/queue/link-click-intercept.md`.
-
 - **Help users start the shared ssh connections themselves.** A host that needs an interactive approval for every new
   ssh connection (a second factor, say) only works if the user starts the helm's shared connections for it by hand, at
   the helm's socket paths, because the helm itself runs ssh non-interactively. Today that means knowing Farhelm's

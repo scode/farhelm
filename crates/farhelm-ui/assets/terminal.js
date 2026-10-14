@@ -3523,6 +3523,10 @@
           secret: deviceSecret,
           native: typeof window[WEBVIEW_DEVICE_SECRET] === 'string',
         });
+        // Both link providers identify the web target currently under the pointer.
+        // A file hover never qualifies for withholding program input.
+        let hoveredWebLink = false;
+        const linkClickMode = () => window.farhelmTerminalLinkClickMode || 'intercept';
         term = new Terminal({
           // At most the tmux history floor (`HISTORY_LIMIT`,
           // farhelm-supervisor/src/tmux.rs), never more: PLAN_M2_5.md
@@ -3586,11 +3590,12 @@
               // download belongs to a gesture made to copy terminal text.
               if (term.getSelection()) return;
               const target = window.farhelmTerminalFiles.oscTarget(uri);
-              if (target?.kind === 'web') window.farhelmTerminalLinks.openTerminalUrl(uri);
+              if (target?.kind === 'web' && linkClickMode() !== 'program') window.farhelmTerminalLinks.openTerminalUrl(uri);
               else if (target?.kind === 'file') fileLinks.download(target.path);
             },
             hover(event, uri, range) {
               const target = window.farhelmTerminalFiles.oscTarget(uri);
+              hoveredWebLink = target?.kind === 'web';
               const links = window.farhelmTerminalLinks;
               // OSC labels can change without changing target or cell range.
               // Keep evidence only while the same displayed text remains there.
@@ -3600,6 +3605,7 @@
               }
             },
             leave() {
+              hoveredWebLink = false;
               fileLinks.leave();
               window.farhelmTerminalLinks.hideLinkTarget(term.element);
             },
@@ -3651,7 +3657,7 @@
         // it on unmount, because the `keepTerm` reconnect path retains the
         // terminal and the addon must live exactly as long.
         //
-        // No options: the verified upstream default matcher is the whole
+        // The verified upstream default matcher is the whole
         // detection boundary (explicit http(s) text in lowercase or
         // UPPERCASE schemes only — the upstream regex has no `i` flag —
         // absolute-URL-with-host validation, wrapped-line reconstruction),
@@ -3675,13 +3681,18 @@
             // after selecting text still opens. Both halves are pinned by
             // e2e/tests/terminal-links.spec.ts, in both engines. OSC 8
             // activation applies the same guard before web/file dispatch.
-            if (term.getSelection()) return;
+            if (term.getSelection() || linkClickMode() === 'program') return;
             // The second boundary (the addon's default matcher is the
             // first): http(s) with a host, or nothing opens — printed
             // `javascript:`/`data:`/`file:` text is never clickable (see
             // terminal-links.js for the full four-check rationale).
             if (!window.farhelmTerminalLinks.isPlainWebUrl(uri)) return;
             window.farhelmTerminalLinks.openTerminalUrl(uri);
+          }, {
+            hover(_event, uri) {
+              hoveredWebLink = window.farhelmTerminalLinks.isPlainWebUrl(uri);
+            },
+            leave() { hoveredWebLink = false; },
           }),
         );
         term.loadAddon(fileLinks);
@@ -5024,7 +5035,13 @@
         // arm that would ESC-prefix some later unrelated Enter. Ordinary
         // input is untouched: unarmed chunks pass through byte-for-byte.
         let shiftEnterArmed = false;
+        // Link ownership survives other button presses and preference changes
+        // until the primary release. The captured event bounds output filtering
+        // to its synchronous dispatch; no timer can swallow subsequent input.
+        let withheldPrimary = false;
+        let linkMouseDispatch = null;
         term.onData((d) => {
+          if (window.farhelmTerminalLinks.suppressMouseReport(d, linkMouseDispatch)) return;
           const merged = window.farhelmShiftEnterKey.mergeArmedPrefix(shiftEnterArmed, d);
           shiftEnterArmed = merged.armed;
           sendData(merged.send);
@@ -5335,6 +5352,7 @@
             const selectionText = hasSelection ? term.getSelection() : "";
             if (
               press &&
+              !press.withheld &&
               press.sequence === pressSequence &&
               window.farhelmCopyOnSelect.dragMayHaveCopiedNothing({
                 button: press.button,
@@ -5368,6 +5386,51 @@
           }, 0);
         };
         term.element.addEventListener("mousedown", handleTerminalMouseDown);
+        // xterm's link listener on the screen must see the press first: it
+        // remembers which link owns the eventual release. A capture listener
+        // would hide that press and could activate a stale link instead. Stop
+        // only before bindMouse on the enclosing terminal: skipping its press
+        // usually also skips installing document release/drag reporters. Another
+        // button may have installed them already, so their output is gated below
+        // without preventing xterm's all-buttons-up cleanup from running.
+        const linkScreen = term.element.querySelector('.xterm-screen');
+        const withholdLinkPress = (event) => {
+          if (!window.farhelmTerminalLinks.interceptLinkPress({
+            button: event.button,
+            tracking: term.modes.mouseTrackingMode !== 'none',
+            forced: window.farhelmCopyOnSelect.pressForcesSelection(event, navigator.platform),
+            webLink: hoveredWebLink,
+            mode: linkClickMode(),
+          })) return;
+          // The ordinary terminal listener is above this stop. Dismiss its
+          // previous notice explicitly, but this gesture never reaches the
+          // program and must never produce the program-copy guidance itself.
+          handleTerminalMouseDown(event);
+          pressed.withheld = true;
+          withheldPrimary = true;
+          term.clearSelection();
+          event.preventDefault();
+          term.focus();
+          event.stopPropagation();
+        };
+        linkScreen.addEventListener('mousedown', withholdLinkPress);
+        // Observe without stopping propagation: screen-level link activation and
+        // document-level reporter cleanup both need the release. xterm's public
+        // output callbacks run synchronously inside these mouse dispatches. DOM
+        // resets eventPhase after dispatch, whereas a capture-listener microtask
+        // can run before the later bubble listener and is too early a boundary.
+        const captureLinkMouseEvent = (event) => {
+          const withheld = withheldPrimary && (event.type === 'mouseup'
+            ? event.button === 0
+            : event.type === 'mousemove' && !!(event.buttons & 1));
+          linkMouseDispatch = { event, withheld };
+          if ((event.type === 'mouseup' || event.type === 'mousedown') && event.button === 0) {
+            withheldPrimary = false;
+          }
+        };
+        for (const type of ['mousedown', 'mousemove', 'mouseup']) {
+          document.addEventListener(type, captureLinkMouseEvent, true);
+        }
         document.addEventListener("mouseup", handleCopyOnSelectMouseUp);
         if (dragNotice) window.addEventListener("resize", dragNotice.reposition);
         // Removable independently of every other per-mount listener (see
@@ -5377,6 +5440,12 @@
         // its own.
         stopCopyOnSelect = () => {
           term.element.removeEventListener("mousedown", handleTerminalMouseDown);
+          linkScreen.removeEventListener('mousedown', withholdLinkPress);
+          for (const type of ['mousedown', 'mousemove', 'mouseup']) {
+            document.removeEventListener(type, captureLinkMouseEvent, true);
+          }
+          linkMouseDispatch = null;
+          withheldPrimary = false;
           document.removeEventListener("mouseup", handleCopyOnSelectMouseUp);
           if (noticeGraceTimer !== null) clearTimeout(noticeGraceTimer);
           if (dragNotice) {
@@ -5408,6 +5477,7 @@
         // pin the byte-domain contract against the exact file the page
         // runs, rather than a copy.
         term.onBinary((d) => {
+          if (window.farhelmTerminalLinks.suppressMouseReport(d, linkMouseDispatch)) return;
           if (ws.readyState !== WebSocket.OPEN) return;
           ws.send(window.farhelmTermBytes.binaryStringToBytes(d));
         });

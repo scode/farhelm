@@ -479,10 +479,10 @@ switches retain native checkbox inputs for label activation and Space handling. 
 `Some(true)` as without asking, updates `SharedPreferences` immediately and sends an explicit boolean through the
 existing sparse preference queue. Preference failures retain that queue's silent behavior. The dialog uses the host
 dialogs' framed header and footer, with a gear tile and a separately named × close control. Only the body scrolls; its
-sections group hosts, managed checkouts, sounds and, when the updater is active, updates. Both close controls stay
-visible. It uses the shared focus/isolation helper with its own selector; opening focuses the first switch, Escape or
-either close control releases isolation and returns focus to the gear. The host setup and removal permanent answers each
-name that gear as the way to turn confirmation back on.
+sections group hosts, terminal links, managed checkouts, sounds and, when the updater is active, updates. Both close
+controls stay visible. It uses the shared focus/isolation helper with its own selector; opening focuses the first
+switch, Escape or either close control releases isolation and returns focus to the gear. The host setup and removal
+permanent answers each name that gear as the way to turn confirmation back on.
 
 The all-hosts checkout folder uses a shared explicit-save field rather than the preference queue: invalid path text must
 have a visible refusal, and a draft is not configuration. `GET`/`PUT /api/checkout-root` is an ordinary protected route
@@ -958,6 +958,30 @@ release pointer rather than flipping below it. CSS caps the box to the viewport 
 dismissed. Only × takes pointer events; its mousedown prevents the native focus change, and its click hides locally
 outside xterm's element. A terminal press cancels both the visible notice and any pending OSC 52 grace check. Resize
 repositions it; mount teardown removes listeners and cancels timers.
+
+Terminal web-link click ownership is the nullable `terminal_link_click` shared preference added by helm schema 46:
+`intercept` is the default, `both` preserves Farhelm activation plus program mouse reporting, and `program` disables
+Farhelm's web activation. The settings radio buttons use the ordinary sparse preference queue. `PreferencesGate`
+publishes the current choice into the page-wide terminal asset state; every terminal reads it at press/activation time,
+without a remount. Other clients seed again on reload, matching host confirmation choices. File downloads and agent URL
+forwarding do not consult this choice.
+
+OSC 8 and plain-web hover callbacks identify only targets their existing activation checks would open. In interception
+mode a primary non-forced press on such a target is stopped by a screen-element listener installed after xterm opens.
+The vendored Linkifier's screen listener must see it first to record the owning link; capture-phase suppression would
+leave a stale pressed-link record and can duplicate a later activation. Suppression occurs before xterm's enclosing
+terminal-element mouse reporter, so that press installs neither the program's release reporter nor its drag reporter.
+Another held button can already have installed them, or can install them during the withheld gesture. Independent
+primary-button ownership therefore lasts through release. Document capture listeners record each mouse event and its
+ownership decision; the public `onData` and `onBinary` callbacks discard only complete mouse-report chunks emitted
+synchronously while that event's `eventPhase` is nonzero. DOM supplies the end-of-dispatch boundary: a microtask can run
+between native capture and bubble callbacks and would clear suppression too early. The reporters still run their
+all-buttons-up cleanup, and other buttons' reports pass through. The always-on move reporter ignores motion while a
+button is down; the drag reporter prioritizes the primary bit when buttons overlap. Normal release link callbacks still
+open the target. The withheld press explicitly runs drag-notice dismissal bookkeeping, marks its gesture as withheld,
+clears an earlier local selection, prevents the native focus change and focuses the terminal. Forced-selection presses
+keep xterm's own path; file links, other buttons, wheel and unowned moves remain unchanged. Teardown removes the screen
+and document listeners with the mount's copy-on-select listeners, so reconnects cannot accumulate owners.
 
 An OSC 8 link's hover compares the link's underlined text with its target (`linkTextMismatch` in
 `assets/terminal-links.js`) to decide whether the display is the quiet one or the loud mismatch warning. The text is

@@ -334,7 +334,7 @@ impl ListSort {
 /// (SPEC.md, Session list): the chosen list order, user-selected session,
 /// compact-row choice, and the remembered permissions and workspace-trust
 /// choices of successful structured launches, host confirmation choices,
-/// and the contact reused by Send feedback. The reply shape of
+/// terminal web-link click ownership, and the contact reused by Send feedback. The reply shape of
 /// `GET /api/preferences`.
 ///
 /// `None` means "never chosen, use the default". Writes use
@@ -374,6 +374,43 @@ pub(crate) struct Preferences {
     /// Shared contact memory; dialogs seed this authenticated snapshot once.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) feedback_contact: Option<String>,
+    /// Helm-wide web-link ownership; unknown or unset words use interception.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) terminal_link_click: Option<String>,
+}
+
+/// The shared terminal web-link gesture, independent of agent URL forwarding.
+/// Unset or unknown persisted words retain the default, so a newer preference
+/// vocabulary cannot prevent an older client from mounting its terminals.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TerminalLinkClick {
+    /// Farhelm owns a primary web-link gesture, withholding program reports.
+    #[default]
+    Intercept,
+    /// Preserve both Farhelm activation and the program's mouse reports.
+    Both,
+    /// Disable Farhelm web activation while leaving all program input intact.
+    Program,
+}
+
+impl TerminalLinkClick {
+    /// Decode only known wire choices, with interception as the upgrade default.
+    pub(crate) fn from_key(key: Option<&str>) -> Self {
+        match key {
+            Some("both") => Self::Both,
+            Some("program") => Self::Program,
+            _ => Self::Intercept,
+        }
+    }
+
+    /// The same words the helm validates and terminal assets consume.
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Intercept => "intercept",
+            Self::Both => "both",
+            Self::Program => "program",
+        }
+    }
 }
 
 /// How long the seed read of the shared preference may take before the
@@ -492,6 +529,7 @@ pub(crate) enum PreferenceField {
     HostRemoveConfirmation,
     HostSetupConfirmation,
     FeedbackContact,
+    TerminalLinkClick,
 }
 
 impl PreferenceField {
@@ -504,6 +542,7 @@ impl PreferenceField {
             PreferenceField::HostRemoveConfirmation => "skip_host_remove_confirmation",
             PreferenceField::HostSetupConfirmation => "skip_host_setup_confirmation",
             PreferenceField::FeedbackContact => "feedback_contact",
+            PreferenceField::TerminalLinkClick => "terminal_link_click",
         }
     }
 }
@@ -523,6 +562,7 @@ pub(crate) enum PreferenceValue {
     HostSetupConfirmation(bool),
     /// None is an explicit clear, not an omitted patch field.
     FeedbackContact(Option<String>),
+    TerminalLinkClick(TerminalLinkClick),
 }
 
 impl PreferenceValue {
@@ -535,6 +575,7 @@ impl PreferenceValue {
             Self::HostRemoveConfirmation(_) => PreferenceField::HostRemoveConfirmation,
             Self::HostSetupConfirmation(_) => PreferenceField::HostSetupConfirmation,
             Self::FeedbackContact(_) => PreferenceField::FeedbackContact,
+            Self::TerminalLinkClick(_) => PreferenceField::TerminalLinkClick,
         }
     }
 
@@ -543,6 +584,7 @@ impl PreferenceValue {
         match self {
             Self::Sort(value) | Self::Selected(value) => serde_json::json!(value),
             Self::FeedbackContact(value) => serde_json::json!(value),
+            Self::TerminalLinkClick(value) => serde_json::json!(value.key()),
             Self::Compact(value)
             | Self::HostRemoveConfirmation(value)
             | Self::HostSetupConfirmation(value) => serde_json::json!(value),
@@ -560,6 +602,7 @@ impl PreferenceValue {
             }
             Self::HostSetupConfirmation(value) => seed.skip_host_setup_confirmation = Some(*value),
             Self::FeedbackContact(value) => seed.feedback_contact = value.clone(),
+            Self::TerminalLinkClick(value) => seed.terminal_link_click = Some(value.key().into()),
         }
     }
 }
@@ -610,6 +653,7 @@ struct PreferenceWrites {
     host_remove_confirmation: FieldWrite,
     host_setup_confirmation: FieldWrite,
     feedback_contact: FieldWrite,
+    terminal_link_click: FieldWrite,
 }
 
 impl PreferenceWrites {
@@ -621,6 +665,7 @@ impl PreferenceWrites {
             PreferenceField::HostRemoveConfirmation => &mut self.host_remove_confirmation,
             PreferenceField::HostSetupConfirmation => &mut self.host_setup_confirmation,
             PreferenceField::FeedbackContact => &mut self.feedback_contact,
+            PreferenceField::TerminalLinkClick => &mut self.terminal_link_click,
         }
     }
 
@@ -686,6 +731,7 @@ impl PreferenceWrites {
             PreferenceField::HostRemoveConfirmation => &self.host_remove_confirmation,
             PreferenceField::HostSetupConfirmation => &self.host_setup_confirmation,
             PreferenceField::FeedbackContact => &self.feedback_contact,
+            PreferenceField::TerminalLinkClick => &self.terminal_link_click,
         };
         if slot.acked {
             return None;
@@ -774,6 +820,7 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
         PreferenceField::HostRemoveConfirmation,
         PreferenceField::HostSetupConfirmation,
         PreferenceField::FeedbackContact,
+        PreferenceField::TerminalLinkClick,
     ] {
         let claimed = {
             let mut queue = preference_writes();
@@ -4640,7 +4687,49 @@ mod tests {
 /// pure state machine so no runtime or network is involved.
 #[cfg(test)]
 mod preference_write_tests {
-    use super::{PreferenceField, PreferenceValue, PreferenceWrites, Preferences};
+    use super::{
+        PreferenceField, PreferenceValue, PreferenceWrites, Preferences, TerminalLinkClick,
+    };
+
+    /// A failed link choice survives reauthentication and serializes as its
+    /// own sparse field. Unknown persisted values retain default interception.
+    #[farhelm_testtrace::test]
+    fn terminal_link_click_uses_the_shared_queue_and_default() {
+        assert_eq!(
+            TerminalLinkClick::from_key(None),
+            TerminalLinkClick::Intercept
+        );
+        assert_eq!(
+            TerminalLinkClick::from_key(Some("future-mode")),
+            TerminalLinkClick::Intercept
+        );
+        for mode in [
+            TerminalLinkClick::Intercept,
+            TerminalLinkClick::Both,
+            TerminalLinkClick::Program,
+        ] {
+            assert_eq!(TerminalLinkClick::from_key(Some(mode.key())), mode);
+            let mut queue = PreferenceWrites::default();
+            let value = PreferenceValue::TerminalLinkClick(mode);
+            assert!(queue.record(value.clone()));
+            assert_eq!(
+                queue.next_to_send(PreferenceField::TerminalLinkClick),
+                Some(value.clone())
+            );
+            assert!(!queue.finished(PreferenceField::TerminalLinkClick, &value, false));
+            let mut seed = Preferences {
+                compact: Some(true),
+                ..Preferences::default()
+            };
+            queue
+                .dirty(PreferenceField::TerminalLinkClick)
+                .unwrap()
+                .overlay(&mut seed);
+            assert_eq!(seed.terminal_link_click.as_deref(), Some(mode.key()));
+            assert_eq!(seed.compact, Some(true));
+            assert_eq!(value.wire_value(), serde_json::json!(mode.key()));
+        }
+    }
 
     /// Returning to an in-flight value is still a new explicit choice.
     /// The first true may already have committed while its response is

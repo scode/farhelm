@@ -2,7 +2,7 @@
 //! remembers for every client (SPEC.md, Session list): the chosen list order,
 //! last user-selected session, compact-row choice, and the remembered
 //! permissions and workspace-trust choices of successful structured launches,
-//! host confirmation choices, and contact reused after successful feedback.
+//! host confirmation choices, terminal web-link ownership, and contact reused after successful feedback.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client persists its own copy, so a browser tab and the desktop
@@ -30,6 +30,8 @@
 //! the stored word, and refusing it at the write is the cheap place.
 //! `remembered_permissions` gets the identical treatment against its own
 //! smaller vocabulary ([`store::is_known_remembered_permissions_word`]).
+//! Terminal link ownership similarly has three known words; unknown writes
+//! refuse the patch, while null restores default interception.
 //! `last_selected` is NOT checked against the fleet — a session can be
 //! deleted after the write, so the reader has to tolerate a stale id
 //! regardless (the UI's auto-select falls back to the newest session), and
@@ -139,6 +141,15 @@ pub(crate) async fn put_preferences(
             message: format!("feedback_contact exceeds {FEEDBACK_CONTACT_MAX_CHARS} characters"),
         }));
     }
+    if let Some(Some(mode)) = &patch.terminal_link_click
+        && !store::is_known_terminal_link_click_word(mode)
+    {
+        return http_error(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::InvalidRequest,
+            message: "terminal_link_click must be intercept, both, or program".into(),
+        }));
+    }
     match state.store.update_preferences(patch).await {
         Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
         Err(error) => http_error(error),
@@ -187,6 +198,54 @@ mod tests {
     async fn read(harness: &rest_harness::Harness) -> Preferences {
         serde_json::from_slice(&read_raw(harness).await)
             .expect("the preference reply decodes as the shared type")
+    }
+
+    /// All link choices travel through the protected sparse route. Invalid
+    /// words must refuse the entire patch, while null restores the default
+    /// without clearing a separately chosen compact-list preference.
+    #[farhelm_testtrace::test]
+    async fn terminal_link_click_validates_and_clears_independently() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read_raw(&harness).await, b"{}");
+        for mode in ["intercept", "both", "program"] {
+            let response = harness
+                .router()
+                .oneshot(put(serde_json::json!({
+                    "terminal_link_click": mode, "compact": true
+                })))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            let stored = read(&harness).await;
+            assert_eq!(stored.terminal_link_click.as_deref(), Some(mode));
+            assert_eq!(stored.compact, Some(true));
+        }
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "terminal_link_click": "unknown", "compact": false
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let stored = read(&harness).await;
+        assert_eq!(stored.terminal_link_click.as_deref(), Some("program"));
+        assert_eq!(stored.compact, Some(true));
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "terminal_link_click": null
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            read(&harness).await,
+            Preferences {
+                compact: Some(true),
+                ..Preferences::default()
+            }
+        );
     }
 
     /// Contact memory uses the feedback cap in code points, never echoes a
@@ -349,6 +408,7 @@ mod tests {
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
+                terminal_link_click: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -451,6 +511,7 @@ mod tests {
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
+                terminal_link_click: None,
             },
             "an explicit null clears the field it names and only that one"
         );

@@ -26,6 +26,8 @@ const path = require("node:path");
 const vm = require("node:vm");
 const {
   isPlainWebUrl,
+  interceptLinkPress,
+  suppressMouseReport,
   linkTargetParts,
   shortenedTarget,
   displayedTarget,
@@ -38,6 +40,18 @@ const SHIPPED_SOURCE = fs.readFileSync(
   path.join(__dirname, "..", "assets", "terminal-links.js"),
   "utf8",
 );
+
+/** Link ownership must never consume a file, forced selection or another
+ * button. The pure press policy complements real browser report assertions;
+ * a drag keeps the same ownership because later motion never replays input. */
+test("only default primary web-link presses under mouse reporting are withheld", () => {
+  const link = { button: 0, tracking: true, forced: false, webLink: true, mode: "intercept" };
+  assert.equal(interceptLinkPress(link), true);
+  for (const change of [
+    { button: 1 }, { button: 2 }, { tracking: false }, { forced: true },
+    { webLink: false }, { mode: "both" }, { mode: "program" },
+  ]) assert.equal(interceptLinkPress({ ...link, ...change }), false, JSON.stringify(change));
+});
 
 // ---------------------------------------------------------------------------
 // The plain-text filter: what may open.
@@ -226,6 +240,25 @@ test("displayedTarget keeps empty query and fragment delimiters", () => {
   assert.equal(displayedTarget("https://example.com/path?#"), "https://example.com/path?#");
   assert.equal(displayedTarget("https://ex\u0430mple.com/"), "https://xn--exmple-4nf.com/");
   assert.equal(displayedTarget("not a url"), "not a url");
+});
+
+// Only synchronous mouse-report output from the owned dispatch may disappear.
+// A stale event must not consume later pasted report-shaped text, and a live
+// event must preserve unrelated focus and keyboard output. Native listener
+// ordering itself is covered by real pointer input in the browser regression.
+test("withheld dispatch filtering preserves stale and non-mouse input", () => {
+  const event = { eventPhase: 3 };
+  const dispatch = { event, withheld: true };
+  for (const report of ["\x1b[M !!", "\x1b[<0;10;20M", "\x1b[<0;10;20m", "\x1b[<32;120;450M"]) {
+    assert.equal(suppressMouseReport(report, dispatch), true);
+    assert.equal(suppressMouseReport(report, { event, withheld: false }), false);
+    assert.equal(suppressMouseReport(report, null), false);
+  }
+  for (const input of ["hello", "\r", "\x1b[I", "\x1b[O", "\x1b[M", "\x1b[<0;10;20Mextra"]) {
+    assert.equal(suppressMouseReport(input, dispatch), false);
+  }
+  event.eventPhase = 0;
+  assert.equal(suppressMouseReport("\x1b[<0;10;20M", dispatch), false);
 });
 
 // Why this matters: the loud hover warning exists to catch a link whose

@@ -1006,6 +1006,8 @@ export interface Preferences {
   skip_host_setup_confirmation?: boolean;
   /** Contact reused by feedback dialogs after this client seeds from the helm. */
   feedback_contact?: string;
+  /** Shared terminal web-link ownership; unset means interception. */
+  terminal_link_click?: "intercept" | "both" | "program";
 }
 
 /** Read the helm's shared preference row (SPEC.md, Session list). */
@@ -1036,6 +1038,7 @@ export async function patchPreferences(
     skip_host_remove_confirmation?: boolean | null;
     skip_host_setup_confirmation?: boolean | null;
     feedback_contact?: string | null;
+    terminal_link_click?: "intercept" | "both" | "program" | null;
   },
 ): Promise<void> {
   const response = await request.put("/api/preferences", { data: patch });
@@ -1067,6 +1070,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
     skip_host_remove_confirmation: null,
     skip_host_setup_confirmation: null,
     feedback_contact: null,
+    terminal_link_click: null,
   });
 }
 

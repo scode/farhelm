@@ -319,7 +319,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 45;
+const SCHEMA_VERSION: i64 = 46;
 
 /// The two profile tables exactly as schema 15 created them and schema 36
 /// dropped them: the helm-owned catalog and the remembered default.
@@ -954,6 +954,8 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 /// helm-wide opt-outs: an explicit permanent answer is shared by every
 /// client, while an unset field keeps asking. Feedback contact is a client
 /// choice recorded only after a successful send, and explicit null forgets it.
+/// Terminal link ownership is also helm-wide; an unset or unknown word selects
+/// interception without changing file transfers or program URL forwarding.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
@@ -984,6 +986,10 @@ pub struct Preferences {
     /// Contact from the last successful feedback send that opted into reuse.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feedback_contact: Option<String>,
+    /// Which terminal web-link clicks the client owns. None means intercept;
+    /// file downloads and program-initiated URL forwarding are independent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_link_click: Option<String>,
 }
 
 /// A sparse change to [`Preferences`]: each field is absent (leave it as
@@ -1054,6 +1060,20 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub feedback_contact: Option<Option<String>>,
+    /// Sparse ownership choice: null restores the default interception.
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub terminal_link_click: Option<Option<String>>,
+}
+
+/// The client and terminal asset share this closed gesture vocabulary.
+/// Unknown persisted words default on read; unknown writes are refused by
+/// the route rather than silently accepting a choice no client can show.
+pub(crate) fn is_known_terminal_link_click_word(word: &str) -> bool {
+    matches!(word, "intercept" | "both" | "program")
 }
 
 /// Deserialize a PRESENT field of [`PreferencePatch`] — serde only calls
@@ -1823,6 +1843,8 @@ pub struct HelmStore {
 ///   and the local host keeps both null.
 /// - 45: independent public and local-network browser permissions, both off for every host.
 ///   A previous command or YOLO grant never supplies either permission.
+/// - 46: the nullable terminal web-link click ownership joins the shared
+///   preferences row; null (and any unknown word) means interception.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2033,7 +2055,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  remembered_workspace_trust INTEGER CHECK (remembered_workspace_trust IN (0, 1)),
                  skip_host_remove_confirmation INTEGER CHECK (skip_host_remove_confirmation IN (0, 1)),
                  skip_host_setup_confirmation INTEGER CHECK (skip_host_setup_confirmation IN (0, 1)),
-                 feedback_contact TEXT
+                 feedback_contact TEXT,
+                 terminal_link_click TEXT
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2122,7 +2145,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 45;",
+              PRAGMA user_version = 46;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3132,6 +3155,26 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 45")?;
         version = 45;
     }
+    if version == 45 {
+        // An absent value deliberately selects interception without a backfill.
+        // Rewound ladder fixtures can already have the current column.
+        let present: bool = tx
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('preferences') \
+                 WHERE name = 'terminal_link_click'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .context("checking terminal link preference")?
+            > 0;
+        if !present {
+            tx.execute_batch("ALTER TABLE preferences ADD COLUMN terminal_link_click TEXT;")
+                .context("migrating terminal link preference")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 46;")
+            .context("migrating helm.db to schema version 46")?;
+        version = 46;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4029,7 +4072,7 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -4052,6 +4095,8 @@ impl HelmStore {
                             skip_host_remove_confirmation: row.get(5)?,
                             skip_host_setup_confirmation: row.get(6)?,
                             feedback_contact: row.get(7)?,
+                            terminal_link_click: row.get::<_, Option<String>>(8)?
+                                .filter(|word| is_known_terminal_link_click_word(word)),
                         })
                     },
                 )
@@ -4091,6 +4136,8 @@ impl HelmStore {
             let skip_host_setup_confirmation_present = patch.skip_host_setup_confirmation.is_some();
             let feedback_contact_present = patch.feedback_contact.is_some();
             let feedback_contact = patch.feedback_contact.flatten();
+            let terminal_link_click_present = patch.terminal_link_click.is_some();
+            let terminal_link_click = patch.terminal_link_click.flatten();
             let sort = patch.list_sort.flatten();
             let selected = patch.last_selected.flatten();
             let compact = patch.compact.flatten();
@@ -4101,22 +4148,23 @@ impl HelmStore {
             conn
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
                      ON CONFLICT (singleton) DO UPDATE SET \
-                         list_sort = CASE WHEN ?9 THEN excluded.list_sort ELSE list_sort END, \
-                         last_selected = CASE WHEN ?10 THEN excluded.last_selected \
+                         list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
+                         last_selected = CASE WHEN ?11 THEN excluded.last_selected \
                                               ELSE last_selected END, \
-                         compact = CASE WHEN ?11 THEN excluded.compact ELSE compact END, \
-                         remembered_permissions = CASE WHEN ?12 \
+                         compact = CASE WHEN ?12 THEN excluded.compact ELSE compact END, \
+                         remembered_permissions = CASE WHEN ?13 \
                              THEN excluded.remembered_permissions ELSE remembered_permissions END, \
-                         remembered_workspace_trust = CASE WHEN ?13 \
+                         remembered_workspace_trust = CASE WHEN ?14 \
                              THEN excluded.remembered_workspace_trust ELSE remembered_workspace_trust END, \
-                         skip_host_remove_confirmation = CASE WHEN ?14 \
+                         skip_host_remove_confirmation = CASE WHEN ?15 \
                              THEN excluded.skip_host_remove_confirmation ELSE skip_host_remove_confirmation END, \
-                         skip_host_setup_confirmation = CASE WHEN ?15 \
+                         skip_host_setup_confirmation = CASE WHEN ?16 \
                              THEN excluded.skip_host_setup_confirmation ELSE skip_host_setup_confirmation END, \
-                         feedback_contact = CASE WHEN ?16 THEN excluded.feedback_contact ELSE feedback_contact END",
+                         feedback_contact = CASE WHEN ?17 THEN excluded.feedback_contact ELSE feedback_contact END, \
+                         terminal_link_click = CASE WHEN ?18 THEN excluded.terminal_link_click ELSE terminal_link_click END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -4126,6 +4174,7 @@ impl HelmStore {
                         skip_host_remove_confirmation,
                         skip_host_setup_confirmation,
                         feedback_contact,
+                        terminal_link_click,
                         sort_present,
                         selected_present,
                         compact_present,
@@ -4133,7 +4182,8 @@ impl HelmStore {
                         remembered_workspace_trust_present,
                         skip_host_remove_confirmation_present,
                         skip_host_setup_confirmation_present,
-                        feedback_contact_present
+                        feedback_contact_present,
+                        terminal_link_click_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -7517,6 +7567,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
@@ -9839,6 +9890,7 @@ mod tests {
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
+                terminal_link_click: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -9859,6 +9911,7 @@ mod tests {
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
+                terminal_link_click: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -9878,6 +9931,7 @@ mod tests {
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
+                terminal_link_click: None,
             },
             "an explicit null clears exactly the field it names"
         );
@@ -9946,6 +10000,7 @@ mod tests {
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
                 feedback_contact: None,
+                terminal_link_click: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -10208,6 +10263,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
@@ -11071,6 +11127,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
@@ -11200,6 +11257,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
@@ -11231,6 +11289,7 @@ mod tests {
                 skip_host_remove_confirmation: None,
                 skip_host_setup_confirmation: None,
                 feedback_contact: None,
+                terminal_link_click: None,
             },
             "the new field defaults absent while both existing choices survive"
         );
@@ -11265,6 +11324,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  INSERT INTO preferences (singleton, list_sort, last_selected, compact)
                  VALUES (1, 'title', 'session-before-permissions-memory', 1);
@@ -11292,8 +11352,81 @@ mod tests {
                 skip_host_remove_confirmation: None,
                 skip_host_setup_confirmation: None,
                 feedback_contact: None,
+                terminal_link_click: None,
             },
             "the new field defaults absent while every existing choice survives"
+        );
+    }
+
+    /// Schema 45 acquires the default link ownership without changing other
+    /// preferences. Reopen after every write so a connection-local mirror
+    /// cannot stand in for durable state or sparse-patch preservation.
+    #[farhelm_testtrace::test]
+    async fn terminal_link_click_migration_and_sparse_round_trip() {
+        let (dir, store) = fresh_store().await;
+        store
+            .update_preferences(PreferencePatch {
+                compact: Some(Some(true)),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("ALTER TABLE preferences DROP COLUMN terminal_link_click; PRAGMA user_version = 45;").unwrap();
+            assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('preferences') WHERE name = 'terminal_link_click'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        }
+        let migrated = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            migrated.preferences().await.unwrap(),
+            Preferences {
+                compact: Some(true),
+                ..Preferences::default()
+            }
+        );
+        drop(migrated);
+        for mode in ["intercept", "both", "program"] {
+            let store = HelmStore::open(&path).await.unwrap();
+            store
+                .update_preferences(PreferencePatch {
+                    terminal_link_click: Some(Some(mode.into())),
+                    ..PreferencePatch::default()
+                })
+                .await
+                .unwrap();
+            store
+                .update_preferences(PreferencePatch {
+                    compact: Some(Some(true)),
+                    ..PreferencePatch::default()
+                })
+                .await
+                .unwrap();
+            drop(store);
+            let reopened = HelmStore::open(&path).await.unwrap();
+            assert_eq!(
+                reopened.preferences().await.unwrap(),
+                Preferences {
+                    compact: Some(true),
+                    terminal_link_click: Some(mode.into()),
+                    ..Preferences::default()
+                }
+            );
+        }
+        let store = HelmStore::open(&path).await.unwrap();
+        store
+            .update_preferences(serde_json::from_str(r#"{"terminal_link_click":null}"#).unwrap())
+            .await
+            .unwrap();
+        drop(store);
+        let reopened = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            reopened.preferences().await.unwrap(),
+            Preferences {
+                compact: Some(true),
+                ..Preferences::default()
+            }
         );
     }
 
@@ -11315,7 +11448,8 @@ mod tests {
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(
-                "ALTER TABLE preferences DROP COLUMN feedback_contact; PRAGMA user_version = 42;",
+                "ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN feedback_contact; PRAGMA user_version = 42;",
             )
             .unwrap();
             assert_eq!(
@@ -11396,6 +11530,7 @@ mod tests {
             conn.execute_batch(
                 "ALTER TABLE hosts RENAME COLUMN yolo_without_asking TO yolo_safe;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  PRAGMA user_version = 32;",
             )
@@ -11532,6 +11667,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
@@ -13014,6 +13150,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
+                 ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
