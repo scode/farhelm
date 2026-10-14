@@ -59,8 +59,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   without an app release. Decide what the release gate should cover, including whether it sends to the live endpoint
   (and how such sends stay out of the maintainer's inbox) or tests against a local copy of the handler.
 
-- **Website human review deploy gating.**
-
 - **Test in-app feedback's failure path.** Sending feedback works end to end in production (inbox issue #1, sent from
   the 0.23.0 desktop app on 2026-10-05), but the failure case has not been exercised against the live endpoint. Revoke
   the inbox token, send from the app, and check that the dialog says sending failed and keeps the text; then create a
@@ -504,6 +502,14 @@ are large mostly because of their tests.
   changelog docstring and the cross-protocol test pruning that shared this entry are done.
 
 ## Maybe later
+
+- **Guard the website's install command against a rogue change.** Add automated protection so that an agent cannot
+  replace the `curl … | sh` install command on the docs website without the maintainer noticing. The command is what new
+  users paste into a shell unread, and it appears in three places (the site header, the Install page, and the README)
+  that nothing checks today. Agents land changes to main without the maintainer reviewing each one (the plans monitor
+  does, for one) and can trigger a website deploy, so a changed command could reach the live site unseen. What the
+  protection checks, and where (the website build, a check against the live site, an alert to the maintainer), is to be
+  decided when the entry is planned.
 
 - **Brick test a release before signing it.** Today the brick test can only run after the maintainer has signed the
   release and published it at its version path on get.farhelm.io (it does not need `/latest` moved). The signature is
