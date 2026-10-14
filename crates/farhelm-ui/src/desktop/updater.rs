@@ -14,6 +14,9 @@
 //!   through the Dioxus context.
 //! - One worker thread ([`Engine`]) owns every check and install, so they are
 //!   single-flight across the automatic schedule and every on-demand trigger.
+//! - Authenticated advisories can withdraw a target, running release or waiting
+//!   update. Unknown directives remain harmless. A withdrawn wait requires
+//!   manual recovery; the worker cannot establish safe replacement from Running.
 //! - Success is judged by the Installed record the installer writes, never by
 //!   the installer's exit status.
 //! - Nothing it runs is trusted on TLS alone: the installer runs only once
@@ -35,6 +38,9 @@ use std::time::SystemTime;
 
 use farhelm_helm::{build_is_newer, is_development_build};
 use sha2::Digest as _;
+
+mod advisories;
+use advisories::Advisories;
 
 /// The one origin every release is published on, in the layout SPEC_impl.md
 /// "Verification chain (D3)" fixes: `/latest`, and each release under
@@ -123,14 +129,26 @@ pub(crate) struct UpdaterState {
     /// way (at startup, with automatic updates on). Network and HTTP
     /// failures never set it.
     pub(crate) needs_reinstall: bool,
+    /// Last authenticated snapshot for this run. Failed or missing downloads
+    /// retain it; a later verified file can lift a withdrawal.
+    advisories: Advisories,
 }
 
 impl UpdaterState {
     /// Whether a newer version is installed than the one running, so that a
-    /// restart finishes an update. Not a state of its own: it holds however
-    /// that version was installed, and whatever the updater is doing.
+    /// restart finishes an unwithdrawn update. This is presentation eligibility,
+    /// not the installed-version fact used to hold back automatic installations.
     pub(crate) fn update_ready(&self) -> bool {
-        newer_installed(self.installed.as_deref(), &self.running)
+        newer_installed(self.installed.as_deref(), &self.running) && self.withdrawn_wait().is_none()
+    }
+
+    /// Installation and restart eligibility are different facts. The daily
+    /// schedule still learns withdrawals while an installed version waits.
+    fn withdrawn_wait(&self) -> Option<&str> {
+        let installed = self.installed.as_deref()?;
+        newer_installed(Some(installed), &self.running)
+            .then(|| self.advisories.reason(installed))
+            .flatten()
     }
 }
 
@@ -238,6 +256,11 @@ impl UpdaterHandle {
     /// `false` the failure is already shown in the readout's hover, and the
     /// app must stay open, since quitting would leave it closed.
     pub(crate) fn start_relaunch(&self) -> bool {
+        // A menu rendered before a newly learned withdrawal must not authorize
+        // a restart afterwards. Ordinary relaunch remains the operator's action.
+        if !self.shared.subscribe().borrow().update_ready() {
+            return false;
+        }
         match spawn_relaunch_helper(
             std::process::id(),
             &self.bundle,
@@ -362,6 +385,7 @@ pub(super) fn start(state_path: PathBuf) -> Option<UpdaterHandle> {
     }
     let deps = Deps {
         probe: probe_with_latest_override(latest_override, Box::new(probe_latest_release)),
+        advisories: Box::new(fetch_advisories),
         install: Box::new(run_installer),
         read_installed: Box::new(move || read_installed_record(&installed_record)),
         automatic_enabled: Box::new({
@@ -443,11 +467,18 @@ type InstallFn = dyn Fn(&str) -> anyhow::Result<()> + Send;
 /// Answers the latest stable release's version.
 type ProbeFn = dyn Fn() -> anyhow::Result<String> + Send;
 
+/// Recheck permission before each advisory request, including a signature
+/// request after the user disabled an automatic check during the body fetch.
+type AdvisoriesFn = dyn Fn(&dyn Fn() -> bool) -> anyhow::Result<Option<Advisories>> + Send;
+
 /// Everything the worker reaches outside itself, as plain functions so a
 /// test can stand in for each.
 pub(super) struct Deps {
     /// The latest stable release's version.
     pub(super) probe: Box<ProbeFn>,
+    /// A verified replacement, absence, or a logged failure. No information
+    /// here is persisted or allowed to set the reinstall notice.
+    advisories: Box<AdvisoriesFn>,
     /// Run the installer pinned to this version. Its result is logged; the
     /// Installed record decides whether the install happened.
     pub(super) install: Box<InstallFn>,
@@ -474,7 +505,24 @@ pub(super) struct Deps {
 /// "Installation and updates"). Activity also drives the inline progress and
 /// outcome, whose expiry belongs to the component; the hover wording persists.
 pub(crate) fn readout(state: &UpdaterState) -> crate::app_updater::Readout {
-    let readout = activity_readout(state);
+    let mut readout = activity_readout(state);
+    let mut warnings = Vec::new();
+    if let Some(reason) = state.advisories.reason(&state.running) {
+        warnings.push(format!(
+            "Farhelm {} was withdrawn: {reason}.",
+            state.running
+        ));
+    }
+    if let Some(reason) = state.withdrawn_wait() {
+        warnings.push(format!(
+            "The installed update, Farhelm {}, was withdrawn: {reason}. Manual recovery is required before restarting; an ordinary relaunch may open this withdrawn version. Farhelm will not replace it automatically.",
+            state.installed.as_deref().unwrap_or_default()
+        ));
+    }
+    readout.withdrawn = !warnings.is_empty();
+    if !warnings.is_empty() {
+        readout.tooltip = format!("{} {}", warnings.join(" "), readout.tooltip);
+    }
     if !state.needs_reinstall {
         return readout;
     }
@@ -519,6 +567,9 @@ fn activity_readout(state: &UpdaterState) -> crate::app_updater::Readout {
         Activity::Failed(reason) => {
             format!("The update check failed: {}.", reason.trim_end_matches('.'))
         }
+        Activity::RestartFailed if state.withdrawn_wait().is_some() => {
+            "Farhelm did not restart into the withdrawn update.".to_string()
+        }
         Activity::RestartFailed => format!(
             "Farhelm could not restart itself. Quit and reopen it to finish updating to Farhelm {installed}."
         ),
@@ -526,11 +577,16 @@ fn activity_readout(state: &UpdaterState) -> crate::app_updater::Readout {
         Activity::UpToDate(latest) => {
             format!("Farhelm is up to date. Farhelm {latest} is the latest release.")
         }
+        Activity::Idle if state.withdrawn_wait().is_some() => format!(
+            "This is Farhelm {}. Check for updates to refresh release information.",
+            state.running
+        ),
         Activity::Idle => crate::app_updater::idle_tooltip(&state.running, true),
     };
     crate::app_updater::Readout {
         update_ready: ready,
         needs_reinstall: false,
+        withdrawn: false,
         tooltip,
         activity: state.activity.clone(),
         notice_id: state.notice_id,
@@ -552,6 +608,8 @@ pub(super) struct Shared {
 struct Status {
     running: String,
     installed: Option<String>,
+    /// The snapshot is shared with presentation but only the worker replaces it.
+    advisories: Advisories,
     /// What the worker is doing now, published or not.
     current: Activity,
     /// The last visible outcome, published while no user-joined run is
@@ -584,9 +642,9 @@ impl Status {
     /// A change to a version newer than the running one also drops the
     /// reinstall notice: something installed a newer Farhelm since the
     /// notice went up (most likely the user, following it), and a restart
-    /// into that app is the next step, which the update marker already
-    /// says. Automatic checks stop while an update waits, so otherwise the
-    /// notice would keep asking for a reinstall that already happened.
+    /// into that app is the next step unless advisories withdraw it. Metadata
+    /// checks continue while an update waits, but need not prove installation
+    /// again, so the notice would otherwise ask for a reinstall already done.
     fn record_installed(&mut self, installed: Option<String>) {
         if installed != self.installed {
             // The completion referred to the previous record. Retaining it
@@ -598,8 +656,8 @@ impl Status {
                 // A retained failure said an update did not install. Once a
                 // newer version is installed by any route (the installer run
                 // from a terminal, say) it is stale, and nothing else would
-                // clear it: automatic checks hold back while an update waits,
-                // so it would sit beside the red update-ready readout until
+                // clear it promptly: automatic installs hold back while an update waits,
+                // so it could sit beside the red update-ready readout until
                 // dismissed or the app restarted. A run that fails after this
                 // point still sets its own failure afterwards.
                 if self.retain_failure {
@@ -621,6 +679,7 @@ impl Shared {
             notice_id: 0,
             user_update_ready: false,
             needs_reinstall: false,
+            advisories: Advisories::default(),
         });
         Self {
             status: Mutex::new(Status {
@@ -636,6 +695,7 @@ impl Shared {
                 user_update_ready: false,
                 requested: false,
                 needs_reinstall: false,
+                advisories: Advisories::default(),
             }),
             wake: Condvar::new(),
             published,
@@ -692,6 +752,7 @@ impl Shared {
             notice_id: status.notice_id,
             user_update_ready: status.user_update_ready,
             needs_reinstall: status.needs_reinstall,
+            advisories: status.advisories.clone(),
         };
         self.published.send_if_modified(|state| {
             if *state == next {
@@ -721,6 +782,9 @@ enum CheckResult {
     ProbeFailed(String),
     InstallFailed(String),
     VerificationFailed(String),
+    /// A known withdrawal is a user-check refusal. It is not an offline streak
+    /// or an indication that the app has lost its signing keys.
+    Withdrawn(String),
 }
 
 impl CheckResult {
@@ -730,7 +794,8 @@ impl CheckResult {
             Self::Success(activity) => activity.clone(),
             Self::ProbeFailed(reason)
             | Self::InstallFailed(reason)
-            | Self::VerificationFailed(reason) => Activity::Failed(reason.clone()),
+            | Self::VerificationFailed(reason)
+            | Self::Withdrawn(reason) => Activity::Failed(reason.clone()),
         }
     }
 }
@@ -779,9 +844,8 @@ impl Engine {
 
     /// Whether the automatic schedule wants a check now.
     ///
-    /// Never while an installed update waits for a restart (SPEC_impl.md
-    /// "The desktop app's updater": it saves a download a day, and a third
-    /// version could replace the folder of the one still running). A wall
+    /// Waiting updates still need metadata checks to learn withdrawals, but
+    /// never another automatic install. A wall
     /// clock that moved backwards past the last check counts as due, so a
     /// clock correction cannot postpone checks indefinitely.
     fn automatic_due(&self) -> bool {
@@ -794,12 +858,7 @@ impl Engine {
         // The clock first, so the setting (a file read, which warns when
         // the file is broken) is consulted once a day rather than every
         // minute.
-        clock_due && !self.update_ready() && (self.deps.automatic_enabled)()
-    }
-
-    fn update_ready(&self) -> bool {
-        let status = self.shared.status.lock().expect("updater status poisoned");
-        newer_installed(status.installed.as_deref(), &status.running)
+        clock_due && (self.deps.automatic_enabled)()
     }
 
     /// Set or clear the reinstall notice and publish it.
@@ -866,7 +925,11 @@ impl Engine {
             // Readiness alone can come from an automatic or external install.
             // Capture it only with a successful check the user saw through.
             status.user_update_ready = matches!(outcome, CheckResult::Success(_))
-                && newer_installed(status.installed.as_deref(), &status.running);
+                && newer_installed(status.installed.as_deref(), &status.running)
+                && !status
+                    .installed
+                    .as_deref()
+                    .is_some_and(|v| status.advisories.reason(v).is_some());
             // A finished install needs no words of its own: the update
             // marker shows it.
             let activity = outcome.activity();
@@ -896,12 +959,26 @@ impl Engine {
         }
     }
 
-    /// Probe, compare, and install when the latest release is newer than
-    /// what is installed. Distinct failure boundaries let the caller apply
+    /// Probe and refresh advisories, then install an unwithdrawn newer target
+    /// only when no withdrawn update waits. Distinct failure boundaries let the caller apply
     /// the grace period only to an unusable `/latest` answer; successful
     /// probes clear that streak before the slower install can fail.
     fn check_and_install(&self) -> CheckResult {
-        let latest = match (self.deps.probe)() {
+        let probe = (self.deps.probe)();
+        // Even an unusable /latest can accompany a withdrawal. Errors here
+        // are no new information, never a failed release verification.
+        if self.check_allowed() {
+            match (self.deps.advisories)(&|| self.check_allowed()) {
+                Ok(Some(advisories)) => {
+                    let mut status = self.shared.status.lock().expect("updater status poisoned");
+                    status.advisories = advisories;
+                    self.shared.publish(&status);
+                }
+                Ok(None) => {}
+                Err(error) => tracing::warn!("updater: reading release advisories: {error:#}"),
+            }
+        }
+        let latest = match probe {
             Ok(latest) => latest,
             Err(error) => {
                 tracing::info!("updater: checking for the latest release failed: {error:#}");
@@ -922,7 +999,7 @@ impl Engine {
         // by an older release, and an automatic run must still hold back
         // once an update waits.
         let installed = (self.deps.read_installed)();
-        let (baseline, automatic_should_wait) = {
+        let (baseline, automatic_should_wait, refusal) = {
             let mut status = self.shared.status.lock().expect("updater status poisoned");
             status.record_installed(installed);
             self.shared.publish(&status);
@@ -931,8 +1008,28 @@ impl Engine {
                 .clone()
                 .unwrap_or_else(|| status.running.clone());
             let waiting = newer_installed(status.installed.as_deref(), &status.running);
-            (baseline, waiting && !status.user_waiting)
+            let refusal = if waiting && status.advisories.reason(&baseline).is_some() {
+                Some(format!(
+                    "the installed update, Farhelm {baseline}, was withdrawn; manual recovery is required before restarting"
+                ))
+            } else if build_is_newer(&latest, &baseline) {
+                // Only a release this check would install can be refused.
+                // When `/latest` still names the release already in place
+                // (say, the running one, withdrawn with no fix out yet), the
+                // check is simply up to date: reporting "it was not installed"
+                // would be false, and the up-to-date path below must still
+                // clear a stale reinstall warning.
+                status.advisories.reason(&latest).map(|reason| {
+                    format!("Farhelm {latest} was withdrawn: {reason}; it was not installed")
+                })
+            } else {
+                None
+            };
+            (baseline, waiting && !status.user_waiting, refusal)
         };
+        if let Some(reason) = refusal {
+            return CheckResult::Withdrawn(reason);
+        }
         if automatic_should_wait {
             tracing::info!(
                 "updater: {baseline} was installed during the check; nothing more to do"
@@ -948,13 +1045,7 @@ impl Engine {
         // Automatic updates may have been turned off while the probe was
         // out. Off means no background install from then on, so a run no
         // user has joined stops here; a run the user asked for goes on.
-        let user_waiting = self
-            .shared
-            .status
-            .lock()
-            .expect("updater status poisoned")
-            .user_waiting;
-        if !user_waiting && !(self.deps.automatic_enabled)() {
+        if !self.check_allowed() {
             tracing::info!("updater: automatic updates were turned off during the check");
             return CheckResult::Success(Activity::Idle);
         }
@@ -1001,6 +1092,19 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// A user-joined check can continue after automatic updates are disabled.
+    /// An unjoined automatic check cannot begin another request or install.
+    fn check_allowed(&self) -> bool {
+        self.shared
+            .status
+            .lock()
+            .expect("updater status poisoned")
+            .user_waiting
+            || (self.deps.automatic_enabled)()
+    }
+}
+
 // ===== The real probe and installer ========================================
 
 /// Select the captured release-test override or the ordinary site probe.
@@ -1030,6 +1134,15 @@ fn probe_latest_release() -> anyhow::Result<String> {
         PROBE_TIMEOUT,
     )?;
     latest_from_site(&body)
+}
+
+/// Advisories are optional authenticated metadata, read after every probe.
+/// Each small request has a short independent deadline; neither outcome can
+/// prevent the worker from reaching its ordinary update decision.
+fn fetch_advisories(allowed: &dyn Fn() -> bool) -> anyhow::Result<Option<Advisories>> {
+    advisories::fetch_if_allowed(farhelm_helm::RELEASE_KEY_RING, allowed, &|name, cap| {
+        fetch_optional_capped(&format!("{SITE_URL}/{name}"), cap, Duration::from_secs(15))
+    })
 }
 
 /// The latest release's version from `/latest`'s answer: exactly one line
@@ -1208,38 +1321,86 @@ fn spawn_installer(dir: &Path, script: &Path, sums: &Path, version: &str) -> any
 /// from elsewhere; integrity never rests on where it came from, since every
 /// byte this updater acts on is checked against the signature first.
 fn fetch_capped(url: &str, cap: usize, timeout: Duration) -> anyhow::Result<Vec<u8>> {
+    fetch_optional_capped(url, cap, timeout)?.with_context(|| format!("fetching {url}: HTTP 404"))
+}
+
+/// Only HTTP 404 means absent. A truncated body, other status, transport error
+/// or byte-cap failure remains an error, so optional metadata cannot disappear
+/// from memory because a server or connection misbehaved.
+fn fetch_optional_capped(
+    url: &str,
+    cap: usize,
+    timeout: Duration,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    fetch_on_worker(url, cap, timeout, &production_client)
+}
+
+/// The deadline must bound returning to the worker as well as HTTP I/O. System
+/// DNS uses Tokio's blocking pool and cannot be cancelled once started. Dropping
+/// a runtime waits for that resolver, even after the HTTP deadline has fired.
+/// Shutdown without waiting lets the worker continue; an outstanding resolver
+/// retains its thread until the OS call finishes. It owns no updater state.
+fn fetch_on_worker(
+    url: &str,
+    cap: usize,
+    timeout: Duration,
+    client: &dyn Fn(Duration) -> anyhow::Result<reqwest::Client>,
+) -> anyhow::Result<Option<Vec<u8>>> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("starting the updater's runtime")?;
-    runtime.block_on(async {
-        let client = reqwest::Client::builder()
-            .https_only(true)
-            .timeout(timeout)
-            .build()
-            .context("building the updater's HTTP client")?;
-        let mut response = client
-            .get(url)
-            .send()
-            .await
-            .with_context(|| format!("fetching {url}"))?
-            .error_for_status()
-            .with_context(|| format!("fetching {url}"))?;
-        // Read chunk by chunk so the cap holds while downloading: a whole
-        // body buffered first would already be in memory when checked.
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .with_context(|| format!("fetching {url}"))?
-        {
-            if bytes.len() + chunk.len() > cap {
-                bail!("{url} is over {cap} bytes, which cannot be it");
-            }
-            bytes.extend_from_slice(&chunk);
+    let result = runtime.block_on(async { fetch_with_client(&client(timeout)?, url, cap).await });
+    runtime.shutdown_timeout(Duration::ZERO);
+    result
+}
+
+/// HTTPS-only applies to initial URLs and redirects. Tests inject a plain-HTTP
+/// client only into the streaming seam, never weaken this production builder.
+fn production_client(timeout: Duration) -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .https_only(true)
+        .timeout(timeout)
+        .build()
+        .context("building the updater's HTTP client")
+}
+
+/// Stream under the cap rather than buffering an unbounded response first.
+/// The client supplies transport policy and total deadline; this seam allows a
+/// loopback fixture to prove HTTP status and incomplete-body handling.
+async fn fetch_with_client(
+    client: &reqwest::Client,
+    url: &str,
+    cap: usize,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("fetching {url}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    anyhow::ensure!(
+        response.status().is_success(),
+        "fetching {url}: HTTP {}",
+        response.status()
+    );
+    let mut response = response
+        .error_for_status()
+        .with_context(|| format!("fetching {url}"))?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .with_context(|| format!("fetching {url}"))?
+    {
+        if chunk.len() > cap.saturating_sub(bytes.len()) {
+            bail!("{url} is over {cap} bytes, which cannot be it");
         }
-        Ok(bytes)
-    })
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(Some(bytes))
 }
 
 /// A fresh directory only this user can read, for the downloaded script, the
@@ -1275,6 +1436,9 @@ fn farhelm_variables(names: impl Iterator<Item = OsString>) -> Vec<OsString> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod transport_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2005,6 +2169,7 @@ mod tests {
         let probes = Arc::new(AtomicUsize::new(0));
         let installs = Arc::new(Mutex::new(Vec::new()));
         let deps = Deps {
+            advisories: Box::new(|_| Ok(None)),
             probe: Box::new({
                 let latest = Arc::clone(&latest);
                 let probes = Arc::clone(&probes);
@@ -2232,8 +2397,8 @@ mod tests {
     /// newer Farhelm installed some other way (the user following the
     /// notice) clears it at the next wake, without a check.
     ///
-    /// Why: with an update waiting, automatic checks stop, so no check
-    /// would clear a notice that asks for a reinstall the user already did.
+    /// Why: the next daily metadata check is not proof another install happened;
+    /// the record refresh must promptly clear advice the user already followed.
     #[farhelm_testtrace::test]
     fn a_reinstall_from_a_terminal_clears_the_notice() {
         let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
@@ -2871,10 +3036,10 @@ mod tests {
     }
 
     /// Spec: while an installed update waits for a restart, the automatic
-    /// check does nothing, while a check the user asks for still installs a
-    /// release newer than the waiting one.
+    /// check refreshes metadata but installs nothing, while a check the user
+    /// asks for still installs a release newer than an unwithdrawn waiting one.
     ///
-    /// Holding back saves a download a day and keeps a third version from
+    /// Holding back keeps a third version from
     /// replacing the folder of the version still running; the user's own
     /// request is the deliberate exception.
     #[farhelm_testtrace::test]
@@ -2883,8 +3048,8 @@ mod tests {
         rig.engine.wake_once();
         assert_eq!(
             rig.probes.load(Ordering::SeqCst),
-            0,
-            "an update already waits"
+            1,
+            "a waiting update still needs withdrawal information"
         );
         rig.shared.check_now();
         rig.engine.wake_once();
@@ -3165,6 +3330,391 @@ mod tests {
         }
     }
 
+    // ---- signed advisory decisions ----
+
+    /// Build a known-directive snapshot through the production parser. These
+    /// state tests isolate decisions; authentication has its own signed fixtures.
+    fn withdrawn(versions: &[&str]) -> Advisories {
+        let mut body = format!("{}\n", advisories::PURPOSE);
+        for version in versions {
+            body.push_str(&format!("revoked v{version} reason for {version}\n"));
+        }
+        advisories::parse(body.as_bytes()).unwrap()
+    }
+
+    /// Publication order is /latest, advisories, then the install decision.
+    /// Disabled automatic updates must fetch neither endpoint; manual checks
+    /// still learn withdrawals, even when /latest itself fails.
+    #[farhelm_testtrace::test]
+    fn withdrawal_checks_obey_trigger_privacy_and_probe_order() {
+        for manual in [false, true] {
+            for latest_fails in [false, true] {
+                let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.2.0"), true);
+                *rig.automatic.lock().unwrap() = !manual;
+                let order = Arc::new(Mutex::new(Vec::new()));
+                let probe_order = order.clone();
+                rig.engine.deps.probe = Box::new(move || {
+                    probe_order.lock().unwrap().push("latest");
+                    if latest_fails {
+                        bail!("offline");
+                    }
+                    Ok("1.2.0".into())
+                });
+                let advice_order = order.clone();
+                rig.engine.deps.advisories = Box::new(move |_| {
+                    advice_order.lock().unwrap().push("advisories");
+                    Ok(Some(withdrawn(&["1.0.0"])))
+                });
+                if manual {
+                    rig.engine.wake_once();
+                    assert!(
+                        order.lock().unwrap().is_empty(),
+                        "off forbids background fetches"
+                    );
+                    assert!(!readout(&rig.published()).withdrawn);
+                    rig.shared.check_now();
+                }
+                rig.engine.wake_once();
+                assert_eq!(*order.lock().unwrap(), ["latest", "advisories"]);
+                let state = rig.published();
+                let shown = readout(&state);
+                assert!(shown.withdrawn && shown.tooltip.contains("Farhelm 1.0.0 was withdrawn"));
+                assert!(!state.needs_reinstall);
+                assert_eq!(rig.shared.status.lock().unwrap().current, Activity::Idle);
+                assert!(!rig.shared.status.lock().unwrap().user_waiting);
+                assert_eq!(
+                    *rig.installs.lock().unwrap(),
+                    if latest_fails { vec![] } else { vec!["1.2.0"] }
+                );
+                if !latest_fails {
+                    assert!(shown.update_ready);
+                }
+            }
+        }
+    }
+
+    /// An old/missing Running record cannot establish downgrade safety after
+    /// a failed migration. The narrowed scope requires manual recovery for any
+    /// withdrawn waiting version, whatever /latest names and who asks.
+    #[farhelm_testtrace::test]
+    fn withdrawn_waits_refuse_every_automatic_and_manual_replacement() {
+        for manual in [false, true] {
+            for target in ["0.9.0", "1.0.0", "1.0.5", "1.1.0", "1.2.0"] {
+                let mut rig = make_rig("1.0.0", Some("1.1.0"), Some(target), true);
+                rig.engine.deps.advisories = Box::new(|_| Ok(Some(withdrawn(&["1.1.0"]))));
+                if manual {
+                    rig.shared.check_now();
+                }
+                rig.engine.wake_once();
+                assert_eq!(rig.probes.load(Ordering::SeqCst), 1);
+                assert!(
+                    rig.installs.lock().unwrap().is_empty(),
+                    "{manual} / {target}"
+                );
+                let state = rig.published();
+                let shown = readout(&state);
+                assert!(!shown.update_ready && !state.update_ready() && !shown.user_update_ready);
+                assert!(shown.withdrawn && shown.tooltip.contains("Manual recovery is required"));
+                assert!(!shown.tooltip.contains("Restart to update"));
+                assert!(!state.needs_reinstall);
+                assert_eq!(rig.shared.status.lock().unwrap().current, Activity::Idle);
+                if manual {
+                    assert!(
+                        matches!(state.activity, Activity::Failed(ref reason) if reason.contains("manual recovery"))
+                    );
+                }
+                // A callback retained from an older menu must also be refused.
+                let handle = UpdaterHandle {
+                    shared: rig.shared.clone(),
+                    bundle: PathBuf::from("not-an-app"),
+                    state_path: PathBuf::from("unused"),
+                };
+                assert!(!handle.start_relaunch());
+            }
+        }
+    }
+
+    /// Waiting updates need daily advisory refreshes but no repeated install.
+    /// Learning the withdrawal later must change presentation immediately, not
+    /// suppress the schedule that is needed to learn a subsequent correction.
+    #[farhelm_testtrace::test]
+    fn waiting_updates_keep_the_daily_metadata_schedule() {
+        let mut rig = make_rig("1.0.0", Some("1.1.0"), Some("1.2.0"), true);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let advice_calls = calls.clone();
+        rig.engine.deps.advisories = Box::new(move |_| {
+            let index = advice_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(if index == 0 {
+                Advisories::default()
+            } else {
+                withdrawn(&["1.1.0"])
+            }))
+        });
+        rig.engine.wake_once();
+        assert!(rig.published().update_ready());
+        rig.advance(CHECK_INTERVAL - Duration::from_secs(1));
+        rig.engine.wake_once();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        rig.advance(Duration::from_secs(1));
+        rig.engine.wake_once();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(!rig.published().update_ready());
+        rig.advance(CHECK_INTERVAL);
+        rig.engine.wake_once();
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        assert!(rig.installs.lock().unwrap().is_empty());
+        *rig.automatic.lock().unwrap() = false;
+        rig.advance(CHECK_INTERVAL);
+        rig.engine.wake_once();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            3,
+            "off still forbids metadata checks"
+        );
+    }
+
+    /// Refuse a withdrawn target this check would install, before
+    /// installation, with a reason for manual checks and no loss-of-key
+    /// warning. Unwithdrawn newer targets remain installable when the running
+    /// version alone is withdrawn.
+    #[farhelm_testtrace::test]
+    fn withdrawn_targets_never_reach_the_installer() {
+        for manual in [false, true] {
+            let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+            rig.engine.deps.advisories = Box::new(|_| Ok(Some(withdrawn(&["1.1.0"]))));
+            if manual {
+                rig.shared.check_now();
+            }
+            rig.engine.wake_once();
+            assert!(rig.installs.lock().unwrap().is_empty());
+            assert!(!rig.published().needs_reinstall);
+            assert!(rig.streak.lock().unwrap().is_none());
+            if manual {
+                assert!(
+                    matches!(rig.published().activity, Activity::Failed(ref reason) if reason.contains("reason for 1.1.0"))
+                );
+            }
+            rig.advance(CHECK_INTERVAL);
+            *rig.latest.lock().unwrap() = Some("1.2.0".into());
+            rig.engine.wake_once();
+            assert_eq!(*rig.installs.lock().unwrap(), ["1.2.0"]);
+        }
+    }
+
+    /// A withdrawn running release that `/latest` still names (no fix out
+    /// yet) makes an on-demand check up to date, not a refusal. Why: nothing
+    /// is being installed, so "it was not installed" would be false, and the
+    /// up-to-date path is where a stale reinstall warning is cleared. The
+    /// withdrawal warning itself still shows.
+    #[farhelm_testtrace::test]
+    fn a_withdrawn_running_release_named_by_latest_is_up_to_date() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.0.0"), true);
+        rig.engine.deps.advisories = Box::new(|_| Ok(Some(withdrawn(&["1.0.0"]))));
+        rig.shared.check_now();
+        rig.engine.wake_once();
+        let state = rig.published();
+        assert_eq!(state.activity, Activity::UpToDate("1.0.0".into()));
+        assert!(rig.installs.lock().unwrap().is_empty());
+        assert!(readout(&state).withdrawn);
+    }
+
+    /// Missing or broken publication retains an authenticated withdrawal for
+    /// this run. Only a later verified replacement can lift it; the next check
+    /// then installs normally, proving refusals do not wedge the worker.
+    #[farhelm_testtrace::test]
+    fn withdrawals_survive_missing_and_failed_fetches_until_a_verified_lift() {
+        let key = include_str!("../../tests/fixtures/advisories/test-key.pub")
+            .lines()
+            .nth(1)
+            .unwrap();
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        let index = Arc::new(AtomicUsize::new(0));
+        let at = index.clone();
+        rig.engine.deps.advisories = Box::new(move |_| match at.fetch_add(1, Ordering::SeqCst) {
+            0 => advisories::fetch(&[key], &|name, _| {
+                Ok(Some(if name == "advisories" {
+                    include_bytes!("../../tests/fixtures/advisories/future").to_vec()
+                } else {
+                    include_bytes!("../../tests/fixtures/advisories/future.minisig").to_vec()
+                }))
+            }),
+            1 => Ok(None),
+            2 => bail!("timeout"),
+            _ => advisories::fetch(&[key], &|name, _| {
+                Ok(Some(if name == "advisories" {
+                    include_bytes!("../../tests/fixtures/advisories/empty").to_vec()
+                } else {
+                    include_bytes!("../../tests/fixtures/advisories/empty.minisig").to_vec()
+                }))
+            }),
+        });
+        for _ in 0..3 {
+            rig.shared.check_now();
+            rig.engine.wake_once();
+            assert!(readout(&rig.published()).withdrawn);
+            assert!(rig.installs.lock().unwrap().is_empty());
+            assert_eq!(rig.shared.status.lock().unwrap().current, Activity::Idle);
+        }
+        rig.shared.check_now();
+        rig.engine.wake_once();
+        assert!(!readout(&rig.published()).withdrawn);
+        assert_eq!(*rig.installs.lock().unwrap(), ["1.1.0"]);
+        assert!(rig.published().update_ready());
+        assert_eq!(index.load(Ordering::SeqCst), 4);
+    }
+
+    /// Every optional-fetch failure is no new information, even while a user
+    /// watches. Ordinary verified installs and later checks must still complete.
+    #[farhelm_testtrace::test]
+    fn advisory_failures_never_block_updates_or_leave_the_worker_busy() {
+        for failure in [
+            "404",
+            "HTTP 500",
+            "connection refused",
+            "DNS failure",
+            "timeout",
+            "oversize body",
+            "truncated body",
+            "HTTP refused",
+            "missing signature",
+            "empty signature",
+            "oversize signature",
+            "garbage signature",
+            "wrong header",
+            "invalid UTF8",
+        ] {
+            for manual in [false, true] {
+                let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.2.0"), true);
+                rig.engine.deps.advisories = Box::new(move |_| {
+                    if failure == "404" {
+                        Ok(None)
+                    } else {
+                        bail!("{failure}")
+                    }
+                });
+                if manual {
+                    rig.shared.check_now();
+                }
+                rig.engine.wake_once();
+                assert_eq!(*rig.installs.lock().unwrap(), ["1.2.0"], "{failure}");
+                assert!(!rig.published().needs_reinstall);
+                assert_eq!(rig.shared.status.lock().unwrap().current, Activity::Idle);
+                assert!(!rig.shared.status.lock().unwrap().user_waiting);
+                rig.shared.check_now();
+                rig.engine.wake_once();
+                assert_eq!(rig.probes.load(Ordering::SeqCst), 2);
+                assert_eq!(rig.shared.status.lock().unwrap().current, Activity::Idle);
+            }
+        }
+    }
+
+    /// Withdrawal and verification advice must coexist through every activity,
+    /// including a safe waiting update. Keep the reinstall command last so its
+    /// hover remains copyable; a withdrawn wait never promises restart recovery.
+    #[farhelm_testtrace::test]
+    fn withdrawal_readout_preserves_activity_and_other_warnings() {
+        for installed in ["1.1.0", "1.2.0"] {
+            for activity in [
+                Activity::Idle,
+                Activity::Checking,
+                Activity::Installing("1.3.0".into()),
+                Activity::Failed("offline".into()),
+                Activity::RestartFailed,
+            ] {
+                let mut state = state(Some(installed), activity.clone());
+                state.needs_reinstall = true;
+                state.advisories = withdrawn(&["1.0.0", "1.1.0"]);
+                let shown = readout(&state);
+                assert_eq!(shown.activity, activity);
+                assert!(shown.withdrawn && shown.needs_reinstall);
+                assert!(shown.tooltip.contains("Farhelm 1.0.0 was withdrawn"));
+                assert!(shown.tooltip.ends_with(REINSTALL_COMMAND));
+                assert_eq!(shown.update_ready, installed == "1.2.0");
+                assert_eq!(
+                    crate::app_updater::readout_marks(&shown).len(),
+                    if installed == "1.2.0" { 2 } else { 1 }
+                );
+                if installed == "1.1.0" {
+                    assert!(shown.tooltip.contains("Manual recovery"));
+                    assert!(!shown.tooltip.contains("Restart to update"));
+                    assert!(!shown.tooltip.contains("Quit and reopen"));
+                }
+            }
+        }
+    }
+
+    /// Turning automatic updates off during either metadata phase forbids
+    /// subsequent background requests. A manual join authorizes continuation
+    /// through the same guarded body/signature path and normal installation.
+    #[farhelm_testtrace::test]
+    fn disabling_automatic_updates_stops_new_advisory_requests_unless_joined() {
+        for during in ["probe", "body"] {
+            for joined in [false, true] {
+                let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.2.0"), true);
+                let automatic = rig.automatic.clone();
+                let shared = rig.shared.clone();
+                rig.engine.deps.probe = Box::new(move || {
+                    if during == "probe" {
+                        *automatic.lock().unwrap() = false;
+                        if joined {
+                            shared.check_now();
+                        }
+                    }
+                    Ok("1.2.0".into())
+                });
+                let calls = Arc::new(Mutex::new(Vec::new()));
+                let requests = calls.clone();
+                let automatic = rig.automatic.clone();
+                let shared = rig.shared.clone();
+                rig.engine.deps.advisories = Box::new(move |allowed| {
+                    let key = include_str!("../../tests/fixtures/advisories/test-key.pub")
+                        .lines()
+                        .nth(1)
+                        .unwrap();
+                    advisories::fetch_if_allowed(&[key], allowed, &|name, _| {
+                        requests.lock().unwrap().push(name.to_string());
+                        if name == "advisories" {
+                            if during == "body" {
+                                *automatic.lock().unwrap() = false;
+                                if joined {
+                                    shared.check_now();
+                                }
+                            }
+                            Ok(Some(
+                                include_bytes!("../../tests/fixtures/advisories/future").to_vec(),
+                            ))
+                        } else {
+                            Ok(Some(
+                                include_bytes!("../../tests/fixtures/advisories/future.minisig")
+                                    .to_vec(),
+                            ))
+                        }
+                    })
+                });
+                rig.engine.wake_once();
+                let expected_calls = if joined {
+                    2
+                } else if during == "probe" {
+                    0
+                } else {
+                    1
+                };
+                assert_eq!(
+                    calls.lock().unwrap().len(),
+                    expected_calls,
+                    "{during}/{joined}"
+                );
+                assert_eq!(readout(&rig.published()).withdrawn, joined);
+                assert_eq!(
+                    *rig.installs.lock().unwrap(),
+                    if joined { vec!["1.2.0"] } else { vec![] }
+                );
+                assert_eq!(rig.shared.status.lock().unwrap().current, Activity::Idle);
+                assert!(!rig.shared.status.lock().unwrap().user_waiting);
+            }
+        }
+    }
+
     // ---- the readout ----
 
     /// An installed release with a controlled activity and Installed record.
@@ -3174,6 +3724,7 @@ mod tests {
         UpdaterState {
             running: "1.0.0".to_string(),
             installed: installed.map(str::to_string),
+            advisories: Advisories::default(),
             activity,
             notice_id: 0,
             user_update_ready: false,
