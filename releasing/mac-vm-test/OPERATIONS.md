@@ -119,6 +119,13 @@ accessibility tree describes the host window, not guest controls. Use screenshot
 submission. Bring-up proved guest clicks, keyboard input and screenshot export. Permissions needed by the guest screen
 agent and apps require the maintainer's approval; never transfer a guest approval to host permissions.
 
+Check leftover brick-test pairs before starting a new one, following BRICK-TEST.md's startup reconciliation procedure.
+Separate Tart processes share the same application identity; binding by bundle ID or app path can select an earlier
+guest even after the intended window is brought forward. This was resolved by cleanly shutting down the abandoned
+earlier pair, preserving its disks and evidence, then resetting computer use and binding to the remaining Mac clone.
+Verify the returned window title before product setup. Do not shut down another active operator's pair to obtain GUI
+access, and do not treat foreground placement as proof that the tool selected that guest.
+
 If computer use returns `noWindowsAvailable` or `cgWindowNotFound`, inspect the coordinator status and live Tart state
 before doing anything to the guests. In one run, both owned guests were still running and command-ready even though
 binding by bundle ID, installed app path and display name, and a clean computer-use reset, could not recover the Mac
