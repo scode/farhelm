@@ -577,12 +577,22 @@ progress and report reviews do not. An idle executor still wakes when the watche
   `<checkout>` is the checkout's absolute path. Use that commit, not a fresh fetch, so a plan that landed in between
   still counts as a change. If that pick's `status` failed, do not start a watcher at all: notify the maintainer and
   stop monitoring.
-- Run it as a background command whose completion wakes the session: in Claude Code, `run_in_background` with a timeout
-  above the watcher's `--max-wait` (the defaults, 6600 seconds against Claude Code's two-hour background limit, fit).
-  Record its task handle and the baseline commit in the executor log. After a compaction or a resume, if the recorded
-  watcher is no longer running, start a new one with the recorded commit.
-- Act only on the exit of the watcher the executor log records. Exits of a watcher the agent stopped itself, or of any
-  other, are ignored.
+- Run it as a background command whose completion wakes the session:
+  - In Claude Code, `run_in_background` with a timeout above the watcher's `--max-wait` (the defaults, 6600 seconds
+    against Claude Code's two-hour background limit, fit). Record its task handle and the baseline commit in the
+    executor log.
+  - In Codex, arm it through the maintainer's `skillette-codex-wake-on-exit` skill (trigger: "use Codex wake-on-exit"),
+    from the checkout, with a new run directory inside the agent's scratch directory, and follow that skill for the
+    mechanics: check the phase it returns before relying on it, end the turn once it is armed, and acknowledge the
+    callback before acting on the watcher's exit. Record its run id, run directory and baseline commit in the executor
+    log, with the continuation: the exit rules below. A `queue-failed` or `runner-failed` phase, or a session the skill
+    cannot arm (no `CODEX_THREAD_ID`, no `codex queue`), means waking does not work here: fall back to the foreground
+    rule at the end of this list rather than polling, and record why.
+
+  After a compaction or a resume, if the recorded watcher is no longer running (in Codex, the skill's one-time `status`
+  check settles it), start a new one with the recorded commit.
+- Act only on the exit of the watcher the executor log records (in Codex, a callback whose run id and directory match
+  the recorded ones). Exits of a watcher the agent stopped itself, or of any other, are ignored.
 - Its exit decides what happens next:
   - `changed` (status 0): drain again.
   - `idle` (status 10): nothing changed; start it again with the same commit, without fetching or draining.
@@ -593,7 +603,8 @@ progress and report reviews do not. An idle executor still wakes when the watche
   - `usage:` (status 2) or anything else: the invocation is wrong, so restarting cannot help. Notify and stop
     monitoring.
 - A harness that cannot wake a session when a background command exits runs the watcher in the foreground instead, with
-  a `--max-wait` shorter than its own command timeout.
+  a `--max-wait` shorter than its own command timeout. In Codex that is a run without a connected client to receive the
+  callback: a one-shot `codex exec`, or a native spawned subagent, which Codex will not wake with queued input.
 
 A batch of new plans wakes every monitoring executor at once, and they will race for the same first pick. That is fine:
 the losers get exit 10 and move to their next candidate.
