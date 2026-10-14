@@ -19,7 +19,7 @@ import unittest
 import uuid
 from unittest import mock
 
-from brick_test import Run, artifact, metadata, plan, smoke, version
+from brick_test import Run, artifact, metadata, plan, priority_entry, smoke, version
 from control import Control, Refused, atomic_json
 from machine_profile import Profile
 from test_machine_profile import fixture
@@ -592,7 +592,7 @@ artifact corruption as competing causes of the new refusal.
         self.assertTrue(all(state == 'stopped' for state in self.model.states.values()))
         self.assertTrue(all(child.poll() == 0 for child in self.model.children))
 
-    def enable_p0(self, p0_only=False, supported=True, candidate='v0.25.0'):
+    def enable_p0(self, p0_only=False, supported=True, candidate='v0.25.0', p1_only=False):
         """Create a new priority-aware run without rewriting the legacy fixture's history.
 
 The modeled bases are independently stopped. No real release bytes, guest
@@ -603,7 +603,7 @@ authentication, GUI outcome or product verdict is borrowed by these tests.
                        factory=self.model.factory, connector=self.model.connect)
         release = plan(candidate, 'v0.24.0', FakeSource(['v0.24.0'] if supported else []))
         release['sha256sums_sha256'] = 'fixture-checksum'
-        self.run.create(release, p0_only=p0_only)
+        self.run.create(release, p0_only=p0_only, p1_only=p1_only)
 
     def complete_p0(self, pass_id, through=None):
         """Exercise all real record and cleanup gates with explicitly synthetic observations.
@@ -611,6 +611,8 @@ authentication, GUI outcome or product verdict is borrowed by these tests.
 Tiny PNGs prove evidence format only. The fake substrate's stopped/absent
 state independently checks cleanup before the next fixture is permitted.
 An explicit boundary leaves the pair live for an unsettled evidence-gate test.
+Without a boundary, this helper also records the in-scope P1 with synthetic
+image evidence so cleanup cannot silently skip its new obligation.
 """
         children = self.prepare(pass_id)
         image = self.evidence_file(pass_id + '.png', PNG)
@@ -624,11 +626,13 @@ An explicit boundary leaves the pair live for an unsettled evidence-gate test.
                 self.run.select_update(pass_id, 'v0.24.0')
             entry = self.run.selected(pass_id)
             for check in entry['required']:
+                if entry['required'][check].get('priority') == 'P1' and self.run.data['scope'] == 'p0-only':
+                    continue
                 refs = [receipt] if check == 'artifact-verification' else [image, command]
                 self.run.record(pass_id, check, 'pass', refs, 'Synthetic evidence contract, not a product observation.')
                 if check == through:
                     return children
-            self.assertEqual(self.run.verdict(entry), 'pass')
+            self.assertEqual(self.run.verdict(priority_entry(entry, 'P0')), 'pass')
             self.run.cleanup(pass_id)
         self.assertTrue(all(child.poll() == 0 for child in children))
         self.assertEqual(set(self.model.states), {'mac-base', 'linux-base'})
@@ -717,7 +721,9 @@ An explicit boundary leaves the pair live for an unsettled evidence-gate test.
 
     def test_each_p0_agent_check_needs_command_evidence_and_reports_separately(self):
         """A local success cannot conceal an untested remote agent, and GUI evidence alone is insufficient."""
-        self.enable_p0()
+        # P0-only scope keeps this regression about agent evidence, without
+        # inventing a feedback-send observation merely to clean its pair.
+        self.enable_p0(p0_only=True)
         self.complete_p0('p0-fresh')
         self.complete_p0('p0-installer-upgrade')
         children = self.complete_p0('p0-updater-upgrade', through='update-relaunch')
@@ -760,6 +766,172 @@ An explicit boundary leaves the pair live for an unsettled evidence-gate test.
         """Resuming historical manifests preserves their original coverage instead of inventing missing upgrade paths."""
         with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'not planned')
+            self.assertEqual(self.run.report()['p1']['verdict'], 'not planned')
+
+    def ready_for_p1(self, p0_only=False, p1_only=False):
+        """Leave the final candidate pair live after independently validated P0.
+
+This is a synthetic coordinator boundary, not a real feedback submission.
+The two preceding pairs have already passed their evidence and cleanup gates.
+"""
+        self.enable_p0(p0_only=p0_only, p1_only=p1_only)
+        self.complete_p0('p0-fresh')
+        self.complete_p0('p0-installer-upgrade')
+        children = self.complete_p0('p0-updater-upgrade', through='remote-supervisor-agent')
+        self.assertTrue(all(child.poll() is None for child in children))
+        with self.run.locked():
+            self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
+            self.assertEqual(self.run.report()['p1']['verdict'], 'could not run')
+            self.assertNotIn('p1-feedback-send', self.run.selected('p0-updater-upgrade')['results'])
+        return children
+
+    def test_p1_is_gui_only_and_required_before_last_pair_cleanup(self):
+        """A P0 pass neither invents a feedback result nor permits skipping the in-scope send."""
+        children = self.ready_for_p1(p1_only=True)
+        before = self.evidence_file('feedback-filled.png', PNG)
+        after = self.evidence_file('feedback-closed.png', PNG)
+        with self.run.locked():
+            spec = self.run.selected('p0-updater-upgrade')['required']['p1-feedback-send']
+            self.assertEqual(spec, {'gui': True, 'command': False, 'continuity': False, 'priority': 'P1'})
+            with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                self.run.cleanup('p0-updater-upgrade')
+            self.assertTrue(all(child.poll() is None for child in children))
+            self.run.record('p0-updater-upgrade', 'p1-feedback-send', 'pass', [before, after],
+                            'Synthetic filled/closed frames; no live send or GUI result claimed.')
+            report = self.run.report()
+            self.assertEqual(report['p1'], {'verdict': 'pass', 'checks': {'p1-feedback-send': 'pass'}})
+            self.assertEqual(report['requested_verdict'], 'pass')
+            self.assertEqual(report['verdict'], 'could not run')
+            self.run.cleanup('p0-updater-upgrade')
+            with self.assertRaisesRegex(Refused, 'outside this run scope'):
+                self.run.prepare('fresh', [])
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_lost_p1_success_evidence_preserves_guests_until_recovered(self):
+        """The nonblocking-failure exception cannot delete the source of a lost successful GUI observation.
+
+A late stop after P0 (the scope narrowed once P1 is already recorded) must not
+lift that protection either: the scope fences future work, not evidence.
+"""
+        for damage, narrowed in (('changed', False), ('missing', False), ('missing', True)):
+            with self.subTest(damage=damage, narrowed=narrowed):
+                children = self.ready_for_p1()
+                image = self.evidence_file('p1-success-only.png', PNG)
+                with self.run.locked():
+                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', 'pass', [image],
+                                    'Synthetic P1 image independent of every P0 artifact.')
+                    self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
+                    if narrowed:
+                        self.run.limit_to_p0()
+                    path = self.run.directory / image
+                    if damage == 'changed':
+                        path.write_bytes(b'changed P1-only image')
+                    else:
+                        path.unlink()
+                    report = self.run.report()
+                    self.assertEqual(report['p0']['verdict'], 'pass')
+                    self.assertEqual(report['p1']['verdict'], 'could not run')
+                    calls = len(self.model.calls)
+                    with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                        self.run.cleanup('p0-updater-upgrade')
+                    self.assertEqual(len(self.model.calls), calls, 'refusal must precede shutdown or deletion')
+                    self.assertTrue(all(child.poll() is None for child in children))
+                    # Restoring the exact accepted bytes makes cleanup possible;
+                    # a blanket P1 cleanup refusal would fail this half.
+                    path.write_bytes(PNG)
+                    self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
+                    self.run.cleanup('p0-updater-upgrade')
+                self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_every_p1_result_requires_all_valid_p0_evidence(self):
+        """Failed and unavailable P1 records must not bypass the ordering fence that protects passing records."""
+        self.enable_p0()
+        self.complete_p0('p0-fresh')
+        self.complete_p0('p0-installer-upgrade')
+        self.complete_p0('p0-updater-upgrade', through='local-supervisor-agent')
+        image = self.evidence_file('p1.png', PNG)
+        with self.run.locked():
+            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
+            for status in ('pass', 'fail', 'could-not-run'):
+                with self.subTest(status=status), self.assertRaisesRegex(Refused, 'complete all P0'):
+                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image], 'Out of order.')
+            command = self.evidence_file('remote-agent.txt', b'synthetic remote agent receipt')
+            self.run.record('p0-updater-upgrade', 'remote-supervisor-agent', 'pass', [image, command],
+                            'Synthetic evidence; all P0 checks now recorded.')
+            self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
+            # A previously accepted earlier fixture is still a prerequisite:
+            # the last pair alone cannot authorize P1 after its bytes changed.
+            (self.run.directory / 'p0-fresh.png').write_bytes(b'changed image')
+            for status in ('pass', 'fail', 'could-not-run'):
+                with self.subTest(invalidated=status), self.assertRaisesRegex(Refused, 'complete all P0'):
+                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image], 'Invalid predecessor.')
+            self.assertNotIn('p1-feedback-send', self.run.selected('p0-updater-upgrade')['results'])
+
+    def test_p0_stop_refuses_feedback_but_cleans_its_last_pair(self):
+        """A P0-only request sends nothing even though the retained full plan still declares P1."""
+        children = self.ready_for_p1(p0_only=True)
+        with self.run.locked():
+            for status in ('pass', 'fail', 'could-not-run'):
+                with self.subTest(status=status), self.assertRaisesRegex(Refused, 'P1 is outside'):
+                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [], 'Outside scope.')
+            self.assertEqual(self.run.report()['requested_verdict'], 'pass')
+            self.run.cleanup('p0-updater-upgrade')
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_failed_p1_preserves_p0_and_allows_cleanup_and_bonus_observations(self):
+        """Feedback outages do not hold disposable guests or suppress independent bonus checks."""
+        for status, expected in (('fail', 'fail'), ('could-not-run', 'could not run')):
+            with self.subTest(status=status):
+                children = self.ready_for_p1()
+                image = self.evidence_file('failed-feedback.png', PNG)
+                with self.run.locked():
+                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image],
+                                    'Synthetic failed/unavailable feedback observation.')
+                    report = self.run.report()
+                    self.assertEqual(report['p0']['verdict'], 'pass')
+                    self.assertEqual(set(report['p0']['checks'].values()), {'pass'})
+                    self.assertEqual(report['p1']['verdict'], expected)
+                    self.assertEqual(report['verdict'], expected)
+                    self.run.cleanup('p0-updater-upgrade')
+                    self.assertEqual(self.run.report()['p1']['verdict'], expected)
+                self.assertTrue(all(child.poll() == 0 for child in children))
+                bonus = self.prepare('fresh')
+                with self.run.locked():
+                    self.run.record('fresh', 'fixture-clean', 'pass', [image], 'Synthetic fresh fixture.')
+                    self.assertEqual(self.run.selected('fresh')['results']['fixture-clean']['status'], 'pass')
+                    self.run.cleanup('fresh', discard_failed=True)
+                self.assertTrue(all(child.poll() == 0 for child in bonus))
+
+    def test_mid_session_p1_stop_retains_each_result_and_refuses_bonus(self):
+        """Stopping after P1 includes its outcome; a failed send cannot become a P0-only requested pass."""
+        for status, expected in (('pass', 'pass'), ('fail', 'fail'), ('could-not-run', 'could not run')):
+            with self.subTest(status=status):
+                children = self.ready_for_p1()
+                image = self.evidence_file('p1-scope.png', PNG)
+                with self.run.locked():
+                    self.run.limit_to_p1()
+                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image], 'Synthetic P1 result.')
+                    self.assertEqual(self.run.report()['scope'], 'p1-only')
+                    self.assertEqual(self.run.report()['requested_verdict'], expected)
+                    self.run.cleanup('p0-updater-upgrade')
+                    with self.assertRaisesRegex(Refused, 'outside this run scope'):
+                        self.run.prepare('fresh', [])
+                self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_pre_p1_manifest_keeps_its_existing_obligations(self):
+        """Upgrading the coordinator must not demand a send the original run never planned."""
+        self.enable_p0()
+        with self.run.locked():
+            self.run.selected('p0-updater-upgrade')['required'].pop('p1-feedback-send')
+            self.run.save()
+            self.assertEqual(self.run.report()['p1']['verdict'], 'not planned')
+            with self.assertRaisesRegex(Refused, 'no planned P1'):
+                self.run.limit_to_p1()
+        for pass_id in self.run.data['plan']['p0_sequence']:
+            self.complete_p0(pass_id)
+        with self.run.locked():
+            self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
+            self.assertEqual(self.run.report()['p1']['verdict'], 'not planned')
 
 
 if __name__ == '__main__':

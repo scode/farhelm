@@ -395,9 +395,10 @@ still a draft, say so before deploying.
    Mac, in Tart VMs, so this session does not run it; it installs the staged release and upgrades the previous stable
    releases to it, which is the check that the release does not brick existing installations (SPEC.md, "Upgrade
    compatibility and client scale"). Give the maintainer the risk report's ranked risks and manual checks as material
-   for the test's per-release addendum. If the notes are not finalized yet, say so in the same message, since a pass
-   leads straight to promotion. Then wait for the maintainer's verdict; do not treat silence, or a test that could not
-   run, as a pass.
+   for the test's per-release addendum. The result names P0's install/upgrade/agent checks, P1's live feedback send and
+   bonus coverage separately; bring those results to the maintainer without deciding whether a P1 failure blocks
+   promotion. If the notes are not finalized yet, say so in the same message, since a pass leads straight to promotion.
+   Then wait for the maintainer's verdict; do not treat silence, or a test that could not run, as a pass.
    - Pass: the maintainer moves `/latest`, which no agent does. If the notes are still not finalized when they report
      the pass, remind them before they move it, since promoting would send every ordinary install to a release whose
      page still reads DRAFT. Once they say it has moved, check that `https://get.farhelm.io/latest` names `vX.Y.Z`, and

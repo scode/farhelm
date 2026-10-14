@@ -49,12 +49,14 @@ either fresh clone. A broken fixture is “could not run,” not a product pass.
 Run these five checks immediately after environment readiness and basic coverage planning, in order. P0 is a named
 group: report all five results and a separate P0 verdict. Stop at the first failed or unavailable check and retain its
 diagnostics. A successful step never substitutes for a later step. A request to **stop after P0 checks** ends after P0
-evidence is recorded and its successful fixtures are cleaned up. Otherwise, report P0 promptly and continue bonus work.
+evidence is recorded and its successful fixtures are cleaned up, without sending feedback. Otherwise, report P0
+promptly, run P1 on the last pair, and only then continue bonus work.
 
 Use three independent guest pairs: `p0-fresh` for step 1, `p0-installer-upgrade` for step 2, and `p0-updater-upgrade`
 for steps 3–5. Both upgrades start from the previous promoted stable and use its actual installed state. For each pair,
 verify the candidate's published bytes against that stable's compiled trust ring as described in BRICK-TEST.md.
-Export/record evidence and clean up each successful pair before starting the next.
+Export/record evidence and clean up each successful pair before starting the next. Unless scope is P0-only, keep the
+last pair's candidate app running for P1 before that pair's final export and cleanup.
 
 Identify genuine agent CLI/authentication prerequisites for the Mac and Linux hosts during environment readiness; Codex
 is the baseline. Follow BRICK-TEST.md's permission preflight and obtain missing approvals together before product
@@ -103,6 +105,45 @@ with release-specific feature checks or wait for historical-version investigatio
 **did P0 checks succeed?** with that P0 result, candidate and previous stable, and the evidence references. Do not imply
 that broader checks ran. Older manifests without these separate fixtures have no P0 verdict; retain their observations
 as historical coverage rather than rewriting them.
+
+## P1 check: send feedback from the candidate
+
+Run only after all five P0 checks passed with valid retained evidence. Use the Mac guest of `p0-updater-upgrade`, on the
+candidate app those steps left running; do not create a new clone or install another app. Permission preflight must
+already cover the live send to `farhelm.io`, which creates an issue in the maintainer's private feedback inbox. This
+check does not run in stop-after-P0 scope.
+
+1. Through computer use bound to this exact guest, open **?** and choose **send feedback**. Enter this exact message,
+   replacing only `vX.Y.Z` with the candidate's full tag:
+
+   ```text
+   [brick-test] vX.Y.Z
+
+   This is an automated release brick test checking that this release can send feedback; no action is needed.
+   ```
+
+   Use the verified guest-only clipboard workaround in OPERATIONS.md: prepare the clipboard through the journaled
+   controller inside the Mac guest, then use the guest's Edit menu and Paste. Keep Tart's shared clipboard disabled and
+   the host clipboard untouched. Inspect the pasted message before proceeding; the first line must be exact so the inbox
+   title is `Feedback: [brick-test] vX.Y.Z`.
+2. Leave the contact field blank, clearing any prefilled contact. Inspect the dialog's display of what accompanies the
+   message: the version must name this candidate and the surface must be the desktop app. Save a PNG of the filled
+   dialog before Send. These are fixture premises, not inferred from which installer ran.
+3. Press Send and observe it finish. Pass only if the dialog closes by itself without a failure message. Seeing the
+   brief thanks is optional; it lasts only 1.5 seconds. A failure message or a dialog that stays open fails the check.
+   Save another PNG showing the closed dialog (or the thanks, if caught); on failure capture the visible failure state.
+   Retain the agent's actual observation as the result detail. No command success receipt is required: the helm logs
+   only failed sends, and the GUI closing is the success oracle.
+4. Export the two captures with the existing bounded evidence collection and record `p1-feedback-send` on
+   `p0-updater-upgrade`, with GUI evidence and status pass, fail or could-not-run. Inspect `status` and report P1's
+   named result and `p1.verdict` promptly, separate from P0. Retain failure evidence before cleanup; a P1 failure does
+   not change a valid P0 verdict, does not prevent ordinary cleanup of this pair, and does not fence bonus passes.
+5. Clean up this pair and wait for its foreground owner to exit. End here for **stop after P1 checks**; otherwise
+   continue the bonus passes below. Whether a failed P1 should prevent promotion is the maintainer's decision for that
+   release, not a rule this recipe chooses.
+
+The full verdict includes P1. P0-only requested verdict follows P0; P1-only requested verdict follows P0 and P1
+together. Historical manifests with no declared P1 check report it as not planned; do not retrofit a send into them.
 
 ## Bonus: full fresh install
 
@@ -224,6 +265,10 @@ hostnames, usernames or private paths.
 
 ```text
 Verdict: pass | fail | could not run
+Scope: full | stop after P0 | stop after P1
+P0 verdict and five named results:
+P1 verdict and p1-feedback-send result: pass | fail | could not run | not planned
+Requested-scope verdict:
 Candidate / previous stable / extra pairs:
 Tag's commit; SHA-256 of SHA256SUMS; guest OS versions (portable summary):
 /latest observation; selected update path; actual trigger:
@@ -235,7 +280,8 @@ Coverage gaps: unrun checks, manual-verification omissions, untested version pai
 Cleanup: owned clones deleted or retained by agreement; evidence retained
 ```
 
-“P0 pass” requires all five P0 checks to run and pass. “Full pass” additionally requires every planned bonus check to
-run and pass. A product failure makes the relevant verdict fail; a missing test environment with no demonstrated product
-failure makes it could not run. Never treat a skipped check or a clean process exit as a pass. This result covers the
-actual versions, artifacts and paths exercised, not zero risk for every supported installation.
+“P0 pass” requires all five P0 checks to run and pass. “P1 pass” requires the feedback send after valid P0. “Full pass”
+additionally requires P1 and every planned bonus check to run and pass. A product failure makes the relevant verdict
+fail; a missing test environment with no demonstrated product failure makes it could not run. Never treat a skipped
+check or a clean process exit as a pass. This result covers the actual versions, artifacts and paths exercised, not zero
+risk for every supported installation.
