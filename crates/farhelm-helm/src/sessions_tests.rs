@@ -2723,8 +2723,7 @@ async fn plain_replace_of_a_legacy_session_is_refused_with_its_remedy() {
 async fn replace_of_an_agent_launch_copies_its_stored_launch() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{
-        ControlMsg, Frame, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
-        SessionInfo,
+        ControlMsg, Frame, LaunchEffort, LaunchHarness, LaunchSelection, SessionInfo,
     };
 
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
@@ -2732,7 +2731,7 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
         harness: LaunchHarness::Claude,
         model: Some("claude-opus-4-6".to_string()),
         effort: Some(LaunchEffort::High),
-        permissions: Some(LaunchPermission::Yolo),
+        permissions: None,
         workspace_trust: None,
     };
     // A launch an older catalog composed: the start command carries a flag
@@ -2743,7 +2742,6 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
             "claude".to_string(),
             "--model".to_string(),
             "claude-opus-4-6".to_string(),
-            "--dangerously-skip-permissions".to_string(),
             "--older-flag".to_string(),
             "{farhelm_args}".to_string(),
         ],
@@ -2760,9 +2758,9 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
         ..rest_harness::session("sess-1", 1_700_000_000)
     };
     let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
-    // YOLO launch on the fixture's ask-first host; the guard
-    // is not what this test is about (see `yolo_guard`'s own tests).
-    allow_yolo_here(&harness.store).await;
+    // No permission field means an older no-flag command, not a request for
+    // today's guarded default. Replace must ask before copying it, then keep
+    // it unchanged when the user confirms.
     let fleet = harness.fleet.clone();
     let peer = tokio::spawn(async move {
         let (r, w) = tokio::io::split(peer_side);
@@ -2812,10 +2810,21 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
     });
 
     harness.await_refreshed(local).await;
-    let (status, body) = post_text(
+    let (refused, headers, _) = post_text_headers(
         &harness,
         "/api/sessions/sess-1/replace",
         serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(refused, axum::http::StatusCode::CONFLICT);
+    assert_eq!(
+        headers[farhelm_proto::http::YOLO_CONFIRMATION_HEADER],
+        farhelm_proto::http::YOLO_CONFIRMATION_REQUIRED
+    );
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({"confirm_yolo":true}),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");

@@ -58,7 +58,7 @@ test("New opens on the agent tab, and each tab keeps its own fields and draft", 
   await commandTab.click();
   await expect(form.getByLabel("agent command")).toHaveValue("sleep 300");
   await expect(
-    form.getByRole("group", { name: "runs without approval prompts" }).getByLabel("yes (YOLO)", { exact: true }),
+    form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("yes (YOLO)", { exact: true }),
   ).toBeChecked();
   await agentTab.click();
   await expect(harness.getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");

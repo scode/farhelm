@@ -272,6 +272,10 @@
 
     function position(text) {
       const box = element();
+      // Permission help deliberately includes mode, flags and caveats as
+      // paragraphs. Its target opts out of the short-help line clamp; this
+      // metadata is app-authored, never inferred from peer command text.
+      box.dataset.paragraphs = target.getAttribute("data-tooltip-paragraphs") === "true" ? "true" : "false";
       box.textContent = text;
       box.hidden = false;
       // Measure at the origin first, so the width it wraps to is its own

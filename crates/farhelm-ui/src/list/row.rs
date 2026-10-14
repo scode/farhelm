@@ -13,7 +13,7 @@ use crate::icons::{
     EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, HostMark, LocalHostIcon,
     ManagedCheckoutMark, PermissionGlyph, PermissionIcon, QualifierGlyph, QualifierIcon,
 };
-use crate::launch_composer::{selection_explicit_before_permissions, selection_permission_value};
+use crate::launch_composer::selection_explicit_before_permissions;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, status_badge};
 use crate::{LaunchHarness, Session, SessionStatus};
@@ -219,10 +219,12 @@ fn menu_header_summary_parts(session: &Session, state: Option<&str>) -> Vec<Deta
     let values = if let Some(launch) = session.agent_selection() {
         let mut values =
             vec![crate::launch_composer::harness_label(launch.harness).to_ascii_lowercase()];
-        let permission = selection_permission_value(launch);
-        if permission != "default" {
-            values.push(permission.to_string());
-        }
+        let permission = launch
+            .harness
+            .stored_permission(launch.permissions)
+            .map(crate::launch_composer::permission_value)
+            .unwrap_or("agent's own setting");
+        values.push(permission.to_string());
         values.extend(selection_explicit_before_permissions(launch));
         values
     } else {
@@ -403,6 +405,8 @@ fn abbreviate_home(cwd: &str) -> String {
 struct AgentBadge {
     harness: HarnessGlyph,
     permission: PermissionGlyph,
+    /// App-authored mode help with peer command text already escaped. Its
+    /// paragraph breaks are intentional and must survive tooltip rendering.
     description: String,
 }
 
@@ -418,7 +422,10 @@ const STALE_TOOLTIP: &str = "stale: the host is not connected, so this is its la
 fn permission_description(permission: PermissionGlyph) -> &'static str {
     match permission {
         PermissionGlyph::Yolo => "YOLO permission bypass",
-        PermissionGlyph::Default => "default permission mode",
+        PermissionGlyph::Guarded => "guarded permission mode",
+        PermissionGlyph::OwnSetting => {
+            "agent's own setting — not classified; treated as YOLO on hosts that ask before YOLO launches"
+        }
         PermissionGlyph::Unknown => {
             "unclassified — a command from before launch kinds, which Farhelm never classified"
         }
@@ -445,26 +452,43 @@ fn permission_description(permission: PermissionGlyph) -> &'static str {
 fn agent_badge(session: &Session) -> AgentBadge {
     if let Some(launch) = session.agent_selection() {
         let harness = harness_glyph(launch.harness);
-        // The shared classifier decides YOLO; the effective permission helper
-        // also handles older omitted or unsupported choices for mode display.
-        let permission = if farhelm_proto::yolo::selection_is_yolo(launch) {
+        // Own-setting needs the same admission gate as YOLO but a different
+        // mark. Resolve the stored choice before using that shared gate so an
+        // older omission cannot borrow today's guarded request default.
+        let permission = if launch
+            .harness
+            .stored_permission(launch.permissions)
+            .is_none()
+        {
+            PermissionGlyph::OwnSetting
+        } else if farhelm_proto::yolo::selection_is_yolo(launch) {
             PermissionGlyph::Yolo
         } else {
-            match launch.harness.effective_permission(launch.permissions) {
+            match launch.harness.stored_permission(launch.permissions) {
+                Some(crate::LaunchPermission::Guarded) => PermissionGlyph::Guarded,
                 Some(crate::LaunchPermission::Yolo) => {
                     unreachable!("the shared classifier handled YOLO")
                 }
                 Some(crate::LaunchPermission::Approve) => PermissionGlyph::Approve,
                 Some(crate::LaunchPermission::SmartApprove) => PermissionGlyph::SmartApprove,
                 Some(crate::LaunchPermission::Chat) => PermissionGlyph::Chat,
-                None => PermissionGlyph::Default,
+                None => unreachable!("own-setting was handled above"),
             }
         };
         let mut description = harness_name(launch.harness).to_string();
         description.push_str(" — ");
-        description.push_str(permission_description(permission));
-        description.push_str(" — ");
-        description.push_str(&session.invocation);
+        description.push_str(&crate::launch_composer::permission_help(
+            launch.harness,
+            launch.harness.stored_permission(launch.permissions),
+        ));
+        description.push_str("\n\nLaunched with: ");
+        description.push_str(&display_peer(
+            &session
+                .launch
+                .as_ref()
+                .expect("agent selection has a launch")
+                .display_command(),
+        ));
         return AgentBadge {
             harness,
             permission,
@@ -496,7 +520,7 @@ fn agent_badge(session: &Session) -> AgentBadge {
     description.push_str(" — ");
     description.push_str(permission_description(permission));
     description.push_str(" — ");
-    description.push_str(&session.invocation);
+    description.push_str(&display_peer(&session.invocation));
     AgentBadge {
         harness,
         permission,
@@ -1617,17 +1641,20 @@ pub(super) fn SessionRow(
                         // The agent track is a bounded visual classifier.
                         span {
                             class: "session-agent",
-                            "data-tooltip": "{display_peer(&agent_tooltip)}",
+                            "data-tooltip": "{agent_tooltip}",
+                            "data-tooltip-paragraphs": "true",
                             // Give each glyph its own hover target. The
                             // parent still exposes the argv when the pointer
                             // is between the two marks.
-                            span { "data-tooltip": "{display_peer(&agent_tooltip)}",
+                            span { "data-tooltip": "{agent_tooltip}",
+                                "data-tooltip-paragraphs": "true",
                                 HarnessIcon { glyph: agent.harness }
                             }
-                            span { "data-tooltip": "{permission_description(agent.permission)}",
+                            span { "data-tooltip": "{agent_tooltip}",
+                                "data-tooltip-paragraphs": "true",
                                 PermissionIcon { glyph: agent.permission }
                             }
-                            span { class: "visually-hidden", "{display_peer(&agent.description)}" }
+                            span { class: "visually-hidden", "{agent.description}" }
                         }
                         // Beside the badge, and about something ELSE. The
                         // badge is the session's current (or, on a stale
@@ -3327,14 +3354,14 @@ mod tests {
             invocation: "unknown-command --anything".to_string(),
             ..row_specimen("structured-agent-badge")
         };
-        assert_eq!(
-            agent_badge(&session),
-            AgentBadge {
-                harness: HarnessGlyph::Claude,
-                permission: PermissionGlyph::Yolo,
-                description: "Claude Code — YOLO permission bypass — unknown-command --anything"
-                    .to_string(),
-            }
+        let badge = agent_badge(&session);
+        assert_eq!(badge.harness, HarnessGlyph::Claude);
+        assert_eq!(badge.permission, PermissionGlyph::Yolo);
+        assert!(badge.description.starts_with("Claude Code — YOLO:"));
+        assert!(badge.description.contains("Launched with: agent"));
+        assert!(
+            !badge.description.contains("unknown-command --anything"),
+            "the stored launch, not a contradictory display invocation, is the command provenance"
         );
     }
 
@@ -3372,11 +3399,7 @@ mod tests {
             ..row_specimen("structured-pi-badge")
         };
         assert_eq!(agent_badge(&pi).permission, PermissionGlyph::Yolo);
-        assert!(
-            agent_badge(&pi)
-                .description
-                .contains("YOLO permission bypass")
-        );
+        assert!(agent_badge(&pi).description.contains("YOLO:"));
     }
 
     /// Every row carries exactly one permission mark, and it comes from the
@@ -3385,9 +3408,22 @@ mod tests {
     /// reading of the command line.
     #[farhelm_testtrace::test]
     fn every_row_has_a_permission_mark_without_inferring_approval() {
-        for (permission, expected) in [
-            (None, PermissionGlyph::Default),
-            (Some(crate::LaunchPermission::Yolo), PermissionGlyph::Yolo),
+        for (permission, expected, explanation) in [
+            (
+                None,
+                PermissionGlyph::OwnSetting,
+                "Not classified · agent's own setting",
+            ),
+            (
+                Some(crate::LaunchPermission::Guarded),
+                PermissionGlyph::Guarded,
+                "Guarded · Codex sandboxed auto",
+            ),
+            (
+                Some(crate::LaunchPermission::Yolo),
+                PermissionGlyph::Yolo,
+                "YOLO:",
+            ),
         ] {
             let session = Session {
                 launch: agent_launch(crate::LaunchSelection {
@@ -3401,11 +3437,7 @@ mod tests {
                 ..row_specimen("structured-mode")
             };
             assert_eq!(agent_badge(&session).permission, expected);
-            assert!(
-                agent_badge(&session)
-                    .description
-                    .contains(permission_description(expected))
-            );
+            assert!(agent_badge(&session).description.contains(explanation));
         }
         // A command launch carries its assertion and says it is one, and a
         // legacy session is unclassified whatever its command spells;
@@ -3453,13 +3485,22 @@ mod tests {
             assert_eq!(badge.harness, HarnessGlyph::Terminal, "{invocation}");
             assert!(badge.description.contains("unclassified"));
         }
-        for (permission, expected) in [
-            (crate::LaunchPermission::Approve, PermissionGlyph::Approve),
+        for (permission, expected, explanation) in [
+            (
+                crate::LaunchPermission::Approve,
+                PermissionGlyph::Approve,
+                "approve: the agent asks before every tool action",
+            ),
             (
                 crate::LaunchPermission::SmartApprove,
                 PermissionGlyph::SmartApprove,
+                "smart approve: the agent asks only before actions it judges risky",
             ),
-            (crate::LaunchPermission::Chat, PermissionGlyph::Chat),
+            (
+                crate::LaunchPermission::Chat,
+                PermissionGlyph::Chat,
+                "chat: the agent only talks and uses no tools",
+            ),
         ] {
             let session = Session {
                 launch: agent_launch(crate::LaunchSelection {
@@ -3473,11 +3514,7 @@ mod tests {
                 ..row_specimen("approval-mode")
             };
             assert_eq!(agent_badge(&session).permission, expected);
-            assert!(
-                agent_badge(&session)
-                    .description
-                    .contains(permission_description(expected))
-            );
+            assert!(agent_badge(&session).description.contains(explanation));
         }
     }
 

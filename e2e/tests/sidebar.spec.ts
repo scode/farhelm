@@ -4931,15 +4931,15 @@ test("composer keeps arbitrary model-first choices reviewable", async ({ page, r
   await form.locator("#launch-composer-model-results").getByRole("option", { name: "reviewable-codex (Codex)", exact: true }).click();
   await expect(model).toHaveValue("reviewable-codex");
   await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
-  // The summary's "permissions: default" and "trust: default" are this
+  // The summary's "permissions: guarded" and "trust: default" are this
   // test's own choices: a fresh dialog preselects the helm-wide remembered
   // permissions mode and workspace trust, and an earlier launch in this
   // invocation may have set them to yolo and true. The trust choice only
   // appears once the model has made the harness known.
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }).click();
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
   await form.locator(".launch-composer-trust-choice").getByRole("button", { name: "default", exact: true }).click();
   await expect(form.locator(".launch-composer-summary")).toHaveText(
-    "model: reviewable-codex · effort: default · permissions: default · trust: default",
+    "model: reviewable-codex · effort: default · permissions: guarded · trust: default",
   );
 });
 
@@ -5275,7 +5275,7 @@ test("composer saved defaults clear explicit choices without posting", async ({ 
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill("saved-defaults");
   await form.getByRole("group", { name: "Recent setups" }).getByRole("option").click();
-  await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: default");
+  await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: guarded");
   expect(createPosts).toBe(0);
 });
 
@@ -5792,7 +5792,7 @@ test("composer mounted clone generation replaces the prior draft and notice", as
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue("mounted-new-custom");
     await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     await firstRow.locator(".session-row-menu").evaluate((node) => {
       node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -6147,9 +6147,10 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
     const row = slots.getByRole("button").nth(index);
     const entry = launches[index];
     // The row's title spells the permission the way the summary does:
-    // "yolo" — the colorable warning word — or "default" when the
-    // selection carries none.
-    const permission = entry.selection.permissions ?? "default";
+    // "yolo" — the colorable warning word — or, when the selection carries
+    // none, the request default that applying it would launch with. Codex and
+    // Claude both default to guarded.
+    const permission = entry.selection.permissions ?? "guarded";
     const harness = entry.selection.harness === "claude" ? "Claude" : "Codex";
     const expected = `${entry.cwd} · local (this machine) · ${harness} · model: ${entry.selection.model} · effort: High · permissions: ${permission}`;
     await expect(row).toHaveAttribute("data-tooltip", expected);
@@ -6316,7 +6317,7 @@ test("composer recent rows lead with the harness", async ({ page, request }) => 
  * line up down the list, while its title still names every default.
  *
  * Three rows that each spelled out "model: default · effort: default ·
- * permissions: default" buried the one row that differed, so the row now
+ * permissions: guarded" buried the one row that differed, so the row now
  * shows what is unusual about a setup and the word `defaults` when nothing
  * is. That must not cost the complete description: the summary helper names
  * defaults on purpose, so that absence is never mistaken for an invisible
@@ -6354,10 +6355,10 @@ test("composer recent rows list only explicit choices, in aligned columns", asyn
   // The complete description survives where it always was.
   await expect(rows.nth(1)).toHaveAttribute(
     "data-tooltip",
-    `${cwd} · local (this machine) · Claude · model: default · effort: default · permissions: default`,
+    `${cwd} · local (this machine) · Claude · model: default · effort: default · permissions: guarded`,
   );
   await expect(rows.nth(1)).toHaveAccessibleName(
-    `${cwd} · local (this machine) · Claude · model: default · effort: default · permissions: default`,
+    `${cwd} · local (this machine) · Claude · model: default · effort: default · permissions: guarded`,
   );
 
   for (const cell of [".launch-composer-recent-folder", ".launch-composer-recent-host", ".launch-composer-recent-selection"]) {
@@ -6626,6 +6627,28 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(custom).toHaveValue("restored-custom");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+/** Guarded is an ordinary request default for Claude, but an explicit OMP write
+ * choice; Cursor's unforced mode is uncertain. Compact rows must preserve those
+ * distinctions rather than hiding all guarded or all omitted permissions. */
+test("compact recents distinguish guarded defaults, OMP write and own-setting", async ({ page, request }) => {
+  const cwd = "/recent-permission-modes";
+  await installComposerChoices(page, request, [
+    { host: 1, canonical_cwd: cwd, cwd, selection: { harness: "claude", model: null, effort: null, permissions: "guarded" }, created_at: 3, creation_seq: 3 },
+    { host: 1, canonical_cwd: cwd, cwd, selection: { harness: "omp", model: null, effort: null, permissions: "guarded" }, created_at: 2, creation_seq: 2 },
+    { host: 1, canonical_cwd: cwd, cwd, selection: { harness: "cursor", model: null, effort: null, permissions: null }, created_at: 1, creation_seq: 1 },
+  ], []);
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await form.getByLabel("folder", { exact: true }).fill(cwd);
+  const rows = form.locator(".launch-composer-recent-slots").getByRole("button");
+  await expect(rows.locator(".launch-composer-recent-harness")).toHaveText(["Claude", "OMP", "Cursor"]);
+  await expect(rows.locator(".launch-composer-recent-selection")).toHaveText([
+    "defaults", "permissions: guarded", "permissions: agent's own setting",
+  ]);
+  await expect(rows.nth(1)).toHaveAttribute("data-tooltip", /OMP.*permissions: guarded/);
 });
 
 /**
@@ -7277,7 +7300,7 @@ test("composer busy guard preserves one structured create through queued edits a
     // memory currently remembers (SPEC.md's launch-composer carve-out) —
     // an earlier structured launch elsewhere in this file may have already
     // remembered yolo, which would otherwise preselect it here too.
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }).click();
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
 
     await form.locator('button[type="submit"]').click();
     await dispatched;
@@ -7286,7 +7309,7 @@ test("composer busy guard preserves one structured create through queued edits a
     expect(bodies).toHaveLength(1);
     expect(bodies[0].intent_key).toBeTruthy();
     expect(bodies[0].launch).toMatchObject({ harness: "codex" });
-    expect(bodies[0].launch.permissions ?? null).toBeNull();
+    expect(bodies[0].launch.permissions).toBe("guarded");
 
     // These events model controls queued before disabled feedback painted.
     // Their visible state and the already-dispatched request must both stay
@@ -8294,7 +8317,7 @@ test("model picks discard another harness's default YOLO", async ({ page, reques
     await target.click();
     await expect(harnesses.getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(model).toHaveValue("codex-offered");
-    await expect(permissions.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
     await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
   }

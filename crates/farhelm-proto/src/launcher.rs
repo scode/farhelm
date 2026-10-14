@@ -111,7 +111,7 @@ pub fn reconcile_harness_selection(
         selection.model = None;
         selection.effort = None;
         selection.workspace_trust = None;
-        selection.permissions = harness.effective_permission(selection.permissions);
+        selection.permissions = harness.request_permission(selection.permissions);
         return (selection, None);
     }
     // Ownership is read in both harnesses' catalog spellings
@@ -155,7 +155,7 @@ pub fn reconcile_harness_selection(
     }) {
         selection.effort = None;
     }
-    selection.permissions = harness.effective_permission(selection.permissions);
+    selection.permissions = harness.request_permission(selection.permissions);
     if !harness.offers_workspace_trust() {
         selection.workspace_trust = None;
     }

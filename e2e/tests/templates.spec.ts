@@ -167,12 +167,40 @@ test("an approvals-only template saves every offered approval choice", async ({ 
     await dialog.locator(".templates-name").fill(name);
     await addField(dialog, "approvals");
     const choices = dialog.getByLabel("approvals", { exact: true });
-    for (const choice of ["approve", "smart_approve", "chat", "yolo"]) {
+    for (const choice of ["guarded", "approve", "smart_approve", "chat", "yolo"]) {
       await choices.selectOption(choice);
       await expect(dialog.locator(".templates-save")).toBeEnabled();
       await dialog.locator(".templates-save").click();
       await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
       expect((await storedTemplate(request, name)).fields).toEqual({ kind: "agent", permissions: choice });
+      await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    }
+  } finally {
+    await deleteTemplate(request, name);
+  }
+});
+
+/** A supported permission remains an explicit stored edit even when it is
+ * also the agent's current default. The editor must not mark it unoffered or
+ * block saving merely to avoid a duplicate reset label. */
+test("templates save explicit guarded and default-YOLO permissions", async ({ page, request }) => {
+  const name = `explicit-permissions-${Date.now()}`;
+  try {
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-new").click();
+    await dialog.locator(".templates-name").fill(name);
+    await addField(dialog, "agent type");
+    await dialog.getByLabel("agent type", { exact: true }).selectOption("codex");
+    await addField(dialog, "approvals");
+    for (const [agent, permission] of [["codex", "guarded"], ["omp", "yolo"], ["goose", "yolo"]]) {
+      await dialog.getByLabel("agent type", { exact: true }).selectOption(agent);
+      const choices = dialog.getByLabel("approvals", { exact: true });
+      await expect(choices.locator(`option[value="${permission}"]`)).not.toHaveText(/not offered/);
+      await choices.selectOption(permission);
+      await expect(dialog.locator(".templates-save")).toBeEnabled();
+      await dialog.locator(".templates-save").click();
+      await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+      expect((await storedTemplate(request, name)).fields).toMatchObject({ kind: "agent", agent, permissions: permission });
       await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
     }
   } finally {
@@ -719,7 +747,7 @@ test("a template fills the command tab and the folder, and a reset clears a choi
     await expect(form.getByRole("tab", { name: "command", exact: true })).toHaveAttribute("aria-selected", "true");
     await expect(form.getByLabel("agent command")).toHaveValue("claude {farhelm_args}");
     await expect(
-      form.getByRole("group", { name: "runs without approval prompts" }).getByLabel("no", { exact: true }),
+      form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("no", { exact: true }),
     ).toBeChecked();
     await expect(form.locator(".launch-command-agent")).toHaveValue("claude");
     await expect(form.locator(".launch-command-resume-toggle")).toBeChecked();
@@ -793,7 +821,7 @@ for (const kind of ["agent", "command"] as const) {
       } else {
         await form.getByRole("tab", { name: "command", exact: true }).click();
         await form.getByLabel("agent command").fill("printf hello");
-        await form.getByRole("group", { name: "runs without approval prompts" }).getByLabel("no", { exact: true }).check();
+        await form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("no", { exact: true }).check();
       }
       await form.getByLabel("folder", { exact: true }).fill("/tmp");
       await form.locator(".launch-composer-save-template").click();

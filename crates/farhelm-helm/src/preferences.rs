@@ -466,13 +466,13 @@ mod tests {
             "a permissions word this helm does not serve is refused at the write"
         );
         // The refusal names every word it would have accepted; it used to
-        // name only `yolo` after the vocabulary had grown to four.
+        // name only `yolo` after the vocabulary had grown beyond it.
         let body = axum::body::to_bytes(response.into_body(), 1024)
             .await
             .unwrap();
         let body = String::from_utf8(body.to_vec()).unwrap();
         assert!(
-            body.contains("this helm serves yolo, approve, smart_approve, chat"),
+            body.contains("this helm serves guarded, yolo, approve, smart_approve, chat"),
             "{body}"
         );
         assert_eq!(
@@ -480,7 +480,7 @@ mod tests {
             None,
             "a refused permissions patch leaves the row unchanged"
         );
-        for word in ["approve", "smart_approve", "chat", "yolo"] {
+        for word in ["guarded", "approve", "smart_approve", "chat", "yolo"] {
             let response = harness
                 .router()
                 .oneshot(put(serde_json::json!({ "remembered_permissions": word })))

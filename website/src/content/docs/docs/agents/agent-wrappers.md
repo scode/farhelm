@@ -19,8 +19,8 @@ no restart. On stop the wrapper is killed along with the agent; being the agent'
 On the session launcher's **command** tab, four fields matter:
 
 - **agent command**: `my-wrapper run {cwd} claude {farhelm_args}`
-- **runs without approval prompts**: your answer, **yes (YOLO)** or **no**. Farhelm believes it and never reads the
-  command to check it, and it covers the resume command too.
+- **runs in YOLO mode**: your answer, **yes (YOLO)** or **no**. Farhelm believes it and never reads the command to check
+  it, and it covers the resume command too.
 - **agent type**: Claude — the agent the wrapper ends up running, never the wrapper itself
 - **resume command**, which appears once you tick **resume**:
   `my-wrapper run {cwd} claude --resume {conversation} {farhelm_args}`

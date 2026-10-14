@@ -37,9 +37,9 @@ combination of: durable remote execution, real-terminal fidelity, VCS neutrality
   the command, and the command it uses to resume a conversation, from those choices when the session is created (and
   again on Restart with), and stores them; Replace and agent clone copy the stored commands rather than composing them
   anew, while Clone and Replace with compose from the choices. A **command launch** is a command line the user writes,
-  with the user's own assertion of whether it runs without approval prompts (YOLO). A command launch may also declare
-  that it runs a given agent type, which buys that agent type's status reading and conversation reporting, and, with a
-  resume command the user writes, Resume (see Creation and Durability). The agent type is the field the two kinds share:
+  with the user's own assertion of whether it bypasses safety checks (YOLO). A command launch may also declare that it
+  runs a given agent type, which buys that agent type's status reading and conversation reporting, and, with a resume
+  command the user writes, Resume (see Creation and Durability). The agent type is the field the two kinds share:
   required for an agent launch, optional for a command launch. This spec also calls an agent type a harness, after the
   vendor program behind it.
 - **Launch template**: a named, partial set of launcher edits. Applying a template is exactly the same as making its
@@ -225,21 +225,23 @@ template saved before this rule still launches, but saving any change to it is r
 
 Cursor is an agent type launched as `cursor-agent`, and YOLO adds `--force`; Farhelm launches Cursor by that name, never
 as the generic `agent`, which other tools also use. Its model is optional, with `auto`, `composer-2.5` and literal
-custom IDs supported. Default permissions add no flag; YOLO preserves explicit Cursor denies. There is no separate
-effort selector. Cursor uses generic activity status and has no conversation tracking, automatic Resume, configuration
-editing, hooks or instruction injection. The launcher states that tracking and Resume are unsupported, so a Cursor
-session cannot be restarted; Replace starts it over, and clone preserves launch intent. See
-[Cursor](website/src/content/docs/docs/agents/cursor.md).
+custom IDs supported. The non-YOLO choice is labelled "agent's own setting": Farhelm found no flag that wins over
+Cursor's configured Run Everything mode, so it cannot classify that launch and treats it as YOLO for the host guard.
+YOLO adds `--force` and preserves explicit Cursor denies. There is no separate effort selector. Cursor uses generic
+activity status and has no conversation tracking, automatic Resume, configuration editing, hooks or instruction
+injection. The launcher states that tracking and Resume are unsupported, so a Cursor session cannot be restarted;
+Replace starts it over, and clone preserves launch intent. See [Cursor](website/src/content/docs/docs/agents/cursor.md).
 
-Grok is an agent type for the official `grok` CLI. A normal launch is `grok --no-leader`; YOLO adds `--always-approve`.
-Farhelm exposes neither a Grok model picker nor an effort picker because those command-line contracts have not been
-verified. Every generated fresh and resume command retains `--no-leader`: the shared leader is outside the tracked
-process's ownership boundary, while a private leader still permits Grok's native subagents. Grok uses generic activity
-status. The launch layer preserves its exact `grok --no-leader --resume <conversation-id>` argv, but it does not offer
-Resume until the capture integration has verified an exact conversation. See
-[Grok](website/src/content/docs/docs/agents/grok.md).
+Grok is an agent type for the official `grok` CLI. A guarded launch is `grok --no-leader --permission-mode auto`,
+selecting Grok's auto-review classifier; YOLO instead adds `--always-approve`. Farhelm exposes neither a Grok model
+picker nor an effort picker because those command-line contracts have not been verified. Every generated fresh and
+resume command retains `--no-leader`: the shared leader is outside the tracked process's ownership boundary, while a
+private leader still permits Grok's native subagents. Grok uses generic activity status. The launch layer retains the
+selected permission flags before `--resume <conversation-id>`, but it does not offer Resume until the capture
+integration has verified an exact conversation. See [Grok](website/src/content/docs/docs/agents/grok.md).
 
-Muse support uses `muse` and `muse --yolo` with generic activity status. The yolo variant skips approval prompts and
+Muse support uses `muse --permission-profile :auto-review` for guarded launches and `muse --yolo` for YOLO, with generic
+activity status. Guarded selects Muse's AI reviewer and workspace sandbox; the yolo variant skips approval prompts and
 sandboxing and trusts the workspace for the run. Muse-specific hooks, conversation capture/resume, and waiting-state
 recognition are not implemented. Muse agent launches also offer a workspace-trust choice separate from tool permissions:
 true adds `--trust-workspace` for that launch; false adds no trust flag. False does not undo trust already implied by
@@ -263,10 +265,11 @@ after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or `ma
 visibly labelled YOLO mode; this describes the absence of Pi's built-in tool gate, not its project-resource `--approve`
 flag. Pi stores that mode as `yolo`; an older snapshot that omitted the formerly optional permission field reads and
 displays as YOLO too. OMP requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` thinking (OMP's `auto`
-level is not offered) and offers `yolo` (preselected, `--approval-mode yolo`) and `approve`
-(`--approval-mode always-ask`); its `write` mode is not offered, and `smart approve`/`chat` are refused. OMP gets no
-waiting-state recognition: an OMP approval prompt shows the generic running/idle status, a settled scope decision rather
-than a detection gap. Provider capabilities may clamp or reject a requested effort.
+level is not offered) and offers `yolo` (preselected, `--approval-mode yolo`), `guarded` (`--approval-mode write`,
+workspace edits approved automatically and other actions asking), and `approve` (`--approval-mode always-ask`);
+`smart approve`/`chat` are refused. OMP gets no waiting-state recognition: an OMP approval prompt shows the generic
+running/idle status, a settled scope decision rather than a detection gap. Provider capabilities may clamp or reject a
+requested effort.
 
 Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
 transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a
@@ -528,70 +531,74 @@ agent choice is independent of that destination:
   shown as two tabs, agent and command, each showing only its own fields; switching tabs keeps each tab's draft. Codex,
   Claude, Muse, Cursor, Grok, Goose, Pi, OpenCode, and OMP agent launches carry an agent type plus model, effort,
   permission, and workspace-trust choices where that agent type supports them, and nothing else: an agent launch takes
-  no custom arguments, and a launch that needs them is a command launch; visible permission vocabulary is `default`,
-  `approve`, `smart approve`, `chat`, and `yolo`. Absent optional choices mean the selected harness's defaults and omit
-  their flags, except an omitted Pi, OpenCode, OMP, or Goose permission means its YOLO mode. Model selection is optional
-  for every harness; OpenCode, Cursor, and Grok offer no effort choice, and Grok accepts no model choice. The helm owns
-  the released model catalog and validates every agent-launch choice, so the browser never turns a model identifier into
-  an argv fragment. Typing a model never changes a selected harness: the typed id is read as that harness spells it (for
-  OpenCode, a bare Zen name means `opencode/<model>`), a model only other harnesses offer is refused with a message
-  naming them, and choosing another harness's model from the full model list switches the harness on purpose. With no
-  harness selected yet, a typed known model fills in its owning harness (a bare `gpt-6-luna` picks Codex); a custom
-  model needs an explicit harness, and an id several harnesses offer asks for one. Replacing a harness clears
-  incompatible choices and a YOLO permission that was the previous harness's default. An invalid combination cannot
-  launch. New normally preselects no harness or model. The permissions mode remembers the last successful agent launch,
-  helm-wide across every client, except that a harness's default or forced YOLO clears that memory instead of
-  preselecting YOLO for another harness. Explicit YOLO on a harness with a non-YOLO default is remembered; an explicit
-  workspace-trust choice on Codex, Muse, or Pi is remembered separately after a successful user launch. `trust:true` and
-  `trust:false` are single search actions on those harnesses. Codex true and false set that launch's exact working
-  directory to `trusted` and `untrusted` through its per-run project configuration; a managed checkout's path is filled
-  only after the supervisor has resolved it. Muse true uses `--trust-workspace`; Pi true and false use `--approve` and
-  `--no-approve` respectively. Each setting applies to one launch and never writes vendor trust state; Muse false adds
-  no flag and cannot revoke trust from YOLO or vendor settings. Without a choice, the harness retains its own trust
-  behavior; Codex, Muse, Claude, and Cursor may still ask for directory trust (Cursor even with `--force`). Farhelm does
-  not silently answer their prompts. Claude, Goose, OMP, and Cursor have no supported interactive workspace-trust
-  switch. "reset choices" returns both segments to their remembered values rather than to harness defaults, and a
-  recent-setup row's own saved choice overrides it when used. The launch-composer search matches harnesses, launch
-  templates (`tl:name`), models scoped by the chosen harness, effort words offered by that harness and model, `yolo`
-  plus the `perms:yolo` and `perms:default` permission actions, supported trust actions, host and name actions, folders,
-  and recent setups. Permission actions are offered only when the selected harness can represent them; `perms:default`
-  is not offered when the harness's omitted mode is YOLO. `name:foo` applies the entire value as the session name.
-  `host:foo` filters host choices, and `host:local` selects the helm-local host even if it has an alias. The default
-  local host label in the GUI is `local (this machine)`. Accepting a result applies it and clears the box while keeping
-  focus there. Enter on an empty box launches only a complete, valid selection through the ordinary Launch path; an
-  incomplete attempt says why beside Launch, as does a refused Launch press, and the greyed-out button's hover names
-  what is missing. Request refusals appear there too, within the initial dialog viewport. Enter on a non-empty query
-  with no result never launches, and Escape closes the result list without clearing the query, so Enter after Escape
-  does nothing until the box is emptied. Enter on a choice button (launch-kind tab, harness, effort, permissions, or
-  workspace trust) applies that choice and then launches through the ordinary Launch path, or shows its refusal beside
-  Launch. Enter on the closed host picker or the agent-type dropdown, YOLO radios, or Resume checkbox launches with the
-  values shown, without changing them; those native controls retain their Space and arrow behavior. Action buttons keep
-  their normal press. The search box, model field, YOLO confirmation, and save-as-template panel keep their own Enter
-  rules. In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with no
-  highlighted entry it launches as before. A held Enter never launches.
+  no custom arguments, and a launch that needs them is a command launch; visible permission vocabulary is `guarded`,
+  `agent's own setting`, `approve`, `smart approve`, `chat`, and `yolo`. Guarded means an agent can approve actions
+  through a safety mechanism that can still refuse or escalate (a classifier, AI reviewer, sandbox or asking the user),
+  not that it asks about everything. YOLO means no such check. New omitted permissions on Claude, Codex, Grok and Muse
+  become explicit guarded choices: Claude and Grok use `--permission-mode auto`, Codex uses
+  `-a on-request -s workspace-write`, and Muse uses `--permission-profile :auto-review`. Every supported resume retains
+  those flags. Cursor's omission stays under its own setting; Pi, OpenCode, OMP and Goose omissions remain YOLO. Model
+  and effort omissions still leave their flags out. Model selection is optional for every harness; OpenCode, Cursor, and
+  Grok offer no effort choice, and Grok accepts no model choice. The helm owns the released model catalog and validates
+  every agent-launch choice, so the browser never turns a model identifier into an argv fragment. Typing a model never
+  changes a selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
+  `opencode/<model>`), a model only other harnesses offer is refused with a message naming them, and choosing another
+  harness's model from the full model list switches the harness on purpose. With no harness selected yet, a typed known
+  model fills in its owning harness (a bare `gpt-6-luna` picks Codex); a custom model needs an explicit harness, and an
+  id several harnesses offer asks for one. Replacing a harness clears incompatible choices and a YOLO permission that
+  was the previous harness's default. An invalid combination cannot launch. New normally preselects no harness or model.
+  The permissions mode remembers the last successful agent launch, helm-wide across every client, except that a
+  harness's default or forced YOLO clears that memory instead of preselecting YOLO for another harness. Explicit YOLO on
+  a harness with a non-YOLO default is remembered; an explicit workspace-trust choice on Codex, Muse, or Pi is
+  remembered separately after a successful user launch. `trust:true` and `trust:false` are single search actions on
+  those harnesses. Codex true and false set that launch's exact working directory to `trusted` and `untrusted` through
+  its per-run project configuration; a managed checkout's path is filled only after the supervisor has resolved it. Muse
+  true uses `--trust-workspace`; Pi true and false use `--approve` and `--no-approve` respectively. Each setting applies
+  to one launch and never writes vendor trust state; Muse false adds no flag and cannot revoke trust from YOLO or vendor
+  settings. Without a choice, the harness retains its own trust behavior; Codex, Muse, Claude, and Cursor may still ask
+  for directory trust (Cursor even with `--force`). Farhelm does not silently answer their prompts. Claude, Goose, OMP,
+  and Cursor have no supported interactive workspace-trust switch. "reset choices" returns both segments to their
+  remembered values rather than to harness defaults, and a recent-setup row's own saved choice overrides it when used.
+  The launch-composer search matches harnesses, launch templates (`tl:name`), models scoped by the chosen harness,
+  effort words offered by that harness and model, `yolo` plus the `perms:yolo`, `perms:guarded` and `perms:own`
+  permission actions, supported trust actions, host and name actions, folders and recent setups. Permission actions are
+  offered only when the selected harness can represent them; own setting is offered only on Cursor. `name:foo` applies
+  the entire value as the session name. `host:foo` filters host choices, and `host:local` selects the helm-local host
+  even if it has an alias. The default local host label in the GUI is `local (this machine)`. Accepting a result applies
+  it and clears the box while keeping focus there. Enter on an empty box launches only a complete, valid selection
+  through the ordinary Launch path; an incomplete attempt says why beside Launch, as does a refused Launch press, and
+  the greyed-out button's hover names what is missing. Request refusals appear there too, within the initial dialog
+  viewport. Enter on a non-empty query with no result never launches, and Escape closes the result list without clearing
+  the query, so Enter after Escape does nothing until the box is emptied. Enter on a choice button (launch-kind tab,
+  harness, effort, permissions, or workspace trust) applies that choice and then launches through the ordinary Launch
+  path, or shows its refusal beside Launch. Enter on the closed host picker or the agent-type dropdown, YOLO radios, or
+  Resume checkbox launches with the values shown, without changing them; those native controls retain their Space and
+  arrow behavior. Action buttons keep their normal press. The search box, model field, YOLO confirmation, and
+  save-as-template panel keep their own Enter rules. In the editable folder field, Enter chooses an arrow-highlighted
+  dropdown entry without launching; with no highlighted entry it launches as before. A held Enter never launches.
 - Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
-  as a whole argument, and a required YOLO assertion: the user states whether the command runs without approval prompts,
-  and Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it
-  runs, or how to resume it. A command launch may optionally declare the agent type it runs. A declared agent type
-  requires `{farhelm_args}` as a whole argument exactly once in the command, which marks where Farhelm places that agent
-  type's own launch arguments (the conversation-reporting hook and the instructions pointer, see Durability); it is
-  replaced by nothing for an agent type that takes no such arguments, so the rule never depends on which agent type was
-  declared. `{farhelm_args}` without a declared agent type is refused. Farhelm passes whatever turns its integration on
-  as arguments, never through the environment: every process the agent starts inherits the environment, including
-  another agent of the same type that it shells out to, so a hook carried there would reach runs that are not the
-  session's. The environment carries only settings that Farhelm's own reporter reads once an argument has turned it on,
-  set on the launched process directly and never written into the command. Declaring an agent type gives the session
-  that agent type's status reading and conversation reporting. It also allows opting into Resume, which requires a
-  resume command containing `{conversation}` and `{farhelm_args}`, each as a whole argument exactly once; Farhelm fills
-  those and `{cwd}` in and otherwise runs the resume command as written. `{conversation}` in the start command is
-  refused. The one exception to "as written" in either command: Codex's internal workspace-trust markers,
-  `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled wherever one stands as a whole argument, exactly as in a
-  composed Codex agent launch (see SPEC_impl.md). A command launch with no declared agent type, or one that does not opt
-  into Resume, can never be restarted (see Lifecycle operations). The YOLO assertion covers the resume command too.
-  Search while the command launch kind is active still offers agent types, models, and recent setups, and accepting one
-  switches to the agent launch kind; accepting a folder, host, or name keeps the current launch kind, and a template
-  keeps it unless the template sets one. The declared agent type is chosen in the command tab's own field, not through
-  search.
+  as a whole argument, and a required YOLO assertion: the user states whether the command bypasses human, classifier,
+  AI-reviewer and sandbox safety checks, and Farhelm believes the statement. Farhelm never reads a command line to
+  decide whether it is YOLO, what agent it runs, or how to resume it. A command launch may optionally declare the agent
+  type it runs. A declared agent type requires `{farhelm_args}` as a whole argument exactly once in the command, which
+  marks where Farhelm places that agent type's own launch arguments (the conversation-reporting hook and the
+  instructions pointer, see Durability); it is replaced by nothing for an agent type that takes no such arguments, so
+  the rule never depends on which agent type was declared. `{farhelm_args}` without a declared agent type is refused.
+  Farhelm passes whatever turns its integration on as arguments, never through the environment: every process the agent
+  starts inherits the environment, including another agent of the same type that it shells out to, so a hook carried
+  there would reach runs that are not the session's. The environment carries only settings that Farhelm's own reporter
+  reads once an argument has turned it on, set on the launched process directly and never written into the command.
+  Declaring an agent type gives the session that agent type's status reading and conversation reporting. It also allows
+  opting into Resume, which requires a resume command containing `{conversation}` and `{farhelm_args}`, each as a whole
+  argument exactly once; Farhelm fills those and `{cwd}` in and otherwise runs the resume command as written.
+  `{conversation}` in the start command is refused. The one exception to "as written" in either command: Codex's
+  internal workspace-trust markers, `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled wherever one stands as
+  a whole argument, exactly as in a composed Codex agent launch (see SPEC_impl.md). A command launch with no declared
+  agent type, or one that does not opt into Resume, can never be restarted (see Lifecycle operations). The YOLO
+  assertion covers the resume command too. Search while the command launch kind is active still offers agent types,
+  models, and recent setups, and accepting one switches to the agent launch kind; accepting a folder, host, or name
+  keeps the current launch kind, and a template keeps it unless the template sets one. The declared agent type is chosen
+  in the command tab's own field, not through search.
 - Launch templates: `tl:name` in the search box offers templates by name, and accepting one applies it. Applying a
   template makes the edits it contains, in the same way and with the same effects as making them by hand, in a fixed
   order: launch kind first, then agent type, then every other field. It can switch the launch kind, and choosing an
@@ -669,21 +676,27 @@ yields one session or a clear error, never two silently. Deliberately creating s
 parameters — same directory, same launch — is a sanctioned workflow, not a duplicate to be suppressed.
 
 A YOLO launch on a host that asks before YOLO launches (see the host settings under Topology) needs an explicit
-confirmation. An agent launch counts as YOLO when its effective permission is YOLO, including omitted permissions on Pi,
-OpenCode, OMP and Goose, and is classified exactly. A command launch counts as YOLO when its YOLO assertion says so, and
-only then: Farhelm does not parse command lines to second-guess the assertion. Because an agent's assertion cannot be
-checked either, an agent may not start a command launch, or a YOLO launch, on such a host at all (see Agent-spawned
-sessions). The helm enforces the confirmation, so no client can skip it: every create, clone, replace, replace with, and
-restart with that reaches it on such a host without the override is refused before any supervisor is contacted, and
-nothing is started. The GUI answers that refusal with a prominent confirmation, shown with the control or surface that
-started the launch and scrolled into view, that names the host, says what YOLO means and why this launch is one (YOLO
-was chosen where the agent type offers other modes, the agent type has no mode with approval prompts, or the command was
-asserted to be YOLO), and retries with the override only when the user confirms. Besides a one-off confirmation it
-offers to stop asking for that host: that answer first sets the host to start YOLO sessions without asking, exactly as
-its settings would, and then retries with the override; if changing that setting fails, nothing is started and the
-confirmation stays up with the reason. The `farhelm` command line has no override: a request from inside a session is an
-agent's, and agents follow their own rule under Agent-spawned sessions, whatever the request claims. A plain restart
-relaunches the session's own stored launch and needs no YOLO confirmation again.
+confirmation. An agent launch counts as YOLO when its stored permission is YOLO, including omitted permissions on Pi,
+OpenCode, OMP and Goose. A stored omission on Claude, Codex, Grok, Muse or Cursor is the agent's own setting, not
+guarded, and is conservatively treated as YOLO by the host guard. A command launch counts as YOLO when its YOLO
+assertion says so, and only then: Farhelm does not parse command lines to second-guess the assertion. Because an agent's
+assertion cannot be checked either, an agent may not start a command launch, or a YOLO launch, on such a host at all
+(see Agent-spawned sessions). The helm enforces the confirmation, so no client can skip it: every create, clone,
+replace, replace with, and restart with that reaches it on such a host without the override is refused before any
+supervisor is contacted, and nothing is started. The GUI answers that refusal with a prominent confirmation, shown with
+the control or surface that started the launch and scrolled into view, that names the host, says what YOLO means and why
+this launch is one (YOLO was chosen where the agent type offers other modes, the agent type has no guarded mode, the
+launch uses the agent's own setting which Farhelm cannot override, or the command was asserted to be YOLO), and retries
+with the override only when the user confirms. Besides a one-off confirmation it offers to stop asking for that host:
+that answer first sets the host to start YOLO sessions without asking, exactly as its settings would, and then retries
+with the override; if changing that setting fails, nothing is started and the confirmation stays up with the reason. The
+`farhelm` command line has no override: a request from inside a session is an agent's, and agents follow their own rule
+under Agent-spawned sessions, whatever the request claims. A plain restart relaunches the session's own stored launch
+and needs no YOLO confirmation again. Plain Replace, agent clone and inherited spawn also copy the stored command;
+pre-upgrade no-flag sessions therefore remain own-setting, with plain Replace asking on hosts that ask before YOLO
+launches and agent copies refused there. Clone, Replace with and Restart with compile new choices and get the guarded
+flags. Remote hosts must be updated after this protocol change before launches resume; older releases cannot read
+launches stored as guarded.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
@@ -1130,12 +1143,17 @@ the row (a tooltip on the web and desktop clients); an abbreviation is never the
 own actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread toggle — reachable there
 or by clicking the dot itself — that sets the session's seen state directly (see Status). Every session row carries one
 permission mark. An amber slashed shield means the session's launch is YOLO by the rule under Creation: its effective
-agent-launch permission is YOLO, or its command was asserted to be YOLO. A green plain shield means an agent launch in a
-non-YOLO mode, or a command asserted not to be YOLO. A session created before launch kinds existed that was not an agent
-launch has no assertion and carries an amber question mark. Hover and screen-reader text name the specific agent-launch
-mode (default, approve, smart approve, chat, or YOLO), or say that the mark is the assertion made when the command was
-launched, by the user or by an agent, and not something Farhelm checked, or that a pre-existing session's command was
-never classified.
+agent-launch permission is YOLO, or its command was asserted to be YOLO. A green plain shield means an agent launch in
+guarded or an approval mode, or a command asserted not to be YOLO. A session created before launch kinds existed that
+was not an agent launch has no assertion and carries an amber question mark. Hover and screen-reader text name the
+specific agent-launch mode (guarded, approve, smart approve, chat, or YOLO), or say that the mark is the assertion made
+when the command was launched, by the user or by an agent, and not something Farhelm checked, or that a pre-existing
+session's command was never classified. A grey dashed shield means the agent's own setting, including older sessions
+started without guarded flags. Its hover says Not classified and that the host guard treats it as YOLO. Every guarded
+hover names the agent's mode and meaning, shows the actual stored command under Launched with, and explains that allow
+rules, hooks, plugins, always-allow answers, sandbox settings and in-session switches can loosen it; agents may change
+behavior between versions. The launcher's permission choice has a separate ? button with that help, opening the docs
+section on permission modes.
 
 Hovering a live status dot, agent mark, or permission mark explains that mark. A clickable dot also names its mark read
 or mark unread action. The hover text uses the same status and permission meaning the row exposes to assistive

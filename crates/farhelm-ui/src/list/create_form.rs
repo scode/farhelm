@@ -232,6 +232,7 @@ enum LaunchTab {
 fn initial_structured_permissions(preferences: &api::Preferences) -> Option<LaunchPermission> {
     match preferences.remembered_permissions.as_deref() {
         Some("yolo") => Some(LaunchPermission::Yolo),
+        Some("guarded") => Some(LaunchPermission::Guarded),
         Some("approve") => Some(LaunchPermission::Approve),
         Some("smart_approve") => Some(LaunchPermission::SmartApprove),
         Some("chat") => Some(LaunchPermission::Chat),
@@ -517,9 +518,10 @@ fn template_edits(
         Some(Some(LaunchPermission::Yolo)) => edits.push(TemplateEdit::Search(
             ComposerSearchResult::Permissions(ComposerPermission::Yolo),
         )),
-        Some(None) => edits.push(TemplateEdit::Search(ComposerSearchResult::Permissions(
-            ComposerPermission::Default,
-        ))),
+        Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
+            t.structured_permissions.set(None);
+            t.structured_permissions_is_explicit.set(true);
+        }))),
         Some(Some(permission)) => edits.push(TemplateEdit::Set(Box::new(move || {
             t.structured_permissions.set(Some(permission));
             t.structured_permissions_is_explicit.set(true);
@@ -790,7 +792,10 @@ fn apply_composer_search_result(
         }
         crate::launch_composer::ComposerSearchResult::Permissions(permission) => {
             match permission {
-                crate::launch_composer::ComposerPermission::Default => {
+                crate::launch_composer::ComposerPermission::Guarded => {
+                    structured_permissions.set(Some(LaunchPermission::Guarded));
+                }
+                crate::launch_composer::ComposerPermission::OwnSetting => {
                     structured_permissions.set(None);
                 }
                 crate::launch_composer::ComposerPermission::Yolo => {
@@ -1863,8 +1868,14 @@ fn search_result_tooltip(
         }
         ComposerSearchResult::Model { .. } => "use this model for the session".to_string(),
         ComposerSearchResult::Effort(_) => "use this reasoning effort for the session".to_string(),
-        ComposerSearchResult::Permissions(ComposerPermission::Default) => {
-            "use the agent's default permissions".to_string()
+        ComposerSearchResult::Permissions(ComposerPermission::Guarded) => {
+            crate::launch_composer::permission_help(
+                harness.expect("a permission result needs a harness"),
+                Some(LaunchPermission::Guarded),
+            )
+        }
+        ComposerSearchResult::Permissions(ComposerPermission::OwnSetting) => {
+            "use the agent's own setting, which Farhelm cannot force or classify".to_string()
         }
         ComposerSearchResult::Permissions(ComposerPermission::Yolo) => {
             crate::launch_composer::permission_tooltip(LaunchPermission::Yolo).to_string()
@@ -4173,7 +4184,7 @@ pub(super) fn CreateSessionForm(
                         ),
                     ) else {
                         error.set(Some(
-                            "say whether this command runs without approval prompts (YOLO) before \
+                            "say whether this command runs in YOLO mode (YOLO) before \
                              launching"
                                 .to_string(),
                         ));
@@ -5146,6 +5157,11 @@ pub(super) fn CreateSessionForm(
                                                 .map(|(_, prior)| prior.len())
                                                 .sum::<usize>() + result_index;
                                             rsx! {
+                                                if matches!(result, crate::launch_composer::ComposerSearchResult::Permissions(crate::launch_composer::ComposerPermission::Guarded)) {
+                                                    span { class: "visually-hidden", id: "launch-composer-search-option-{index}-help",
+                                                        {search_result_tooltip(&result, &selected_host_label, *structured_harness.read())}
+                                                    }
+                                                }
                                                 button {
                                                     id: "launch-composer-search-option-{index}",
                                                     r#type: "button",
@@ -5156,6 +5172,8 @@ pub(super) fn CreateSessionForm(
                                                         if composer_active_index == index { "launch-composer-search-recent selected" } else { "launch-composer-search-recent" }
                                                     } else if composer_active_index == index { "selected" } else { "" },
                                                     "data-tooltip": search_result_tooltip(&result, &selected_host_label, *structured_harness.read()),
+                                                    "data-tooltip-paragraphs": if matches!(result, crate::launch_composer::ComposerSearchResult::Permissions(crate::launch_composer::ComposerPermission::Guarded)) { "true" } else { "false" },
+                                                    aria_describedby: if matches!(result, crate::launch_composer::ComposerSearchResult::Permissions(crate::launch_composer::ComposerPermission::Guarded)) { format!("launch-composer-search-option-{index}-help") } else { String::new() },
                                                     // Search recents use two visual spans as ordinary
                                                     // recents do. Their accessible label repeats the
                                                     // complete title with the result kind, instead of
@@ -5190,7 +5208,8 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::Permissions(permission) => rsx! {
                                                             "Permissions: "
                                                             {match permission {
-                                                                crate::launch_composer::ComposerPermission::Default => "default",
+                                                                crate::launch_composer::ComposerPermission::Guarded => "guarded",
+                                                                crate::launch_composer::ComposerPermission::OwnSetting => "agent's own setting",
                                                                 crate::launch_composer::ComposerPermission::Yolo => "yolo",
                                                             }}
                                                         },
@@ -5231,11 +5250,13 @@ pub(super) fn CreateSessionForm(
                     div { class: "launch-composer-recents",
                             span { class: "launch-composer-section-label", "recent setups" }
                             div { class: "launch-composer-recent-slots",
-                            for (entry, summary, explicit, permission) in recent_launches.iter().take(3).map(|entry| (
+                            for (entry, summary, explicit, permission, uses_guarded_default) in recent_launches.iter().take(3).map(|entry| (
                                 entry,
                                 crate::launch_composer::selection_summary(&entry.selection),
                                 crate::launch_composer::selection_explicit_before_permissions(&entry.selection).join(" · "),
                                 crate::launch_composer::selection_permission_value(&entry.selection),
+                                entry.selection.harness.omitted_permission() == Some(LaunchPermission::Guarded)
+                                    && entry.selection.harness.request_permission(entry.selection.permissions) == Some(LaunchPermission::Guarded),
                             )) {
                                 button {
                                     r#type: "button",
@@ -5307,7 +5328,11 @@ pub(super) fn CreateSessionForm(
                                     // from the text around it the way string
                                     // surgery on a Debug spelling would.
                                     span { class: "launch-composer-recent-selection",
-                                        if explicit.is_empty() && permission == "default" {
+                                        // Only a harness's guarded request default can be
+                                        // compacted into "defaults". OMP's guarded write
+                                        // choice is explicit because its default is YOLO;
+                                        // own-setting must also retain its uncertainty.
+                                        if explicit.is_empty() && uses_guarded_default {
                                             "{crate::launch_composer::RECENT_ALL_DEFAULTS}"
                                         }
                                         // Guarded, not interpolated bare:
@@ -5318,7 +5343,7 @@ pub(super) fn CreateSessionForm(
                                         if !explicit.is_empty() {
                                             "{display_peer(&explicit)}"
                                         }
-                                        if permission != "default" {
+                                        if !uses_guarded_default {
                                             if !explicit.is_empty() { " · " }
                                             "permissions: "
                                             if permission == "yolo" {
@@ -5993,9 +6018,9 @@ pub(super) fn CreateSessionForm(
             // (SPEC.md, Creation). Farhelm believes it and never reads the
             // command to check it.
             fieldset { class: "launch-command-yolo",
-                legend { "runs without approval prompts" }
+                legend { "runs in YOLO mode" }
                 label {
-                    "data-tooltip": "yes: you assert this command acts without asking for approval; Farhelm marks it YOLO and does not check",
+                    "data-tooltip": "yes: you assert this command bypasses human, classifier and sandbox safety checks; Farhelm marks it YOLO and does not check",
                     input {
                         r#type: "radio",
                         name: "launch-command-yolo",
@@ -6011,7 +6036,7 @@ pub(super) fn CreateSessionForm(
                     "yes (YOLO)"
                 }
                 label {
-                    "data-tooltip": "no: you assert this command asks before acting; Farhelm does not check",
+                    "data-tooltip": "no: you assert this command retains a safety check that may refuse or ask you; Farhelm does not check",
                     input {
                         r#type: "radio",
                         name: "launch-command-yolo",

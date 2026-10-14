@@ -1970,3 +1970,28 @@ Class: fixture-premise
 Cause: confirmed: the stop raced the target's launch; the error state on early stop is correct product behaviour.
 
 Disposition: fixed in #1948.
+
+## 2026-10-14 — `uninstall_host_commands_refuse_setup_units_and_skip_finished_work` (crates/farhelm-helm/src/provisioning.rs)
+
+The existing uninstall command test failed in recorder run `da64f0e2-c88c-4bf0-93d4-19a6749f170e` on Ubuntu 26.04 with
+uutils coreutils 0.8.0, then passed unchanged in the exact four-provisioning-test retry
+`d37147c8-4273-46eb-92fc-c30942bcdb1e` with GNU coreutils 9.4. Both ran on the guarded-permissions dirty tree based on
+`2b33f7f1`, with no changes to provisioning or its fixtures, four nextest slots and zero retries. The broad run selected
+the complete proto, helm and UI packages: 1659 of 1664 passed; a stale permission-word assertion and three process-group
+liveness failures also failed. The latter three passed outside the container, whose PID1 lacked an init reaper. The
+uninstall failure was immediate at the stop step, about 0.24 seconds total; the narrow pass took about 2.25 seconds for
+all four tests. The cleanup recognizes GNU stat's exact missing-path ending, while uutils appends `(os error 2)` and is
+refused. This is a product portability defect, retained open in TODO.md's Tricky bugs bucket. Both runs used recorded
+pinned tmux 3.7c, executable SHA256 `7913713d94756a96d6b6a7b63041d86ecf31fde6d878ad398bbc2f4fe75e8c2a`; no ambient
+`FARHELM_*` were retained and the recorder supplied `FARHELM_TEST_TRACE_DIR`. The broad recorder locale had
+`LC_CTYPE=C.UTF-8`, other locale variables absent; the cleanup itself forces C. Other browser validation and builds ran
+concurrently; precise load and compiler identity are unavailable. Full output and traces remain private retained
+records; no repeat series was run.
+
+```text
+called `Result::unwrap()` on an `Err` value: BackendFailure { context: "stopping the supervisor and private tmux server", stderr: "exit status 1; stat: cannot stat '<fixture>/tmux.sock': No such file or directory (os error 2)\n" }
+```
+
+Class: product
+
+Cause: established — the missing-path matcher excludes uutils's errno suffix.

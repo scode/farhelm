@@ -10,6 +10,9 @@ specific to Claude.
 
 ## Gotchas and quirks
 
+- Guarded selects Claude's auto mode with `--permission-mode auto`: its classifier can approve or block actions without
+  asking about everything. Your allow rules, hooks and later mode switches can loosen it. See
+  [Permission modes](/docs/agents/#permission-modes).
 - Claude may ask whether you trust a directory the first time it starts there. Answer it in the session's terminal; the
   session launcher has no way to answer it for you, and Claude remembers your answer for that directory.
 - If you start Claude through a script or wrapper of your own (a [custom command](/docs/agents/custom-commands/)),

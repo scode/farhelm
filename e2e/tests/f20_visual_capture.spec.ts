@@ -150,7 +150,7 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   await capture("prefill-default-over-explicit", desktop, async (form) => {
     await selectExplicit(form);
     await prefillSavedDefaults(form);
-    await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: default");
+    await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: guarded");
   }, ["explicit Codex draft", "saved default recent applied without launch"]);
   await capture("keyboard-active-hover", desktop, async (form) => {
     const search = form.locator('.launch-composer-search input[role="combobox"]');
@@ -212,7 +212,7 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   await capture("prefill-default-over-explicit", narrow, async (form) => {
     await selectExplicit(form);
     await prefillSavedDefaults(form);
-    await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: default");
+    await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: guarded");
   }, ["saved defaults replace explicit draft", "composer remains editable"], true);
   await capture("claude-search-recents", narrow, async (form) => {
     await form.locator('.launch-composer-search input[role="combobox"]').fill("Claude");

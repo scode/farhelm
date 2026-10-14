@@ -78,8 +78,9 @@ Before a YOLO launch, Farhelm asks you to confirm. Every host asks until you tel
 
 It is not only the **yolo** choice that asks. Farhelm offers Pi and OpenCode only in YOLO mode, so every launch of
 either asks. Goose and OMP run in YOLO mode unless you pick one of their approval modes, so their launches ask too, and
-so does a custom command you say runs without approval prompts. Farhelm goes by that answer alone and never reads the
-command to check it. It does not take an agent's word for it, though, and an agent cannot confirm a YOLO launch: on a
+so does a custom command you say runs in YOLO mode. Farhelm goes by that answer alone and never reads the command to
+check it. Cursor launches ask as well, because they run on Cursor's own setting, and so does a plain **Replace** of a
+session an older version of Farhelm started without choosing a permission mode. It does not take an agent's word for it, though, and an agent cannot confirm a YOLO launch: on a
 host that asks, an agent cannot start a YOLO session or a custom command at all ([Approve what agents
 do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 
@@ -134,7 +135,8 @@ With nothing highlighted, Enter in the directory field launches the path you typ
 A few other prefixes do something no plain search does: `gh:` starts a [managed
 checkout](#start-from-a-managed-checkout), `tl:` applies one of your [launch
 templates](/docs/using/launch-templates/), saved sets of launcher choices, `trust:` is the only way to set workspace
-trust from the search box, and `perms:` the only way to pick **default** permissions there. The rest only narrow a
+trust from the search box, and `perms:` the way to pick **guarded** permissions or Cursor's **agent's own setting**
+there ([Permission modes](/docs/agents/#permission-modes)). The rest only narrow a
 search to one kind of thing: `host:`, `harness:`, `model:`, `effort:`, `folder:`, and `recent:`. `host:local` picks the
 machine you are using.
 

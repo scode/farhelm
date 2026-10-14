@@ -1,6 +1,6 @@
 ---
 title: Custom commands
-description: Run any command as a session, say whether it runs without approval prompts, and opt into restart.
+description: Run any command as a session, say whether it runs in YOLO mode, and opt into restart.
 sidebar:
   order: 50
 ---
@@ -21,11 +21,12 @@ offer, or from a different install. What Farhelm can then do for the session dep
 
 - **agent command**: the command line to run. Write `{cwd}` as a whole argument where the command wants the session's
   directory, and Farhelm fills it in at every launch and restart.
-- **runs without approval prompts**: **yes (YOLO)** or **no**, and you have to pick one. Farhelm never reads the command
-  to work out which; it takes your answer, and asks you to
-  [confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-launch) on hosts that ask. An agent cannot give
-  this answer for you, so an agent cannot start a command at all on a host that asks before YOLO launches
-  ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
+- **runs in YOLO mode**: **yes (YOLO)** or **no**, and you have to pick one. Guarded can approve actions automatically
+  through a classifier, AI reviewer or sandbox, so no prompt by itself does not mean YOLO
+  ([Permission modes](/docs/agents/#permission-modes)). Farhelm never reads the command to work out which; it takes your
+  answer, and asks you to [confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-launch) on hosts that ask.
+  An agent cannot give this answer for you, so an agent cannot start a command at all on a host that asks before YOLO
+  launches ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 - **agent type**, optional: the agent the command ends up running. Leave it empty for anything that is not one of the
   agents Farhelm knows.
 - **resume**, and the **resume command** it reveals: how to start the command again on the same conversation, so the
@@ -60,7 +61,7 @@ The resume command is usually the start command plus the agent's own way of pick
 | Pi        | `--session {conversation} {farhelm_args}`                                 |
 
 So `claude --model sonnet {farhelm_args}` resumes as `claude --model sonnet --resume {conversation} {farhelm_args}`.
-Your answer to **runs without approval prompts** covers the resume command too.
+Your answer to **runs in YOLO mode** covers the resume command too.
 
 Each agent's own page notes anything its custom commands need beyond this, such as Grok's `--no-leader` and Goose's
 `session`.

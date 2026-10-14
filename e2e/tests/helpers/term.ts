@@ -133,7 +133,7 @@ export async function attachSession(page: Page, id: string): Promise<void> {
  */
 export async function answerYolo(form: Locator, yolo = false) {
   await form
-    .getByRole("group", { name: "runs without approval prompts" })
+    .getByRole("group", { name: "runs in YOLO mode" })
     .getByLabel(yolo ? "yes (YOLO)" : "no", { exact: true })
     .check();
 }

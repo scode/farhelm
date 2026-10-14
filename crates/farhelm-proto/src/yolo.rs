@@ -1,11 +1,12 @@
-//! What counts as a YOLO launch: a launch that lets the agent act without
-//! asking for approval.
+//! Which launches the host must treat as YOLO for admission.
 //!
 //! The launch says so itself ([`crate::SessionLaunch::yolo`]): an agent
 //! launch by its effective permission ([`selection_is_yolo`](crate::yolo::selection_is_yolo)), resolved
-//! through [`crate::LaunchHarness::effective_permission`] (an omitted Pi,
-//! OpenCode, OMP or Goose permission means YOLO; supported approval choices
-//! still win), and a command launch by the user's assertion. Farhelm never
+//! through [`crate::LaunchHarness::stored_permission`]. Explicit bypass and
+//! own-setting launches both require the conservative gate; the sidebar
+//! distinguishes them instead of claiming own-setting is known bypass.
+//! Omitted Pi, OpenCode, OMP and Goose permissions retain their historical
+//! YOLO meaning. A command launch uses the user's assertion. Farhelm never
 //! reads a command line to decide or second-guess it (SPEC.md, Creation).
 //!
 //! The `env`-prefix helpers below are not classification: they serve the
@@ -53,13 +54,16 @@ pub fn is_env_program(program: &str) -> bool {
         .is_some_and(|name| name == "env")
 }
 
-/// Whether a structured launch has an effective YOLO permission, including
-/// older snapshots that omitted a now-explicit default.
+/// Whether admission must treat a stored selection as YOLO.
+///
+/// Own-setting cannot prove a safety gate and therefore also returns true.
+/// New requests must be compiled first; this function never upgrades an older
+/// missing permission to today's guarded default.
 pub fn selection_is_yolo(selection: &LaunchSelection) -> bool {
     selection
         .harness
-        .effective_permission(selection.permissions)
-        == Some(LaunchPermission::Yolo)
+        .stored_permission(selection.permissions)
+        .is_none_or(|permission| permission == LaunchPermission::Yolo)
 }
 
 #[cfg(test)]
@@ -131,7 +135,11 @@ mod tests {
             )));
         }
 
-        assert!(!selection_is_yolo(&selection(LaunchHarness::Codex, None)));
+        assert!(selection_is_yolo(&selection(LaunchHarness::Codex, None)));
+        assert!(!selection_is_yolo(&selection(
+            LaunchHarness::Codex,
+            Some(LaunchPermission::Guarded)
+        )));
         assert!(!selection_is_yolo(&selection(
             LaunchHarness::Omp,
             Some(LaunchPermission::Approve)

@@ -47,6 +47,7 @@ pub(crate) const fn effort_value(effort: LaunchEffort) -> &'static str {
 /// `Debug` spelling.
 pub(crate) const fn permission_value(permission: LaunchPermission) -> &'static str {
     match permission {
+        LaunchPermission::Guarded => "guarded",
         LaunchPermission::Yolo => "yolo",
         LaunchPermission::Approve => "approve",
         LaunchPermission::SmartApprove => "smart approve",
@@ -62,7 +63,10 @@ pub(crate) const fn permission_value(permission: LaunchPermission) -> &'static s
 /// chat; OMP's approve, which launches with `--approval-mode always-ask`).
 pub(crate) const fn permission_tooltip(permission: LaunchPermission) -> &'static str {
     match permission {
-        LaunchPermission::Yolo => "YOLO: the agent acts without asking for permission",
+        LaunchPermission::Guarded => {
+            "guarded: the agent can approve actions through a safety mechanism that may refuse or ask you"
+        }
+        LaunchPermission::Yolo => "YOLO: the agent bypasses its approval and sandbox safety checks",
         LaunchPermission::Approve => "approve: the agent asks before every tool action",
         LaunchPermission::SmartApprove => {
             "smart approve: the agent asks only before actions it judges risky"
@@ -71,17 +75,93 @@ pub(crate) const fn permission_tooltip(permission: LaunchPermission) -> &'static
     }
 }
 
+/// Explain the selected mode without promising control over vendor behavior.
+///
+/// Rows pass the stored permission, while the launcher passes its request
+/// choice. Keeping the distinction at the caller prevents an older command's
+/// missing flags from being described as today's guarded default. Flag text
+/// comes from the same proto definition the helm compiles.
+pub(crate) fn permission_help(
+    harness: LaunchHarness,
+    permission: Option<LaunchPermission>,
+) -> String {
+    let explanation = match permission {
+        Some(LaunchPermission::Guarded) => match harness {
+            LaunchHarness::Claude => {
+                "Guarded · Claude auto mode\nClaude's classifier approves or blocks actions instead of asking about every action."
+            }
+            LaunchHarness::Codex => {
+                "Guarded · Codex sandboxed auto\nCodex runs within its workspace sandbox and asks before stepping outside it. An approval reviewer may decide requests according to your configuration."
+            }
+            LaunchHarness::Grok => {
+                "Guarded · Grok auto-review\nGrok's auto-review classifier approves or blocks actions instead of asking about every action."
+            }
+            LaunchHarness::Muse => {
+                "Guarded · Muse auto-review\nMuse's AI reviewer approves eligible actions; workspace commands use its sandbox, and restricted actions may ask you."
+            }
+            LaunchHarness::Omp => {
+                "Guarded · OMP write mode\nOMP approves workspace edits on its own and asks before other actions."
+            }
+            LaunchHarness::Cursor
+            | LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::OpenCode => unreachable!("these harnesses do not offer guarded"),
+        },
+        Some(value) => permission_tooltip(value),
+        None => {
+            "Not classified · agent's own setting\nFarhelm did not force a guarded permission mode for this launch. The agent's configuration decides; hosts that ask before YOLO launches treat it as YOLO."
+        }
+    };
+    let mut help = explanation.to_string();
+    if permission == Some(LaunchPermission::Guarded) {
+        help.push_str("\n\nFlags: ");
+        help.push_str(&harness.guarded_flags().join(" "));
+    }
+    help.push_str("\n\nFarhelm starts the agent with these choices, but can't guarantee how it behaves. Your own allow rules, hooks, plugins, always-allow answers, sandbox settings or switching modes inside the session can loosen it, and agents change between versions. See About permission modes in the agent documentation.");
+    help
+}
+
+/// A compact request label for templates, save panels and approval cards.
+///
+/// A template without an agent defers its mode until it is applied. With an
+/// agent, omission names that agent's request default, never an unqualified
+/// promise that it asks. The detailed helper remains the wording source for
+/// guarded modes so a short label cannot name a different vendor mode.
+pub(crate) fn permission_label(
+    harness: Option<LaunchHarness>,
+    permission: Option<LaunchPermission>,
+) -> String {
+    let Some(harness) = harness else {
+        return permission
+            .map(permission_value)
+            .unwrap_or("agent-dependent mode")
+            .to_string();
+    };
+    match harness.request_permission(permission) {
+        Some(LaunchPermission::Guarded) => {
+            permission_help(harness, Some(LaunchPermission::Guarded))
+                .lines()
+                .next()
+                .expect("permission help has a heading")
+                .to_string()
+        }
+        Some(value) => permission_value(value).to_string(),
+        None => "agent's own setting".to_string(),
+    }
+}
+
 /// Normalize a permission to the modes the selected harness can represent.
 ///
-/// Older saved selections resolve omissions through the same proto fact as
-/// the helm and sidebar. Unsupported explicit values fall back to the harness
-/// default, so no hidden unsupported choice reaches submit. This wrapper keeps
-/// browser call sites brief; the proto helper owns the normalization rule.
+/// A saved setup applied in the launcher becomes a new request, unlike plain
+/// restart or replace of its stored command. Its omission can therefore select
+/// today's guarded flags. Unsupported explicit choices fall back to the
+/// request default so a hidden incompatible draft cannot reach submit. The
+/// sidebar uses the separate stored-permission rule.
 pub(crate) const fn normalized_permissions(
     harness: LaunchHarness,
     permissions: Option<LaunchPermission>,
 ) -> Option<LaunchPermission> {
-    harness.effective_permission(permissions)
+    harness.request_permission(permissions)
 }
 
 /// Normalize the effective permission before comparing saved setups.
@@ -115,7 +195,7 @@ pub(crate) const fn normalized_workspace_trust(
 pub(crate) fn selection_permission_value(selection: &LaunchSelection) -> &'static str {
     normalized_permissions(selection.harness, selection.permissions)
         .map(permission_value)
-        .unwrap_or("default")
+        .unwrap_or("agent's own setting")
 }
 
 /// The order the composer's search lists harnesses in (the `harness:` results
@@ -310,7 +390,7 @@ pub(crate) enum ComposerSearchResult {
     Effort(LaunchEffort),
     /// Apply an explicit per-launch workspace-trust choice.
     Trust(bool),
-    /// Apply the harness default or YOLO permission choice without changing
+    /// Apply a searched permission choice without changing
     /// any other structured launch field.
     Permissions(ComposerPermission),
     /// Apply the path the person typed without changing their agent choices.
@@ -324,15 +404,15 @@ pub(crate) enum ComposerSearchResult {
     Recent(LaunchHistoryEntry),
 }
 
-/// The two permission choices exposed by launch-composer search.
+/// The permission choices exposed by launch-composer search.
 ///
-/// `Default` is represented by an omitted permission on the wire, while
-/// `Yolo` is an explicit permission. Keeping that distinction here lets the
-/// picker share the segmented control's semantics without inventing a fake
-/// wire enum value for the default.
+/// Guarded and YOLO carry explicit wire choices; own-setting leaves the
+/// permission absent. This is request intent, so it must not be used to
+/// classify an older session's stored command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ComposerPermission {
-    Default,
+    Guarded,
+    OwnSetting,
     Yolo,
 }
 
@@ -941,14 +1021,16 @@ pub(crate) fn search_results(
     {
         let choices = [
             ("yolo", ComposerPermission::Yolo),
-            ("default", ComposerPermission::Default),
+            ("guarded", ComposerPermission::Guarded),
+            ("own", ComposerPermission::OwnSetting),
         ];
         for (word, choice) in choices {
             let supported = match choice {
                 ComposerPermission::Yolo => {
                     normalized_permissions(harness, Some(LaunchPermission::Yolo)).is_some()
                 }
-                ComposerPermission::Default => normalized_permissions(harness, None).is_none(),
+                ComposerPermission::Guarded => harness.offers_permission(LaunchPermission::Guarded),
+                ComposerPermission::OwnSetting => harness.omitted_permission().is_none(),
             };
             if supported
                 && (query.is_empty()
@@ -1099,7 +1181,8 @@ fn exact_word_group(
         }
         ComposerSearchResult::Permissions(permission)
             if match permission {
-                ComposerPermission::Default => folded_query == "default",
+                ComposerPermission::Guarded => folded_query == "guarded",
+                ComposerPermission::OwnSetting => folded_query == "own",
                 ComposerPermission::Yolo => folded_query == "yolo",
             } =>
         {
@@ -1479,10 +1562,13 @@ pub(crate) fn reconciliation_reset_reason(
     if let Some(permission) = before.permissions
         && !after.harness.offers_permission(permission)
     {
-        let disposition = if after.permissions.is_some() {
-            "replaced by YOLO, this harness's default"
-        } else {
-            "cleared"
+        let disposition = match after.permissions {
+            Some(LaunchPermission::Yolo) => "replaced by YOLO, this harness's default",
+            Some(LaunchPermission::Guarded) => "replaced by guarded, this harness's default",
+            Some(
+                LaunchPermission::Approve | LaunchPermission::SmartApprove | LaunchPermission::Chat,
+            ) => "replaced by this harness's supported mode",
+            None => "cleared",
         };
         notices.push(format!(
             "the selected permission is unavailable for this harness, so it was {disposition}"
@@ -1632,7 +1718,7 @@ mod tests {
             search_results(&history, &[], "perms:", Some(LaunchHarness::Codex), None),
             vec![
                 ComposerSearchResult::Permissions(ComposerPermission::Yolo),
-                ComposerSearchResult::Permissions(ComposerPermission::Default),
+                ComposerSearchResult::Permissions(ComposerPermission::Guarded),
             ]
         );
         assert_eq!(
@@ -1640,9 +1726,9 @@ mod tests {
             vec![ComposerSearchResult::Permissions(ComposerPermission::Yolo)]
         );
         assert_eq!(
-            search_results(&history, &[], "perms:d", Some(LaunchHarness::Codex), None),
+            search_results(&history, &[], "perms:g", Some(LaunchHarness::Codex), None),
             vec![ComposerSearchResult::Permissions(
-                ComposerPermission::Default
+                ComposerPermission::Guarded
             )]
         );
         assert_eq!(
@@ -2480,14 +2566,19 @@ mod tests {
         );
 
         let (codex, _) = reconcile_harness_selection(pi, None, LaunchHarness::Codex, &[]);
-        assert_eq!(codex.permissions, None);
+        assert_eq!(codex.permissions, Some(LaunchPermission::Guarded));
 
         let (codex_from_goose, _) =
             reconcile_harness_selection(goose.clone(), None, LaunchHarness::Codex, &[]);
-        assert_eq!(codex_from_goose.permissions, None);
+        assert_eq!(
+            codex_from_goose.permissions,
+            Some(LaunchPermission::Guarded)
+        );
         assert_eq!(
             reconciliation_reset_reason(&goose, &codex_from_goose).as_deref(),
-            Some("the selected permission is unavailable for this harness, so it was cleared")
+            Some(
+                "the selected permission is unavailable for this harness, so it was replaced by guarded, this harness's default"
+            )
         );
     }
 
@@ -2698,7 +2789,11 @@ mod tests {
                 before.permissions = permission;
                 let (after, _) =
                     reconcile_harness_selection(before, None, LaunchHarness::Codex, &[]);
-                assert_eq!(after.permissions, None, "{harness:?} {permission:?}");
+                assert_eq!(
+                    after.permissions,
+                    Some(LaunchPermission::Guarded),
+                    "{harness:?} {permission:?}"
+                );
             }
             assert!(
                 search_results(
@@ -3868,5 +3963,55 @@ mod tests {
                 "Grok must remain discoverable through {query:?}"
             );
         }
+    }
+    /// Mode help must name every offered guarded mode and its forcing flags;
+    /// request labels may select a current default, while stored omissions
+    /// must still explain uncertainty. This prevents the UI from promising
+    /// asking behavior for automatic guarded modes or older no-flag commands.
+    #[test]
+    fn guarded_and_own_setting_help_name_the_mode_and_its_limits() {
+        for (harness, mode, flags) in [
+            (
+                LaunchHarness::Claude,
+                "Claude auto mode",
+                "--permission-mode auto",
+            ),
+            (
+                LaunchHarness::Codex,
+                "Codex sandboxed auto",
+                "-a on-request -s workspace-write",
+            ),
+            (
+                LaunchHarness::Grok,
+                "Grok auto-review",
+                "--permission-mode auto",
+            ),
+            (
+                LaunchHarness::Muse,
+                "Muse auto-review",
+                "--permission-profile :auto-review",
+            ),
+            (
+                LaunchHarness::Omp,
+                "OMP write mode",
+                "--approval-mode write",
+            ),
+        ] {
+            let help = permission_help(harness, Some(LaunchPermission::Guarded));
+            assert!(help.contains(mode) && help.contains(flags), "{help}");
+            assert!(
+                help.contains("can't guarantee how it behaves")
+                    && help.contains("switching modes inside the session")
+            );
+            assert!(
+                permission_label(Some(harness), Some(LaunchPermission::Guarded)).contains(mode)
+            );
+            let older = permission_help(harness, harness.stored_permission(None));
+            if harness != LaunchHarness::Omp {
+                assert!(older.starts_with("Not classified"));
+                assert!(!older.contains("Flags:"));
+            }
+        }
+        assert!(permission_help(LaunchHarness::Cursor, None).contains("treat it as YOLO"));
     }
 }

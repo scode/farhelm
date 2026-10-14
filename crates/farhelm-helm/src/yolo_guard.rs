@@ -2,8 +2,8 @@
 //! launches without asking.
 //!
 //! Every host asks before YOLO launches until the user turns off that confirmation
-//! (`HostRow::yolo_without_asking`, the host settings dialog). Starting an agent that runs
-//! without approval prompts on the wrong machine by accident is the failure this exists to
+//! (`HostRow::yolo_without_asking`, the host settings dialog). Starting an agent that bypasses
+//! its safety checks on the wrong machine by accident is the failure this exists to
 //! stop, so the check lives here, on every create path the helm has (a new session, a fresh
 //! checkout, replace, and an agent's create and clone) and on restart-with, rather than in
 //! any one client: no client can skip it. A plain restart or resume relaunches a choice the
@@ -26,7 +26,7 @@ use crate::store::HostId;
 /// message is what the command line and agents show.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "{host_name} asks before YOLO launches, and this launch skips approval prompts: nothing was \
+    "{host_name} asks before YOLO launches, and this launch is YOLO or uses the agent's own setting: nothing was \
      started. Confirm the YOLO launch explicitly in the GUI, or turn on \"start YOLO sessions here \
      without asking\" in the host's settings"
 )]
@@ -34,9 +34,10 @@ pub(crate) struct YoloNeedsConfirmation {
     pub(crate) host_name: String,
 }
 
-/// Whether a launch is YOLO, as the launch itself says
+/// Whether admission must treat a launch as YOLO, as the launch itself says
 /// ([`farhelm_proto::SessionLaunch::yolo`]): an agent launch by its
-/// effective permission, a command launch by the user's assertion. Farhelm
+/// stored permission (including an unclassified own-setting mode), a command
+/// launch by the user's assertion. Farhelm
 /// never reads a command line to second-guess either (SPEC.md). A legacy
 /// launch carries no verdict and is never created anew, so it reads as not
 /// YOLO here; nothing that can reach this check holds one.
@@ -157,6 +158,40 @@ pub(crate) async fn check_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A copied pre-upgrade command keeps its own-setting classification:
+    /// neither a GUI replace nor an agent clone/inherit may pass it off as a
+    /// newly compiled guarded launch on a host that asks first.
+    #[farhelm_testtrace::test]
+    async fn old_no_flag_launches_and_their_copies_require_confirmation() {
+        let harness = crate::rest_harness::idle_helm().await;
+        let host = crate::rest_harness::local_id(&harness.store).await;
+        let old = crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        });
+        assert_eq!(
+            old.yolo(),
+            Some(true),
+            "premise: no guarded flags were recorded"
+        );
+        for copied in [
+            old.clone(),
+            serde_json::from_str(&serde_json::to_string(&old).unwrap()).unwrap(),
+        ] {
+            assert!(create_is_yolo(&copied));
+            assert!(
+                check(&harness.state, host, create_is_yolo(&copied), false)
+                    .await
+                    .unwrap_err()
+                    .is::<YoloNeedsConfirmation>()
+            );
+            assert!(check_agent(&harness.state, host, &copied).await.is_err());
+        }
+    }
 
     /// Spec: a YOLO launch checked against a host id the registry has no row for is refused
     /// with the helm's unknown-host error ("no such host", the same text routing gives),

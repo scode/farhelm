@@ -619,7 +619,20 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
             // YOLO", and restating it here in Farhelm's words would present
             // the claim as a finding.
             if !matches!(launch, SessionLaunch::Command(_)) {
-                rows.push(CardRow::Note("YOLO", yolo_words(launch.yolo())));
+                let own_setting = launch.agent_selection().is_some_and(|selection| {
+                    selection
+                        .harness
+                        .stored_permission(selection.permissions)
+                        .is_none()
+                });
+                rows.push(CardRow::Note(
+                    "YOLO",
+                    if own_setting {
+                        "agent's own setting: not classified; treated as YOLO by the host guard"
+                    } else {
+                        yolo_words(launch.yolo())
+                    },
+                ));
             }
         }
         ApprovalAction::Rename { target, title } => {
@@ -718,9 +731,23 @@ fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
                 "effort",
                 selection.effort.as_ref().map(word),
             ));
-            rows.push(optional_value(
+            // Only the help's heading line ("Guarded · Claude auto mode",
+            // "Not classified · agent's own setting"). Value rows render
+            // through the peer-text escaper, which shows each newline of the
+            // full multi-paragraph help as a literal escape, in a half-width
+            // cell styled as text another host supplied. The heading comes
+            // from the stored permission, not the request default, so an
+            // older own-setting launch still reads as not classified here.
+            rows.push(CardRow::Value(
                 "permissions",
-                selection.permissions.as_ref().map(word),
+                crate::launch_composer::permission_help(
+                    selection.harness,
+                    selection.harness.stored_permission(selection.permissions),
+                )
+                .lines()
+                .next()
+                .expect("permission help has a heading")
+                .to_string(),
             ));
             if let Some(trust) = selection.workspace_trust {
                 rows.push(CardRow::Note(
@@ -783,9 +810,9 @@ fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Ve
         rows.push(optional_value("effort", effort.as_ref().map(word)));
     }
     if let Some(permissions) = &fields.permissions {
-        rows.push(optional_value(
+        rows.push(CardRow::Value(
             "permissions",
-            permissions.as_ref().map(word),
+            crate::launch_composer::permission_label(fields.agent, *permissions),
         ));
     }
     if let Some(trust) = &fields.workspace_trust {
@@ -934,6 +961,44 @@ mod tests {
             "a command launch's claim is not restated as Farhelm's verdict: {rows:?}"
         );
         assert!(rows.contains(&CardRow::Note("title", "generated")));
+    }
+
+    /// Spec: an agent launch's card names its permission mode in one line,
+    /// from the stored permission.
+    ///
+    /// Why: this is the card on which a user approves an agent's launch.
+    /// The full permission help is several paragraphs; in a value row each of
+    /// its newlines renders as a literal escape, so the mode the user is
+    /// approving became hard to read. An older launch stored without a
+    /// permission must still read as not classified, never as guarded.
+    #[test]
+    fn an_agent_launch_card_names_its_permission_in_one_line() {
+        let permissions_of = |permissions: Option<farhelm_proto::LaunchPermission>| {
+            let launch = SessionLaunch::Agent {
+                selection: farhelm_proto::LaunchSelection {
+                    harness: farhelm_proto::LaunchHarness::Claude,
+                    model: None,
+                    effort: None,
+                    permissions,
+                    workspace_trust: None,
+                },
+                start: vec!["claude".to_string()],
+                resume: None,
+            };
+            let mut rows = Vec::new();
+            launch_rows(&launch, Runs::Start, &mut rows);
+            rows.into_iter()
+                .find_map(|row| match row {
+                    CardRow::Value("permissions", value) => Some(value),
+                    _ => None,
+                })
+                .expect("the card has a permissions row")
+        };
+        assert_eq!(
+            permissions_of(Some(farhelm_proto::LaunchPermission::Guarded)),
+            "Guarded · Claude auto mode"
+        );
+        assert_eq!(permissions_of(None), "Not classified · agent's own setting");
     }
 
     /// Spec: a restart card shows the resume command the restart runs, for a

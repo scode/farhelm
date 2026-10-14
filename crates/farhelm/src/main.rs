@@ -635,7 +635,7 @@ fn refuse_create_profile(_value: &str) -> Result<String, String> {
 fn refuse_invocation(_value: &str) -> Result<String, String> {
     Err(
         "--invocation was replaced by --command: pass the command line with --command <CMD> \
-         and say whether it runs without approval prompts with --yolo or --no-yolo"
+         and say whether it bypasses safety checks with --yolo or --no-yolo"
             .to_string(),
     )
 }
@@ -700,9 +700,27 @@ fn parse_effort(value: &str) -> Result<Choice<farhelm_proto::LaunchEffort>, Stri
     parse_choice(value, &farhelm_proto::LaunchEffort::ALL, "an effort")
 }
 
-/// `--permissions`'s parser; see [`parse_choice`].
+/// Parse explicit permissions without advertising the older `default` alias.
+///
+/// The alias still means request omission, so existing callers keep the
+/// harness's admission default (notably OMP's YOLO default). Reasoning effort
+/// has a separate default vocabulary and still uses [`parse_choice`].
 fn parse_permissions(value: &str) -> Result<Choice<farhelm_proto::LaunchPermission>, String> {
-    parse_choice(value, &farhelm_proto::LaunchPermission::ALL, "a permission")
+    if value == "default" {
+        return Ok(Choice(None));
+    }
+    serde_json::from_value(serde_json::Value::String(value.to_string()))
+        .map(|choice| Choice(Some(choice)))
+        .map_err(|_| {
+            format!(
+                "{value:?} is not a permission; the choices are {}",
+                farhelm_proto::LaunchPermission::ALL
+                    .iter()
+                    .map(|permission| permission.wire_word())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
 }
 
 /// `--trust`'s parser: `true`, `false`, or `default`.
@@ -761,8 +779,9 @@ struct LaunchFlags {
     /// Reasoning effort for an agent launch, or `default`.
     #[arg(long, value_name = "LEVEL", value_parser = parse_effort)]
     effort: Option<Choice<farhelm_proto::LaunchEffort>>,
-    /// Permission mode for an agent launch (yolo, approve, smart_approve,
-    /// chat), or `default`.
+    /// Permission mode for an agent launch (guarded, yolo, approve,
+    /// smart_approve, chat), where supported. `default` remains an alias for
+    /// omission; OMP, Goose, Pi and OpenCode default to YOLO.
     #[arg(long, value_name = "MODE", value_parser = parse_permissions)]
     permissions: Option<Choice<farhelm_proto::LaunchPermission>>,
     /// Workspace trust for an agent launch: true, false, or default.
@@ -772,11 +791,11 @@ struct LaunchFlags {
     /// Needs --yolo or --no-yolo.
     #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
     command: Option<String>,
-    /// The command runs without approval prompts. Farhelm believes this
+    /// The command bypasses its approval/classifier/sandbox safety checks. Farhelm believes this
     /// and never reads the command to check it.
     #[arg(long, conflicts_with = "no_yolo")]
     yolo: bool,
-    /// The command asks before acting (it is not YOLO).
+    /// The command retains a safety check that can refuse or ask (it is not YOLO).
     #[arg(long)]
     no_yolo: bool,
     /// Command that resumes a conversation, with {conversation} and
@@ -2274,7 +2293,48 @@ mod tests {
             "{effort}"
         );
         let permissions = create(&["--agent", "codex", "--permissions", "free"]);
-        assert!(permissions.contains("smart_approve"), "{permissions}");
+        assert!(
+            permissions.contains("smart_approve") && permissions.contains("guarded"),
+            "{permissions}"
+        );
+        assert!(
+            !permissions.contains("or default"),
+            "the compatibility alias is not the visible permission vocabulary: {permissions}"
+        );
+    }
+
+    /// Guarded is explicit intent, while the old default spelling remains
+    /// omission for callers and templates written before the rename. Keeping
+    /// it absent is necessary for OMP's unchanged YOLO admission default.
+    #[farhelm_testtrace::test]
+    fn guarded_permissions_and_the_legacy_default_alias_reach_create_intent() {
+        for (word, permission) in [
+            ("guarded", Some(farhelm_proto::LaunchPermission::Guarded)),
+            ("default", None),
+        ] {
+            let Cmd::Agent { command } = Cli::try_parse_from([
+                "farhelm",
+                "agent",
+                "create",
+                "--host",
+                "h",
+                "--cwd",
+                "/w",
+                "--agent",
+                "codex",
+                "--permissions",
+                word,
+            ])
+            .unwrap()
+            .command
+            else {
+                panic!("agent create")
+            };
+            let Some(farhelm_proto::AgentVerb::Create { edits, .. }) = command.verb() else {
+                panic!("create intent")
+            };
+            assert_eq!(edits.permissions, Some(permission), "{word}");
+        }
     }
 
     /// Managed checkout flags express repository intent only on create and

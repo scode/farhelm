@@ -1368,6 +1368,16 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   display: none;
 }
 
+/* Permission modes need their closing caveat to remain visible. Ordinary
+   short help keeps its eight-line bound; paragraph help uses the viewport cap. */
+.farhelm-tooltip[data-paragraphs="true"] {
+  display: block;
+  max-width: min(440px, calc(100vw - 8px));
+  white-space: pre-line;
+  -webkit-line-clamp: unset;
+}
+.farhelm-tooltip[data-paragraphs="true"][hidden] { display: none; }
+
 /* The hidden-characters warning after a header copy. It hangs below the
    titlebar (its positioning anchor) instead of living inside the copy
    button, whose text shrinks and ellipsizes in a crowded header: the
@@ -3797,6 +3807,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--ok);
 }
 
+/* A missing forcing flag is uncertainty, not an approval guarantee. */
+.permission-glyph[data-glyph="own-setting"] {
+  color: var(--fg-1);
+}
+
 .ended-status-glyph[data-glyph="exited"] {
   color: var(--fg-1);
 }
@@ -5665,6 +5680,14 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   background: var(--well);
   color: var(--fg-0);
   font-size: 13px;
+}
+
+/* Help belongs beside the permission choices, without looking selected or
+   stretching into a second row. It opens documentation rather than choosing a mode. */
+.launch-composer-segmented > button.launch-permission-help {
+  flex: 0 0 30px;
+  padding: 0;
+  color: var(--fg-1);
 }
 
 /* Selection in the composer, stated ONCE for every control that can hold

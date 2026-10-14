@@ -59,7 +59,10 @@
 //!   `offers_only_yolo`). The helm's release catalog and argv compiler stay
 //!   in
 //!   `farhelm-helm/src/launches.rs`: exhaustive matches for the program
-//!   name and the model, effort, and YOLO flags, plus harness-specific
+//!   name and the model, effort, and YOLO flags; guarded flags are shared with
+//!   pre-launch help through `LaunchHarness::guarded_flags` in proto. New
+//!   requests use `request_permission`, while `stored_permission` keeps older
+//!   no-flag launches under their own setting. The compiler also has harness-specific
 //!   branches (Goose's environment and subcommand, Grok's `--no-leader`,
 //!   OMP's approval mode, the workspace-trust flags) that were deliberately
 //!   left as they are. A new harness gets compile errors for the former and

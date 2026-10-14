@@ -201,7 +201,7 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
   await expect(dialog).toBeVisible();
   await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
   await expect(dialog.locator(".launch-composer-permissions-choice .launch-composer-changed-marker"))
-    .toHaveText("● changed · was default");
+    .toHaveText("● changed · was agent's own setting");
   await expect(submit).toBeEnabled();
   await expect(submit).toHaveText("restart");
   await submit.click();
@@ -209,6 +209,30 @@ test("restart with shows fixed context and submits one edited resume", async ({ 
   expect(bodies, "one consent must send one restart request").toEqual([{
     stop_if_running: false,
     with: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "yolo" },
+  }]);
+});
+
+/**
+ * An older no-flag session can adopt guarded by editing only its permission.
+ * The comparison must preserve the old command's own-setting intent, or the
+ * selected guarded chip would appear unchanged and block the upgrade path.
+ */
+test("restart with upgrades an older own-setting launch to guarded", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  const bodies = await acceptYoloRestart(page);
+  await page.goto("/");
+  const dialog = await openInjectedDialog(page);
+  const submit = dialog.locator(".restart-with-submit");
+  await expect(submit, "the stored launch is initially unchanged").toBeDisabled();
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+  await expect(dialog.locator(".launch-composer-permissions-choice .launch-composer-changed-marker"))
+    .toHaveText("● changed · was agent's own setting");
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(dialog).toHaveCount(0);
+  expect(bodies).toEqual([{
+    stop_if_running: false,
+    with: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "guarded" },
   }]);
 });
 
@@ -1139,7 +1163,7 @@ test("restart with edits a command launch's command, resume command and YOLO ans
   await expect(command).toHaveValue("claude {farhelm_args}");
   await expect(dialog.locator(".restart-with-resume-input")).toHaveValue(resume);
   await expect(
-    dialog.getByRole("group", { name: "runs without approval prompts" }).getByLabel("no", { exact: true }),
+    dialog.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("no", { exact: true }),
   ).toBeChecked();
   await expect(submit).toBeDisabled();
   await expect(dialog.locator(".restart-with-edited")).toHaveCount(0);
@@ -1157,7 +1181,7 @@ test("restart with edits a command launch's command, resume command and YOLO ans
   await dialog.locator(".restart-with-resume-input").fill(editedResume);
   await expect(dialog.locator(".restart-with-edited")).toHaveCount(2);
   await dialog
-    .getByRole("group", { name: "runs without approval prompts" })
+    .getByRole("group", { name: "runs in YOLO mode" })
     .getByLabel("yes (YOLO)", { exact: true })
     .check();
   await expect(dialog.locator(".restart-with-edited")).toHaveCount(3);
@@ -1239,13 +1263,13 @@ test("a YOLO command restart-with asks inside the dialog, worded for an assertio
   });
   const dialog = await openInjectedDialog(page);
   await dialog
-    .getByRole("group", { name: "runs without approval prompts" })
+    .getByRole("group", { name: "runs in YOLO mode" })
     .getByLabel("yes (YOLO)", { exact: true })
     .check();
   await dialog.locator(".restart-with-submit").click();
   const confirmation = dialog.locator(".yolo-confirmation");
   await expect(confirmation, "the question must appear inside the modal dialog").toBeVisible();
-  await expect(confirmation).toContainText("This command was asserted to run without approval prompts.");
+  await expect(confirmation).toContainText("This command was asserted to bypass its safety checks.");
   expect(bodies).toHaveLength(1);
   await confirmation.locator(".yolo-confirm").click();
   await expect(dialog).toHaveCount(0);

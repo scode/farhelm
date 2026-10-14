@@ -5619,8 +5619,10 @@ mod tests {
     ///
     /// Why: the clone must run what the source runs, with the same YOLO
     /// answer, declared agent type and resume command, not something the
-    /// helm rebuilds. The agent case uses a start command today's catalog
-    /// would not compose, so a clone that recompiled the selection instead
+    /// helm rebuilds. The agent case is an older no-permission-field launch
+    /// with a start command today's catalog would not compose. It must be
+    /// refused on a host that asks before YOLO launches, rather than becoming
+    /// guarded during admission. A clone that recompiled the selection instead
     /// of copying would fail it. The source deliberately differs from the
     /// caller and the destination is another host, proving neither identity
     /// is inferred.
@@ -5637,7 +5639,7 @@ mod tests {
                 harness: farhelm_proto::LaunchHarness::Claude,
                 model: None,
                 effort: None,
-                permissions: Some(farhelm_proto::LaunchPermission::Approve),
+                permissions: None,
                 workspace_trust: None,
             },
             start: ["claude", "--from-an-older-catalog", "{farhelm_args}"]
@@ -5656,9 +5658,45 @@ mod tests {
                 launch: launch.clone(),
                 ..session("source", 1)
             };
-            let (h, local, _remote) = creating_fleet(client_side, vec![source]).await;
+            let (h, local, remote) = creating_fleet(client_side, vec![source]).await;
 
             let handler = HelmAgentRequests::for_state(&h.state);
+            // The older no-flag agent must not be recompiled into guarded
+            // intent by clone admission. A refusal sends nothing and creates
+            // no approval card; allowing the host afterwards preserves its
+            // exact stored command in the successful copy below.
+            h.store
+                .set_yolo_without_asking(remote, false)
+                .await
+                .unwrap();
+            assert!(seen.lock().unwrap().is_empty(), "premise: no creates yet");
+            let refused = handler
+                .handle(
+                    origin_of(&h, local),
+                    "asker",
+                    AgentVerb::Clone {
+                        source_session_id: Some("source".to_string()),
+                        host: Some("user@builder".to_string()),
+                        cwd: None,
+                        title: None,
+                        intent_key: None,
+                        confirm_yolo: false,
+                    },
+                )
+                .await;
+            assert!(
+                matches!(
+                    refused,
+                    AgentOutcome::Err {
+                        kind: ErrorKind::Unauthorized,
+                        ..
+                    }
+                ),
+                "{refused:?}"
+            );
+            assert!(seen.lock().unwrap().is_empty());
+            assert!(h.state.approvals.list().is_empty());
+            h.store.set_yolo_without_asking(remote, true).await.unwrap();
             let outcome = handler
                 .handle(
                     origin_of(&h, local),
@@ -6670,7 +6708,9 @@ mod tests {
     /// Spec: `farhelm spawn --inherit-agent`, as its supervisor relays it with
     /// the session's stored launch filled in, creates that launch on the
     /// asking session's own host, in the folder and with the title the CLI
-    /// gave; one that also names a template is refused.
+    /// gave; one that also names a template is refused. An older no-flag
+    /// launch is refused when that host asks before YOLO launches; changing
+    /// the host to allow it does not add guarded flags to the inherited copy.
     ///
     /// Why: inheritance now goes through the helm so the user is asked, and
     /// SPEC.md keeps `--inherit-agent` exclusive with every launch flag and
@@ -6681,7 +6721,17 @@ mod tests {
         let seen = spawn_create_responder(peer, None);
         let (h, _local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
         let handler = HelmAgentRequests::for_state(&h.state);
-        let inherited = farhelm_proto::SessionLaunch::plain_command("my-agent --flag");
+        let inherited = farhelm_proto::SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+            },
+            start: vec!["claude".into(), "{farhelm_args}".into()],
+            resume: None,
+        };
         let spawn = |templates: Vec<String>| AgentVerb::Create {
             host: None,
             templates,
@@ -6700,6 +6750,34 @@ mod tests {
                 inherited_launch: Some(Box::new(inherited.clone())),
             }),
         };
+        assert_eq!(
+            inherited.yolo(),
+            Some(true),
+            "premise: the inherited launch predates guarded flags"
+        );
+        h.store
+            .set_yolo_without_asking(remote, false)
+            .await
+            .unwrap();
+        let refused = handler
+            .handle(origin_of(&h, remote), "asker", spawn(Vec::new()))
+            .await;
+        assert!(
+            matches!(
+                refused,
+                AgentOutcome::Err {
+                    kind: ErrorKind::Unauthorized,
+                    ..
+                }
+            ),
+            "{refused:?}"
+        );
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "the refused inherit must dispatch no create"
+        );
+        assert!(h.state.approvals.list().is_empty());
+        h.store.set_yolo_without_asking(remote, true).await.unwrap();
         let outcome = handler
             .handle(origin_of(&h, remote), "asker", spawn(Vec::new()))
             .await;
