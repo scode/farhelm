@@ -130,3 +130,73 @@ cold read for product understanding and public-repository hygiene.
 Implementation and investigation stayed local under no-workhorse. Only required resume/source/scope/wording/report
 reviews were delegated. Private galaxy-brain session records retain the routing and outcomes; native and orchestrator
 usage are unavailable, and unverified external counter semantics are excluded from totals.
+
+### Landing
+
+Landed alone in its round as #1991 then #2010, built to the maintainer's narrowed decision: warnings and refusals only,
+with manual recovery for a withdrawn update already waiting for a restart. The automatic recovery follow-up is the Near
+term TODO.md entry added in #1996. While this landing ran, only queue bookkeeping reached main; two other plans
+delivered and belong to the next round.
+
+#### Release-relevant
+
+No schema or protocol change. The helm, remote hosts and the standalone installer do not read advisories; only the
+desktop app does. Nothing changes for users until the maintainer's publishing tooling serves `/advisories` and
+`/advisories.minisig` on get.farhelm.io (releasing/AGENTS.md, "Publishing release advisories"). Until then a missing
+file means there is nothing to say.
+
+#### Review
+
+An independent fresh-context review, focused on signatures, found nothing blocking. It confirmed:
+
+- #1991 leaves the helm's release payload and checksum verification exactly as it was: the same keys, prehashed
+  signatures only, the same trusted-comment check and the same refusals.
+- A signed checksum file presented as advisories is refused twice: its trusted comment is wrong, and so is its first
+  line. A signed advisories file cannot pass as release checksums.
+- The fixture key is a test key, not in the production key ring; a test asserts the ring rejects it, and no private key
+  is committed.
+- Any advisories failure only logs. It never blocks an update, never sets the reinstall warning, and never wedges the
+  updater.
+- With automatic updates off, nothing is fetched in the background.
+- Nothing is ever installed over a withdrawn waiting update.
+
+#### Fixes made while landing
+
+- With the running release withdrawn and `/latest` still naming it (no fix out yet), an on-demand check reported "check
+  failed" with "Farhelm X was withdrawn: …; it was not installed". That is false, since nothing was being installed, and
+  it also skipped clearing a stale reinstall warning. A withdrawn target is now refused only when the check would
+  actually install it. Otherwise the check is up to date and the withdrawal warning still shows. A new unit test covers
+  it.
+- The new "Publishing release advisories" section in releasing/AGENTS.md was inserted above an existing paragraph, so
+  the rule that main's version is always `0.0.0-unreleased` and release commits never merge into main sat under the
+  advisories heading. That paragraph is back above the new section.
+
+#### Something the maintainer should know
+
+Automatic checks now run daily while an update waits (to keep advisories current). A consequence the report does not
+mention: a Mac offline for three or more days with an update waiting will now show **check failed** beside the red
+update arrow, which could not happen before. SPEC.md allows it. If that is unwanted, the alternative is to keep probe
+failures from starting the offline count while an update waits.
+
+#### Other review notes left as they are
+
+- A test that checks a refused connection drops its listener before connecting to the port, so on a shared machine
+  another process could take the port in between. That would only produce a spurious failure, never a false pass.
+- During brick tests the release-test override of `/latest` still fetches the production advisories file. That looks
+  harmless.
+
+#### Checks
+
+- Run now:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog format lint;
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, desktop all-target
+    Clippy and `cargo check -p farhelm-desktop`;
+  - the helm package in full through the recorder (pinned tmux, four slots, no retries), since the executor had proved
+    #1991's helm side with six focused tests: 1082 passed and 1 failed, run `1707a310-3e25-4454-803d-4ebcdc9040bb`,
+    kept. The failure was `manager::tests::a_shutdown_beats_a_reconciliation_that_is_already_running`, which neither PR
+    touches. That exact test then passed 30 times out of 30 under nextest's stress mode, run
+    `0fcd2615-f7c1-4242-9472-30d3397a9ba6`. One failure under a shared machine's load is not logged as a flake.
+  - after the fix, the full desktop package: 625 passed, none skipped, run `eaea2ff5-10d2-4633-b88a-611777ade9c5`.
+- Reused: the executor's desktop runs on this same base, and its focused release-authentication run.
+- Not run: the full browser battery, desktop GUI smoke, installer and release gates. No web flow, installer or release
+  artifact changed.

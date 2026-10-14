@@ -26,3 +26,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`quick-launch-template`](reports/quick-launch-template.report.md) landed 2026-10-14 in #1994: Mark one template ⚡ quick launch; Cmd+P / Ctrl+Shift+P starts a session from it with no launcher
 - [`custom-permission-flags`](reports/custom-permission-flags.report.md) landed 2026-10-14 in #1995: A "custom" permission choice that passes the user's own permission flags and always counts as YOLO
 - [`release-notes-menu-item`](reports/release-notes-menu-item.report.md) landed 2026-10-14 in #2006: A "release notes" item in the ? menu that opens the release notes on the docs website
+- [`release-advisories`](reports/release-advisories.report.md) landed 2026-10-14 in #1991, #2010: A signed advisories file on get.farhelm.io that the desktop updater reads, starting with release revocation
