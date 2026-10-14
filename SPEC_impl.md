@@ -1340,6 +1340,17 @@ explicitly off (`ControlMaster=no`, `ControlPath=none`) instead of failing. The 
 `farhelm internal stdio` on the remote side, which proxies stdio to the supervisor's unix socket. Supervisors listen on
 that unix socket only — no network port, exactly as SPEC.md requires.
 
+The authenticated `POST /api/ssh-connections` composes read-only command help from registered SSH destinations and an
+optional extra destination from Add host. It does not probe or mutate hosts. The helm uses its own state directory, the
+same connection overrides, socket fit checks and ControlPath encoder as its SSH clients, then shell-quotes every local
+argument. A relative state directory keeps its socket spelling and length gate: the pasted command uses a quoted
+subshell that changes to the helm's working directory first. The masters use `-N -f`, `BatchMode=no`,
+`ControlMaster=yes` and `ControlPersist=yes` so authentication can prompt and the idle connection stays available before
+a client attaches. Unsupported paths are explained once per connection at the top of the response; `/api/hosts` still
+exposes no helm state-directory field. The dialog reads once per opening and uses the existing native-first clipboard
+path to copy exact command bytes. From Add host the parent stays mounted with its draft, hidden while the child modal
+owns isolation; closing restores its isolation and focus. The SSH transport itself is unchanged.
+
 The ssh child's stderr is piped and relayed as bounded, control-escaped tracing events attributed to the host, not
 inherited. Inheriting is defensible for the single-host path a user started by hand; for a registered host it hands a
 remote party a direct, unbounded write channel to the operator's own terminal, escape sequences included. The relay

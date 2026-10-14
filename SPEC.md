@@ -2206,12 +2206,23 @@ the agent creates it.
 ## Feedback
 
 The sidebar's top bar has a **?** button immediately to the right of the settings gear, in the desktop app and the web
-UI alike. It opens a small menu with four items, in order: **Send feedback**, **Documentation**, **Release notes** and
-**Welcome**. Documentation opens the docs site (`https://farhelm.io/docs/`) in the user's browser: a new tab from the
-web UI, the system browser from the desktop app. Release notes opens the general release notes page
-(`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is waiting. The installed desktop
-app's menu has a fifth item, **Check for updates** (see [Installation and updates](#installation-and-updates)). Welcome
-shows the welcome card again.
+UI alike. It opens a small menu with five items, in order: **Send feedback**, **Documentation**, **Release notes**,
+**ssh needs 2FA?** and **Welcome**. Documentation opens the docs site (`https://farhelm.io/docs/`) in the user's
+browser: a new tab from the web UI, the system browser from the desktop app. Release notes opens the general release
+notes page (`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is waiting. The installed
+desktop app's menu has a sixth item, **Check for updates** (see [Installation and updates](#installation-and-updates)).
+Welcome shows the welcome card again.
+
+**ssh needs 2FA?** shows the two shell commands for each registered SSH host: **sessions connection** and **setup and
+updates connection**, each with a copy button. Run them on the helm's machine, as its user (on this Mac in the Mac app);
+each prompts normally, then stays connected in the background. The dialog recommends taking a screenshot and asking an
+agent to automate the commands. With no SSH hosts, it points at Add host. Add host also links to this dialog with
+commands for its typed destination; closing it returns to the intact draft. An empty draft asks for a destination, and
+an invalid destination is refused before composing commands. Commands use the helm's actual socket paths and connection
+overrides, including disabling port forwards: clients cannot cancel forwards belonging to a master someone already
+started. When the state path is too long for either socket, contains literal `${`, or is not UTF-8, the dialog names the
+affected connection and reason once at the top, including the path and byte limit where applicable, instead of commands
+for that connection. It never starts SSH or registers a host.
 
 ### Welcome card
 
@@ -2818,12 +2829,13 @@ supported on a best-effort basis only, as an exception to the passwordless-SSH r
 server also allows only one session per connection. The helm keeps its supervisor connection and provisioning on two
 separate shared SSH connections per host, so the two never compete for one connection's sessions, and such a host works
 when the user starts both of the helm's shared-connection sockets for it by hand, for the same destination the host was
-registered with, and the username is short enough for both sockets to fit (the provisioning socket's limit is one
-character below the supervisor connection's). Only provisioning steps that run one at a time are promised to work there.
-Restarting those connections when they drop is the user's job, and port forwards set up by a connection the user started
-are theirs. Farhelm need not add complexity for such hosts. The separate provisioning connection applies to every host:
-on an ordinary host it means one more SSH login when provisioning starts with no provisioning connection open, which a
-user whose key needs a hardware touch or an agent confirmation per login sees as one more prompt.
+registered with, using the commands in **? → ssh needs 2FA?**, and the username is short enough for both sockets to fit
+(the provisioning socket's limit is one character below the supervisor connection's). Only provisioning steps that run
+one at a time are promised to work there. Restarting those connections when they drop is the user's job, and port
+forwards set up by a connection the user started are theirs. Farhelm need not add complexity for such hosts. The
+separate provisioning connection applies to every host: on an ordinary host it means one more SSH login when
+provisioning starts with no provisioning connection open, which a user whose key needs a hardware touch or an agent
+confirmation per login sees as one more prompt.
 
 Confirmed 2026-10-10: a configuration Farhelm does not support is refused with a clear message rather than left to
 undefined behavior, except where this section says otherwise (other login shells, unsupported tmux programs, filesystem

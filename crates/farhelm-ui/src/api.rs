@@ -3388,6 +3388,45 @@ pub(crate) async fn fetch_hosts(base: &str) -> Result<Vec<Host>, String> {
     decode_hosts(resp).await
 }
 
+/// Read-only connection help composed by the helm, including an optional
+/// destination from Add host. Clients never infer socket paths or SSH options.
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct SshConnectionHelp {
+    pub(crate) unavailable: Vec<String>,
+    pub(crate) hosts: Vec<SshHostCommands>,
+    pub(crate) extra: Option<SshHostCommands>,
+}
+
+/// A display label and exact pasteable bytes are separate: peer escaping must
+/// not alter the command placed on the clipboard.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub(crate) struct SshHostCommands {
+    pub(crate) name: String,
+    pub(crate) destination: String,
+    pub(crate) sessions: Option<String>,
+    pub(crate) setup: Option<String>,
+}
+
+/// Fetch help when its dialog opens; this request never probes or adds a host.
+pub(crate) async fn fetch_ssh_connection_help(
+    base: &str,
+    destination: Option<&str>,
+) -> Result<SshConnectionHelp, String> {
+    let url = format!("{base}/api/ssh-connections");
+    let resp = send_read(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({"destination": destination})),
+    )
+    .await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("POST", &url, resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|error| format!("could not read ssh connection help: {error}"))
+}
+
 /// Fetch the helm build's structured-launch catalog.
 ///
 /// The browser presents this data but never compiles it into argv: selection

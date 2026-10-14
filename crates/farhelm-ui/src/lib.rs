@@ -162,6 +162,7 @@ mod session_view;
 mod settings;
 mod skew;
 mod sounds;
+mod ssh_help;
 mod status;
 mod tabs;
 mod welcome;

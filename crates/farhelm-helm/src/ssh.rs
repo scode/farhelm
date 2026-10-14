@@ -52,6 +52,8 @@
 //! provisioning never compete for one connection's sessions, and a user on
 //! such a host can start both masters by hand at the helm's socket paths
 //! (SPEC.md "Supported user environments" describes that, best effort).
+//! [`manual_master_command`] exposes those paths and overrides as a pasteable
+//! command for the help dialog; it never starts a connection.
 //!
 //! The split applies to every host, not only to restricted ones, so both
 //! paths are exercised everywhere. On an ordinary host it costs one more
@@ -306,6 +308,79 @@ const MAX_SOCKET_PATH: usize = 107;
 /// `<ControlPath>.<16 random characters>` first and renames it into place.
 const MASTER_TEMP_SUFFIX: usize = 17;
 
+/// `%C` is a SHA-1 in hex; fit checks and their explanations share this size.
+const EXPANDED_TOKEN: usize = 40;
+
+/// Compose an interactive master with the exact connection boundary Farhelm uses.
+///
+/// The user runs this on the helm's machine, under its account. Shell quoting
+/// protects each local argument; ControlPath separately uses OpenSSH's config
+/// quoting. A missing sharing socket is explained rather than offering a command
+/// that authenticates but never helps the helm. No remote session is opened,
+/// leaving MaxSessions available for Farhelm's own clients.
+pub(crate) fn manual_master_command(
+    dest: &str,
+    control_dir: &std::path::Path,
+    connection: SharedConnection,
+) -> Result<String, String> {
+    // Automatic clients inherit the helm's cwd. Preserve it for a relative
+    // --state-dir, rather than silently opening a socket in the user's terminal
+    // directory or expanding its spelling beyond the socket-path length gate.
+    let cwd = if control_dir.is_relative() {
+        std::env::current_dir()
+            .map_err(|error| format!("cannot read the helm's working directory: {error}"))?
+    } else {
+        std::path::PathBuf::from("/")
+    };
+    manual_master_command_from(dest, control_dir, connection, &cwd)
+}
+
+/// Keep the directory context explicit for pure composition and portability
+/// tests; no test changes the harness process's own working directory.
+fn manual_master_command_from(
+    dest: &str,
+    control_dir: &std::path::Path,
+    connection: SharedConnection,
+    working_dir: &std::path::Path,
+) -> Result<String, String> {
+    let path = control_dir.to_str().ok_or_else(|| format!(
+        "{} is not UTF-8; ssh cannot represent this helm's state directory. Hosts needing 2FA cannot share this connection.",
+        control_dir.to_string_lossy(),
+    ))?;
+    let socket = control_socket(control_dir, connection).ok_or_else(|| {
+        if path.contains("${") {
+            format!("{path} contains ${{; ssh would expand it. Hosts needing 2FA cannot share this connection.")
+        } else {
+            let extra = connection.socket_name().len() - "%C".len();
+            let required = control_dir.as_os_str().len() + 1 + extra + EXPANDED_TOKEN + MASTER_TEMP_SUFFIX;
+            format!("{path} needs {required} bytes for this connection's socket and temporary name; the limit is {MAX_SOCKET_PATH} bytes. Hosts needing 2FA cannot share this connection.")
+        }
+    })?;
+    let control_path =
+        ssh_control_path_option(socket.to_str().expect("directory checked as UTF-8"));
+    // The user's master must permit prompts and stay up before any client
+    // attaches; ordinary helm clients instead authenticate noninteractively.
+    let mut args = vec!["ssh".to_string(), "-N".to_string(), "-f".to_string()];
+    args.extend(options_with_overrides(&[
+        "BatchMode=no",
+        "ControlMaster=yes",
+        &control_path,
+        "ControlPersist=yes",
+    ]));
+    args.extend(["--".to_string(), dest.to_string()]);
+    let command = args
+        .iter()
+        .map(|arg| shell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if control_dir.is_relative() {
+        let cwd = working_dir.to_str().ok_or_else(|| "the helm's working directory is not UTF-8; its relative state path cannot be represented in a shell command".to_string())?;
+        Ok(format!("(cd {} && {command})", shell_quote(cwd)))
+    } else {
+        Ok(command)
+    }
+}
+
 /// The connection-sharing socket for `connection` inside `control_dir`, as a
 /// ControlPath still holding OpenSSH's `%C` token, or `None` when its
 /// expansion would be too long to bind or would interpret literal `${...}`.
@@ -341,8 +416,6 @@ fn control_socket_within(
     connection: SharedConnection,
     max_socket_path: usize,
 ) -> Option<std::path::PathBuf> {
-    // What `%C` expands to: 40 hex digits of a SHA-1.
-    const EXPANDED_TOKEN: usize = 40;
     // OpenSSH expands ${...} even inside its quoted ControlPath. A literal
     // directory with that spelling cannot safely name a shared socket.
     if control_dir.to_str().is_some_and(|path| path.contains("${")) {
@@ -435,6 +508,146 @@ mod tests {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
     use farhelm_proto::{ControlMsg, Frame};
     use tokio::io::AsyncWriteExt;
+
+    /// Both hand-started masters must carry every transport override and the
+    /// same config-quoted socket as the corresponding ordinary helm client.
+    /// The shell inverse catches word splitting and active destination syntax.
+    #[farhelm_testtrace::test]
+    fn manual_master_commands_preserve_the_connection_boundary() {
+        let dir = std::path::Path::new("/tmp/a 'b\"c\\%d");
+        let dest = "user@host'; echo $bad";
+        for kind in [SharedConnection::Supervisor, SharedConnection::Provisioning] {
+            let command = super::manual_master_command(dest, dir, kind).unwrap();
+            let argv = shell_words::split(&command).unwrap();
+            assert_eq!(&argv[..3], ["ssh", "-N", "-f"]);
+            assert_eq!(&argv[argv.len() - 2..], ["--", dest]);
+            for option in super::CONNECTION_OVERRIDES {
+                assert!(argv.windows(2).any(|pair| pair == ["-o", option]));
+            }
+            for option in ["BatchMode=no", "ControlMaster=yes", "ControlPersist=yes"] {
+                assert!(argv.windows(2).any(|pair| pair == ["-o", option]));
+            }
+            let ordinary = super::ssh_base_args(dest, dir, kind).unwrap();
+            let ordinary_from_manual = argv[3..]
+                .iter()
+                .map(|arg| match arg.as_str() {
+                    "BatchMode=no" => "BatchMode=yes".to_string(),
+                    "ControlMaster=yes" => "ControlMaster=auto".to_string(),
+                    "ControlPersist=yes" => "ControlPersist=60".to_string(),
+                    _ => arg.clone(),
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                ordinary_from_manual, ordinary,
+                "changing only the interactive-master choices must recover the helm's own argv"
+            );
+            let path = argv
+                .iter()
+                .find(|arg| arg.starts_with("ControlPath="))
+                .unwrap();
+            assert!(
+                ordinary.contains(path),
+                "manual and automatic clients must share a socket"
+            );
+            assert_eq!(
+                path,
+                &super::ssh_control_path_option(
+                    super::control_socket(dir, kind).unwrap().to_str().unwrap()
+                )
+            );
+        }
+    }
+
+    /// Relative ControlPaths inherit the helm's cwd, not the directory where
+    /// the user pastes help. A real shell and private argv spy distinguish a
+    /// quoted cwd subshell from merely quoting the relative socket string.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn manual_master_preserves_relative_state_directory_context() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = tempfile::tempdir().unwrap();
+        let helm = fixture.path().join("helm 'working directory");
+        let terminal = fixture.path().join("terminal");
+        let bin = fixture.path().join("bin");
+        for dir in [&helm, &terminal, &bin] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        let ssh = bin.join("ssh");
+        std::fs::write(&ssh, "#!/bin/sh\npwd\nprintf '%s\\n' \"$@\"\n").unwrap();
+        std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_ne!(
+            helm, terminal,
+            "premise: the user's terminal has a different cwd"
+        );
+        for kind in [SharedConnection::Supervisor, SharedConnection::Provisioning] {
+            let command = super::manual_master_command_from(
+                "example",
+                std::path::Path::new("state"),
+                kind,
+                &helm,
+            )
+            .unwrap();
+            let output = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(command)
+                .current_dir(&terminal)
+                .env("PATH", &bin)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let text = String::from_utf8(output.stdout).unwrap();
+            let lines = text.lines().collect::<Vec<_>>();
+            assert_eq!(lines[0], helm.to_str().unwrap());
+            assert!(lines.contains(
+                &super::ssh_control_path_option(&format!("state/{}", kind.socket_name())).as_str()
+            ));
+            assert_eq!(&lines[lines.len() - 2..], ["--", "example"]);
+        }
+    }
+
+    /// A setup socket can exceed the limit while sessions still fit. The
+    /// explanation must use the same byte arithmetic as the actual fit gate.
+    #[farhelm_testtrace::test]
+    fn manual_master_help_explains_unshareable_paths() {
+        let length = super::MAX_SOCKET_PATH - 1 - super::EXPANDED_TOKEN - super::MASTER_TEMP_SUFFIX;
+        let dir = std::path::PathBuf::from("x".repeat(length));
+        assert!(
+            super::control_socket(&dir, SharedConnection::Supervisor).is_some(),
+            "premise: sessions fits exactly"
+        );
+        assert!(
+            super::control_socket(&dir, SharedConnection::Provisioning).is_none(),
+            "premise: setup is one byte too long"
+        );
+        assert!(super::manual_master_command("host", &dir, SharedConnection::Supervisor).is_ok());
+        let error =
+            super::manual_master_command("host", &dir, SharedConnection::Provisioning).unwrap_err();
+        assert!(error.contains(&format!("needs {} bytes", super::MAX_SOCKET_PATH + 1)));
+        assert!(error.contains(&format!("limit is {} bytes", super::MAX_SOCKET_PATH)));
+        assert!(error.contains(&dir.to_string_lossy().to_string()));
+        let expanded = super::manual_master_command(
+            "host",
+            std::path::Path::new("/tmp/${literal}"),
+            SharedConnection::Supervisor,
+        )
+        .unwrap_err();
+        assert!(expanded.contains("ssh would expand it"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let dir =
+                std::path::PathBuf::from(std::ffi::OsString::from_vec(b"/tmp/a\xff".to_vec()));
+            assert!(
+                super::manual_master_command("host", &dir, SharedConnection::Supervisor)
+                    .unwrap_err()
+                    .contains("not UTF-8")
+            );
+        }
+    }
 
     /// The remote state dir rides ssh's trailing argv, which the remote
     /// login shell re-parses — a path with spaces must survive as one

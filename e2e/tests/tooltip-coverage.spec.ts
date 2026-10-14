@@ -275,7 +275,7 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await page.locator(".app-help-toggle").click();
   const help = page.getByRole("menu", { name: "help", exact: true });
   await expect(help).toBeVisible();
-  await expectCovered(page, "help menu", '[data-bar-menu="help"] [role="menu"]', 4);
+  await expectCovered(page, "help menu", '[data-bar-menu="help"] [role="menu"]', 5);
   await help.locator('[data-bar-menu-item="send feedback"]').click();
   const feedback = page.getByRole("dialog", { name: "send feedback", exact: true });
   await expect(feedback).toBeVisible();

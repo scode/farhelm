@@ -163,11 +163,12 @@ test("the help menu sits right of the gear and follows the menu conventions", as
   expect(toggleBox!.x).toBeGreaterThan(gearBox!.x);
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   const items = menu.getByRole("menuitem");
-  await expect(items).toHaveCount(4);
+  await expect(items).toHaveCount(5);
   await expect(items.nth(0)).toContainText("send feedback");
   await expect(items.nth(1)).toContainText("documentation");
   await expect(items.nth(2)).toContainText("release notes");
-  await expect(items.nth(3)).toContainText("welcome");
+  await expect(items.nth(3)).toContainText("ssh needs 2FA?");
+  await expect(items.nth(4)).toContainText("welcome");
   await toggle.click();
   await expect(menu).toHaveCount(0);
 
@@ -182,10 +183,12 @@ test("the help menu sits right of the gear and follows the menu conventions", as
   await expect(items.nth(2)).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(items.nth(3)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(4)).toBeFocused();
   await page.keyboard.press("Home");
   await expect(items.nth(0)).toBeFocused();
   await page.keyboard.press("End");
-  await expect(items.nth(3)).toBeFocused();
+  await expect(items.nth(4)).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
   await expect(toggle).toBeFocused();
