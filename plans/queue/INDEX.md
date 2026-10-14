@@ -6,3 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 575faf] `ntfy-waiting-alerts.md` — Send an ntfy alert from the helm when a session starts waiting, with server, topic, token and priority settings
 - [pending] `release-advisories.md` — A signed advisories file on get.farhelm.io that the desktop updater reads, starting with release revocation
 - [in-flight afc614] `guarded-permission-mode.md` — Rename non-YOLO to "guarded", force each agent's guarded mode with explicit flags, and explain it per agent
+- [pending] `confirmation-focus-and-skip.md` — Enter goes ahead on every confirmation (except YOLO), and a Settings switch skips the everyday session confirmations
+- [pending] `quick-launch-template.md` — Mark one template ⚡ quick launch; Cmd+P / Ctrl+Shift+P starts a session from it with no launcher
+- [pending] `custom-permission-flags.md` — A "custom" permission choice that passes the user's own permission flags and always counts as YOLO (after `guarded-permission-mode.md`)
+- [pending] `launch-with-conversation-id.md` — Let New, Clone, Replace with and Restart with start in a conversation the user names
