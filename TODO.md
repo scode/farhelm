@@ -126,7 +126,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   release fetches anything beyond `/latest` and its own version's files. Decide where new signed information goes and
   make clients ignore what they do not understand there rather than refuse it. Ship a release that reads it, and test
   that a release keeps accepting what newer releases publish. This must ship before the first release that needs to say
-  something new, the same way the upgrade epochs entry above handles new upgrade logic.
+  something new, the same way the upgrade epochs entry above handles new upgrade logic. Plan:
+  `plans/queue/release-advisories.md`.
 
 - **Experiment: a different allocator for the release binaries.** EXPERIMENT ONLY; nothing changes without a measured
   win. The release binaries are static musl, whose allocator hands memory back to the OS eagerly; about a quarter of the
@@ -147,7 +148,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   waiting, or an agent asks for approval) is a sound in whichever client happens to be open, so nothing reaches the user
   when no Farhelm window is in front of them. Support sending a notification through ntfy.sh (a topic the user
   configures) when an agent becomes blocked on them. SPEC.md currently lists desktop and operating-system notifications
-  as a non-goal for v1, so this needs a SPEC change alongside it.
+  as a non-goal for v1, so this needs a SPEC change alongside it. Plan: `plans/queue/ntfy-waiting-alerts.md`.
 
 - **Check that "not YOLO" is true in practice.** Farhelm decides and shows whether a session runs with approval prompts
   from the flags it passed, but an agent's own configuration can make it run without them anyway. Observed 2026-10-11:
@@ -159,7 +160,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Farhelm avoids claiming a session asks for approval when it does not: pass an explicit non-YOLO flag where the agent
   has one, detect the effective mode from what the agent reports or from its configuration, or show the permission as
   the agent's own setting when Farhelm cannot know. The plain shield on a row, the YOLO confirmation, and the host
-  setting that stops agents from starting YOLO sessions all rely on that claim being true.
+  setting that stops agents from starting YOLO sessions all rely on that claim being true. Plan:
+  `plans/queue/guarded-permission-mode.md`.
+
+- **Notice a session switched into YOLO partway through.** Claude, Grok, Cursor and Muse print their current permission
+  mode in their status line, and each can be switched into a no-checks mode inside a running session (Grok's
+  `/always-approve`, Cursor's `/run-everything`, Muse's `/permissions`, Claude's bypass mode when the user's settings
+  allow it), after which Farhelm's shield still shows the guarded mode the session was launched in. Read the mode from
+  the status line where an agent shows it and change the shield to YOLO, with hover text saying it was seen on screen.
+  Screen reading is a heuristic, so this is advisory, and it cannot see allow rules or hooks. Planning for the
+  guarded-mode work recorded each agent's status-line wording (2026-10-13).
 
 - **Make the Mac installer race-free.** Updating, automatically updating and uninstalling Farhelm.app can race with each
   other and with a running Farhelm. An install can delete the version a starting Farhelm or a session's `farhelm`
@@ -185,13 +195,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   bar is plain text unless an update is waiting, in which case clicking it opens the Restart to update / What's new
   menu. Make clicking it while no update waits start a check, exactly as "check for updates" in the `?` menu does, with
   the same inline progress and outcome beside the readout. Clicking it while an update waits keeps opening its menu.
-  Where there is no updater (the web UI, a build from main), the readout stays plain text.
+  Where there is no updater (the web UI, a build from main), the readout stays plain text. Plan:
+  `plans/queue/update-check-readout.md`.
 
 - **Make failed automatic updates visible.** The desktop app's automatic update checks and background installs (at
   startup and daily) stay invisible unless the user started or joined the check, so when one fails nothing says so, and
   the user can sit on an old version without knowing updates have stopped working. Show a failed automatic check or
   install somewhere the user will notice, with the reason. SPEC.md currently says automatic checks no user joins "stay
-  invisible", so this needs a SPEC change alongside it.
+  invisible", so this needs a SPEC change alongside it. Plan: `plans/queue/update-check-readout.md`.
 
 - **A quick agent mode.** For when you just want an agent now, with as little fuss and as few choices as possible: a way
   to start an agent session without working through the launcher's fields. What it skips, what it picks instead, and
