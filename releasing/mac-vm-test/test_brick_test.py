@@ -600,7 +600,8 @@ authentication, GUI outcome or product verdict is borrowed by these tests.
 """
         self.assertTrue(all(state == 'stopped' for state in self.model.states.values()))
         self.run = Run(self.evidence / ('brick-' + str(uuid.uuid4())), self.profile,
-                       factory=self.model.factory, connector=self.model.connect)
+                       factory=self.model.factory, connector=self.model.connect,
+                       disk_usage=lambda path: namedtuple('Usage', 'free')(self.free))
         release = plan(candidate, 'v0.24.0', FakeSource(['v0.24.0'] if supported else []))
         release['sha256sums_sha256'] = 'fixture-checksum'
         self.run.create(release, p0_only=p0_only, p1_only=p1_only)

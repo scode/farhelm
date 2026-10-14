@@ -26,20 +26,23 @@ The full verdict includes P1; whether its failure blocks promotion is the mainta
 prerequisites mean could not run; resolve them with the maintainer instead of guessing machine bindings. A test request
 does not authorize publication or release promotion.
 
-During startup readiness and coverage planning, inventory permissions needed for the requested scope and ask for missing
-approvals together before product testing starts. Include agent setup on both Mac and Linux, credential copies or
-refreshes, guest GUI permissions and bounded private evidence export. For full or P1-only scope, include the live
-feedback send to farhelm.io that creates an issue in the private inbox; P0-only scope does not authorize or require it.
-Name the credential source, each destination and run scope; reuse existing explicit authorization when it covers them.
-Follow BRICK-TEST.md's permission preflight so a known agent prerequisite does not first become a permission question
-halfway through P0.
+Use BRICK-TEST.md's guest-native executor for actual tests: an independent Codex process inside the Mac guest drives
+native CUA and survives Farhelm quit/restart. The host coordinates Tart lifecycle, pinned networking and evidence, but
+does not drive product UI. Resolve native permissions and explicit Mac/Linux credential-copy consent during fixture
+setup. Prepared bases remain credential-free; standing authorization may cover this machine's disposable test clones. An
+OS/CUA/authentication permission block during P0 or an evaluation is a harness bug: stop, retain the failure, repair
+setup separately and start a new run. Do not manually approve or switch to host UI to rescue it. Ordinary Farhelm
+confirmations are authorized product interactions handled by the guest tester.
+
+For full or P1-only scope, resolve authorization during setup for the live feedback send to farhelm.io, which creates an
+issue in the private inbox. P0-only scope does not authorize or require that send.
 
 Before creating a new test pair, inspect live Tart state and reconcile leftover brick-test guests using their original
 ownership manifests and journal. The new test request authorizes clean shutdown of abandoned previous test pairs without
 asking again, preserving their disks and evidence. Do not interrupt an active operator, delete retained data, force-stop
-guests or touch unrelated VMs. Verify the earlier pair is stopped and its foreground owner has exited, then verify
-computer use binds to the new Mac clone's exact window title before installing or seeding state. Follow BRICK-TEST.md's
-startup reconciliation procedure; bringing a window forward alone may not change the tool's binding.
+guests or touch unrelated VMs. Verify the earlier pair is stopped and its foreground owner has exited. Follow
+BRICK-TEST.md's startup reconciliation procedure. Host Tart window binding is needed only during fixture setup; actual
+product computer use binds apps directly inside the guest.
 
 Run this gate **before** moving `/latest` to the candidate. It is expected that `/latest` still names the preceding
 promoted stable; do not treat that difference as a blocker or ask to promote first. Upgrade baselines run from v0.23.0
@@ -48,13 +51,13 @@ inside the Mac guest with `open --env FARHELM_DESKTOP_UPDATE_LATEST=vX.Y.Z "$HOM
 the in-app updater. Older apps use the manual candidate-installer path. Follow the procedure's verification and override
 removal checks in both cases.
 
-Read OPERATIONS.md's computer-use notes before entering guest text. Update those notes and this section when a new Tart
-input workaround is verified, so the next agent does not repeat the investigation. `typeText` and rapid physical key
-sequences can drop characters; per-character `pressKey` calls with `durationMs: 100` delivered unmodified text reliably
-in the release test. To replace a field, triple-click with `durationMs: 100`, then inspect a screenshot for the actual
-selection highlight before typing. Modifier chords can reach the guest without their modifier (`tl:` became `tl;`, and
-select-all became a literal `a`); verify punctuation and the resulting reactive form state before submitting. The
-verified workaround is guest-only clipboard preparation through the journaled controller
+During fixture setup only, read OPERATIONS.md's computer-use notes before entering guest text. Update those notes and
+this section when a new Tart input workaround is verified, so the next agent does not repeat the investigation.
+`typeText` and rapid physical key sequences can drop characters; per-character `pressKey` calls with `durationMs: 100`
+delivered unmodified text reliably in the release test. To replace a field, triple-click with `durationMs: 100`, then
+inspect a screenshot for the actual selection highlight before typing. Modifier chords can reach the guest without their
+modifier (`tl:` became `tl;`, and select-all became a literal `a`); verify punctuation and the resulting reactive form
+state before submitting. The verified workaround is guest-only clipboard preparation through the journaled controller
 (`printf %s <text> | /usr/bin/pbcopy` inside the Mac guest), followed by computer use on the guest's Edit menu. Click
 Edit, navigate with `Down` keys held for 100 ms until Paste is visibly highlighted, then press Return. Direct clicks on
 guest native menu items can dismiss the menu and reach the underlying window instead. Keep Tart's shared clipboard

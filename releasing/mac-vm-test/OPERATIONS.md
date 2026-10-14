@@ -5,26 +5,27 @@ discovers private machine bindings and supplies the handles used below. These lo
 bring-up and reconciliation; they do not by themselves produce a release verdict.
 
 These stdlib Python helpers run on the macOS host and operate only the fresh clones recorded in one private manifest.
-GUI checks and the release verdict remain the operator's responsibility. Use Python 3.11 or newer, installed Tart with
-guest execution support, two stopped private bases and an append-only external journal. Bring-up exercised Tart 2.32.1,
-Python 3.14 on macOS and Python 3.12 inside Linux. Install guest prerequisites inside the guests; host installation or
-network changes require the maintainer's authorization.
+The guest-native tester performs GUI checks; the operator judges its retained evidence. Use Python 3.13+ for the guest
+tester and Python 3.11+ for these host helpers, installed Tart with guest execution support, two stopped private bases
+and an append-only external journal. Bring-up exercised Tart 2.32.1, Python 3.14 on macOS and Python 3.12 inside Linux.
+Install guest prerequisites inside the guests; host installation or network changes require the maintainer's
+authorization.
 
 ## Prepare the bases
 
 Use a recent compatible Cirrus macOS image and ARM64 Ubuntu. Bring-up exercised Tahoe 26.6.2 and Ubuntu 24.04.5 LTS.
 Record the exact OCI digests and provisioning privately. The Mac base needs a logged-in desktop, Homebrew tmux in a
-prefix Farhelm probes, genuine authenticated selected agent CLIs on its login-shell PATH, Python and minisign for
-verification. The Linux base needs key-based SSH, a working systemd user manager, lingering and guest privileges for
-persistent user services. Bring-up used Homebrew tmux 3.7c locally and removed distro tmux from Linux so Farhelm
-installed its static 3.7c payload. Removing distro tmux can remove packages depending on it; inspect the package
-manager's plan first.
+prefix Farhelm probes, genuine selected agent CLIs on its login-shell PATH, Python and minisign for verification. The
+Linux base needs key-based SSH, a working systemd user manager, lingering and guest privileges for persistent user
+services. Bring-up used Homebrew tmux 3.7c locally and removed distro tmux from Linux so Farhelm installed its static
+3.7c payload. Removing distro tmux can remove packages depending on it; inspect the package manager's plan first.
 
-Prove genuine CLI conversation and resume before freezing the Mac base. Authentication copies require explicit consent
-for that credential and destination, restrictive guest file permissions, and a private base/clone policy. Never collect
-an authentication directory as evidence. Prove Linux's user manager both through the command channel and an SSH login.
-Stop the bases with guest shutdown; verify stopped Tart state and absence of Farhelm binaries/state. Once frozen, create
-new clones for all tests. Do not start or provision the bases again to prepare a pass.
+Install Codex in Linux too. Prepare the official native Mac CUA helper and guest permissions during setup, then prove
+native use and genuine agents in disposable validation clones. Keep both bases credential-free; authorized injection
+happens before each test in its working clones. Never collect authentication stores as evidence. Prove Linux's user
+manager through both the command channel and an SSH login. Stop the bases with guest shutdown; verify stopped Tart state
+and absence of Farhelm binaries/state. Once frozen, create new clones for all tests. Do not start or provision the bases
+again to prepare a pass.
 
 ## Create and supervise a pass
 
@@ -58,6 +59,11 @@ commands: the operator still owns their scope. Journal failure prevents mutation
 A replaced VM with the same name but a different MAC is refused. This is an operational ownership fence, not protection
 against a malicious editor forging both the manifest and VM configuration.
 
+For coordinator progress, parse `brick_test.py status` as JSON. Lifecycle commands can mix shutdown diagnostics with
+their final report, so preserve their stdout without treating the whole stream as JSON. After successful deletion, the
+status entry keeps its verdict and evidence but no longer exposes live guest handles. A reporting error after cleanup
+does not invalidate completed product checks; inspect the authoritative status before starting another pair.
+
 ## Guest SSH
 
 Run:
@@ -83,6 +89,23 @@ over guest SSH, or set guest `XDG_RUNTIME_DIR=/run/user/$(id -u)` and
 proof that the provisioned service failed.
 
 ## Guest commands and app launch
+
+Actual release checks use `brick_test.py test`, which stages an independent guest executor and checkpoint envelope
+through this journaled channel. Each checkpoint starts a fresh `codex exec --yolo` process. Its owned process group is
+terminated on timeout or completion, including surviving MCP children; Python `waitid`/`WNOWAIT` preserves identity
+through teardown. Export includes only bounded executor diagnostics and validated evidence references. A permission
+block is retained as automation failure; no host UI rescue or manual approval is allowed during actual testing.
+
+The executor persists native image bytes directly from the private tool event stream, retaining up to ten recent
+distinct captures that fit its evidence budget. The tester requests screenshots at acceptance states and writes command
+receipts; it must not encode images or run image-saving scripts. The raw `model-result.json` and enriched `result.json`
+remain separate so evidence persistence cannot silently rewrite what the model originally observed. Tester
+script/evidence faults use `automation-failure`, not a product `fail`.
+
+The staged `fixture_probe.py` performs read-only cleanliness inspection in the Mac and its pinned Linux peer. Use its
+recorded helper path and SSH alias from the task context; it writes one private receipt. Do not replace it with guessed
+source paths or ad hoc service probes. An empty systemd listing can exit 1 on a clean guest; the helper accepts only
+that exact no-output case after positive manager readiness, retaining other failures as unavailable evidence.
 
 - `control exec mac -- /bin/sh -c '<guest command>'` runs a bounded command in the owned guest. Arguments are journaled;
   keep secrets out of them and save private output inside a named guest evidence directory.
@@ -113,6 +136,9 @@ at the actual old tag and follow RECIPE.md's path selection. A successful ordina
 nor removal of a staged-candidate override.
 
 ## Computer use and continuity
+
+The Tart input workarounds below are for **fixture setup and historical diagnostics only**. During product tests, native
+CUA binds apps directly inside the guest. Keep shared clipboard disabled in either mode.
 
 Bind computer use to Tart's **specific Mac clone window**, checking its title before every interaction. Its
 accessibility tree describes the host window, not guest controls. Use screenshots for guest controls and verify each
@@ -169,19 +195,14 @@ again (a different point within the same path worked). An earlier repeated click
 correctly refused to download that selection gesture. Require both the actual saved-file message and an independent
 check of the resulting file's bytes, not just the hover tooltip.
 
-A frozen base's copied Codex login can become stale while the host continues using that login. `codex login status`
-still reported a ChatGPT login even when interactive startup required sign-in and the vendor log recorded
-`refresh_token_reused`. Treat this as a fixture-authentication problem; file presence and login status do not prove that
-a genuine conversation can run. Keep credential contents out of diagnostics and evidence. With the maintainer's explicit
-authorization for the credential and working guest, a stdin copy to the guest's auth file under `umask 077` and mode
-0600 restored startup after replacing the unauthenticated disposable session through Farhelm. Do not modify frozen
-bases, export authentication directories, or log out a clone to clean it up. Do not infer permission to copy a host
-credential from the brick-test request alone.
-
-Plan that possible refresh in the startup permission preflight, together with the Linux agent CLI and authentication
-requirements. Ask once for the missing scopes before product testing, naming the credential source and each disposable
-Mac/Linux destination covered by this run. Apply an approved refresh only when needed; do not recopy merely because
-permission exists. Reuse the recorded authorization while its credential, destinations and run scope still apply.
+A copied Codex login can become stale when shared refresh tokens rotate. File presence and `codex login status` do not
+prove that a genuine conversation can run; a sign-in request or `refresh_token_reused` is a fixture-authentication
+failure. Keep credential contents out of diagnostics and evidence. Reusable bases must remain credential-free. The named
+authorized file enters working clones before testing; any later authentication failure stops the run as a harness
+failure. Diagnose and repair setup separately, without mid-test refresh or session replacement. Never export
+authentication stores or log out a clone to clean it up. Do not infer credential-copy permission from a brick-test
+request alone. A dedicated test login is preferable when available. Standing consent authorizes the copy, not a
+guarantee that the vendor accepts concurrent use.
 
 Install `continuity.py` inside Linux before freezing the base or copy it into the owned working clone. Launch this as
 Farhelm's **plain command**, with agent type none:
@@ -215,8 +236,8 @@ verifies against the previous tag's compiled key ring, exact trusted version com
 does not install anything or replace the old updater's own verification. Keep its source checkout and scratch evidence
 out of the frozen clean base after exporting them.
 
-- Save GUI evidence with approved guest `screencapture -x <file>` and command/service output in explicit guest evidence
-  directories. Do not collect home directories, credentials or session-token database columns.
+- Save actual native CUA-returned PNG/JPEG evidence and command/service output in explicit guest evidence directories.
+  Do not collect home directories, credentials or session-token database columns.
 - `control collect mac "$mac_guest_evidence" mac-evidence` and the Linux equivalent stream private tar archives to the
   run directory, bounded to 128 MiB and 60 seconds. Existing labels are refused; failed partial exports are retained.
 - Inspect archive contents and actual required evidence before teardown. macOS tar may include AppleDouble `._*`
@@ -228,9 +249,9 @@ out of the frozen clean base after exporting them.
   then verify absence. They cannot delete bases, other runs or pre-existing VMs. Preserve failed clones only by
   agreement.
 
-Keep the manifest, journal, archive hashes and explicit evidence directory for later cleanup. Base images contain real
-credentials; never push them or export raw evidence to GitHub. Set a disk/free-space budget and failure-retention policy
-with the maintainer before starting another run.
+Keep the manifest, journal, archive hashes and explicit evidence directory for later cleanup. Working clones contain
+real credentials; reusable bases must contain none. Never publish either or export raw evidence to GitHub. Set a
+disk/free-space budget and failure-retention policy with the maintainer before starting another run.
 
 ## Harness validation
 
