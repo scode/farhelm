@@ -29,7 +29,7 @@ pub(crate) use http::{
     probe_host, provision_host, provisioning_state, uninstall_host, update_host,
 };
 pub(crate) use payloads::PayloadSelection;
-pub use release_payloads::{RELEASE_KEY_RING, verify_signed_sums};
+pub use release_payloads::{RELEASE_KEY_RING, verify_signed_metadata, verify_signed_sums};
 pub(crate) use service::{ProvisioningService, RunTask};
 
 #[cfg(test)]
