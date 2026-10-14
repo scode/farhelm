@@ -2154,10 +2154,11 @@ the agent creates it.
 ## Feedback
 
 The sidebar's top bar has a **?** button immediately to the right of the settings gear, in the desktop app and the web
-UI alike. It opens a small menu with two items: **Send feedback** and **Documentation**. Documentation opens the docs
-site (`https://farhelm.io/docs/`) in the user's browser: a new tab from the web UI, the system browser from the desktop
-app. The installed desktop app's menu has a third item, **Check for updates** (see
-[Installation and updates](#installation-and-updates)).
+UI alike. It opens a small menu with three items, in order: **Send feedback**, **Documentation** and **Release notes**.
+Documentation opens the docs site (`https://farhelm.io/docs/`) in the user's browser: a new tab from the web UI, the
+system browser from the desktop app. Release notes opens the general release notes page
+(`https://farhelm.io/docs/release-notes/`) the same way, whether or not an update is waiting. The installed desktop
+app's menu has a fourth item, **Check for updates** (see [Installation and updates](#installation-and-updates)).
 
 Send feedback is a lightweight, private way to tell the maintainer something. It opens a dialog with a required message,
 an optional field for how to reach the user, and a plain display of everything else that will be sent: the Farhelm
