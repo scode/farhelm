@@ -27,6 +27,8 @@ const DIALOG_SELECTOR: &str = ".quick-switcher-dialog";
 pub(super) enum SwitcherPick {
     Session(Box<Session>),
     New(ComposerSearchResult),
+    /// Close this modal, then use the chord's fresh quick-launch path.
+    QuickLaunch,
 }
 
 /// Wait for the closing render before navigation lets a terminal take focus.
@@ -192,7 +194,10 @@ fn MatchedText(text: String, positions: Vec<usize>) -> Element {
 ///
 /// Plain typing searches sessions and offers a pinned New action. Only `tl:`
 /// searches templates, through the launcher's own parser and matcher. The
-/// input retains focus while arrows change its active row; the parent closes
+/// empty query appends direct quick launch after recent sessions without
+/// changing their initial selection. Unlike a template pick, that action can
+/// submit New after the parent removes this modal and reads the mark fresh.
+/// The input retains focus while arrows change its active row; the parent closes
 /// and removes the modal before navigating or opening the launcher.
 #[component]
 pub(super) fn QuickSwitcher(
@@ -201,6 +206,7 @@ pub(super) fn QuickSwitcher(
     on_pick: EventHandler<SwitcherPick>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let preferences = use_context::<super::SharedPreferences>();
     let sessions_base = base.clone();
     let listing = use_resource(move || {
         let base = sessions_base.clone();
@@ -230,6 +236,7 @@ pub(super) fn QuickSwitcher(
         .unwrap_or_default();
     let template_rows = template_search_results(&text, &template_names);
     let show_new = !template_mode && !text.trim().is_empty();
+    let show_quick = !template_mode && text.trim().is_empty();
     // Loading has no active action, including New, so Enter cannot mistake
     // an unfinished session read for an empty match. After a refusal, New
     // remains usable; template mode has its own independent readiness.
@@ -238,7 +245,7 @@ pub(super) fn QuickSwitcher(
     } else if read.is_none() {
         0
     } else {
-        matches.len() + usize::from(show_new)
+        matches.len() + usize::from(show_new) + usize::from(show_quick)
     };
     let selected_index = selected().min(count.saturating_sub(1));
     let picked = if count == 0 {
@@ -248,6 +255,8 @@ pub(super) fn QuickSwitcher(
             .get(selected_index)
             .cloned()
             .map(SwitcherPick::New)
+    } else if selected_index == matches.len() && show_quick {
+        Some(SwitcherPick::QuickLaunch)
     } else if selected_index == matches.len() && show_new {
         Some(SwitcherPick::New(ComposerSearchResult::Name(
             text.trim().to_string(),
@@ -378,6 +387,17 @@ pub(super) fn QuickSwitcher(
                             "data-tooltip": "open New with this name; nothing launches yet",
                             onclick: { let name = text.trim().to_string(); move |_| on_pick.call(SwitcherPick::New(ComposerSearchResult::Name(name.clone()))) },
                             span { "new session named \"" bdi { "{display_peer(text.trim())}" } "\"" }
+                        }
+                    }
+                    if show_quick {
+                        button {
+                            class: "quick-switcher-row quick-switcher-quick-launch", r#type: "button", role: "option", tabindex: "-1",
+                            id: "quick-switcher-result-{matches.len()}", aria_selected: count > 0 && selected_index == matches.len(),
+                            "data-tooltip": "quick launch: start the marked template directly, or open Templates to mark one",
+                            onclick: move |_| on_pick.call(SwitcherPick::QuickLaunch),
+                            span { "⚡" }
+                            span { "Quick launch: " bdi { {display_peer(preferences.0.read().quick_launch_template.as_deref().unwrap_or("mark a template"))} } }
+                            span { class: "templates-quick-chord", "{super::templates::QUICK_LAUNCH_CHORD}" }
                         }
                     }
                 }

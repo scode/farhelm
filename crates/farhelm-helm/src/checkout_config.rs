@@ -1983,6 +1983,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_remove_confirmation;
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
+                 ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
                  ALTER TABLE hosts DROP COLUMN icon;

@@ -18,6 +18,21 @@ use farhelm_proto::launcher::{
 use farhelm_proto::{LaunchHarness, LaunchPermission};
 
 const DIALOG_SELECTOR: &str = r#".templates-dialog[role="dialog"]"#;
+
+/// A quick template must choose a runnable side of New's otherwise blank draft.
+/// This is an editor affordance, not backend validation: later edits may make
+/// the marked setup incomplete, in which case quick launch reveals ordinary New.
+pub(super) fn quick_launch_eligible(fields: &TemplateFields) -> bool {
+    fields.agent.is_some()
+        || fields
+            .command
+            .as_ref()
+            .is_some_and(|command| !command.trim().is_empty())
+}
+
+/// Advertise both platform chords without mistaking the browser for a Mac app.
+/// The capture listener chooses the actual chord using navigator.platform.
+pub(super) const QUICK_LAUNCH_CHORD: &str = "⌘P / Ctrl+Shift+P";
 const DEFAULT: &str = "default";
 
 /// Tell an already-open launcher to reload templates when the editor closes.
@@ -852,8 +867,12 @@ pub(super) fn TemplatesDialog(
     /// A successful launcher save opens its actual returned fields directly;
     /// the asynchronous list read is not needed to rediscover the new record.
     initial_template: Option<LaunchTemplate>,
+    /// A shortcut with no usable mark explains how to enable it here.
+    #[props(default)]
+    quick_launch_hint: bool,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let mut preferences = use_context::<super::SharedPreferences>();
     let list_base = base.clone();
     let mut templates = use_resource(move || {
         let base = list_base.clone();
@@ -879,6 +898,19 @@ pub(super) fn TemplatesDialog(
     let mut add_open = use_signal(|| false);
     let mut undo = use_signal(|| None::<Undo>);
     let mut undo_generation = use_signal(|| 0_u64);
+    let mark_base = base.clone();
+    let mark: EventHandler<String> = EventHandler::new(move |name| {
+        if busy() {
+            return;
+        }
+        let next =
+            (preferences.0.peek().quick_launch_template.as_ref() != Some(&name)).then_some(name);
+        preferences.0.write().quick_launch_template = next.clone();
+        crate::api::store_preference(
+            &mark_base,
+            crate::api::PreferenceValue::QuickLaunchTemplate(next),
+        );
+    });
     use_effect(move || {
         let writing = busy();
         let loading = templates.pending();
@@ -962,6 +994,40 @@ pub(super) fn TemplatesDialog(
             let result = crate::api::put_template(&base, &value.name, &value.fields).await;
             let result = match (result, old) {
                 (Ok(()), Some(old)) if old != value.name => {
+                    // Another window may have marked this name, or moved the
+                    // mark away, since sign-in. Refresh only this field while
+                    // respecting our unconfirmed explicit queue choice. Rename
+                    // remains ordinary last-writer-wins writes across clients.
+                    let fetched = match crate::api::fetch_preferences(&base).await {
+                        Ok(fetched) => fetched,
+                        Err(message) => {
+                            busy.set(false);
+                            error.set(Some(format!("the new name was saved, but the quick launch mark could not be read; the old template was kept: {message}")));
+                            templates.restart();
+                            return;
+                        }
+                    };
+                    preferences.0.write().quick_launch_template =
+                        crate::api::quick_launch_mark_after_read(fetched);
+                    // Repoint before deletion: the shared delete path clears
+                    // only an old-name mark, and cannot clear the new one.
+                    if preferences.0.peek().quick_launch_template.as_ref() == Some(&old) {
+                        preferences.0.write().quick_launch_template = Some(value.name.clone());
+                        if !crate::api::write_quick_launch_template(&base, Some(value.name.clone()))
+                            .await
+                        {
+                            busy.set(false);
+                            error.set(Some("the new name was saved, but the quick launch mark could not be moved; the old template was kept".into()));
+                            templates.restart();
+                            return;
+                        }
+                    }
+                    if !crate::api::prepare_template_delete(&old).await {
+                        busy.set(false);
+                        error.set(Some("the new name was saved, but a quick launch write was interrupted; the old template was kept".into()));
+                        templates.restart();
+                        return;
+                    }
                     crate::api::delete_template(&base, &old).await
                 }
                 (result, _) => result,
@@ -1021,8 +1087,18 @@ pub(super) fn TemplatesDialog(
         busy.set(true);
         error.set(None);
         spawn(async move {
+            if !crate::api::prepare_template_delete(&name).await {
+                busy.set(false);
+                error.set(Some(
+                    "a quick launch write was interrupted; try deleting the template again".into(),
+                ));
+                return;
+            }
             match crate::api::delete_template(&base, &name).await {
                 Ok(()) => {
+                    if preferences.0.peek().quick_launch_template.as_ref() == Some(&name) {
+                        preferences.0.write().quick_launch_template = None;
+                    }
                     undo_generation += 1;
                     let generation = undo_generation();
                     undo.set(Some(Undo {
@@ -1125,6 +1201,9 @@ pub(super) fn TemplatesDialog(
                 p { class: "host-settings-help templates-help",
                     "A template is a named set of launcher edits. In New session, type tl:name to apply one; it changes only the fields it sets. Templates stack, the later one winning: tl:my-claude then tl:webbuilder starts Claude in a managed checkout of acme/web on build-box."
                 }
+                if quick_launch_hint {
+                    p { class: "templates-quick-hint", role: "status", "Mark a template with ⚡ to launch it directly with {QUICK_LAUNCH_CHORD}." }
+                }
                 div { class: "templates-panes",
                     aside { class: "templates-sidebar", aria_label: "template list", aria_busy: templates.pending(),
                         button { r#type: "button", class: "btn btn-neutral templates-new", disabled, "data-tooltip": "start a new template; unsaved changes ask before leaving", onclick: move |_| depart.call(Departure::New), "+ new template" }
@@ -1135,9 +1214,23 @@ pub(super) fn TemplatesDialog(
                                 ul { class: "templates-list",
                                     for template in rows {
                                         li { key: "{template.name}",
+                                            button {
+                                                r#type: "button", class: "templates-quick-mark",
+                                                // A lit bolt stays clickable even when its template has since
+                                                // become ineligible (edited through the API, say): clicking
+                                                // the lit bolt is how a mark is cleared, and a disabled one
+                                                // would leave an unusable mark with no way to turn it off.
+                                                disabled: disabled || templates.pending() || (!quick_launch_eligible(&template.fields) && preferences.0.read().quick_launch_template.as_ref() != Some(&template.name)),
+                                                aria_label: "quick launch {display_peer(&template.name)}",
+                                                aria_pressed: preferences.0.read().quick_launch_template.as_ref() == Some(&template.name),
+                                                "data-tooltip": if preferences.0.read().quick_launch_template.as_ref() == Some(&template.name) { format!("Quick launch ({QUICK_LAUNCH_CHORD}). Click to turn off") } else if !quick_launch_eligible(&template.fields) { "Can't be the quick launch: this template chooses neither an agent nor a command".to_string() } else { format!("Make this the quick launch ({QUICK_LAUNCH_CHORD})") },
+                                                onclick: { let name = template.name.clone(); move |_| mark.call(name.clone()) },
+                                                "⚡"
+                                            }
                                             button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&template.name), "data-tooltip": "edit template {display_peer(&template.name)}", onclick: move |_| depart.call(Departure::Open(template.clone())),
                                                 span { class: "templates-row-name peer-value", dir: "ltr", "{display_peer(&template.name)}" }
                                                 span { class: "templates-row-summary", "{template_summary(&template.fields)}" }
+                                                if preferences.0.read().quick_launch_template.as_ref() == Some(&template.name) { span { class: "templates-quick-chord", "{QUICK_LAUNCH_CHORD}" } }
                                             }
                                         }
                                     }
@@ -1163,6 +1256,15 @@ pub(super) fn TemplatesDialog(
                                 input { class: "templates-name", value: "{current.name}", disabled, placeholder: "my-claude",
                                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                                     "data-tooltip": "template name: use tl:name to apply it in New session", oninput: move |e| draft.with_mut(|d| d.name=e.value()) }
+                            }
+                            p { class: "templates-quick-state",
+                                if previous().is_some() && preferences.0.read().quick_launch_template == previous() {
+                                    "⚡ quick launch: {QUICK_LAUNCH_CHORD} starts a session from this saved template."
+                                } else if quick_launch_eligible(&current.fields) {
+                                    "Not the quick launch. The ⚡ in the list makes it one."
+                                } else {
+                                    "Can't be the quick launch: it chooses neither an agent nor a command."
+                                }
                             }
                             div { class: "templates-field",
                                 span { "switches launcher to" }
@@ -1235,6 +1337,30 @@ pub(super) fn TemplatesDialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A partial setup cannot become the shortcut's sole launch instruction.
+    /// A kind switch alone or a blank command still needs New; an actual agent
+    /// or command qualifies even when other template fields remain partial.
+    #[test]
+    fn quick_launch_requires_an_agent_or_nonblank_command() {
+        assert!(!quick_launch_eligible(&TemplateFields::default()));
+        assert!(!quick_launch_eligible(&TemplateFields {
+            kind: Some(LauncherKind::Agent),
+            ..Default::default()
+        }));
+        assert!(!quick_launch_eligible(&TemplateFields {
+            command: Some(" \t".into()),
+            ..Default::default()
+        }));
+        assert!(quick_launch_eligible(&TemplateFields {
+            agent: Some(LaunchHarness::Claude),
+            ..Default::default()
+        }));
+        assert!(quick_launch_eligible(&TemplateFields {
+            command: Some("agent --flag".into()),
+            ..Default::default()
+        }));
+    }
 
     /// Explicit supported choices must remain saveable even when their mode
     /// equals a request default. Otherwise saving a guarded launcher selection

@@ -8,12 +8,102 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { cleanupSession, commandLaunch, createSession, FAKE_AGENT, localHostId, openRowMenu, setLocalYoloWithoutAsking } from "./helpers/fleet";
+import { cleanupSession, commandLaunch, createSession, FAKE_AGENT, listHosts, localHostId, openRowMenu, patchPreferences, setLocalYoloWithoutAsking } from "./helpers/fleet";
+import { routeGate } from "./helpers/route-gate";
 import { answerCard, setLocalCommandsWithoutAsking } from "./helpers/approvals";
+
+// Two tests here mark a template as the helm-wide quick launch. Later specs
+// share this helm, so clear the mark even when a test body is abandoned
+// before its own `finally` runs; a leaked helm-wide preference has cascaded
+// into unrelated failures before. No mark is the default.
+test.afterEach(async ({ request }) => {
+  await patchPreferences(request, { quick_launch_template: null });
+});
 import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, waitForTermText, answerYolo, termText } from "./helpers/term";
 
 const run = promisify(execFile);
+
+for (const collide of [false, true]) {
+  /** The hidden composer must obtain the actual current preview before it
+   * submits. A real clone proves the success path; occupying that exact offer
+   * proves that the shortcut spends its attempt and exposes the ordinary retry
+   * instead of silently choosing another directory. */
+  test(`quick launch waits for a managed preview and ${collide ? "reveals its path race" : "starts directly"}`, async ({ page, request }) => {
+    const fixture = await checkoutFixture(collide ? "quick-race" : "quick-managed");
+    const name = `quick-checkout-${Date.now()}`;
+    const ids: string[] = [];
+    const gate = routeGate();
+    let previews = 0;
+    const bodies: any[] = [];
+    const occupied = path.join(fixture.root, `${fixture.repoName}-1`);
+    try {
+      const local = (await listHosts(request)).find(host => host.kind === "local");
+      expect(local?.identity, "the checkout template selects the actual connected install").toBeTruthy();
+      const stored = await request.put(`/api/templates/${name}`, { data: {
+        kind: "agent", agent: "codex", permissions: "guarded", host: local!.identity,
+        destination: { github: fixture.repo },
+      } });
+      expect(stored.ok(), await stored.text()).toBe(true);
+      await patchPreferences(request, { quick_launch_template: name });
+      await page.route("**/api/github-checkout-preview", async route => {
+        if (route.request().method() !== "POST") return route.continue();
+        // Host/template binding may supersede an early preview. Withhold all
+        // offers until release, so a newer valid one cannot invalidate the
+        // deliberately unsettled premise this test is asserting.
+        previews++;
+        await gate.wait();
+        await route.continue();
+      });
+      await page.route("**/api/sessions", async route => {
+        if (route.request().method() !== "POST") return route.continue();
+        const body = route.request().postDataJSON();
+        bodies.push(body);
+        if (collide && bodies.length === 1) {
+          expect(body.github_checkout.preview.cwd).toBe(occupied);
+          await fs.mkdir(occupied);
+          await fs.writeFile(path.join(occupied, "foreign"), "preserve quick-launch collision\n");
+        }
+        const response = await route.fetch();
+        if (response.ok()) ids.push((await response.json()).id);
+        await route.fulfill({ response });
+      });
+      await page.goto("/");
+      await expect(page.locator(".quick-launch-trigger")).toBeEnabled();
+      const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+      await page.keyboard.press(mac ? "Meta+p" : "Control+Shift+p");
+      await expect.poll(() => previews, { message: "all owned preview requests are held" }).toBeGreaterThan(0);
+      const form = page.locator(".create-session-form");
+      await expect(form).toHaveCount(1);
+      await expect(form).toBeHidden();
+      expect(bodies, "no request can use an unreturned preview").toHaveLength(0);
+      expect(await fs.readdir(fixture.root)).toEqual([]);
+      gate.release();
+      if (collide) {
+        await expect(form).toBeVisible();
+        await expect(form.locator(".create-session-error")).toContainText("nothing was accepted");
+        await expect(form.locator(".launch-composer-checkout-preview")).toContainText(path.join(fixture.root, `${fixture.repoName}-2`));
+        await expect(form.locator(".create-session-submit")).toBeEnabled();
+        expect(bodies).toHaveLength(1);
+        expect(await fs.readFile(path.join(occupied, "foreign"), "utf8")).toBe("preserve quick-launch collision\n");
+      } else {
+        await expect.poll(() => ids.length, { message: "the single shortcut create was accepted" }).toBe(1);
+        await expect(form).toHaveCount(0);
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0]).toMatchObject({ launch: { harness: "codex", permissions: "guarded" }, github_checkout: { repo: fixture.repo } });
+        await assertCheckout(page, request, fixture, ids[0], occupied, true);
+      }
+    } finally {
+      gate.release();
+      await page.unroute("**/api/github-checkout-preview");
+      await page.unroute("**/api/sessions");
+      for (const id of ids.reverse()) await cleanupSession(request, id);
+      await patchPreferences(request, { quick_launch_template: null });
+      await request.delete(`/api/templates/${name}`);
+      await fixture.close(request);
+    }
+  });
+}
 
 /** Compare every owned byte, link and directory across an archival rename.
  * Git metadata and untracked work are included: checking only the tracked
@@ -598,7 +688,9 @@ test("replacement preserves borrowers and archives only the released checkout", 
     const edited = await replace(plain.id, { host, cwd: origin.cwd, title: "changed-agent", launch: selection });
     await assertLive(page, edited.id);
     const editedState = await sessionState(request, edited.id);
-    expect(editedState.launch.selection).toEqual({ ...selection, model: null, permissions: null });
+    // A Replace with new choices compiles a fresh request, whose omitted
+    // permission is stored as Claude's guarded request default.
+    expect(editedState.launch.selection).toEqual({ ...selection, model: null, permissions: "guarded" });
     expect(editedState.cwd).toBe(origin.cwd);
     expect(editedState.working_copy).toEqual(owned.working_copy);
     expect(editedState.github_repo).toBeNull();
@@ -1069,7 +1161,8 @@ test("trash count and cue follow the final reference, including another client",
     await expect(band.locator(".checkout-trash-host-header")).toContainText(/KiB|MiB/);
     await band.locator(".trash-host-delete").click();
     await expect(band.locator(".checkout-trash-confirm")).toContainText("never committed or pushed is lost permanently");
-    await expect(band.locator(".trash-confirm-cancel")).toBeFocused();
+    // The confirming button takes focus, so Enter answers; Escape still cancels.
+    await expect(band.locator(".trash-confirm-submit")).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(dialog).toBeVisible();
     await expect(dialog.locator(".checkout-trash-confirm")).toHaveCount(0);

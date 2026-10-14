@@ -139,33 +139,34 @@ The session list's chosen ORDER, last-selected session, compact-row choice, and 
 permissions and workspace-trust choices, host confirmation choices, and remembered feedback contact are one preference
 the HELM keeps, in a singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`,
 `remembered_permissions`, `remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`,
-`feedback_contact`) behind `GET`/`PUT /api/preferences`, device-authenticated like every other route. The two remembered
-launch fields are written by the helm after a successful user structured launch; no shipped client PUTs them. Workspace
-trust changes only after an explicit Codex, Muse, or Pi choice. An agent-originated create and an unsupported harness
-leave it alone. This makes the remembered values facts of accepted launches rather than claims from one client. Both
-clients read the row once after authentication — `PreferencesGate` holds the authenticated tree, rendering nothing,
-until the read lands, so the sort control and the auto-select effect see the remembered values on their first run and no
-frame shows a default that is then corrected. On desktop the IPC authentication gate already holds the tree and the read
-is one loopback hop, so nothing is visible; in the browser the first paint deliberately waits on that one round trip to
-the helm — a page with a valid credential used to paint its sidebar synchronously from localStorage — so the list never
-appears in an order that then changes. A write is a sparse patch naming only the field the user changed, merged
-per-field by the helm (an absent field is untouched, an explicit `null` clears one), so two clients changing different
-fields at nearly the same time cannot clobber each other; the signal in the page is updated before the request leaves,
-which is what keeps the choice in force when the write fails. Same-field writes are serialized latest-wins in the
-client, so a burst of changes cannot land on the helm in reverse order; the write queue is process state outside the
-remounted tree, and after the browser's credential recovery the gate overlays and replays any local choice whose write
-never got through, so reauthentication cannot roll the current client back to the helm's older row. The desktop app
-never signs in again, so nothing remounts its tree. The seed read runs under a seconds-scale deadline of its own and
-expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty
-seconds. The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the
-selection is a bare session id (the browser's old `{helm, id}` record was keyed by helm identity only because
-origin-scoped storage could outlive a state-directory swap, and a row in the helm's own database cannot describe another
-helm's fleet). An absent or unrecognized sort word still reads as the UI default (`activity`) on the client, because the
-row outlives the build that validated it. Nothing is kept per client: no localStorage key, no field in
-`desktop-client.json` (which holds no credentials either, only the webview readiness counter the desktop smoke reads and
-the desktop app's automatic-updates setting, which is a setting of that app installation rather than one of these shared
-preferences), no eval round trip. The visible consequences are the ones SPEC.md names — one answer shared by every
-client, and a second client attaching to whatever was selected most recently anywhere.
+`feedback_contact`, `terminal_link_click`, `skip_session_confirmations`, `quick_launch_template`) behind
+`GET`/`PUT /api/preferences`, device-authenticated like every other route. The two remembered launch fields are written
+by the helm after a successful user structured launch; no shipped client PUTs them. Workspace trust changes only after
+an explicit Codex, Muse, or Pi choice. An agent-originated create and an unsupported harness leave it alone. This makes
+the remembered values facts of accepted launches rather than claims from one client. Both clients read the row once
+after authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the
+sort control and the auto-select effect see the remembered values on their first run and no frame shows a default that
+is then corrected. On desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so
+nothing is visible; in the browser the first paint deliberately waits on that one round trip to the helm — a page with a
+valid credential used to paint its sidebar synchronously from localStorage — so the list never appears in an order that
+then changes. A write is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent
+field is untouched, an explicit `null` clears one), so two clients changing different fields at nearly the same time
+cannot clobber each other; the signal in the page is updated before the request leaves, which is what keeps the choice
+in force when the write fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot
+land on the helm in reverse order; the write queue is process state outside the remounted tree, and after the browser's
+credential recovery the gate overlays and replays any local choice whose write never got through, so reauthentication
+cannot roll the current client back to the helm's older row. The desktop app never signs in again, so nothing remounts
+its tree. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a
+stalled preference endpoint cannot blank the page for the funnel's full sixty seconds. The sort travels as the bare word
+`?sort=` takes and is validated against that vocabulary at the write; the selection is a bare session id (the browser's
+old `{helm, id}` record was keyed by helm identity only because origin-scoped storage could outlive a state-directory
+swap, and a row in the helm's own database cannot describe another helm's fleet). An absent or unrecognized sort word
+still reads as the UI default (`activity`) on the client, because the row outlives the build that validated it. Nothing
+is kept per client: no localStorage key, no field in `desktop-client.json` (which holds no credentials either, only the
+webview readiness counter the desktop smoke reads and the desktop app's automatic-updates setting, which is a setting of
+that app installation rather than one of these shared preferences), no eval round trip. The visible consequences are the
+ones SPEC.md names — one answer shared by every client, and a second client attaching to whatever was selected most
+recently anywhere.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
@@ -847,7 +848,34 @@ names after mount seeding; templates also wait for the templates and model-catal
 read to succeed. While waiting, the launcher shows a cancellable loading state so late acceptance cannot overwrite user
 edits. Clone/Replace revokes any pending choice, and closing clears the parent opening intent. Both kinds use the same
 search-accept callback as Enter and a clicked search result. Completed read failures follow that callback's ordinary
-refusal behavior; resource refreshes do not reapply the initial choice. No switcher pick submits the form.
+refusal behavior; resource refreshes do not reapply the initial choice. Name and template picks do not submit the form.
+
+Quick launch uses a separate KeyP capture listener and the same list-owned New-open callback, followed by the ordinary
+template search action and form requestSubmit. The mark is one nullable shared preference rather than template data, so
+a stale editor save cannot move it. Both template delete paths clear only a matching mark in their existing immediate
+transaction; recreating a template does not restore the mark. The editor repoints between save-new-name and
+delete-old-name through the existing preference writer, awaiting its own acknowledgment. Rename reads the mark fresh,
+respecting an unconfirmed explicit local choice; its separate writes retain ordinary cross-client last-writer-wins
+semantics. An unconfirmed repoint keeps both template names and its dirty local choice for recovery. Delete waits for
+any owned mark request and retires matching dirty intent before releasing that wait, so credential recovery cannot
+restore a deleted mark. This sends no unconditional clear that could erase another client's different mark. Each
+shortcut fetches the saved mark and templates rather than trusting its startup preference snapshot, overlaying only an
+explicit local mark still awaiting persistence. A pending or failed mark write cannot silently launch the previous mark.
+
+The form's quick-launch flag changes visibility and schedules one ordinary submission after mount seeding,
+template/catalog reads, host binding and the current managed-checkout preview settle. Its transparent modal backdrop and
+existing modal isolation prevent page clicks or keyboard input from replacing the pending intent, while hidden fields
+take no focus. Parent opening generations revoke late reads and scheduled submissions when another opening takes over;
+the modal install epoch also notices an intervening modal that already closed. Session Rename uses its own focus trap
+and explicitly revokes a held quick read when opened. Clone/Replace reveals a superseding draft and spends the automatic
+intent. Incomplete or offline prerequisites, request errors and YOLO refusal reveal that same form. The auto-submit
+intent is consumed before requestSubmit and stays consumed through retry reconciliation or a new path preview. There is
+no headless composition, second create path or timer-based readiness. The YOLO question mounts only after reveal so its
+usual Cancel focus still applies. A completed initial host-read failure reveals the cancellable draft, focuses its
+loading Cancel button, and cannot launch later merely because the host read recovers. Preparation errors survive first
+binding; every unsuccessful create reveals the form even when its old-target refusal is fenced out after a target
+change. The quick-switcher row closes its modal through the existing DOM-removal handoff before using this shortcut
+path.
 
 Motivation: xterm.js is the only battle-tested embeddable terminal (VS Code) and full escape-sequence fidelity is a
 SPEC.md requirement. Routing high-frequency PTY output through a reactive framework would be a performance disaster, so

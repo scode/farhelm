@@ -140,6 +140,10 @@ there ([Permission modes](/docs/agents/#permission-modes)). The rest only narrow
 search to one kind of thing: `host:`, `harness:`, `model:`, `effort:`, `folder:`, and `recent:`. `host:local` picks the
 machine you are using.
 
+For a setup you use often, mark a [quick-launch template](/docs/using/launch-templates/#quick-launch). Cmd+P on a Mac, or
+Ctrl+Shift+P elsewhere, starts it directly. A YOLO question or failed launch opens the session launcher with the setup
+ready to finish.
+
 ## Start from a managed checkout
 
 A session can also start in a new clone of a GitHub repository instead of an existing directory. Farhelm calls this a
@@ -151,6 +155,8 @@ suggestion. You can also type `gh:owner/repo` in the search box and choose **Man
 suggests repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
 
 Before you launch, the launcher shows the directory the clone will go into, and the launch button waits until it does.
+[Quick launch](/docs/using/launch-templates/#quick-launch) creates that directory directly: marking the template means
+you have chosen to start it without seeing the path first.
 Each checkout gets a new directory of its own, named after the repository and numbered (`farhelm-1`, `farhelm-2`, and so
 on), or named after the repository and the session if you gave the session a name (`farhelm-fix`). **folder** switches
 back to an ordinary directory.

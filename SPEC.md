@@ -638,6 +638,21 @@ agent choice is independent of that destination:
   Saving is explicit; leaving an unsaved draft asks save, discard, or keep editing. Template names are unique; duplicate
   opens an unsaved copy with a free name. Delete takes effect immediately and offers undo inside the dialog for about
   ten seconds; undo refuses if its old name has been taken. Closing the dialog ends its undo notice.
+- Quick launch: at most one saved template is marked with ⚡ in Templates. Cmd+P on macOS or Ctrl+Shift+P elsewhere
+  starts it directly in the browser and desktop app, without showing the launcher on success. Applying it uses exactly
+  New's defaults and ordinary launch path: the open session's host and directory, else this machine's home, with the
+  template overriding only its own fields. Success selects the created session. A held chord starts only once; the chord
+  never reaches the terminal and visible modals keep the keyboard. With no usable mark it opens Templates with an
+  explanation. An edited marked template that no longer supplies an agent or command opens New with it applied. A launch
+  refusal or YOLO question reveals New with the same draft, error or confirmation; nothing bypasses host admission, and
+  the shortcut never retries itself. The mark is a nullable template name on the helm's shared preferences, independent
+  of the template fields. Clicking another bolt moves it; clicking the lit bolt clears it. A template that chooses
+  neither an agent nor a nonblank command cannot be marked in the interface. Renaming repoints the mark before deleting
+  the old name; deleting that name clears its mark through the shared delete path, and Undo never restores the mark. The
+  editor says whether its saved template is marked. The shortcut reads the mark and templates fresh on each use, so
+  another window's change takes effect without reloading. Templates' hover and a separate quick-switcher row advertise
+  the chord and marked name. A browser that reserves the chord keeps its behavior; the quick-switcher row remains
+  available.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the
@@ -750,19 +765,22 @@ a sticky, `/tmp`-style directory. Keeping the root, and so its checkouts and the
 only the user can write is the user's responsibility. Farhelm does not check the root's owner or mode, and the ownership
 and archive promises in this section assume no other account can create, replace, or take over entries in it.
 
-Before Launch becomes available, the composer shows the exact host and path. Preview creates no directory and reserves
-nothing. An unnamed checkout uses the lowest available positive `repo-N` and that basename as its session title. An
-explicit title keeps its printable display spelling while the path uses `repo-` followed by its lowercase ASCII slug;
-runs outside letters and digits become hyphens. A title already starting with `repo-` does not repeat that prefix. An
-empty slug or a component over 200 bytes is refused, and so is a checkout path too long to archive later (the archive
-location adds up to 82 bytes to it, and the whole must stay within the system's path limit: 4096 bytes on Linux, 1024 on
-macOS). Existing files, directories and symlinks all occupy a name. If another create wins the displayed path, Launch
-reports the conflict and obtains a new preview; it never submits automatically or silently chooses another directory. An
-explicit name remains a conflict rather than gaining a suffix. For Clone into the source's repository, an untouched
-nonempty copied title defaults to `<source title>-clone`, then the lowest free `<source title>-clone-N` for N ≥ 2. The
-name field shows the effective name, and preview and launch use it alike. Changing hosts or repositories restarts the
-suffix search; editing the name makes it explicit and disables automatic suffixes. A lost-race launch re-previews and
-may advance the default name, but still needs another click on Launch for the newly shown path.
+Before Launch becomes available, the composer shows the exact host and path. Quick launch is the exception: marking a
+template is consent to its managed-checkout destination, so it obtains the same exact preview and launches without
+showing the path first. A lost race still reveals New with the conflict and new preview rather than submitting again.
+Preview creates no directory and reserves nothing. An unnamed checkout uses the lowest available positive `repo-N` and
+that basename as its session title. An explicit title keeps its printable display spelling while the path uses `repo-`
+followed by its lowercase ASCII slug; runs outside letters and digits become hyphens. A title already starting with
+`repo-` does not repeat that prefix. An empty slug or a component over 200 bytes is refused, and so is a checkout path
+too long to archive later (the archive location adds up to 82 bytes to it, and the whole must stay within the system's
+path limit: 4096 bytes on Linux, 1024 on macOS). Existing files, directories and symlinks all occupy a name. If another
+create wins the displayed path, Launch reports the conflict and obtains a new preview; it never submits automatically or
+silently chooses another directory. An explicit name remains a conflict rather than gaining a suffix. For Clone into the
+source's repository, an untouched nonempty copied title defaults to `<source title>-clone`, then the lowest free
+`<source title>-clone-N` for N ≥ 2. The name field shows the effective name, and preview and launch use it alike.
+Changing hosts or repositories restarts the suffix search; editing the name makes it explicit and disables automatic
+suffixes. A lost-race launch re-previews and may advance the default name, but still needs another click on Launch for
+the newly shown path.
 
 Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no repository ignore
 an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
@@ -1067,34 +1085,35 @@ last-known sessions remain useful. Choosing a host sends a server-side query imm
 can be ordered independently by most recent activity, by creation time, or by title; the order someone picks is
 remembered by the helm as one preference shared by every client, together with the last-selected session and compact-row
 choice, and most recent activity is what a client shows until someone picks otherwise. The same shared preference row
-carries terminal web-link click ownership, the session-confirmation opt-out, and whether host setup or host removal
-confirmation should be skipped after an explicit permanent answer; a client that has already loaded its preferences
-keeps its previous behavior until it reloads. The gear immediately to the right of the sidebar version opens a settings
-dialog with an off-by-default **skip session confirmations** switch under **sessions**. Its help names Delete, Replace,
-Restart and tab Close and excludes YOLO, host and trash questions (see Lifecycle operations). The dialog also has the
-host switches `set up new hosts without asking` and `remove hosts without asking`, on when the respective confirmation
-is skipped. Turning one off restores that confirmation; turning one on makes the same choice as the host dialog's
-permanent answer. Changes take effect immediately in the current client. Each switch explains the current behavior, and
-each host dialog's permanent answer points to the gear as the place to undo it. A separate **terminal links** section
-chooses whether web links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the
-click on, or only pass the click on. The latter two choices explain the risk of a second browser tab and that a program
-without mouse reporting cannot act on a click. This choice covers every client of the helm and takes effect in every
-mounted terminal of the current client immediately; other open clients pick it up when they reload, like the host
-choices. Sounds has three device switches (see Status). A separate **ntfy alerts** section has an off-by-default switch,
-server URL (default `https://ntfy.sh`), topic, optional access token, and priority (min, low, default, high, urgent;
-default default). These are explicitly saved helm configuration, shared by every client, outside the preference row.
-Save refusals appear inline. The stored token is never returned: the form shows whether one exists and allows replacing
-or clearing it. **Send test** uses the saved configuration, even while disabled, and reports success or failure inline.
-The dialog also holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone
-command field (see [Managed checkouts](#managed-checkouts)). The folder's help explains expansion on each host,
-first-use folder creation, and that command-line host overrides keep their folder. The command's help explains that it
-runs in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts
-only, and that command-line host overrides keep their command. The installed desktop app's dialog also has a switch for
-installing updates automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it
-is a setting of that app installation, kept with the app rather than by the helm, and a browser never shows it. The two
-host confirmation choices apply to every host and client of this helm; existing controls with a natural place in the
-main UI stay there. No client keeps its own copy: every client reads the helm's preference once after authenticating and
-writes it on change, so a browser tab and the desktop app open in the same order and on the same session. Per-client
+carries terminal web-link click ownership, the quick-launch template name, the session-confirmation opt-out, and whether
+host setup or host removal confirmation should be skipped after an explicit permanent answer; a client that has already
+loaded its preferences keeps its previous behavior until it reloads, except that quick launch reads its mark on each
+invocation. The gear immediately to the right of the sidebar version opens a settings dialog with an off-by-default
+**skip session confirmations** switch under **sessions**. Its help names Delete, Replace, Restart and tab Close and
+excludes YOLO, host and trash questions (see Lifecycle operations). The dialog also has the host switches
+`set up new hosts without asking` and `remove hosts without asking`, on when the respective confirmation is skipped.
+Turning one off restores that confirmation; turning one on makes the same choice as the host dialog's permanent answer.
+Changes take effect immediately in the current client. Each switch explains the current behavior, and each host dialog's
+permanent answer points to the gear as the place to undo it. A separate **terminal links** section chooses whether web
+links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the click on, or only
+pass the click on. The latter two choices explain the risk of a second browser tab and that a program without mouse
+reporting cannot act on a click. This choice covers every client of the helm and takes effect in every mounted terminal
+of the current client immediately; other open clients pick it up when they reload, like the host choices. Sounds has
+three device switches (see Status). A separate **ntfy alerts** section has an off-by-default switch, server URL (default
+`https://ntfy.sh`), topic, optional access token, and priority (min, low, default, high, urgent; default default). These
+are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
+inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
+**Send test** uses the saved configuration, even while disabled, and reports success or failure inline. The dialog also
+holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command field (see
+[Managed checkouts](#managed-checkouts)). The folder's help explains expansion on each host, first-use folder creation,
+and that command-line host overrides keep their folder. The command's help explains that it runs in each new checkout on
+its host, after cloning and before the agent starts, that changes affect future checkouts only, and that command-line
+host overrides keep their command. The installed desktop app's dialog also has a switch for installing updates
+automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of
+that app installation, kept with the app rather than by the helm, and a browser never shows it. The two host
+confirmation choices apply to every host and client of this helm; existing controls with a natural place in the main UI
+stay there. No client keeps its own copy: every client reads the helm's preference once after authenticating and writes
+it on change, so a browser tab and the desktop app open in the same order and on the same session. Per-client
 persistence — browser storage, a desktop state file, anything that lets two clients remember different answers — is not
 wanted for these shared preferences (sidebar width, terminal text size and sound switches, by contrast, are deliberately
 per device; see Session list, Terminal experience and Status). A client that asks the helm for no particular order gets
@@ -1582,8 +1601,9 @@ permission defaults. A pinned templates section normally shows only a `tl:` hint
 (case-insensitive), sessions and the New row are replaced by matching templates, using the session launcher's own
 template search; `tl:` alone lists every template. Picking one opens New with its edits applied, without using the query
 as the session name. New shows a cancellable loading state until the template inputs are ready, before allowing draft
-edits. Neither kind of pick launches a session: Launch remains the user's action. After a failed session read, New and
-template search remain usable.
+edits. Neither name nor template pick launches a session: Launch remains the user's action. With no query, a separate
+final "Quick launch: <template>" row uses the direct quick-launch path, or opens Templates to mark one; the first recent
+session stays initially selected. After a failed session read, New and template search remain usable.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size

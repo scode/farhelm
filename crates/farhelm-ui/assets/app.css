@@ -2779,7 +2779,21 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   list-style: none;
   min-width: 0;
 }
-.templates-list li { min-width: 0; }
+.templates-list li { min-width: 0; display: flex; gap: 4px; align-items: center; }
+/* The mark is an independent preference action, never a nested editor button.
+   Its label stays attached to the saved name even while another draft is open. */
+.templates-quick-mark {
+  flex: 0 0 28px;
+  align-self: stretch;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-2);
+}
+.templates-quick-mark[aria-pressed="true"] { color: var(--warn); }
+.templates-quick-mark:hover { border-color: var(--border); }
+.templates-quick-mark:disabled { opacity: .4; }
+.templates-quick-chord { color: var(--fg-2); font-size: 11px; }
+.templates-quick-state, .templates-quick-hint { color: var(--fg-2); font-size: 12px; }
 .templates-row {
   display: grid;
   gap: 4px;
@@ -5131,6 +5145,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   overflow: auto;
   background: var(--scrim-dialog);
 }
+/* Keep the ordinary modal boundary while quick launch prepares/submits. The
+   transparent backdrop blocks stale page clicks; no launcher fields are shown. */
+.launch-composer-backdrop.quick-launch-pending { background: transparent; }
+.launch-composer-backdrop .create-session-form[hidden] { display: none; }
 
 /* Content-sized rather than a fixed box: Launch and Cancel lead the composer,
    no recents band is reserved, and no advanced disclosure adds a hidden
