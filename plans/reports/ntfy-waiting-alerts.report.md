@@ -73,3 +73,59 @@ enable-and-save instruction. Its follow-up caught one remaining old checkbox cou
 reported no actionable findings. A fresh scope reassessment found no unnecessary substantial production complexity and
 recommended the current design. Tests were reviewed with the full repository test-authoring contract. Commit and PR
 wording passed a separate fresh cold read. These source reviews ran no tests; the execution evidence is above.
+
+### Landing
+
+Landed alone in its round as #1986. Between the stack's base and the merge, main gained only documentation and queue
+bookkeeping commits, none of which touched what this feature depends on.
+
+#### Release-relevant
+
+The helm's database moves from schema 46 to 47 (the alert settings table). As with every schema bump, a helm that has
+run this build cannot be downgraded in place. The helm–supervisor protocol version is unchanged, so remote hosts keep
+working without an update. The helm now makes outbound HTTP requests to a server the user configures, only after they
+enable alerts or press send test.
+
+#### Fixes made while landing
+
+An independent fresh-context review, focused on security, found nothing blocking. The landing fixed three points before
+merging:
+
+- Alert text was filtered for control characters only. Alerts now drop every character the repository's shared list of
+  unsafe display characters names, which also covers invisible characters and bidirectional overrides. A session's title
+  is set by its agent, and an override in it could make the alert on the phone read as if it named a different host.
+  SPEC.md and SPEC_impl.md now say so, and the existing unit test covers an override, an invisible character and an
+  emoji that must survive.
+- When the helm cannot build its HTTP client (a machine without a CA bundle, say), it now logs why, once. Before, every
+  alert only reported the generic "cannot make outbound connections" reason.
+- The schema 47 migration step now carries the same error context as its neighbours.
+
+#### Review notes left as they are
+
+- Possible follow-up: the quiet baseline after a reconnect may not cover sessions whose first reading after a supervisor
+  restart is "unknown". If a session was already waiting and its first fresh reading after the restart shows it still
+  waiting, one alert can go out for it, within the five-per-minute cap. Treating "unknown" at the baseline as already
+  handled would instead risk missing a genuinely new waiting spell right after a reconnect. Which way to lean is a
+  product choice, so it was left as built.
+- For a host without an alias, the display name in an alert is its ssh destination, which can include a user name. The
+  spec already says host display names are sent.
+- Two test nits were not changed. A refused settings save is checked only through the enable switch, and the
+  stalled-sender test does not check which send its second request came from. The second runs under paused time, which
+  makes the reviewer's loaded-machine scenario unlikely.
+
+#### Checks
+
+- Run now, on the rebased tree with the landing fixes:
+  - `cargo fmt --all -- --check`;
+  - `dprint check` on the two spec files;
+  - `cargo clippy -p farhelm-helm --all-targets -- -D warnings`;
+  - `cargo clippy -p farhelm --bins -- -D warnings`;
+  - the full helm and protocol packages through the recorder (`cargo nextest run -p farhelm-helm -p farhelm-proto`,
+    pinned tmux, four slots, no retries): 1213 passed, none skipped, run `077d1907-4be7-4dba-b758-fe30e6206279`. One
+    test's trace capture reported a single evicted trace event, a diagnostic note rather than a failure.
+- Stopped on purpose: an earlier start of the same run, because the landing fixes were edited in while it ran.
+- Reused: the executor's browser settings runs, asset JavaScript harness, desktop renderer compile, website build and
+  sleep checker. The landing fixes touch only helm-side alert text, a log line, a migration's error context and spec
+  wording, none of which those checks exercise.
+- The package-wide helm run gives the clean pass the executor's report could not claim. Its own package run had failed
+  on three fixtures it then fixed and retried only narrowly.
