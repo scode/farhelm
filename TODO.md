@@ -202,7 +202,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `3d8e4004c6`) and saying the flag can go once git 2.55 is the minimum. A regression test has to run
   `git commit-graph write --reachable` in the reference repository first, or it proves nothing, and should assert that
   the workaround clone succeeds rather than that the plain one fails. Full write-up:
-  https://snippets.scode.org/s/git-clone-dissociate-commit-graph-bug/
+  https://snippets.scode.org/s/git-clone-dissociate-commit-graph-bug/ Plan:
+  `plans/queue/git-clone-commit-graph-workaround.md`.
 
 ## Doc todo
 
