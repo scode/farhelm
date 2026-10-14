@@ -2,6 +2,12 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.28.2 - 2026-10-13
+
+### 🔧 Fixes worth highlighting
+
+- Creating a session in a managed checkout no longer fails at the clone step with "unable to parse commit" on hosts with Git older than 2.55. The failure was common with the Git built into macOS and rare, but possible, on Linux. The cause is a bug in Git itself, fixed in Git 2.55 ([upstream fix](https://github.com/git/git/commit/3d8e4004c604b206d70240a087816907cce70a08)). Farhelm still uses the Git already on the host and works around the bug by turning off one Git optimization (the commit-graph) for that clone, so you do not need to upgrade Git. (#1968)
+
 ## v0.28.1 - 2026-10-13
 
 ### 🔧 Fixes worth highlighting
