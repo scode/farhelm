@@ -81,3 +81,49 @@ final source gate passed with no remaining findings. A scope reassessment suppor
 rejected a microtask boundary that could expire between native listeners. Commit and PR wording passed a second fresh
 cold read. A fresh scope review also strengthened the actual copy-notice boundary and hover failure diagnostics.
 Implementation stayed local under the plan's no-workhorse requirement.
+
+### Landing
+
+Landed alone in its round as #1962. Nothing but queue bookkeeping reached main between the stack's base and its merge,
+so no other work could interact with it.
+
+#### Release-relevant
+
+The helm's database moves from schema 45 to 46 (a new nullable preference column). As with every schema bump, a helm
+that has run this build cannot be downgraded in place. The helm–supervisor protocol version is unchanged, so remote
+hosts keep working without an update.
+
+#### Fix made while landing
+
+An independent fresh-context review found nothing blocking. It flagged one documentation gap, which the landing fixed in
+the PR before merging: the helm database's schema history comment still ended at version 45, so the next person to add a
+schema version would have read a ladder that silently skipped 46. It now records 46.
+
+#### Review notes left as they are
+
+These are minor and were not worth holding the fix for:
+
+- When a stored link-click choice is a word this build does not know, the helm reads it as the default. Only the refusal
+  of an unknown word on write is tested, not that read-side fallback. Reaching it takes a hand-edited database.
+- The three link-click choices in settings are not grouped for screen readers: no radio-group role and no group label. A
+  screen reader therefore does not announce the section name when focus enters one of them.
+- The docs page on working in a session says Farhelm keeps the click from reaching the program, without adding "when the
+  program handles mouse clicks". It is harmless as written.
+- Untested suspicion: link ownership is tracked per terminal. If someone holds another mouse button down in one terminal
+  and then presses a link in a second terminal, the first terminal's program could see the primary-button drag.
+
+#### Possible follow-up
+
+Double-clicking a link still opens it twice in every setting, because each release of the button activates the link.
+This behavior predates this plan. It produces the same "two tabs" symptom the original TODO entry described, so if the
+maintainer's report was really a double-click, this fix will not cover it.
+
+#### Checks
+
+- Run now: `cargo fmt --all -- --check` after the documentation fix, which touches only a comment.
+- Reused: the executor's recorded runs. Its focused Rust preference and migration run
+  `61354065-287c-4372-ba87-06a4e472cee5`, terminal asset JavaScript run `c10040ae-a8e8-4021-94bf-f61b9bb5dc32`, and
+  browser runs `08319b05-85bc-4599-8e14-2d77d663e232`, `06581bd8-b498-4e44-848d-800667ec4b6e`,
+  `caa93bf1-f0c7-4a41-8ce0-ec2ab7886970` and `ec29dad2-e05c-4107-b4fd-3806c1a5c313` all show a zero exit. They still
+  apply, because the only changes since are queue bookkeeping and one comment.
+- Skipped: everything else. Nothing that landed in between called for more.
