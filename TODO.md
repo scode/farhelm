@@ -193,6 +193,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   install somewhere the user will notice, with the reason. SPEC.md currently says automatic checks no user joins "stay
   invisible", so this needs a SPEC change alongside it.
 
+- **Work around git's `--reference --dissociate` clone bug on macOS.** A managed checkout is made with
+  `git clone --reference <cache> --dissociate`, and git before 2.55.0 (including macOS's system git, 2.54.0 Apple
+  Git-157) can transfer every object and then fail the checkout with "fatal: unable to parse commit <sha>" and "Clone
+  succeeded, but checkout failed", leaving an empty worktree with every file staged as deleted. It only happens when the
+  cache's commit-graph covers the commit being checked out, so it looks intermittent. The workaround is to run that one
+  clone as `git -c core.commitGraph=false clone …`, with a comment at the call site naming the upstream fix (git commit
+  `3d8e4004c6`) and saying the flag can go once git 2.55 is the minimum. A regression test has to run
+  `git commit-graph write --reachable` in the reference repository first, or it proves nothing, and should assert that
+  the workaround clone succeeds rather than that the plain one fails. Full write-up:
+  https://snippets.scode.org/s/git-clone-dissociate-commit-graph-bug/
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
