@@ -199,6 +199,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - add a "custom" permission mode next to guarded/yolo
 
+- **Use Codex wake-on-exit in the executors' monitoring flow.** "Drain the plans and keep monitoring" waits for new work
+  by running `scripts/plans-watch.sh` as a background command whose exit wakes the session. That works in Claude Code; a
+  harness that cannot be woken that way runs the watcher in the foreground instead, with a `--max-wait` shorter than its
+  own command timeout (`plans/AGENTS.md`), the rule a Codex executor falls under today. Codex can now be woken when a
+  background command exits, through the maintainer's `skillette-codex-wake-on-exit` skill (trigger: "use Codex
+  wake-on-exit"). Have Codex executors use it for the watcher, so they monitor the same way Claude Code executors do,
+  and update `plans/AGENTS.md` to say so. It needs a connected Codex client: native spawned subagents and one-shot
+  `codex exec` cannot be resumed this way, so the foreground fallback stays for those.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
