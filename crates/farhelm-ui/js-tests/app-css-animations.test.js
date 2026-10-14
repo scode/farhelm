@@ -304,6 +304,7 @@ test("app.css: every looping animation is stepped and within the rate cap", () =
     ".status-badge.running .status-dot",
     ".host-update-dot",
     ".delete-spinner",
+    ".app-version-refresh-spinning",
     ".delete-progress-dot",
   ]) {
     assert.ok(selectors.includes(expected), `expected a looping animation on ${expected}; saw ${selectors}`);
@@ -322,6 +323,20 @@ test("app.css: the pulse runs at 4 changes per second and the spinner at 10", ()
   const rate = (selector) => looping.find((l) => l.selector === selector).changesPerSecond;
   assert.equal(rate(".status-badge.running .status-dot"), 4);
   assert.equal(rate(".delete-spinner"), 10);
+  assert.equal(rate(".app-version-refresh-spinning"), 10);
+});
+
+/**
+ * Visible update checks replace the separate spinner with the refresh glyph.
+ * Reduced motion must stop that new indicator too, while the text still tells
+ * the user work is running. Inspect the shipped rule, not a synthetic substitute.
+ */
+test("app.css: the version refresh stops animating for reduced motion", () => {
+  const rules = parseCss(fs.readFileSync(APP_CSS_PATH, "utf8"));
+  const reduced = rules.filter((rule) => rule.prelude === "@media (prefers-reduced-motion: reduce)");
+  assert.ok(reduced.some((media) => media.items.some((rule) =>
+    rule.prelude === ".app-version-refresh-spinning" && rule.items.includes("animation: none")
+  )), "the refresh glyph needs its own reduced-motion override");
 });
 
 // ---------------------------------------------------------------------------

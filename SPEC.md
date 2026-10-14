@@ -331,24 +331,27 @@ sidebar's top bar shows that an update is ready: a red up-arrow before the versi
 grey. Its hover says which version is installed and that a restart finishes the update. Clicking it opens a small menu
 with **Restart to update**, which quits Farhelm and opens it again on the new version (sessions keep running, as they do
 across any quit), and **What's new**, which opens the release notes on the docs website
-(`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, the readout behaves as it
-always has, apart from showing the progress and result of a check the user started beside it and in its hover.
+(`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, selecting the version
+checks for updates. A dim refresh glyph after it hints at that action; hover and keyboard focus brighten both and turn
+the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (the web UI
+or a build from main), the readout stays plain text without the refresh glyph.
 
 The update can also be checked for on demand: the local machine's host row offers Update (see
-[Session list](#session-list)), and the `?` menu offers **Check for updates** (see [Feedback](#feedback)). Either checks
+[Session list](#session-list)), and the `?` menu offers **Check for updates** (see [Feedback](#feedback)). Each checks
 now and installs a newer release if there is one, even while an earlier update already waits for a restart. A check
-started this way, or an automatic check a user's request joins, shows a small spinner and **checking…** beside the
-version readout, then **installing…** while a newer release installs. **Up to date** stays there for about five seconds;
-**check failed** carries a warning look and stays until the next check starts or the user clicks it, with the reason
-kept in the hover. An installed update takes over with the red update-ready readout. An up-to-date answer while an
-update already waits shows nothing beside that red readout. A failure to restart into an update stays in the hover only.
-The inline progress and outcome are announced to screen readers, and the spinner respects reduced motion. Hover wording
-is unchanged. Automatic checks that no user joins stay invisible. The desktop settings dialog has a switch for
-installing updates automatically, on by default; turning it off stops the startup and daily checks and the background
-installs, while the two on-demand checks keep working and the red readout still appears for a version installed by hand.
-With automatic updates off, the user updates through either on-demand check or by running the installer, as before. None
-of this applies to the web UI, to a build from main, or to remote hosts, which the host list's own update actions
-handle.
+started this way, or an automatic check a user's request joins, spins the refresh glyph with **checking…** beside the
+version readout, then **installing…** while a newer release installs. When an update waits and the readout has no
+refresh glyph, a separate spinner carries the same progress. **Up to date** stays there for about five seconds; **check
+failed** carries a warning look and stays until the next check starts or the user clicks it, with the reason kept in the
+hover. An installed update takes over with the red update-ready readout. An up-to-date answer while an update already
+waits shows nothing beside that red readout. A failure to restart into an update stays in the hover only. The inline
+progress and outcome are announced to screen readers, and either spinner stops moving under reduced motion while the
+progress text remains. Hover wording explains the readout's check or restart action. Automatic checks that no user joins
+stay invisible. The desktop settings dialog has a switch for installing updates automatically, on by default; turning it
+off stops the startup and daily checks and the background installs, while on-demand checks keep working and the red
+readout still appears for a version installed by hand. With automatic updates off, the user updates through an on-demand
+check or by running the installer, as before. None of this applies to the web UI, to a build from main, or to remote
+hosts, which the host list's own update actions handle.
 
 The installer, run by hand, intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from
 get.farhelm.io, downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no

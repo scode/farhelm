@@ -58,6 +58,78 @@ pub(crate) struct Readout {
     pub(crate) user_update_ready: bool,
 }
 
+/// Which action the version offers, with motion only for user-visible work.
+///
+/// The absence of an updater keeps the web and uninstalled builds plain text.
+/// A waiting update owns the menu even during another check; only a check
+/// button owns the refresh glyph, so that menu still needs a separate spinner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReadoutControl {
+    Plain,
+    Check { spinning: bool },
+    UpdateMenu,
+}
+
+/// Choose the version's control from the same published state as inline status.
+/// Reinstall warnings retain their mark without taking away the retry action.
+pub(crate) fn readout_control(readout: Option<&Readout>) -> ReadoutControl {
+    match readout {
+        None => ReadoutControl::Plain,
+        Some(readout) if readout.update_ready => ReadoutControl::UpdateMenu,
+        Some(readout) => ReadoutControl::Check {
+            spinning: matches!(
+                readout.activity,
+                Activity::Checking | Activity::Installing(_)
+            ),
+        },
+    }
+}
+
+/// Keep one progress indicator: the refresh glyph when present, otherwise the ring.
+/// Automatic work publishes idle and cannot acquire visible motion through this rule.
+pub(crate) fn separate_progress_spinner(readout: &Readout, shown: InlineStatus) -> bool {
+    shown.spinning() && !matches!(readout_control(Some(readout)), ReadoutControl::Check { .. })
+}
+
+/// Render the real check action independently of the native worker subscription.
+///
+/// The app bar supplies its updater's check callback, shared with the help menu.
+/// Keeping this hook-free makes its button semantics, action wording and event
+/// dispatch testable without creating a webview or pretending a web updater exists.
+pub(crate) fn check_readout(
+    version: &str,
+    tooltip: &str,
+    readout: &Readout,
+    on_check: EventHandler<()>,
+) -> Element {
+    let spinning = matches!(
+        readout_control(Some(readout)),
+        ReadoutControl::Check { spinning: true }
+    );
+    let marks = readout_marks(readout);
+    rsx! {
+        button {
+            r#type: "button",
+            class: if readout.needs_reinstall { "app-version app-version-check app-version-unverified peer-value" } else { "app-version app-version-check peer-value" },
+            dir: "ltr",
+            aria_label: "Farhelm {version}; check for updates. {tooltip}",
+            // Retry advice leads so a reinstall command at the end of the
+            // hover remains unambiguous to copy.
+            "data-tooltip": "Select this to check for updates. {tooltip}",
+            onclick: move |_| on_check.call(()),
+            for mark in marks {
+                span { class: mark.class, "aria-hidden": "true", "{mark.glyph}" }
+            }
+            span { class: "app-version-text", "{version}" }
+            span {
+                class: if spinning { "app-version-refresh app-version-refresh-spinning" } else { "app-version-refresh" },
+                "aria-hidden": "true",
+                "↻"
+            }
+        }
+    }
+}
+
 /// Short inline words and styling, independent of the hover and version marks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InlineStatus {
@@ -210,7 +282,7 @@ pub(crate) fn UpdateCheckStatus(updater: AppUpdater) -> Element {
                     key: "{readout.user_check_id}",
                     class: "app-update-status-content",
                     if let Some(shown) = shown {
-                        if shown.spinning() {
+                        if separate_progress_spinner(&readout, shown) {
                             span { class: "delete-spinner", "aria-hidden": "true" }
                         }
                         if shown == InlineStatus::Failed {
@@ -291,7 +363,7 @@ pub(crate) fn idle_tooltip(running: &str, has_updater: bool) -> String {
     } else if has_updater {
         let running = crate::peer::display_peer(running);
         format!(
-            "This is Farhelm {running}. When a newer version has been installed, this turns red; select it then to restart into the new version."
+            "This is Farhelm {running}. When a newer version is installed, this turns red and opens the Restart to update / What's new menu."
         )
     } else {
         let running = crate::peer::display_peer(running);
@@ -349,8 +421,7 @@ mod native {
     }
 
     impl AppUpdater {
-        /// Ask the updater to check now (the `?` menu's item and the local
-        /// row's Update).
+        /// Ask the updater to check now (the version, `?` menu and local host).
         pub(crate) fn check_now(&self) {
             self.handle.check_now();
         }
@@ -470,6 +541,129 @@ pub(crate) fn use_app_updater() -> Option<AppUpdater> {
 mod tests {
     use super::*;
 
+    /// Activating the production native button reaches its check callback.
+    /// Inspect the actual template and attributes first so a no-op handler,
+    /// non-button element or lost action wording cannot hide behind state tests.
+    /// Desktop already enables Dioxus's serialized event adapter; nextest runs
+    /// this headless dispatch in its own process, without a native window.
+    #[cfg(native_desktop)]
+    #[farhelm_testtrace::test]
+    fn the_check_readout_is_a_named_button_that_dispatches_a_check() {
+        use dioxus::core::{AttributeValue, Mutation, TemplateAttribute, TemplateNode};
+        use std::{cell::Cell, rc::Rc};
+
+        /// Inject only the requested check's observable effect, leaving the production markup intact.
+        fn render(clicks: Rc<Cell<usize>>) -> Element {
+            let readout = Readout {
+                update_ready: false,
+                needs_reinstall: false,
+                tooltip: "current version".into(),
+                activity: Activity::Idle,
+                user_check_id: 0,
+                user_update_ready: false,
+            };
+            check_readout(
+                "1.2.3",
+                &readout.tooltip,
+                &readout,
+                EventHandler::new(move |_| clicks.set(clicks.get() + 1)),
+            )
+        }
+        let clicks = Rc::new(Cell::new(0));
+        let mut dom = VirtualDom::new_with_props(render, clicks.clone());
+        let mutations = dom.rebuild_to_vec();
+        // ROOT belongs to Dioxus's suspense/error wrappers; APP is the
+        // supplied render function whose button this test must inspect.
+        let vnode = dom
+            .get_scope(ScopeId::APP)
+            .expect("app scope rendered")
+            .root_node();
+        let TemplateNode::Element { tag, attrs, .. } = vnode.template.roots[0] else {
+            panic!("check control must render an element");
+        };
+        assert_eq!(tag, "button");
+        assert!(attrs.iter().any(|attr| matches!(
+            attr,
+            TemplateAttribute::Static {
+                name: "type",
+                value: "button",
+                ..
+            }
+        )));
+        let text_attr = |name: &str| {
+            let attr = vnode
+                .dynamic_attrs
+                .iter()
+                .flatten()
+                .find(|attr| attr.name == name)
+                .expect("action attribute must be rendered");
+            match &attr.value {
+                AttributeValue::Text(text) => text.clone(),
+                _ => panic!("action attribute must be text"),
+            }
+        };
+        assert!(text_attr("aria-label").contains("check for updates"));
+        assert!(text_attr("data-tooltip").starts_with("Select this to check for updates."));
+        let button = mutations
+            .edits
+            .iter()
+            .find_map(|edit| match edit {
+                Mutation::NewEventListener { name, id } if name == "click" => Some(*id),
+                _ => None,
+            })
+            .expect("production button must register click");
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let data: Rc<dyn std::any::Any> = Rc::new(dioxus::html::PlatformEventData::new(Box::new(
+            dioxus::html::SerializedMouseData::default(),
+        )));
+        dom.runtime()
+            .handle_event("click", dioxus::core::Event::new(data, true), button);
+        assert_eq!(clicks.get(), 1, "one activation must request one check");
+    }
+
+    /// Every updater state keeps its correct action and exactly one motion owner.
+    /// A verification warning adds information without removing the retry, and a
+    /// waiting update remains a menu even during a check joined from elsewhere.
+    #[farhelm_testtrace::test]
+    fn the_readout_control_and_progress_owner_follow_the_updater_state() {
+        assert_eq!(readout_control(None), ReadoutControl::Plain);
+        for ready in [false, true] {
+            for warning in [false, true] {
+                for activity in [
+                    Activity::Idle,
+                    Activity::Checking,
+                    Activity::Installing("1.2.4".into()),
+                    Activity::UpToDate("1.2.3".into()),
+                    Activity::Failed("offline".into()),
+                    Activity::RestartFailed,
+                ] {
+                    let active = matches!(activity, Activity::Checking | Activity::Installing(_));
+                    let readout = Readout {
+                        update_ready: ready,
+                        needs_reinstall: warning,
+                        tooltip: String::new(),
+                        activity,
+                        user_check_id: 0,
+                        user_update_ready: false,
+                    };
+                    assert_eq!(
+                        readout_control(Some(&readout)),
+                        if ready {
+                            ReadoutControl::UpdateMenu
+                        } else {
+                            ReadoutControl::Check { spinning: active }
+                        },
+                        "{:?}, ready={ready}, warning={warning}",
+                        readout.activity
+                    );
+                    if let Some(status) = inline_status(&readout.activity, ready, None) {
+                        assert_eq!(separate_progress_spinner(&readout, status), ready && active);
+                    }
+                }
+            }
+        }
+    }
+
     /// A browser or uninstalled desktop build has no update control to promise.
     /// Release candidates and dev releases still identify their real version;
     /// only the shared development-build rule replaces it with non-release text.
@@ -527,7 +721,7 @@ mod tests {
         };
         assert_eq!(
             version_tooltip("1.2.3", None, Some(&state)),
-            "This is Farhelm 1.2.3. When a newer version has been installed, this turns red; select it then to restart into the new version."
+            "This is Farhelm 1.2.3. When a newer version is installed, this turns red and opens the Restart to update / What's new menu."
         );
         assert_eq!(
             version_tooltip("1.2.3", Some("1.2.3"), Some(&state)),

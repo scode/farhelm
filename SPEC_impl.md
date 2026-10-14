@@ -3606,20 +3606,22 @@ waits, the hover names the waiting version and that a restart finishes the updat
 names both. The readout renders it through pure functions (its class, glyph, hover text and inline status). "Update
 ready" is not a state of its own: it is Installed being newer than the running version, whatever the updater is doing.
 
-The version readout also shows checking/installing inline with a spinner, then up to date for about five seconds or
-check failed until dismissed or another check starts. An up-to-date answer yields to a waiting update; a failed restart
-has no inline check outcome. The activity type is shared with presentation without changing the worker's published
-transitions. The published state also retains a user-check identity, incremented when a request starts or first joins a
-run, and whether its successful completion found an update waiting. Repeated requests joining that visible run keep the
-identity; automatic work and Installed-record changes do not create one. The captured success clears with a new request,
-the next run, a restart failure, or a changed Installed record; it is announcement provenance, not update readiness
-itself. Expiry and dismissal belong to the component, keyed by activity and request identity rather than every published
-change: Installed-record or reinstall-warning changes must not stretch the timer or revive hidden text. The same pair
-rejects a callback or dismissal from an earlier request, even when watch delivery skipped checking between identical
-answers. Successful readiness has hidden "update ready" words in the live region while the red toggle owns the visible
-outcome. The live-region child is keyed by request so an identical later phrase still replaces its text-bearing node.
-The status is a persistently mounted polite live region beside either version rendering, with bounded, ellipsized text,
-the existing reduced-motion-aware spinner, and a keyboard-accessible button for failure dismissal. Hover words and
+The version readout also shows checking/installing inline, spinning its trailing refresh glyph when it is a check
+button, or the separate spinner when an update waits and the readout opens a menu. Both use the existing stepped
+animation and stop moving under reduced motion; the progress words remain. It then shows up to date for about five
+seconds or check failed until dismissed or another check starts. An up-to-date answer yields to a waiting update; a
+failed restart has no inline check outcome. The activity type is shared with presentation without changing the worker's
+published transitions. The published state also retains a user-check identity, incremented when a request starts or
+first joins a run, and whether its successful completion found an update waiting. Repeated requests joining that visible
+run keep the identity; automatic work and Installed-record changes do not create one. The captured success clears with a
+new request, the next run, a restart failure, or a changed Installed record; it is announcement provenance, not update
+readiness itself. Expiry and dismissal belong to the component, keyed by activity and request identity rather than every
+published change: Installed-record or reinstall-warning changes must not stretch the timer or revive hidden text. The
+same pair rejects a callback or dismissal from an earlier request, even when watch delivery skipped checking between
+identical answers. Successful readiness has hidden "update ready" words in the live region while the red toggle owns the
+visible outcome. The live-region child is keyed by request so an identical later phrase still replaces its text-bearing
+node. The status is a persistently mounted polite live region beside either version rendering, with bounded, ellipsized
+text, the existing reduced-motion-aware spinner, and a keyboard-accessible button for failure dismissal. Hover words and
 version marks are independent of this visibility state, and the web build has no updater to mount it.
 
 Restart to update spawns a detached helper in its own process group: a short `/bin/sh` script that waits, bounded at
@@ -3979,13 +3981,18 @@ use of the name as a mark shares) rather than served as an asset, so both the we
 without a desktop asset-parity entry. A nonshrinking settings gear follows the version, outside the macOS drag region;
 long versions ellipsize before it or the wordmark shrinks. In a desktop app whose updater is active, the version is also
 the update marker: grey as always, or red with a one-character up-arrow before it while Installed is newer than the
-running version, and then a button that opens the update menu (Restart to update, What's new). Its hover text carries
-the updater's state, so a check the user started ends visibly there. The update menu and the `?` menu are one bar-menu
-component given different items.
+running version, and then a button that opens the update menu (Restart to update, What's new). Otherwise the active
+updater's readout is a native keyboard-reachable check button calling the same `check_now` as the help menu and host
+row. Its dim refresh glyph brightens with the version and turns a quarter on hover or keyboard focus; during a visible
+check that glyph owns the spin, so the inline status suppresses its separate ring. The web/no-updater branch stays a
+plain span. A verification warning keeps its leading mark and check action. Its hover text carries the updater's state,
+so a check the user started ends visibly there. The update menu and the `?` menu are one bar-menu component given
+different items.
 
 The bar's hover is selected by a pure function of the window build, any reported helm build and the updater's readout. A
 mismatch names both builds; a development window identifies itself as a development build rather than a release. Without
-an updater a release window only names its version. An idle installed app also explains that the readout turns red once
+an updater a release window only names its version. A check button's hover leads with its action before the updater's
+status, so a reinstall command still ends the text. An idle installed app also explains that the readout turns red once
 a newer version is installed and offers the restart menu then. The development-build predicate lives in `farhelm-proto`,
 shared by web wording and the helm's native release decisions, so their classification cannot drift.
 
