@@ -3487,6 +3487,14 @@ anything changes: those without the icon, and those whose desktop program lacks 
 its own version folder is missing (`grep` on the downloaded binary; a test in `desktop/bundle.rs` ties the two
 together), which marks every desktop build that understands the side-by-side layout.
 
+Installing a supported target over a newer Installed version remains part of the installer contract: there is no
+version-order refusal, and the target's own published installer restores the main program, Info.plist and forwarder to
+that target while retaining the previous Installed and Running folders. The ownership record must remain readable by
+supported older installers; changing its representation requires a compatible path, not just a new writer. Tagged stable
+installers from v0.23.0 through v0.28.2 accept the `farhelm-app-v2` NUL-separated link record and this replacement.
+These are mechanical compatibility properties, not proof that downgrading local databases is safe, and the updater does
+not use them to replace withdrawn waiting releases.
+
 The dx-produced bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's
 `asset!()` files were the only thing that needed one. They are served instead from the UI tree compiled into
 `farhelm-helm`, through a `dioxus-desktop` asset handler registered on `/assets/*`, handed to the webview over the
@@ -3591,6 +3599,25 @@ the probe's 30-second timeout): exactly one line, `v` and a stable release versi
 prerelease there is refused rather than installed, since `/latest` never names one, and so is anything else that is not
 exactly that; either is a failed check. The probe is one function, so a later channel setting can replace it.
 
+After every probe attempt, including a failed one, the worker fetches `/advisories` and `/advisories.minisig` under the
+same HTTPS-only streaming cap boundary. Each request has a 15-second total deadline; the body cap is 64 KiB and the
+signature cap is 4 KiB. Only an authenticated UTF-8 body with the fixed header replaces the last good snapshot in this
+run. Body 404 is quiet absence; a missing signature beside a body, every other HTTP status or transport/body failure,
+and authentication or content refusal are logged as no new information. None blocks an ordinary allowed update, starts
+an offline streak or sets `needs_reinstall`. There is no advisory disk cache.
+
+The snapshot maps bare stable versions to bounded plain-text withdrawal reasons. The worker refuses a withdrawn
+`/latest` target before installation on either trigger. It warns independently when the running version was withdrawn,
+including when an unwithdrawn update waits. A withdrawn installed version newer than the running one is a different
+case: readiness and Restart to update are suppressed, the hover requires manual recovery before restarting, and neither
+automatic nor on-demand checks replace it. The restart entry point also rechecks current eligibility, so a stale menu
+cannot restart into a withdrawal learned since it rendered. Ordinary quit/relaunch can still open that version.
+
+This deliberately does not infer safe downgrade from `Contents/Versions/running`. A supervisor can migrate its database
+and then fail before publishing that record; an old or missing record is not evidence that no newer program touched
+state. Automatic replacement needs stronger attempted-version evidence and is deferred. Supervisor startup, the meaning
+of Running, the standalone installer, the helm, remote hosts and additional advisory directives are unchanged.
+
 Release tests in `releasing/mac-vm-test/` can select a stable candidate before `/latest` names it by launching the app
 with `FARHELM_DESKTOP_UPDATE_LATEST=v<version>`. The updater captures it once as an `Option<OsString>` when building its
 dependencies; automatic and on-demand checks share that probe. A present value goes through the same stable-tag parser
@@ -3634,11 +3661,11 @@ check when automatic updates are on and 24 hours of wall-clock time have passed 
 reads earlier than the last check, so a corrected clock cannot postpone checks. A plain 24-hour timer would not do: the
 timers on macOS stop counting while the Mac sleeps. The scheduling last-check time is kept in memory only, distinct from
 the persisted probe-failure streak below; the check shortly after startup covers restarts. While Installed is newer than
-the running version the automatic check does nothing: it saves a download a day while an update waits, and it avoids a
-third version replacing the folder of the one still running (the installer keeps only Installed, the version it
+the running version the automatic check still refreshes `/latest` and advisories, but installs nothing. Holding back
+avoids a third version replacing the folder of the one still running (the installer keeps only Installed, the version it
 replaced, and Running, and Running is recorded by a supervisor this app may not own). A check the user asked for still
-installs, accepting that rare case because the user asked; with the default state directory the Running record still
-protects the version that is running.
+installs over an unwithdrawn wait, accepting that rare case because the user asked; with the default state directory the
+Running record still protects the version that is running. A withdrawn wait never takes this path.
 
 The automatic-updates setting is `install_updates_automatically` in `desktop-client.json`, through that file's locked
 read-modify-write. It is optional, and absence means on, so every existing file reads as on.
@@ -3672,10 +3699,10 @@ failures never set it. It is what an app more than one key rotation behind sees 
 verification refusal creates no automatic inline failure notice. The outcome of a run the user saw (up to date, or
 failed with its reason) stays in the hover until the next run starts. An automatically shown failure is retained across
 later failed runs until a check succeeds; UI dismissal hides its inline words without losing the hover reason. Manual
-progress and outcome take precedence over it. While an update waits, the hover names the waiting version and that a
-restart finishes the update; a failed check the user started then names both. The readout renders it through pure
+progress and outcome take precedence over it. While an unwithdrawn update waits, the hover names the waiting version and
+that a restart finishes the update; a failed check the user started then names both. The readout renders it through pure
 functions (its class, glyph, hover text and inline status). "Update ready" is not a state of its own: it is Installed
-being newer than the running version, whatever the updater is doing.
+being newer than the running version and not known to be withdrawn, whatever the updater is doing.
 
 The version readout also shows checking/installing inline, spinning its trailing refresh glyph when it is a check
 button, or the separate spinner when an update waits and the readout opens a menu. Both use the existing stepped
@@ -3903,6 +3930,27 @@ by a key CI could read), and nothing falls back to GitHub for a release the site
 relay, no third-party rendezvous service" line still holds: get.farhelm.io, and GitHub behind its redirects, are
 download sources the helm's own machine reaches directly, never a relay or rendezvous point sessions or connections pass
 through.
+
+`/advisories` and `/advisories.minisig` extend that permanent site contract without changing `/latest` or any release's
+checksum files. The signature is prehashed minisign, authenticated by any key in the release ring, with trusted comment
+exactly `farhelm advisories`. `farhelm_helm::verify_signed_metadata` shares the checksum verifier's whole-ring and
+purpose authentication; a release's `farhelm <tag>` signature cannot be replayed as advisories. The helm continues to
+fetch only its own version's files and does not read advisories.
+
+The UTF-8 file's first line is exactly `farhelm advisories`. CRLF and a final line without newline are accepted. There
+is no format-version negotiation: unknown directives, empty lines and unknown content are ignored, so newer publishers
+can extend it without disabling old clients. This release understands `revoked vX.Y.Z reason`: one ASCII space at each
+field boundary, then the rest of the line a free-text reason. Only stable SemVer tags are accepted; prereleases, build
+metadata and the development build are ignored. A nonexistent stable tag is allowed because the client has no release
+registry. Known malformed directives are logged and ignored individually; a line over 4096 bytes is malformed. Last
+valid duplicate wins. Reason control characters are removed and the result is capped at 240 Unicode characters; a blank
+result is malformed. The 64 KiB whole-file cap bounds lines and allocation. The signature covers every byte, including
+unknown lines, so truncation cannot turn into a valid partial snapshot. Invalid UTF-8 or a wrong header refuses the
+entire replacement, while a verified header-only file lifts all known withdrawals.
+
+Advisories retain D3's existing replay boundary. A site operator can withhold newer information or replay an older
+authenticated snapshot; no sequence storage or freshness guarantee is added. Withdrawals guard against publishing
+mistakes, not an attacker controlling the download site. The unsigned standalone installer is outside this mechanism.
 
 Release signing key. CI never signs and no workflow step reads a signing key: agents working on this repository can push
 to main and run workflows, so any key CI could read would be a path from an agent's push to code running on users'

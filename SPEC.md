@@ -321,51 +321,68 @@ after it starts and again whenever a day of wall-clock time has passed since its
 overnight still checks about daily. When that release is newer than the installed version, the app verifies the
 release's signed checksums and its installer against the keys compiled into it, then runs that installer, pinned to that
 release and handed the verified checksums, in the background; nothing on screen changes while it works. While an
-installed update waits for a restart the automatic check does nothing more; only an on-demand check (below) replaces a
-waiting update with a newer one. Failed automatic work is logged and tried again at the next check, without changing
-that schedule. An install failure shows **check failed** beside the version immediately, with its reason in the hover;
-anything failing after a successful `/latest` probe, including a download failure, counts as an install failure. A
-failed probe shows that notice only when automatic probes have been failing for at least three days, measured from the
-first failure in the current streak. A successful probe, automatic or on demand, ends that streak. The streak start
-survives restarts; a missing value means no streak, a future value or backwards clock resets it to now, and turning
-automatic updates back on clears it. A gap with no checks (sleep, quit, a waiting update, or automatic updates off)
-starts no clock on its own. A release that fails verification is never installed, and since the app then cannot update
-itself, its version readout carries a warning saying that this Farhelm can no longer verify its updates and must be
-reinstalled with the installer. The warning stays while the app runs, until a later check verifies and installs or finds
-nothing newer, or a newer Farhelm is installed some other way; after a relaunch it returns with the first check that
-fails the same way. It follows the stable channel only; prereleases are not offered.
+installed update waits for a restart the automatic check still refreshes release information, but installs nothing; only
+an on-demand check (below) replaces an unwithdrawn waiting update with a newer one. Failed automatic work is logged and
+tried again at the next check, without changing that schedule. An install failure shows **check failed** beside the
+version immediately, with its reason in the hover; release downloads failing after a successful `/latest` probe count as
+install failures. Optional advisory failures are only logged. A failed probe shows that notice only when automatic
+probes have been failing for at least three days, measured from the first failure in the current streak. A successful
+probe, automatic or on demand, ends that streak. The streak start survives restarts; a missing value means no streak, a
+future value or backwards clock resets it to now, and turning automatic updates back on clears it. A gap with no checks
+(sleep, quit, or automatic updates off) starts no clock on its own. A release that fails verification is never
+installed, and since the app then cannot update itself, its version readout carries a warning saying that this Farhelm
+can no longer verify its updates and must be reinstalled with the installer. The warning stays while the app runs, until
+a later check verifies and installs or finds nothing newer, or a newer Farhelm is installed some other way; after a
+relaunch it returns with the first check that fails the same way. It follows the stable channel only; prereleases are
+not offered.
 
-Whenever the installed version is newer than the running one, however it got there (the app's own background install, or
-the installer run by hand in a terminal, which the app notices within about a minute), the version readout in the
-sidebar's top bar shows that an update is ready: a red up-arrow before the version, and the whole readout red instead of
-grey. Its hover says which version is installed and that a restart finishes the update. Clicking it opens a small menu
-with **Restart to update**, which quits Farhelm and opens it again on the new version (sessions keep running, as they do
-across any quit), and **What's new**, which opens the release notes on the docs website
-(`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, selecting the version
-checks for updates. A dim refresh glyph after it hints at that action; hover and keyboard focus brighten both and turn
-the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (the web UI
-or a build from main), the readout stays plain text without the refresh glyph.
+Every update check also reads signed release advisories. When the running release was withdrawn, the version readout
+carries a warning whose hover includes the maintainer's reason. The ordinary update path can still install a newer,
+unwithdrawn release; automatic and on-demand checks never install a withdrawn target. A withdrawn update already
+installed and waiting for restart loses its red update-ready marker and **Restart to update** offer. Its warning says
+manual recovery is required before restarting: an ordinary quit and relaunch may still open that withdrawn version. The
+updater installs nothing over a withdrawn waiting update, even on demand; it cannot establish that replacing it would
+preserve local state. When a safe update waits while the running version was withdrawn, the readout keeps its red update
+marker and also explains that withdrawal. Withdrawal and reinstall warnings can coexist, with both reasons in the hover.
+
+Advisories are kept only for the current run. A later verified file can lift a withdrawal; a missing file, a failed
+download or invalid signed content leaves the last verified information unchanged, and never causes a reinstall warning
+or prevents an otherwise allowed update. After relaunch, withdrawals are relearned at the next check. With automatic
+updates off, there is no background advisory fetch: the warning can be learned only by an on-demand check. Advisories do
+not affect the standalone installer, the helm or remote hosts. Replay protection and directives other than release
+withdrawal are outside this behavior.
+
+Whenever the installed version is newer than the running one and is not known to be withdrawn, however it got there (the
+app's own background install, or the installer run by hand in a terminal, which the app notices within about a minute),
+the version readout in the sidebar's top bar shows that an update is ready: a red up-arrow before the version, and the
+whole readout red instead of grey. Its hover says which version is installed and that a restart finishes the update.
+Clicking it opens a small menu with **Restart to update**, which quits Farhelm and opens it again on the new version
+(sessions keep running, as they do across any quit), and **What's new**, which opens the release notes on the docs
+website (`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, selecting the
+version checks for updates. A dim refresh glyph after it hints at that action; hover and keyboard focus brighten both
+and turn the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (the
+web UI or a build from main), the readout stays plain text without the refresh glyph.
 
 The update can be checked for on demand by selecting the version, by choosing the local machine's host row's Update (see
 [Session list](#session-list)), or by choosing **Check for updates** in the `?` menu (see [Feedback](#feedback)). Each
-checks now and installs a newer release if there is one, even while an earlier update already waits for a restart. A
-check started this way, or an automatic check a user's request joins, spins the refresh glyph with **checking…** beside
-the version readout, then **installing…** while a newer release installs. When an update waits and the readout has no
-refresh glyph, a separate spinner carries the same progress. **Up to date** stays there for about five seconds; **check
-failed** carries a warning look and stays until the next check starts or the user clicks it, with the reason kept in the
-hover. An automatically shown failure, and a user's failed check that took its place, instead stays until a check
-succeeds, a newer version is installed by any route, or the user dismisses it; later unsuccessful work does not silently
-clear it. A user's check takes precedence with its progress and outcome. After dismissal, a later automatic failure
-shows again only if it qualifies under the same rules. Selecting the version retries. An installed update takes over
-with the red update-ready readout. An up-to-date answer while an update already waits shows nothing beside that red
-readout. A failure to restart into an update stays in the hover only. The inline progress and outcome are announced to
-screen readers, and either spinner stops moving under reduced motion while the progress text remains. Hover wording
-explains the readout's check or restart action. Automatic work that no user joins shows no progress; its qualifying
-failures show as described above. The desktop settings dialog has a switch for installing updates automatically, on by
-default; turning it off stops the startup and daily checks and the background installs, while on-demand checks keep
-working and the red readout still appears for a version installed by hand. With automatic updates off, the user updates
-through an on-demand check or by running the installer, as before. None of this applies to the web UI, to a build from
-main, or to remote hosts, which the host list's own update actions handle.
+checks now and installs a newer unwithdrawn release if there is one, even while an earlier unwithdrawn update already
+waits for a restart. A check started this way, or an automatic check a user's request joins, spins the refresh glyph
+with **checking…** beside the version readout, then **installing…** while a newer release installs. When an update waits
+and the readout has no refresh glyph, a separate spinner carries the same progress. **Up to date** stays there for about
+five seconds; **check failed** carries a warning look and stays until the next check starts or the user clicks it, with
+the reason kept in the hover. An automatically shown failure, and a user's failed check that took its place, instead
+stays until a check succeeds, a newer version is installed by any route, or the user dismisses it; later unsuccessful
+work does not silently clear it. A user's check takes precedence with its progress and outcome. After dismissal, a later
+automatic failure shows again only if it qualifies under the same rules. Selecting the version retries. An installed
+update takes over with the red update-ready readout. An up-to-date answer while an update already waits shows nothing
+beside that red readout. A failure to restart into an update stays in the hover only. The inline progress and outcome
+are announced to screen readers, and either spinner stops moving under reduced motion while the progress text remains.
+Hover wording explains the readout's check or restart action. Automatic work that no user joins shows no progress; its
+qualifying failures show as described above. The desktop settings dialog has a switch for installing updates
+automatically, on by default; turning it off stops the startup and daily checks and the background installs, while
+on-demand checks keep working and the red readout still appears for a version installed by hand. With automatic updates
+off, the user updates through an on-demand check or by running the installer, as before. None of this applies to the web
+UI, to a build from main, or to remote hosts, which the host list's own update actions handle.
 
 The installer, run by hand, intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from
 get.farhelm.io, downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no
@@ -2198,17 +2215,17 @@ Steady-state operation between Farhelm's own components has exactly two network 
 Besides provisioning's release downloads (see [Topology](#topology)), three more kinds of outbound connection exist.
 When the user sends feedback, the helm posts that submission, and nothing else, to the project's feedback endpoint (see
 [Feedback](#feedback)); that happens only on explicit user action. And the installed desktop app's updater (see
-[Installation and updates](#installation-and-updates)) asks get.farhelm.io which stable release is the latest and, when
-it is newer, verifies that release's signed checksums and its installer against the keys compiled into the app before
-running the installer, which downloads the release's archives from get.farhelm.io and checks them against those verified
-checksums. The updater does this automatically, at startup and about daily, unless the user turned automatic updates
-off, and also whenever the user checks for updates. It sends nothing about the user or the machine beyond what any HTTPS
-request to get.farhelm.io carries. A release that fails that verification is not installed, and the app then says that
-it can no longer verify its updates and must be reinstalled with the installer, which, like any fresh install, trusts
-get.farhelm.io over TLS alone. When ntfy alerts are configured, the helm also posts waiting alerts and explicit test
-alerts to the saved server and topic, with the optional access token (see Status). This connection sends session titles
-and host display names; it follows no redirects. Settings allow HTTP for a private server, which sends those values and
-any token without TLS protection.
+[Installation and updates](#installation-and-updates)) asks get.farhelm.io which stable release is the latest, reads
+`/advisories` and its signature for release withdrawals, and, when it is newer, verifies that release's signed checksums
+and its installer against the keys compiled into the app before running the installer, which downloads the release's
+archives from get.farhelm.io and checks them against those verified checksums. The updater does this automatically, at
+startup and about daily, unless the user turned automatic updates off, and also whenever the user checks for updates. It
+sends nothing about the user or the machine beyond what any HTTPS request to get.farhelm.io carries. A release that
+fails that verification is not installed, and the app then says that it can no longer verify its updates and must be
+reinstalled with the installer, which, like any fresh install, trusts get.farhelm.io over TLS alone. When ntfy alerts
+are configured, the helm also posts waiting alerts and explicit test alerts to the saved server and topic, with the
+optional access token (see Status). This connection sends session titles and host display names; it follows no
+redirects. Settings allow HTTP for a private server, which sends those values and any token without TLS protection.
 
 - **Client to helm**: a standalone helm serves its web UI over plain HTTP bound to loopback only, with a required token.
   The helm refuses to bind non-loopback addresses in v1; TLS serving is post-v1. Reaching the UI from another machine

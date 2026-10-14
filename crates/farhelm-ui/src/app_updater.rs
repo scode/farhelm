@@ -39,12 +39,15 @@ pub(crate) enum Activity {
 /// (see `desktop::updater::readout`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Readout {
-    /// A newer version is installed than the one running: the readout turns
-    /// red with an up-arrow.
+    /// A newer version is installed than the one running and is not known to
+    /// be withdrawn: the readout turns red with an up-arrow.
     pub(crate) update_ready: bool,
     /// This app can no longer verify its updates and must be reinstalled:
     /// the readout carries a warning mark, and the hover text says how.
     pub(crate) needs_reinstall: bool,
+    /// A running or waiting release was withdrawn. The same warning mark can
+    /// carry both withdrawal and reinstall advice; the hover preserves both.
+    pub(crate) withdrawn: bool,
     /// The readout's hover text.
     pub(crate) tooltip: String,
     /// Activity identity, kept apart from installation and verification changes
@@ -110,7 +113,7 @@ pub(crate) fn check_readout(
     rsx! {
         button {
             r#type: "button",
-            class: if readout.needs_reinstall { "app-version app-version-check app-version-unverified peer-value" } else { "app-version app-version-check peer-value" },
+            class: if readout.needs_reinstall || readout.withdrawn { "app-version app-version-check app-version-unverified peer-value" } else { "app-version app-version-check peer-value" },
             dir: "ltr",
             aria_label: "Farhelm {version}; check for updates. {tooltip}",
             // Retry advice leads so a reinstall command at the end of the
@@ -343,7 +346,7 @@ pub(crate) const UPDATE_MARK: ReadoutMark = ReadoutMark {
 /// warning must not vanish behind the update marker then.
 pub(crate) fn readout_marks(readout: &Readout) -> Vec<ReadoutMark> {
     let mut marks = Vec::new();
-    if readout.needs_reinstall {
+    if readout.needs_reinstall || readout.withdrawn {
         marks.push(WARNING_MARK);
     }
     if readout.update_ready {
@@ -557,6 +560,7 @@ mod tests {
             let readout = Readout {
                 update_ready: false,
                 needs_reinstall: false,
+                withdrawn: false,
                 tooltip: "current version".into(),
                 activity: Activity::Idle,
                 notice_id: 0,
@@ -641,6 +645,7 @@ mod tests {
                     let readout = Readout {
                         update_ready: ready,
                         needs_reinstall: warning,
+                        withdrawn: false,
                         tooltip: String::new(),
                         activity,
                         notice_id: 0,
@@ -714,6 +719,7 @@ mod tests {
         let state = Readout {
             update_ready: false,
             needs_reinstall: false,
+            withdrawn: false,
             tooltip: idle_tooltip("1.2.3", true),
             activity: Activity::Idle,
             notice_id: 0,
@@ -733,30 +739,40 @@ mod tests {
         );
     }
 
-    /// Spec: the readout leads with the warning mark whenever the reinstall
-    /// notice is up, followed by the update arrow whenever an update waits,
-    /// so with both the update menu's toggle shows both.
+    /// Spec: either a withdrawal or reinstall notice leads with one warning
+    /// mark, followed by the arrow for a safe waiting update. Withdrawal alone
+    /// must be visible; coexistence must neither duplicate nor hide its mark.
     ///
     /// Why: the first version of the toggle drew only the arrow, so a
     /// verification failure during a waiting update showed no warning at
     /// all; both renderings now take their marks from this one function.
     #[farhelm_testtrace::test]
     fn the_warning_mark_survives_a_waiting_update() {
-        let readout = |update_ready, needs_reinstall| Readout {
+        let readout = |update_ready, needs_reinstall, withdrawn| Readout {
             update_ready,
             needs_reinstall,
+            withdrawn,
             tooltip: String::new(),
             activity: Activity::Idle,
             notice_id: 0,
             user_update_ready: false,
         };
-        assert_eq!(readout_marks(&readout(false, false)), vec![]);
-        assert_eq!(readout_marks(&readout(true, false)), vec![UPDATE_MARK]);
-        assert_eq!(readout_marks(&readout(false, true)), vec![WARNING_MARK]);
-        assert_eq!(
-            readout_marks(&readout(true, true)),
-            vec![WARNING_MARK, UPDATE_MARK]
-        );
+        for (ready, reinstall, withdrawn, expected) in [
+            (false, false, false, vec![]),
+            (true, false, false, vec![UPDATE_MARK]),
+            (false, true, false, vec![WARNING_MARK]),
+            (true, true, false, vec![WARNING_MARK, UPDATE_MARK]),
+            (false, false, true, vec![WARNING_MARK]),
+            (true, false, true, vec![WARNING_MARK, UPDATE_MARK]),
+            (false, true, true, vec![WARNING_MARK]),
+            (true, true, true, vec![WARNING_MARK, UPDATE_MARK]),
+        ] {
+            assert_eq!(
+                readout_marks(&readout(ready, reinstall, withdrawn)),
+                expected,
+                "ready={ready}, reinstall={reinstall}, withdrawn={withdrawn}"
+            );
+        }
     }
 
     /// Progress and failure remain visible alongside a waiting update, while
@@ -944,6 +960,7 @@ mod tests {
                     let readout = Readout {
                         update_ready,
                         needs_reinstall: false,
+                        withdrawn: false,
                         tooltip: String::new(),
                         activity: activity.clone(),
                         notice_id: 1,

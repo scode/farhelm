@@ -560,13 +560,12 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let readout = updater.as_ref().map(AppUpdater::readout);
     let control = crate::app_updater::readout_control(readout.as_ref());
     let update_ready = readout.as_ref().is_some_and(|readout| readout.update_ready);
-    // This app can no longer verify its updates (SPEC.md "Installation and
-    // updates"): a warning mark on the readout while the app runs, the
-    // reinstall command in its hover, and the same words for a screen
-    // reader.
-    let needs_reinstall = readout
+    // Withdrawals and lost verification share a mark, but the hover carries
+    // both reasons when they coexist. Neither should disappear behind a safe
+    // waiting update's arrow.
+    let version_warning = readout
         .as_ref()
-        .is_some_and(|readout| readout.needs_reinstall);
+        .is_some_and(|readout| readout.needs_reinstall || readout.withdrawn);
     let marks = readout
         .as_ref()
         .map(crate::app_updater::readout_marks)
@@ -642,13 +641,13 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
             }
             if control == crate::app_updater::ReadoutControl::Plain {
                 span {
-                    class: if needs_reinstall { "app-version app-version-unverified peer-value" } else { "app-version peer-value" },
+                    class: if version_warning { "app-version app-version-unverified peer-value" } else { "app-version peer-value" },
                     dir: "ltr",
                     "data-tooltip": "{version_tooltip}",
                     for mark in marks {
                         span { class: mark.class, "aria-hidden": "true", "{mark.glyph}" }
                     }
-                    if needs_reinstall {
+                    if version_warning {
                         span { class: "visually-hidden", "{version_tooltip}" }
                     }
                     "{version}"
