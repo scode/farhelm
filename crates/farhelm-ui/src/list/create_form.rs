@@ -6676,6 +6676,7 @@ mod tests {
             terminal_link_click: None,
             skip_session_confirmations: None,
             quick_launch_template: None,
+            template_shortcuts: Default::default(),
         };
         assert_eq!(
             super::initial_structured_permissions(&with(Some("yolo"))),

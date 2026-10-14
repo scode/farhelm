@@ -1008,6 +1008,8 @@ export interface Preferences {
   skip_session_confirmations?: boolean;
   /** Sole shared shortcut template; template fields never contain this mark. */
   quick_launch_template?: string;
+  /** Shared whole-map physical digit bindings, independent of the quick mark. */
+  template_shortcuts?: Record<string, string>;
   /** Contact reused by feedback dialogs after this client seeds from the helm. */
   feedback_contact?: string;
   /** Shared terminal web-link ownership; unset means interception. */
@@ -1043,6 +1045,7 @@ export async function patchPreferences(
     skip_host_setup_confirmation?: boolean | null;
     skip_session_confirmations?: boolean | null;
     quick_launch_template?: string | null;
+    template_shortcuts?: Record<string, string> | null;
     feedback_contact?: string | null;
     terminal_link_click?: "intercept" | "both" | "program" | null;
   },
@@ -1077,6 +1080,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
     skip_host_setup_confirmation: null,
     skip_session_confirmations: null,
     quick_launch_template: null,
+    template_shortcuts: null,
     feedback_contact: null,
     terminal_link_click: null,
   });

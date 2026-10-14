@@ -510,7 +510,7 @@ pub(crate) fn LaunchControls(
                         span { class: "launch-composer-section-label", "{launch_composer::conversation_label(harness)}" }
                         input {
                             class: "named-conversation", r#type: "text", value: conversation,
-                            disabled: busy, autocomplete: "off", spellcheck: "false",
+                            disabled: busy, autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                             placeholder: if conversation_required { "required for this restart" } else { "optional, this start only" },
                             oninput: move |event| { if !busy { on_change.call(event.value()); } },
                             onkeydown: move |event| enter_choice(event, busy, || {}, on_choice_enter),

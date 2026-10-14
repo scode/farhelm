@@ -2792,6 +2792,23 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .templates-quick-mark[aria-pressed="true"] { color: var(--warn); }
 .templates-quick-mark:hover { border-color: var(--border); }
 .templates-quick-mark:disabled { opacity: .4; }
+.templates-number-control { flex: 0 0 auto; }
+.templates-number-key {
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.templates-number-key:hover { border-color: var(--border); }
+.templates-number-key[data-bound="true"] { color: var(--accent); }
+.templates-number-key:disabled { opacity: .4; }
+.templates-number-flyout { z-index: 25; }
+.templates-number-option { justify-content: space-between; gap: 10px; }
+.templates-number-owner { color: var(--fg-2); font-size: 11px; }
+.templates-number-hint { color: var(--fg-2); font-size: 12px; }
 .templates-quick-chord { color: var(--fg-2); font-size: 11px; }
 .templates-quick-state, .templates-quick-hint { color: var(--fg-2); font-size: 12px; }
 .templates-row {

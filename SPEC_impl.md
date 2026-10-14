@@ -856,6 +856,20 @@ edits. Clone/Replace revokes any pending choice, and closing clears the parent o
 search-accept callback as Enter and a clicked search result. Completed read failures follow that callback's ordinary
 refusal behavior; resource refreshes do not reapply the initial choice. Name and template picks do not submit the form.
 
+Number shortcuts use a capture listener with an independently testable physical `Digit0`–`Digit9` matcher. The build's
+Mac-desktop condition selects Meta alone; every other build selects Ctrl+Shift alone, never `navigator.platform`. Ten
+hidden `.template-number-trigger` buttons hand the digit to the same list callback that handles quick launch; the
+existing `.quick-launch-trigger` remains unique. Both callbacks read fresh shortcut preferences and template
+definitions, resolve a name and use the same New-open, template application and submission path. The row's key popup
+uses `menu_panel` keyboard/focus/placement helpers inside modal isolation; Escape closes it without closing Templates.
+The open toggle owns pointerdown until click. Dialog scroll/resize, backdrop resize and the app's layout epoch dismiss
+the popup when its fixed coordinates become stale; the popup's own scrolling does not dismiss it. Focus returns only
+while still owned by a closing menu, with `preventScroll`, so a delayed dismissal cannot steal another popup's focus or
+undo the dialog's scroll. Re-delivery to an already closed popup does nothing. The two shortcut preference fields share
+acknowledgment, deletion retirement and fresh-read overlay helpers. A rename repoints both before deleting the old name,
+and removes a stale new-name key when retaining the old name's key would otherwise violate one-key-per-template. Failed
+repoints keep both names and dirty intent for recovery.
+
 Quick launch uses a separate KeyP capture listener and the same list-owned New-open callback, followed by the ordinary
 template search action and form requestSubmit. The mark is one nullable shared preference rather than template data, so
 a stale editor save cannot move it. Both template delete paths clear only a matching mark in their existing immediate
