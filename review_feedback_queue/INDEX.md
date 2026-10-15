@@ -8,28 +8,14 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`custom-permission-model-choice-erases-draft.md`](custom-permission-model-choice-erases-draft.md) — Choosing a model
-  or re-selecting the same agent can erase unfinished custom permission flags.
-
-- [`failed-feedback-cleanup-loses-evidence.md`](failed-feedback-cleanup-loses-evidence.md) — Cleanup can delete the
-  final test guest after failed feedback checks even when its exported evidence is missing; live evidence loss remains
-  conditional.
-
 - [`ssh-help-fish-command-quoting.md`](ssh-help-fish-command-quoting.md) — A copied SSH help command can execute extra
   commands in fish; runtime reproduction and the scope of the supported-shell rule remain open.
 
 - [`ssh-help-copies-hidden-terminal-controls.md`](ssh-help-copies-hidden-terminal-controls.md) — SSH help copies hidden
   terminal controls without warning; their execution effect depends on the receiving terminal.
 
-- [`interrupted-checkout-retains-evictable-cache-dependency.md`](interrupted-checkout-retains-evictable-cache-dependency.md)
-  — After a hard interruption, a partially cloned repository can still depend on the cache. If the user resumes work
-  there, later cache cleanup can make that repository incomplete.
-
 - [`trash-confirmation-answer-consumes-new-selection.md`](trash-confirmation-answer-consumes-new-selection.md) — If an
   old confirmation event survives a change of pending selection, it could delete the newly selected host’s archives.
-
-- [`save-template-composing-escape-discards-draft.md`](save-template-composing-escape-discards-draft.md) — Cancelling an
-  input-method candidate can close the save-template panel and lose its unsaved name and checkbox choices.
 
 - [`mouse-reporting-drag-activates-file-link.md`](mouse-reporting-drag-activates-file-link.md) — Dragging across a
   program’s hyperlink can still open a website or download a host file when the program handles mouse input.
@@ -76,14 +62,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`native-download-publication-lacks-directory-durability.md`](native-download-publication-lacks-directory-durability.md)
   — A power loss after a successful desktop download can lose its destination entry; acceptance scope is uncertain.
 
-- [`terminal-right-click-recopies-stale-selection.md`](terminal-right-click-recopies-stale-selection.md) — A right-click
-  in a terminal without mouse reporting can replace newer clipboard contents with an old terminal selection.
-
 - [`restart-ignores-retryable-conversation-admission.md`](restart-ignores-retryable-conversation-admission.md) — If the
   latest conversation report cannot be admitted, Restart can still resume the previously recorded conversation.
-
-- [`template-screenshot-implies-deletion-needs-save.md`](template-screenshot-implies-deletion-needs-save.md) — A reader
-  could delete a saved template and close the dialog believing the deletion was never committed.
 
 - [`unit-reader-dollar-decoding-selects-wrong-installation.md`](unit-reader-dollar-decoding-selects-wrong-installation.md)
   — An edited service containing literal dollars can be attributed to another installation during uninstall.
@@ -111,25 +91,12 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`file-disclosure-misses-invisible-path-characters.md`](file-disclosure-misses-invisible-path-characters.md) —
   Different agent-controlled filenames can look identical in the disclosure meant to authorize their download.
 
-- [`git-discovery-fixtures-inherit-bare-git-config.md`](git-discovery-fixtures-inherit-bare-git-config.md) — Running
-  repository-discovery tests can still overwrite configuration belonging to another repository or the user.
-
-- [`browser-git-fixture-can-change-caller-repository.md`](browser-git-fixture-can-change-caller-repository.md) — Running
-  the new browser test with an inherited Git repository selector can change a developer’s repository instead of its
-  temporary fixture.
-
 - [`post-clone-editor-normalizes-literal-carriage-returns.md`](post-clone-editor-normalizes-literal-carriage-returns.md)
   — Editing and saving an existing command can change its executable contents beyond the user's edit, affecting future
   checkouts.
 
 - [`checkout-recovery-requester-not-bound-to-host.md`](checkout-recovery-requester-not-bound-to-host.md) — Checkout
   recovery can accept another host's claimed requester and recover its approved attempt without approval for the sender.
-
-- [`paste-guide-overstates-control-byte-protection.md`](paste-guide-overstates-control-byte-protection.md) — The paste
-  guide promises unseen-keystroke protection even though control bytes such as Ctrl-C remain deliverable.
-
-- [`introduction-promises-universal-reboot-resume.md`](introduction-promises-universal-reboot-resume.md) — The
-  introduction promises conversation recovery after reboot for sessions without Resume reporting.
 
 - [`os-trusted-proxy-can-read-feedback.md`](os-trusted-proxy-can-read-feedback.md) — An OS-trusted interception proxy
   can inspect feedback; its intentional trust policy lacks explicit confidentiality acceptance in the specifications.
@@ -365,3 +332,32 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`teststate-socket-probe-blocks-sweep.md`](teststate-socket-probe-blocks-sweep.md) — A full Unix-socket backlog can
   block the fixture cleanup probe before either cleanup deadline applies.
+
+- [`custom-permission-model-choice-erases-draft.md`](custom-permission-model-choice-erases-draft.md) — Choosing a model
+  or re-selecting the same agent can erase unfinished custom permission flags.
+
+- [`failed-feedback-cleanup-loses-evidence.md`](failed-feedback-cleanup-loses-evidence.md) — Cleanup can delete the
+  final test guest after failed feedback checks even when its exported evidence is missing; live evidence loss remains
+  conditional.
+
+- [`save-template-composing-escape-discards-draft.md`](save-template-composing-escape-discards-draft.md) — Cancelling an
+  input-method candidate can close the save-template panel and lose its unsaved name and checkbox choices.
+
+- [`terminal-right-click-recopies-stale-selection.md`](terminal-right-click-recopies-stale-selection.md) — A right-click
+  in a terminal without mouse reporting can replace newer clipboard contents with an old terminal selection.
+
+- [`template-screenshot-implies-deletion-needs-save.md`](template-screenshot-implies-deletion-needs-save.md) — A reader
+  could delete a saved template and close the dialog believing the deletion was never committed.
+
+- [`git-discovery-fixtures-inherit-bare-git-config.md`](git-discovery-fixtures-inherit-bare-git-config.md) — Running
+  repository-discovery tests can still overwrite configuration belonging to another repository or the user.
+
+- [`browser-git-fixture-can-change-caller-repository.md`](browser-git-fixture-can-change-caller-repository.md) — Running
+  the new browser test with an inherited Git repository selector can change a developer’s repository instead of its
+  temporary fixture.
+
+- [`paste-guide-overstates-control-byte-protection.md`](paste-guide-overstates-control-byte-protection.md) — The paste
+  guide promises unseen-keystroke protection even though control bytes such as Ctrl-C remain deliverable.
+
+- [`introduction-promises-universal-reboot-resume.md`](introduction-promises-universal-reboot-resume.md) — The
+  introduction promises conversation recovery after reboot for sessions without Resume reporting.
