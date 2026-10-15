@@ -3652,13 +3652,37 @@ one named by the Running record in the default state directory or in the one the
 `XDG_STATE_HOME` names are removed; a Farhelm running with an overridden state directory is protected by the "replaced"
 rule for one update only.
 
+Version locks keep a version from being deleted while anything uses it
+(`crates/farhelm-supervisor/src/version_lock.rs`). Every `farhelm` that runs from `Contents/Versions/<v>/farhelm` holds
+a shared `flock` on that file from its first step until it exits, through one open file per process; whatever deletes a
+version first takes an exclusive lock on the same file without waiting, and keeps the version if that fails. The kernel
+drops a lock when the last descriptor sharing it closes, so a killed holder never leaves one behind. Each acquisition
+checks afterwards that the locked file is still the one at the path (same device and inode), because a deletion renames
+the version's folder away while it holds the exclusive lock; a program that finds its version gone, or still exclusively
+held after a five-second wait, refuses with one line saying to run the command again (agent hooks refuse too, silently
+and with status 0, since their stderr is the agent's terminal). Where the filesystem cannot lock, programs run without
+one, as before. Programs outside the layout take no lock.
+
 The forwarder's contract, which a later installer may only replace by rename and only with a script that forwards every
 older invocation the same way: it resolves its own real path (it is reached through `~/.local/bin/farhelm` from a
 terminal) to find the bundle; when `FARHELM_SUPERVISOR_SOCK` is set and a `running-version` exists beside that socket,
-it runs that version, and otherwise the Installed one; it `exec`s `Contents/Versions/<version>/farhelm` with the
-arguments, the caller's environment variables and the standard streams as they are (the shell itself may add `PWD`,
-`SHLVL` and `_`), and prints one line and exits non-zero if that version's folder is missing. It never takes or tests
-`supervisor.lock`.
+it runs that version, and otherwise the Installed one; if the version the Running record names is missing, the
+supervisor that wrote it is not running any more, and it uses the Installed version instead. Before starting the version
+it claims it: it opens that version's `farhelm` on descriptor 8 (written `{ command exec 8<"$path"; } 2>/dev/null`, so a
+failed open neither ends the shell nor prints anything, and the forwarder's own error output is untouched) and runs that
+`farhelm` once as `internal version-lock 8` with all three standard streams on `/dev/null`. The lock that run takes
+belongs to the open file, so it stays after the run exits. Exit status 0 means the version is held: the forwarder
+exports `FARHELM_VERSION_LOCK_FD=8` and `exec`s the version with descriptor 8 still open, and the program adopts that
+descriptor as its own lock (after checking it is its own file), makes it close-on-exec and removes the variable before
+starting anything. Status 2 (a `farhelm` from before version locks rejecting the unknown command) and 69 (the filesystem
+cannot lock) start the version without a lock, with descriptor 8 closed and no variable. Anything else (75: the version
+is gone or still exclusively held) closes descriptor 8 and chooses again, up to three times, then prints one line and
+exits 127. It `exec`s `Contents/Versions/<version>/farhelm` with the arguments, the caller's environment variables and
+the standard streams as they are (the shell itself may add `PWD`, `SHLVL` and `_`, and a claimed start adds
+`FARHELM_VERSION_LOCK_FD`). A missing Installed version also counts as a failed choice, since an install may have moved
+Installed on and pruned that version after it was read: the forwarder reads Installed again, within the same three
+tries, and prints one line and exits non-zero only when the version it read last is still missing. It never takes or
+tests `supervisor.lock`.
 
 The desktop app starts its managed supervisor from `Contents/Versions/<its own compiled version>/farhelm` when its
 bundle has a `Contents/Versions/` folder, and refuses with an error naming the missing folder rather than falling back
@@ -4252,7 +4276,11 @@ wire format:
 - In the Mac app's side-by-side layout (see "Side-by-side versions inside Farhelm.app"): the forwarder at
   `Contents/MacOS/farhelm`, which every session's paths above lead to, and the Running record `running-version` beside
   the supervisor socket, one line naming the running version. A forwarder written by a newer installer reads records
-  written by older supervisors that are still running, so the record's name, place and format stay as they are.
+  written by older supervisors that are still running, so the record's name, place and format stay as they are. The
+  forwarder's version claim binds versions to each other the same way: every later forwarder may run an older or newer
+  `farhelm` as `internal version-lock <fd>`, so that command line, its exit statuses (0 held, 75 choose again, 69 no
+  lock support) and `FARHELM_VERSION_LOCK_FD` keep their meaning, and status 2 keeps meaning a `farhelm` without version
+  locks.
 
 Every path among those values (the hook's program, the reporter variables, the `PATH` entry, the `-e` asset, the
 supervisor socket) must keep naming a working `farhelm` or file after an update. An installer, a change of layout, or a

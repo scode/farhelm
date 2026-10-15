@@ -1130,6 +1130,14 @@ check "file version: the lock was released" [ ! -e "$home/Applications/.farhelm-
 # outlive any one version (SPEC_impl.md, "What running sessions hold across
 # versions"). A synthetic bundle holds the installed forwarder and versions
 # whose farhelm reports its arguments, environment, stdin, pid and exit.
+#
+# The forwarder also claims a version before starting it, by running that
+# version's farhelm once as `internal version-lock 8` (the real lock is the
+# Rust side's, tested there; here only the shell protocol is). The probe
+# answers that claim with $HELPER_EXIT (default 0, "held"), after trying to
+# swallow stdin and printing noise on both streams, so the cases below can
+# prove the claim never touches the caller's streams. In a normal run it
+# reports whether it was handed descriptor 8 and FARHELM_VERSION_LOCK_FD.
 # ===========================================================================
 echo
 echo "== the forwarder =="
@@ -1140,9 +1148,17 @@ for v in 7.0.0 8.0.0; do
   mkdir -p "$FWD_APP/Contents/Versions/$v"
   cat >"$FWD_APP/Contents/Versions/$v/farhelm" <<PROBEEOF
 #!/bin/sh
+if [ "\${1:-}" = internal ] && [ "\${2:-}" = version-lock ]; then
+  cat >/dev/null
+  echo "helper noise"
+  echo "helper noise" >&2
+  exit "\${HELPER_EXIT:-0}"
+fi
 echo "version $v"
 echo "pid \$\$"
 for arg in "\$@"; do printf 'arg [%s]\n' "\$arg"; done
+printf 'lockfd [%s]\n' "\${FARHELM_VERSION_LOCK_FD-unset}"
+if (exec 0<&8) 2>/dev/null; then echo "fd8 [open]"; else echo "fd8 [closed]"; fi
 printf 'probe [%s]\n' "\${FORWARDER_PROBE-unset}"
 env | grep -c '^farhelm_forwarder_' || true
 if [ "\${1:-}" = stdin ]; then cat; fi
@@ -1194,13 +1210,48 @@ check "forwarder: reached through a chain of symlinks, absolute and relative" \
   contains "$(forward "$WORKDIR/forwarder/bin/farhelm")" "version 7.0.0"
 check "forwarder: reached by name on PATH" \
   contains "$(env -i PATH="$WORKDIR/forwarder/bin:/usr/bin:/bin" farhelm)" "version 7.0.0"
-printf '9.9.9\n' >"$FWD_STATE/running-version"
+# The claim. A lock-aware farhelm is handed descriptor 8 and the variable
+# naming it; one from before version locks (it rejects the claim with exit
+# status 2) or on a filesystem that cannot lock (69) is started without
+# either, as before; one that keeps asking to retry (75: its version is gone
+# or being replaced) is not started at all after three tries. In every case
+# the claim leaves the caller's streams alone.
+FWD_CLAIMED=$(forward "$FWD")
+check "forwarder (claim held): the program is handed the lock on descriptor 8" contains "$FWD_CLAIMED" "lockfd [8]"
+check "forwarder (claim held): descriptor 8 is open in the program" contains "$FWD_CLAIMED" "fd8 [open]"
+FWD_OLD=$(forward HELPER_EXIT=2 "$FWD")
+check "forwarder (farhelm without version locks): still runs it" contains "$FWD_OLD" "version 7.0.0"
+check "forwarder (farhelm without version locks): no lock variable" contains "$FWD_OLD" "lockfd [unset]"
+check "forwarder (farhelm without version locks): descriptor 8 is closed" contains "$FWD_OLD" "fd8 [closed]"
+check "forwarder (no lock support): runs it without a lock" \
+  contains "$(forward HELPER_EXIT=69 "$FWD")" "lockfd [unset]"
+check "forwarder: a lock variable from the caller never reaches an unlocked start" \
+  contains "$(forward HELPER_EXIT=2 FARHELM_VERSION_LOCK_FD=5 "$FWD")" "lockfd [unset]"
+FWD_ALL=$(printf 'piped\n' | forward "$FWD" stdin 2>&1)
+check "forwarder: the claim prints nothing on either stream" not_contains "$FWD_ALL" "helper noise"
+check "forwarder: the claim does not consume the caller's stdin" [ "$(printf '%s\n' "$FWD_ALL" | tail -n 1)" = piped ]
 set +e
-FWD_MISSING_ERR=$(forward FARHELM_SUPERVISOR_SOCK="$FWD_STATE/supervisor.sock" "$FWD" 2>&1 >/dev/null)
+FWD_BUSY_ERR=$(forward HELPER_EXIT=75 "$FWD" 2>&1 >/dev/null)
 FWD_RC=$?
 set -e
-check "forwarder (Running names a missing version): exits non-zero" [ "$FWD_RC" -ne 0 ]
-check "forwarder (Running names a missing version): says so in one line" \
+check "forwarder (version stays busy): gives up with exit status 127" [ "$FWD_RC" -eq 127 ]
+check "forwarder (version stays busy): says so in one line" \
+  [ "$FWD_BUSY_ERR" = "farhelm: could not start version 7.0.0 of Farhelm; it is being updated or uninstalled. Run the command again." ]
+
+# A Running record that names a version which is gone means the supervisor
+# that wrote it is not running any more, so the forwarder uses the Installed
+# version rather than failing.
+printf '9.9.9\n' >"$FWD_STATE/running-version"
+check "forwarder (Running names a missing version): falls back to the Installed version" \
+  contains "$(forward FARHELM_SUPERVISOR_SOCK="$FWD_STATE/supervisor.sock" "$FWD")" "version 7.0.0"
+printf '9.9.9\n' >"$FWD_APP/Contents/Versions/installed"
+set +e
+FWD_MISSING_ERR=$(forward "$FWD" 2>&1 >/dev/null)
+FWD_RC=$?
+set -e
+printf '7.0.0\n' >"$FWD_APP/Contents/Versions/installed"
+check "forwarder (Installed names a missing version): exits non-zero" [ "$FWD_RC" -ne 0 ]
+check "forwarder (Installed names a missing version): says so in one line" \
   [ "$FWD_MISSING_ERR" = "farhelm: version 9.9.9 is not installed in $(cd -P "$FWD_APP/Contents/Versions" && pwd -P); reinstall Farhelm" ]
 printf '../7.0.0\n' >"$FWD_STATE/running-version"
 set +e
