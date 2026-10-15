@@ -13266,7 +13266,11 @@
   words there).
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-hand-edited-units-spec.md`.
+- Execution: implemented in jj change `nrvrsmlypxkzspqxrstzzvuvlmsnzxsw`, bookmark
+  `plan/triage-hand-edited-units-spec/02-unit-continuations`; the hand-edited-unit policy in
+  [PR #2041](https://github.com/scode/farhelm/pull/2041/changes) covers this continuation-line case. Feedback file and
+  index entry removed; no additional specification or code change.
+  [PR #2049](https://github.com/scode/farhelm/pull/2049/changes).
 
 ## quick-launch-acknowledgment-revives-previous-mark.md
 
