@@ -174,6 +174,35 @@ test("a clipped file disclosure refuses a click until the window fits", async ({
   }
 });
 
+/** Disclosure and refusal text share one escape policy; CSS must preserve
+ * the spaces in both, otherwise two different host paths can look alike.
+ */
+test("file disclosure and transfer messages preserve path differences", async ({ page, request }) => {
+  const session = await createSession(request, { title: `file-text-${Date.now()}`, cwd: "/tmp", invocation });
+  const raw = "/output/a  b\u034F<U+034F>.txt";
+  const shown = "a  b<U+034F><U+003C>U+034F>.txt";
+  await page.route(`**/api/sessions/${session.id}/files/stat`, route => route.fulfill({
+    json: { status: "ready", host: "fixture", path: raw, size: 8, can_open: true },
+  }));
+  await page.route(`**/api/sessions/${session.id}/files/download`, route => route.fulfill({ status: 403, body: raw }));
+  try {
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await cue(page, "links");
+    const point = await cell(page, "relative/report.txt");
+    const name = page.locator("#terminal .terminal-file-name");
+    await expect(name).toContainText(shown);
+    expect(await name.evaluate(el => getComputedStyle(el).whiteSpace)).toBe("pre-wrap");
+    await page.mouse.click(point.x, point.y);
+    const notice = page.locator("#terminal .terminal-file-message.showing");
+    await expect(notice).toHaveText(`download failed: /output/${shown}`);
+    expect(await notice.evaluate(el => getComputedStyle(el).whiteSpace)).toBe("pre-wrap");
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
 /** Focus the actual terminal input before sending a program cue. */
 async function cue(page: Page, word: string, element = "terminal") {
   // Link redraws repeat the same visible URLs. A fresh sequence prevents a
