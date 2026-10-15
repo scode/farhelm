@@ -8,18 +8,27 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
+- [`devbuild-git-environment-discards-caller-work.md`](devbuild-git-environment-discards-caller-work.md) — The Mac
+  development-build helper can reset and clean another working copy when Git selectors are inherited.
+
+- [`claude-trust-rewrites-unrelated-numbers.md`](claude-trust-rewrites-unrelated-numbers.md) — Trust edits can change
+  unrelated numbers in Claude's settings; consequential real-world values remain unverified.
+
+- [`claude-trust-publish-after-lock-takeover.md`](claude-trust-publish-after-lock-takeover.md) — A paused trust writer
+  may overwrite newer vendor configuration after stale-lock takeover; the vendor interleaving remains unverified.
+
 - [`trash-confirmation-answer-consumes-new-selection.md`](trash-confirmation-answer-consumes-new-selection.md) — If an
   old confirmation event survives a change of pending selection, it could delete the newly selected host’s archives.
 
 - [`mouse-reporting-drag-activates-file-link.md`](mouse-reporting-drag-activates-file-link.md) — Dragging across a
-  program’s hyperlink can still open a website or download a host file when the program handles mouse input.
+  program’s hyperlink can still open a website or transfer a host file; a native modifier-drag can also open the save.
 
 - [`trash-confirmation-scroll-hides-deletion-context.md`](trash-confirmation-scroll-hides-deletion-context.md) — A
   sufficiently tall confirmation opens at its buttons with the selected hosts, totals, or permanent-loss warning above
   the visible area.
 
 - [`wrapped-file-link-partial-redraw-keeps-old-target.md`](wrapped-file-link-partial-redraw-keeps-old-target.md) —
-  Repainting only part of a wrapped link can leave its previous click target active.
+  Repainting only part of a wrapped link can leave its previous click target active, including for native file opening.
 
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
@@ -35,10 +44,11 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   the trash can delete files being used by a retained session’s terminal tab.
 
 - [`file-disclosure-cannot-scroll-oversized-path.md`](file-disclosure-cannot-scroll-oversized-path.md) — A long path can
-  conceal the filename and size before the user downloads an agent-controlled file.
+  conceal required directory and size information before transfer or native opening; the new layout puts the leaf first.
 
 - [`file-disclosure-misses-invisible-path-characters.md`](file-disclosure-misses-invisible-path-characters.md) —
-  Different agent-controlled filenames can look identical in the disclosure meant to authorize their download.
+  Different agent-controlled filenames can look identical in the disclosure meant to authorize transfer or native
+  opening.
 
 - [`checkout-recovery-requester-not-bound-to-host.md`](checkout-recovery-requester-not-bound-to-host.md) — Checkout
   recovery can accept another host's claimed requester and recover its approved attempt without approval for the sender.
@@ -59,6 +69,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   cloned session opens template controls that conceal host-supplied model and folder characters.
 
 ## High priority: material UX degradation
+
+- [`claude-trust-cleanup-delays-desktop-start.md`](claude-trust-cleanup-delays-desktop-start.md) — Retrying trust
+  cleanup behind a stale vendor lock can exceed the app's startup deadline.
 
 - [`bare-cache-fetch-conflicts-with-explicit-git-policy.md`](bare-cache-fetch-conflicts-with-explicit-git-policy.md) —
   Hosts using Git’s safe.bareRepository=explicit setting cannot launch sessions in fresh GitHub checkouts.
@@ -102,8 +115,23 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
+- [`pin-test-skips-owned-session-cleanup.md`](pin-test-skips-owned-session-cleanup.md) — A failed pin browser test can
+  skip its owned session cleanup and leave agents running for later tests.
+
+- [`resume-docs-promise-newest-conversation.md`](resume-docs-promise-newest-conversation.md) — Resume documentation
+  promises the new conversation after clearing, beyond the accepted tracking guarantee.
+
+- [`claude-trust-settings-misses-invalidation.md`](claude-trust-settings-misses-invalidation.md) — Already-open Settings
+  can retain old trust choices after a shared change; the multi-GUI qualifier needs triage.
+
+- [`claude-trust-tests-compare-lexical-temp-paths.md`](claude-trust-tests-compare-lexical-temp-paths.md) — New trust
+  tests assume temporary-directory spellings are canonical and can fail on macOS.
+
+- [`claude-trust-browser-fixtures-escape-cleanup.md`](claude-trust-browser-fixtures-escape-cleanup.md) — A failed
+  trust-hint browser test can leave agents or shared preferences behind.
+
 - [`custom-permission-test-skips-template-cleanup.md`](custom-permission-test-skips-template-cleanup.md) — One failed
-  template deletion skips the remaining custom-permission browser-test fixtures.
+  template deletion skips the remaining custom-permission or permission-switch browser-test fixtures.
 
 - [`number-shortcut-test-skips-session-cleanup.md`](number-shortcut-test-skips-session-cleanup.md) — A failed expanded
   shortcut test can leave its agent sessions running for subsequent tests.
@@ -200,8 +228,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`checkout-composer-test-skips-configuration-restoration.md`](checkout-composer-test-skips-configuration-restoration.md)
   — One cleanup failure can leave later browser tests using this test’s checkout folder and configuration.
 
-- [`pending-folder-save-overwrites-newer-save.md`](pending-folder-save-overwrites-newer-save.md) — After closing and
-  reopening Settings during a slow save, a newer successful save can silently revert to the older folder.
+- [`pending-folder-save-overwrites-newer-save.md`](pending-folder-save-overwrites-newer-save.md) — The ordinary
+  successful-save race is fixed; the record now preserves that reassessment and the accepted unknown-outcome boundary.
 
 - [`listing-regression-fixtures-escape-cleanup.md`](listing-regression-fixtures-escape-cleanup.md) — A failed browser
   test can leave a fixture agent running and affect subsequent tests.

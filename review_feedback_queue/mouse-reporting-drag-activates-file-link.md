@@ -4,8 +4,8 @@ Reviewed commit: 7522d172fce0699cd5e85547a0b536eb821bc13d
 
 ## TLDR
 
-Dragging across a program’s hyperlink can still open a website or download a host file when the program handles mouse
-input.
+Dragging across a program’s hyperlink can still open a website or transfer a host file when the program handles mouse
+input. A native modifier-drag can also open an admitted downloaded document.
 
 ## Details
 
@@ -43,3 +43,23 @@ search output. No Sol reports or working-copy queue additions were read.
 
 Runtime evidence: None run; findings are static review. Native IME delivery and the mouse-reporting browser gesture
 remain unverified at runtime. No files were created, modified or deleted; no fetch, rebase or helper agents.
+
+## Native file opening extends the consequence
+
+Reviewed commit: 1dc0bde65dcb67aa2632fca8e755747263903e96
+
+Suggested bucket: `highest`. Confidence: likely; activation and event forwarding are confirmed statically, but the
+native mouse-reporting modifier-drag was not reproduced. Source: separate adversarial trailing-review agent, desktop and
+devbuild scope. Proposed drop: none; extend this finding rather than duplicate it. A fresh independent reviewer agreed
+that this extension is required for deduplication.
+
+`crates/farhelm-ui/assets/terminal.js:3602–3610` and `terminal-files.js:391–404` retain selection-only drag admission,
+but now forward the mouse event and turn the native modifier into `open: true`. A modifier-drag over an admitted
+`.md`/`.txt` target can therefore save it and dispatch it to the default application.
+`plans/reports/click-to-open-paths.report.md:22–25` acknowledges the remaining mouse-reporting consequence.
+`SPEC.md:2679–2687` at pinned tip requires an explicit modifier-click; it does not authorize drag-triggered opening. The
+fix and regression should cover both transfer and default-app dispatch. No arbitrary execution or credential disclosure
+is established by this extension.
+
+The complete file-opening patch and relevant surrounding activation paths were read. The extension persists at pinned
+tip `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`; native gesture reproduction remains outstanding.

@@ -69,3 +69,22 @@ Truncated relevant output was reread in smaller selections.
 Runtime evidence: None. Static review only; no browser, network-ordering, or filesystem reproduction. Applied the
 supplied checklist to changed tests. No checkout or scratch files created, modified, or deleted; no fetch, rebase, or
 helper agents.
+
+## Trailing-review reassessment after configuration ordering
+
+Reviewed commit: 8caeacb892909a723cf2124a7e2d95ce3a9535f6
+
+Suggested bucket: `other` for the remaining queue-status question. Confidence: confirmed by static lifecycle tracing; no
+runtime reproduction. Source: separate adversarial trailing-review agent, save ordering and host Settings scope.
+Proposed drop: none in this recording-only review; the original ordinary-success trigger is no longer supported by the
+current code. This reassessment preserves the historical reports for triage rather than adding a duplicate queue item.
+
+`crates/farhelm-ui/src/checkout_root.rs:88–94` registers the app-owned save synchronously. The reopened field's initial
+read at `api.rs:525–547` waits for that earlier save, and `checkout_root.rs:33–46,81` keeps the field locked until its
+read succeeds. The original successful-write overtaking sequence is therefore fixed. The addressing commit left this
+record and its index description unchanged despite the queue's Lifecycle rule.
+
+An unanswered save still has an unknown remote outcome, which `SPEC_impl.md:189–192` explicitly accepts. A fresh
+independent reviewer agreed that this acceptance covers timeout/cancellation and later remote application, not ordinary
+acknowledged-success reordering. That different trigger does not establish that the original report persists. Current
+status is unchanged through pinned tip `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`.

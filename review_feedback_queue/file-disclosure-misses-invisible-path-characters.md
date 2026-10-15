@@ -4,7 +4,8 @@ Reviewed commit: a5f5f8213eeb0a1a5161c22cf6260501aca81be9
 
 ## TLDR
 
-Different agent-controlled filenames can look identical in the disclosure meant to authorize their download.
+Different agent-controlled filenames can look identical in the disclosure meant to authorize their transfer or native
+opening.
 
 ## Details
 
@@ -41,3 +42,19 @@ raw target still drives the transfer at terminal-files.js:290–295. The origina
 installation-identity-escape-collision.md queue item concerns installation adoption identities, not downloaded paths. No
 exact acceptance was identified. This presentation remains at the frozen endpoint. No runtime reproduction was run; the
 full reviewed commit diff was read and unchanged dependencies were inspected selectively.
+
+## Native opening uses the same ambiguous disclosure
+
+Reviewed commit: 1dc0bde65dcb67aa2632fca8e755747263903e96
+
+Suggested bucket: `highest`. Confidence: confirmed retention of the Cf-only escape helper; likely visual ambiguity, with
+native harmful reliance unverified. Source: separate adversarial trailing-review agent, desktop and devbuild scope, with
+fresh independent deduplication review. Proposed drop: none.
+
+`terminal-files.js:194–231,283–293` still uses `terminal-links.js:334–337` for the disclosed fragments.
+`terminal-files.js:391–404` now lets a native modifier-click dispatch an admitted `.md`/`.txt` save to its default app.
+The same visually ambiguous path can therefore authorize both transfer and local opening. This adds a consequence to the
+existing presentation defect; it does not establish arbitrary execution or disclosure of a different raw target. The
+full file-opening patch was read. These paths persist at pinned tip `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`. No exact
+acceptance was found; the independent reviewer required this extension before deduplicating the candidate into this
+record.
