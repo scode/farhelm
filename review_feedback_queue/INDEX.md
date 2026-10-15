@@ -30,9 +30,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Different agent-controlled filenames can look identical in the disclosure meant to authorize transfer or native
   opening.
 
-- [`checkout-recovery-requester-not-bound-to-host.md`](checkout-recovery-requester-not-bound-to-host.md) — Checkout
-  recovery can accept another host's claimed requester and recover its approved attempt without approval for the sender.
-
 - [`ntfy-token-follows-changed-server.md`](ntfy-token-follows-changed-server.md) — Changing the notification server can
   send the previous server's access token to the new one.
 

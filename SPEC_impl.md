@@ -1711,16 +1711,16 @@ the same permanent, interactive scope any other helm-mediated create gets. Perma
 requirement for these agent-originated requests: a retry is a new request that the user approves like any other
 (SPEC.md, Agent-spawned sessions), so how long a key is kept is not what authorizes it. A keyed create into a managed
 checkout is the exception: its retry returns or finishes the approved attempt without a new card, which only ever
-completes that exact request for the session that asked (SPEC.md, Local authority and trust between hosts). The current
-implementation remains described here until a separate retention change is made. Session-lifetime scoping is not merely
-unimplemented here — it is not expressible, since the target supervisor may never have heard of the asking session.
-Every kind of key is stored scoped to the asking session by the helm relay, so a key only ever replays for the session
-that used it. Every spawn is an agent `create` placed on the asking session's own host and goes through the helm, so the
-user can be asked first (SPEC.md, Agent-spawned sessions); there is no offline spawn. With `--inherit-agent` the asking
-session's supervisor fills in that session's exact stored launch (`SpawnPlacement::inherited_launch`, overwriting
-whatever the CLI sent) before relaying it, and the helm launches that launch rather than resolving templates and flags.
-A session-authenticated `CreateSession` sent straight to the supervisor is refused outright (protocol 41), so the relay
-is the only way a session creates one.
+completes that exact request for the session that asked, on its host (SPEC.md, Local authority and trust between hosts).
+The current implementation remains described here until a separate retention change is made. Session-lifetime scoping is
+not merely unimplemented here — it is not expressible, since the target supervisor may never have heard of the asking
+session. Every kind of key is stored scoped to the asking session and its host by the helm relay, so a key only ever
+replays for the session that used it. Every spawn is an agent `create` placed on the asking session's own host and goes
+through the helm, so the user can be asked first (SPEC.md, Agent-spawned sessions); there is no offline spawn. With
+`--inherit-agent` the asking session's supervisor fills in that session's exact stored launch
+(`SpawnPlacement::inherited_launch`, overwriting whatever the CLI sent) before relaying it, and the helm launches that
+launch rather than resolving templates and flags. A session-authenticated `CreateSession` sent straight to the
+supervisor is refused outright (protocol 41), so the relay is the only way a session creates one.
 
 The discovery verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is the same whole-fleet listing the UI reads, cut

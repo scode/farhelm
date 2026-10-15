@@ -1142,25 +1142,43 @@ fn on_host<T>(result: anyhow::Result<T>, host_name: &str) -> anyhow::Result<T> {
 }
 
 /// The intent key an agent's create or clone is stored under on the target:
-/// the agent's own key, scoped to the session that asked.
+/// the agent's own key, scoped to the session and authenticated host that asked.
 ///
 /// Keys are chosen by agents, and nothing else in a request records who
 /// asked, so an unscoped key let one session replay another's result: a
 /// child re-running its parent's keyed `farhelm agent create` got the
 /// parent's create back, which is the child itself, printed as "the new
 /// session" (SPEC.md "Agent-spawned sessions": keys are scoped to the asking
-/// session). Hashing the agent's key gives a fixed length, so the scoped key
-/// stays inside the target's intent-key limit whatever the agent sent. Keys
-/// reserved before this scoping no longer match, which only means such a
-/// retry creates afresh.
-fn asker_scoped_intent_key(asking_session: &str, key: Option<String>) -> Option<String> {
+/// session). A supervisor supplies the session ID, so that ID alone cannot
+/// authorize recovery of another host's approved checkout. The host is the
+/// helm's connection origin, never a host named by the request.
+///
+/// Hash the complete scope with length-delimited strings: neither a long
+/// session ID nor an agent key can exceed the target's intent-key limit or
+/// blur component boundaries. Keys reserved before this host binding no
+/// longer match: such a retry is approved afresh and creates a new session
+/// (or checkout) instead of returning the earlier one. The host is the
+/// registry entry the request arrived on, which approvals follow across a
+/// destination change or an adopted identity (SPEC.md, 2026-10-10).
+fn asker_scoped_intent_key(
+    asking_host: HostId,
+    asking_session: &str,
+    key: Option<String>,
+) -> Option<String> {
     use sha2::Digest as _;
     key.map(|key| {
-        let digest: String = sha2::Sha256::digest(key.as_bytes())
+        let mut hash = sha2::Sha256::new();
+        hash.update(asking_host.to_be_bytes());
+        for part in [asking_session, key.as_str()] {
+            hash.update((part.len() as u64).to_be_bytes());
+            hash.update(part.as_bytes());
+        }
+        let digest: String = hash
+            .finalize()
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
-        format!("agent-{asking_session}-{digest}")
+        format!("agent-v2-{digest}")
     })
 }
 
@@ -1268,7 +1286,7 @@ async fn create_for_agent(
         Some(_) => edits.request_fingerprint()?,
         None => None,
     };
-    let intent_key = asker_scoped_intent_key(asking_session, intent_key);
+    let intent_key = asker_scoped_intent_key(origin.host, asking_session, intent_key);
     let resolved = resolve_agent_create(state, origin, &edits).await?;
     if resolved.resolution.github_repo.is_some() {
         // Only the helm turns session-authenticated repository intent into
@@ -2229,7 +2247,11 @@ async fn clone_for_agent(
                 title: Some(title),
                 cols: crate::sessions::default_cols(),
                 rows: crate::sessions::default_rows(),
-                intent_key: asker_scoped_intent_key(asking_session, request.intent_key),
+                intent_key: asker_scoped_intent_key(
+                    origin.host,
+                    asking_session,
+                    request.intent_key,
+                ),
                 github_checkout: None,
                 origin: crate::sessions::CreateOrigin::Agent,
                 // A clone that comes back as the SOURCE or ASKING session is
@@ -2639,32 +2661,36 @@ mod tests {
     use crate::hosts::{HostStateView, HostView, RefreshView};
     use farhelm_proto::{RestartOffer, SessionInfo};
 
-    /// An agent's intent key reaches the target scoped to the session that
-    /// asked, so two sessions using the same key never share a reservation.
+    /// An agent's key belongs to one asking session on one authenticated host,
+    /// including when another host claims the same session ID and raw key.
     ///
     /// Why it matters: nothing else in a create or clone records who asked,
     /// so a child re-running its parent's keyed create used to get the
     /// parent's result back, which is the child itself, reported as the new
     /// session (SPEC.md "Agent-spawned sessions": keys are scoped to the
-    /// asking session). Specified: the same key from two askers yields two
-    /// different stored keys, the same asker and key always the same one,
-    /// no key stays no key, and a key at the target's 512-byte limit still
-    /// yields a scoped key within it.
+    /// asking session). The full tuple must be unambiguous and bounded even
+    /// when the supervisor supplies an unusually long session ID. No key
+    /// stays no key; retrying the same tuple keeps the stored key.
     #[farhelm_testtrace::test]
-    fn agent_intent_keys_are_scoped_to_the_asking_session() {
-        let parent = asker_scoped_intent_key("parent-session", Some("k".into()));
-        let child = asker_scoped_intent_key("child-session", Some("k".into()));
+    fn agent_intent_keys_are_scoped_to_the_asking_host_and_session() {
+        let parent = asker_scoped_intent_key(1, "parent-session", Some("k".into()));
+        let child = asker_scoped_intent_key(1, "child-session", Some("k".into()));
         assert_ne!(parent, child);
+        assert_ne!(
+            parent,
+            asker_scoped_intent_key(2, "parent-session", Some("k".into()))
+        );
         assert_eq!(
             parent,
-            asker_scoped_intent_key("parent-session", Some("k".into()))
+            asker_scoped_intent_key(1, "parent-session", Some("k".into()))
         );
-        assert_eq!(asker_scoped_intent_key("parent-session", None), None);
-        let long = asker_scoped_intent_key(
-            "7c9d1e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
-            Some("x".repeat(512)),
-        )
-        .unwrap();
+        assert_ne!(
+            asker_scoped_intent_key(1, "ab", Some("c".into())),
+            asker_scoped_intent_key(1, "a", Some("bc".into()))
+        );
+        assert_eq!(asker_scoped_intent_key(1, "parent-session", None), None);
+        let long =
+            asker_scoped_intent_key(i64::MAX, &"s".repeat(1024), Some("x".repeat(512))).unwrap();
         assert!(long.len() <= 512, "{}", long.len());
     }
 
@@ -5752,8 +5778,8 @@ mod tests {
             assert_eq!(seen[0].title.as_deref(), Some("source"));
             assert_eq!(
                 seen[0].intent_key,
-                asker_scoped_intent_key("asker", Some("clone-key".to_string())),
-                "the target stores the key scoped to the asking session"
+                asker_scoped_intent_key(local, "asker", Some("clone-key".to_string())),
+                "the target stores the key scoped to the asking host and session"
             );
         }
     }
@@ -6342,8 +6368,8 @@ mod tests {
         );
         assert_eq!(
             seen[0].intent_key,
-            asker_scoped_intent_key("asker", Some("raw-key".to_string())),
-            "the target stores the key scoped to the asking session"
+            asker_scoped_intent_key(local, "asker", Some("raw-key".to_string())),
+            "the target stores the key scoped to the asking host and session"
         );
     }
 
@@ -6581,6 +6607,212 @@ mod tests {
             "{outcome:?}"
         );
         assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    /// Only the originating host can recover its approved managed create.
+    /// A second live host repeats the exact session ID, key and request: it
+    /// must get its own approval card, not the first host's recorded child.
+    /// The scripted target records a reservation only after the first card
+    /// is allowed, and a same-host retry proves that recovery remains usable.
+    #[farhelm_testtrace::test]
+    async fn managed_checkout_recovery_cannot_borrow_another_hosts_approval() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let recorded = Arc::new(std::sync::Mutex::new(None::<(String, String)>));
+        let reservation = Arc::clone(&recorded);
+        let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let mut lookups = Vec::new();
+            let mut creates = 0;
+            loop {
+                let frame = tokio::select! {
+                    _ = &mut finished_rx => break,
+                    frame = reader.read_frame() => frame.unwrap().expect("live target connection"),
+                };
+                let reply = match parse_control(&frame).unwrap() {
+                    ControlMsg::ReconcileGithubCheckout {
+                        req_id,
+                        intent_key,
+                        client_identity,
+                        ..
+                    } => {
+                        let matched = reservation.lock().unwrap().as_ref()
+                            == Some(&(intent_key.clone(), client_identity.clone()));
+                        lookups.push(intent_key);
+                        ControlMsg::GithubCheckoutReconciled {
+                            req_id,
+                            session: matched.then(|| session("approved-child", 100)),
+                        }
+                    }
+                    ControlMsg::GithubCheckoutPreview { req_id, request } => {
+                        ControlMsg::GithubCheckoutPreviewed {
+                            req_id,
+                            preview: farhelm_proto::GithubPreviewResponse {
+                                canonical_root: "/checkouts".into(),
+                                basename: "project".into(),
+                                cwd: "/checkouts/project".into(),
+                                config_revision: request.config_revision.unwrap(),
+                                claim_context: farhelm_proto::ClaimContext {
+                                    host: request.host.unwrap(),
+                                    incarnation: request.expected_incarnation.unwrap(),
+                                },
+                            },
+                        }
+                    }
+                    ControlMsg::CreateSession {
+                        req_id,
+                        intent_key,
+                        github_checkout,
+                        ..
+                    } => {
+                        creates += 1;
+                        let key = intent_key.expect("keyed managed create");
+                        let checkout = github_checkout.expect("managed payload");
+                        assert!(
+                            reservation.lock().unwrap().is_none(),
+                            "only one approved dispatch"
+                        );
+                        *reservation.lock().unwrap() = Some((key, checkout.client_identity));
+                        ControlMsg::SessionCreated {
+                            req_id,
+                            session: session("approved-child", 100),
+                        }
+                    }
+                    other => panic!("unexpected target request: {other:?}"),
+                };
+                writer.write_control(&reply).await.unwrap();
+            }
+            (creates, lookups)
+        });
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        for host in [local, remote] {
+            h.store
+                .set_commands_without_asking(host, false)
+                .await
+                .unwrap();
+        }
+        h.store.set_checkout_root(None, "/checkouts").await.unwrap();
+        let _gui = h.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let create = || {
+            let mut request = command_create(
+                "user@builder",
+                "/unused",
+                "echo hi",
+                Some("project"),
+                Some("shared-key"),
+            );
+            let AgentVerb::Create { edits, .. } = &mut request else {
+                unreachable!()
+            };
+            edits.destination = Some(farhelm_proto::launcher::TemplateDestination::Github(
+                "owner/project".into(),
+            ));
+            request
+        };
+        let first_origin = origin_of(&h, local);
+        let second_origin = origin_of(&h, remote);
+        assert_ne!(first_origin.host, second_origin.host);
+        assert!(
+            recorded.lock().unwrap().is_none(),
+            "premise: no approved attempt yet"
+        );
+        let asking = Arc::clone(&handler);
+        let first =
+            tokio::spawn(async move { asking.handle(first_origin, "asker", create()).await });
+        await_card(&h, &first).await;
+        assert!(
+            recorded.lock().unwrap().is_none(),
+            "waiting must not record a create"
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let first = first.await.unwrap();
+        assert!(
+            matches!(
+                first,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "{first:?}"
+        );
+        assert!(
+            recorded.lock().unwrap().is_some(),
+            "premise: approved reservation exists"
+        );
+
+        // A recovery bypasses a second card only for the same live origin.
+        let retry = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            handler.handle(first_origin, "asker", create()),
+        )
+        .await
+        .expect("same-host recovery must not wait for another approval");
+        assert!(
+            matches!(
+                retry,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "{retry:?}"
+        );
+        assert!(h.state.approvals.list().is_empty());
+        let asking = Arc::clone(&handler);
+        let second =
+            tokio::spawn(async move { asking.handle(second_origin, "asker", create()).await });
+        let card = await_card(&h, &second).await;
+        assert_eq!(
+            card.session.id, "asker",
+            "the hostile host repeats the claimed session ID"
+        );
+        assert_eq!(
+            answer_card(&h, "deny").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let second = second.await.unwrap();
+        assert!(
+            matches!(
+                second,
+                AgentOutcome::Err {
+                    kind: ErrorKind::Unauthorized,
+                    ..
+                }
+            ),
+            "{second:?}"
+        );
+        assert!(
+            !responder.is_finished(),
+            "the target must still be observing leaked dispatches"
+        );
+        finished_tx.send(()).unwrap();
+        let (creates, lookups) = responder.await.unwrap();
+        assert_eq!(
+            creates, 1,
+            "only the explicitly approved request was dispatched"
+        );
+        assert_eq!(
+            lookups.len(),
+            4,
+            "initial lookup, post-approval lookup, recovery, other-host lookup"
+        );
+        assert_eq!(lookups[0], lookups[1]);
+        assert_eq!(lookups[0], lookups[2]);
+        assert_ne!(
+            lookups[0], lookups[3],
+            "a second host cannot name the first reservation"
+        );
     }
 
     /// Spec: on a host that asks before YOLO launches, an agent's command

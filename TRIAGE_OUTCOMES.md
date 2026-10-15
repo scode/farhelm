@@ -13715,7 +13715,10 @@
 - Completion criteria: a keyed create or clone repeated from a different host never reconciles with another host's
   attempt and goes through ordinary approval; a retry from the same host and session still finishes its approved
   attempt. Covered by a regression test. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/checkout-recovery-host-binding.md`.
+- Execution: `complete`; create and clone retry keys now bind the helm-known requesting host, asking session and raw key
+  with a fixed-length digest. A regression covers approval, same-host recovery and a second host repeating the request.
+  Change `txmwnsww`, bookmark `plan/checkout-recovery-host-binding/01-host-bound-key`,
+  [PR #2086](https://github.com/scode/farhelm/pull/2086/changes).
 
 ## claude-trust-rewrites-unrelated-numbers.md
 
