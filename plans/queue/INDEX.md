@@ -5,4 +5,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 1b33bf] `confirmations-save-error.md` — Settings shows an error when turning session confirmations back on fails to save
 - [complete] `legacy-template-edits-gated.md` — Older templates: no silent command edits and no Undo that cannot work, only if trivially fixable
 - [in-flight acd148] `post-clone-carriage-return-gated.md` — Post-clone command: no silent carriage-return changes on edit, only if trivially fixable
-- [pending] `guarded-default-and-escalation-banner.md` — Guarded is the default for every agent that supports it (OMP changes), and a banner when an agent switch escalates the permission mode
+- [in-flight 215ee8] `guarded-default-and-escalation-banner.md` — Guarded is the default for every agent that supports it (OMP changes), and a banner when an agent switch escalates the permission mode
