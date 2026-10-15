@@ -282,9 +282,18 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
 # named by running-version beside $FARHELM_SUPERVISOR_SOCK; anywhere else it
 # runs the installed one, named by Contents/Versions/installed. Arguments,
 # the caller's environment variables and standard streams pass through as
-# they are (the shell itself may add PWD, SHLVL and _). Written by Farhelm's
-# installer; replaced only by a newer one that forwards everything this one
-# does the same way.
+# they are (the shell itself may add PWD, SHLVL and _; descriptor 8 is the
+# forwarder's own, see below). Written by Farhelm's installer; replaced only
+# by a newer one that forwards everything this one does the same way.
+#
+# Before starting a version, the forwarder claims it, so an install or an
+# uninstall cannot delete it between the choice and the start: it opens the
+# version's farhelm on descriptor 8 and has that farhelm, run once with no
+# streams, take a shared lock on it. The lock belongs to the open file, so it
+# stays after that run exits and is carried, through descriptor 8 and
+# FARHELM_VERSION_LOCK_FD, into the program started next, which adopts it. A
+# farhelm that predates version locks rejects the claim as an unknown command
+# (exit status 2) and is started without one, as before.
 farhelm_forwarder_self=$0
 case $farhelm_forwarder_self in
   */*) ;;
@@ -301,24 +310,67 @@ farhelm_forwarder_versions=$(CDPATH='' cd -P -- "${farhelm_forwarder_self%/*}/..
   printf 'farhelm: cannot find the Versions folder beside %s\n' "$farhelm_forwarder_self" >&2
   exit 127
 }
-farhelm_forwarder_version=
-if [ -n "${FARHELM_SUPERVISOR_SOCK:-}" ] && [ -f "${FARHELM_SUPERVISOR_SOCK%/*}/running-version" ]; then
-  IFS= read -r farhelm_forwarder_version <"${FARHELM_SUPERVISOR_SOCK%/*}/running-version" || :
-fi
-if [ -z "$farhelm_forwarder_version" ] && [ -f "$farhelm_forwarder_versions/installed" ]; then
-  IFS= read -r farhelm_forwarder_version <"$farhelm_forwarder_versions/installed" || :
-fi
-case $farhelm_forwarder_version in
-  '' | .* | */*)
-    printf 'farhelm: no installed version is recorded in %s; reinstall Farhelm\n' "$farhelm_forwarder_versions" >&2
+unset FARHELM_VERSION_LOCK_FD
+farhelm_forwarder_use_running=1
+farhelm_forwarder_attempt=0
+while [ "$farhelm_forwarder_attempt" -lt 3 ]; do
+  farhelm_forwarder_attempt=$((farhelm_forwarder_attempt + 1))
+  farhelm_forwarder_version=
+  farhelm_forwarder_from_running=0
+  if [ "$farhelm_forwarder_use_running" = 1 ] && [ -n "${FARHELM_SUPERVISOR_SOCK:-}" ] && [ -f "${FARHELM_SUPERVISOR_SOCK%/*}/running-version" ]; then
+    IFS= read -r farhelm_forwarder_version <"${FARHELM_SUPERVISOR_SOCK%/*}/running-version" || :
+    farhelm_forwarder_from_running=1
+  fi
+  if [ -z "$farhelm_forwarder_version" ] && [ -f "$farhelm_forwarder_versions/installed" ]; then
+    IFS= read -r farhelm_forwarder_version <"$farhelm_forwarder_versions/installed" || :
+    farhelm_forwarder_from_running=0
+  fi
+  case $farhelm_forwarder_version in
+    '' | .* | */*)
+      printf 'farhelm: no installed version is recorded in %s; reinstall Farhelm\n' "$farhelm_forwarder_versions" >&2
+      exit 127
+      ;;
+  esac
+  farhelm_forwarder_program=$farhelm_forwarder_versions/$farhelm_forwarder_version/farhelm
+  if [ ! -x "$farhelm_forwarder_program" ]; then
+    if [ "$farhelm_forwarder_from_running" = 1 ]; then
+      # The Running record names a version that is gone, so the supervisor
+      # that wrote it is not running any more: use the Installed version.
+      farhelm_forwarder_use_running=0
+      continue
+    fi
+    if [ "$farhelm_forwarder_attempt" -lt 3 ]; then
+      # Installed may have moved on since it was read, and an install may
+      # then have pruned the version it named: read Installed again rather
+      # than fail on a choice that is already stale.
+      continue
+    fi
+    printf 'farhelm: version %s is not installed in %s; reinstall Farhelm\n' "$farhelm_forwarder_version" "$farhelm_forwarder_versions" >&2
     exit 127
-    ;;
-esac
-if [ ! -x "$farhelm_forwarder_versions/$farhelm_forwarder_version/farhelm" ]; then
-  printf 'farhelm: version %s is not installed in %s; reinstall Farhelm\n' "$farhelm_forwarder_version" "$farhelm_forwarder_versions" >&2
-  exit 127
-fi
-exec "$farhelm_forwarder_versions/$farhelm_forwarder_version/farhelm" "$@"
+  fi
+  # `command` keeps a failed open from ending the shell (POSIX makes a failed
+  # redirection on the exec special built-in fatal); the braces send only the
+  # open's own error to /dev/null, not the forwarder's later error output.
+  if { command exec 8<"$farhelm_forwarder_program"; } 2>/dev/null; then
+    "$farhelm_forwarder_program" internal version-lock 8 </dev/null >/dev/null 2>/dev/null
+    case $? in
+      0)
+        FARHELM_VERSION_LOCK_FD=8
+        export FARHELM_VERSION_LOCK_FD
+        exec "$farhelm_forwarder_program" "$@"
+        ;;
+      2 | 69)
+        # No version locks here: a farhelm from before them, or a
+        # filesystem that cannot lock. Start it as before.
+        exec 8<&-
+        exec "$farhelm_forwarder_program" "$@"
+        ;;
+    esac
+    exec 8<&-
+  fi
+done
+printf 'farhelm: could not start version %s of Farhelm; it is being updated or uninstalled. Run the command again.\n' "$farhelm_forwarder_version" >&2
+exit 127
 FORWARDER_EOF
   }
 
