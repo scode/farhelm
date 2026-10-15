@@ -7,7 +7,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing 64c3d4] `checkout-recovery-host-binding.md` — Agent creates into managed checkouts: retry replay bound to the asking host
 - [landing 64e5f6] `claude-trust-decimals.md` — Claude checkout trust edits keep unrelated numbers in Claude's settings exact
 - [in-flight 5a86d6] `ntfy-token-server-change.md` — Waiting alerts: changing the ntfy server's origin drops the saved token, and Settings says so
-- [complete] `codex-guide-hook-warning.md` — Codex docs page stops calling the hook warning harmless
+- [landing 64a7b8] `codex-guide-hook-warning.md` — Codex docs page stops calling the hook warning harmless
 - [pending] `browser-test-cleanup.md` — Browser tests clean up their sessions, templates, preferences and fixtures even when an earlier step fails (20 triage outcomes, each gated)
 - [in-flight 42f6c8] `rust-test-portability.md` — Rust tests stop failing on macOS temp paths and APFS names, wait for real completion, keep Git config out of fixtures, and the test-state sweep cannot hang (6 outcomes, each gated)
 - [in-flight 3935e5] `remote-uninstall-fixes.md` — Remote uninstall finishes on hosts with uutils coreutils and after an interrupted run, and its fixture test runs off GNU systems (3 outcomes, each gated)
