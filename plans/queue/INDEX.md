@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 60c6cd] `terminal-link-safety.md` — Terminal links act only on a real click, on the target the hover honestly shows (four triage outcomes, three complexity gated)
 - [in-flight b212b8] `triage-layout-filter-and-devbuild.md` — Review queue: add the oversized-dialog filter and drop two layout findings under it, discard the devbuild finding
-- [pending] `deliberate-setup-spec.md` — SPEC.md: proportionate precautions against deliberate local setup (OS-trusted proxy, retargeted symlink)
+- [in-flight 3d5574] `deliberate-setup-spec.md` — SPEC.md: proportionate precautions against deliberate local setup (OS-trusted proxy, retargeted symlink)
 - [pending] `trash-unchecked-wording.md` — Trash cleanup's unchecked-entry text warns that verifiable entries are deleted permanently
 - [pending] `adopt-identity-escaping.md` — Adopt prompt: distinct installation identities never render alike
 - [pending] `template-editor-unsafe-values.md` — Template editor shows hidden characters in model and folder, read-only like commands
