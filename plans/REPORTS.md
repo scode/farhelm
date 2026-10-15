@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`triage-bookkeeping-round-two`](reports/triage-bookkeeping-round-two.report.md) landed 2026-10-12 in #1931: 11 triage outcomes: remove 9 discarded review-queue findings, fold the create-rollback case into the systemd TODO entry, and add a Maybe later TODO for macOS mixed-scale window restore (one PR, no code or spec change)
 - [`dev-tooling-robustness-fixes`](reports/dev-tooling-robustness-fixes.report.md) landed 2026-10-12 in #1935: 9 triage outcomes: small robustness fixes in deflake, the recorder, the release smoke check, the brick test, the preview script, README hero staging and a tmux test helper; each discarded instead if its fix is not small
 - [`browser-oracle-and-fixture-fixes`](reports/browser-oracle-and-fixture-fixes.report.md) landed 2026-10-12 in #1930: 12 triage outcomes: browser specs that can pass while their behavior is broken, or skip cleanup after a failure (one test-only PR)
 - [`ui-retry-and-notice-fixes`](reports/ui-retry-and-notice-fixes.report.md) landed 2026-10-12 in #1936: 3 triage outcomes: Replace retries reuse their request key, an "outcome unknown" uninstall notice when the window never saw it finish, and a note when a paste leaves an item out
