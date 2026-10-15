@@ -212,6 +212,12 @@ pub(crate) async fn cleanup_launch_artifacts(
 /// The sentinel goes first: it is the one whose survival changes a
 /// classification, so if only one of the two removals gets to run, that is
 /// the one worth having run.
+///
+/// The interrupted attempt's version-hold marks (`crate::session_hold`)
+/// go too: the new attempt writes its own at the same paths, and a mark
+/// left over from the old one must not stand in for it. Their pids already
+/// keep a leftover from matching; clearing them keeps the shutdown wait and
+/// the keeper from ever having to rely on that alone.
 pub(crate) async fn clear_launch_artifacts_fail_closed(
     state_dir: &Path,
     id: &str,
@@ -220,7 +226,17 @@ pub(crate) async fn clear_launch_artifacts_fail_closed(
     let spec_path = crate::launch::spec_path_for_launch(state_dir, id, generation);
     let status_path = crate::launch::status_path_for_spec(&spec_path);
     remove_fail_closed(&status_path, "the previous launch's sentinel").await?;
-    remove_fail_closed(&spec_path, "the previous launch's spec").await
+    remove_fail_closed(&spec_path, "the previous launch's spec").await?;
+    remove_fail_closed(
+        &crate::session_hold::held_mark_path(&spec_path),
+        "the previous launch's held mark",
+    )
+    .await?;
+    remove_fail_closed(
+        &crate::session_hold::launched_mark_path(&spec_path),
+        "the previous launch's launched mark",
+    )
+    .await
 }
 
 /// Remove every launch spec and sentinel belonging to `session_id`, across
@@ -377,6 +393,12 @@ pub(crate) async fn remove_fail_closed(path: &Path, what: &str) -> Result<(), St
 /// `sessions` maps each session still on record to its current launch
 /// generation, so a live session's superseded specs are removed too.
 ///
+/// The version-hold marks (`.held`, `.launched`; `crate::session_hold`)
+/// follow the spec rather than the sentinel: they are evidence of nothing
+/// once their launch is over, so an unknown session's marks go with its
+/// spec, and a live session's current marks stay, since its keeper may
+/// still be waiting for "launched".
+///
 /// Best-effort and log-only: this sweep is tidiness rather than a
 /// credential boundary (a spec holds nothing the session's own database row
 /// does not already hold for the session's lifetime; see SPEC_impl.md's
@@ -441,7 +463,7 @@ pub(crate) async fn sweep_launch_dir(
             //   The CURRENT launch's files are kept even unread: its shim may
             //   still be mid-flight.
             match sessions.get(id) {
-                None => name.ends_with(".json"),
+                None => !name.ends_with(".status"),
                 Some(current) => generation < *current,
             }
         } else {
@@ -544,7 +566,9 @@ mod tests {
         let state = std::path::Path::new("/state");
         let spec = crate::launch::spec_path_for_launch(state, "sess-1", 7);
         let status = crate::launch::status_path_for_spec(&spec);
-        for path in [&spec, &status] {
+        let held = crate::session_hold::held_mark_path(&spec);
+        let launched = crate::session_hold::launched_mark_path(&spec);
+        for path in [&spec, &status, &held, &launched] {
             let name = path.file_name().unwrap().to_string_lossy();
             assert_eq!(
                 crate::launch::parse_launch_file_name(&name),
@@ -652,6 +676,65 @@ mod tests {
         assert!(
             launch_dir.join("live.2.status").exists(),
             "the current launch's sentinel is its classifier's evidence and must stay"
+        );
+    }
+
+    /// The version-hold marks follow their launch's spec through every
+    /// cleanup: the startup sweep removes an unknown session's marks and a
+    /// superseded launch's, and keeps the current launch's (its keeper may
+    /// still be waiting for "launched"); a retake clears the interrupted
+    /// attempt's so its marks cannot stand in for the new attempt's; delete
+    /// removes them with the rest. Without this, the marks of every session
+    /// ever launched in the Mac app would pile up in the launch directory.
+    #[farhelm_testtrace::test]
+    async fn version_hold_marks_go_with_their_launch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let launch_dir = tmp.path().join("launch");
+        std::fs::create_dir(&launch_dir).unwrap();
+        for name in [
+            "gone.0.held",
+            "gone.0.launched",
+            "live.1.held",
+            "live.1.launched",
+            "live.2.held",
+            "live.2.launched",
+        ] {
+            std::fs::write(launch_dir.join(name), b"123\n").unwrap();
+        }
+        let sessions = std::collections::HashMap::from([("live".to_string(), 2)]);
+        sweep_launch_dir(&launch_dir, &sessions).await;
+        for (name, kept) in [
+            ("gone.0.held", false),
+            ("gone.0.launched", false),
+            ("live.1.held", false),
+            ("live.1.launched", false),
+            ("live.2.held", true),
+            ("live.2.launched", true),
+        ] {
+            assert_eq!(
+                launch_dir.join(name).exists(),
+                kept,
+                "{name} after the sweep"
+            );
+        }
+
+        clear_launch_artifacts_fail_closed(tmp.path(), "live", 2)
+            .await
+            .expect("a retake clears the interrupted attempt's marks");
+        assert!(!launch_dir.join("live.2.held").exists());
+        assert!(!launch_dir.join("live.2.launched").exists());
+
+        for name in ["live.3.held", "live.3.launched", "other.0.held"] {
+            std::fs::write(launch_dir.join(name), b"123\n").unwrap();
+        }
+        remove_launch_artifacts_for_session(tmp.path(), "live")
+            .await
+            .expect("delete removes the session's marks");
+        assert!(!launch_dir.join("live.3.held").exists());
+        assert!(!launch_dir.join("live.3.launched").exists());
+        assert!(
+            launch_dir.join("other.0.held").exists(),
+            "another session's mark is not this delete's"
         );
     }
 
