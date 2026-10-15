@@ -58,9 +58,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`claude-trust-settings-misses-invalidation.md`](claude-trust-settings-misses-invalidation.md) — Already-open Settings
   can retain old trust choices after a shared change; the multi-GUI qualifier needs triage.
 
-- [`claude-trust-tests-compare-lexical-temp-paths.md`](claude-trust-tests-compare-lexical-temp-paths.md) — New trust
-  tests assume temporary-directory spellings are canonical and can fail on macOS.
-
 - [`claude-trust-browser-fixtures-escape-cleanup.md`](claude-trust-browser-fixtures-escape-cleanup.md) — A failed
   trust-hint browser test can leave agents or shared preferences behind.
 

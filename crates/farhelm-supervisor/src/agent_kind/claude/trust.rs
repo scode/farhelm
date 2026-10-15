@@ -298,20 +298,23 @@ mod tests {
     #[farhelm_testtrace::test]
     fn trust_round_trip_preserves_other_keys_mode_and_symlink() {
         let dir = tempfile::tempdir().unwrap();
-        let config = dir.path().join("vendor.json");
-        let alias = dir.path().join(".claude.json");
-        let before = serde_json::json!({"unrelated":{"nested":[1,true,"value"]},"projects":{"other":{"hasTrustDialogAccepted":true},dir.path().to_str().unwrap():{"keep":42}}});
+        // Trust records use canonical paths. Seed the same project key even
+        // when the platform's temporary directory is reached through a symlink.
+        let root = fs::canonicalize(dir.path()).unwrap();
+        let config = root.join("vendor.json");
+        let alias = root.join(".claude.json");
+        let before = serde_json::json!({"unrelated":{"nested":[1,true,"value"]},"projects":{"other":{"hasTrustDialogAccepted":true},root.to_str().unwrap():{"keep":42}}});
         fs::write(&config, serde_json::to_vec(&before).unwrap()).unwrap();
         fs::set_permissions(&config, fs::Permissions::from_mode(0o640)).unwrap();
         std::os::unix::fs::symlink(&config, &alias).unwrap();
         let env = Environment {
-            home: dir.path().into(),
+            home: root.clone(),
             config_dir: None,
             custom_oauth: false,
         };
-        let record = resolve(&env, dir.path()).unwrap().unwrap();
+        let record = resolve(&env, &root).unwrap().unwrap();
         assert_eq!(record.config_path, config);
-        assert_eq!(record.lock_path, dir.path().join(".claude.json.lock"));
+        assert_eq!(record.lock_path, root.join(".claude.json.lock"));
         assert!(
             !before["projects"][&record.project_path]
                 .as_object()
