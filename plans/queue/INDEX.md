@@ -16,7 +16,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight f7114d] `docs-accuracy-fixes.md` — The paste guide and resume docs stop overpromising, and the docs preview refreshes release notes on edit (3 outcomes, each gated)
 - [complete] `host-picker-dotted-i.md` — Typing İ repeatedly in the host picker cycles through hosts whose names start with it (gated)
 - [in-flight 9ced4b] `setup-advice-state-directory.md` — Setup's sign-in advice names the state directory when it came from the environment (gated)
-- [in-flight 5530a8] `copy-guidance-resize.md` — The "this drag did not copy" notice is measured at its origin so narrowing the window does not collapse it (gated)
+- [pending] `copy-guidance-resize.md` — The "this drag did not copy" notice is measured at its origin so narrowing the window does not collapse it (gated)
 - [in-flight 261ce4] `brick-test-feedback-evidence.md` — The release brick test keeps the final guest when failed feedback checks' exported evidence is missing (gated)
 - [pending] `managed-checkout-row-accessibility.md` — Full-size session rows for managed checkouts expose the working folder and trash note to screen readers (gated)
 - [pending] `download-long-name-copies.md` — A second desktop download of a file with a near-limit name shortens the stem so the numbered copy fits (gated)
