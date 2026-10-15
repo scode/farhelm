@@ -624,10 +624,25 @@ checkouts: when it last checked, or when and why it stopped. An idle monitor che
 `running` line whose last check is more than about two and a half hours old means it has probably died; say so. A
 missing log means no monitor has run on this machine, and nothing is landing. Add any flags `queue status` raises.
 
-For each landed plan, start with plain-language context (root `AGENTS.md` "Talking to the user"): what the work was
-about, in product terms. Then walk the maintainer through the report rather than pasting it: what landed, the things
-they should know, the open questions and possible follow-ups, anything the Landing section adds (what it landed
-alongside, fixes made while landing), and a link to the full report on GitHub,
+By default, the landed plans are reviewed on one page rather than one at a time in conversation. The maintainer chose
+this on 2026-10-14. Publish one `scode-snippets` snippet holding every report in `REPORTS.md`, oldest first. Each report
+is rendered in full, with its PRs and summary line, followed by an "approve" checkbox and a free-text comment field. A
+button at the bottom copies every choice as one block of text that the maintainer pastes back into the session. Give
+them the snippet's link, then act on the pasted block:
+
+- a ticked box is an approval (`queue approve` below);
+- a comment with an instruction is that instruction, whether or not the box is ticked: a follow-up, a TODO.md entry, a
+  question to answer, or anything else it asks for. Ask in conversation only where the comment is unclear;
+- an unticked report without a comment means the maintainer did not get to it. Leave it for later. It is never a
+  follow-up or a rejection.
+
+The one-at-a-time walkthrough below is used when the maintainer asks for it. Blocked plans are still presented one at a
+time in conversation, because each needs an answer.
+
+When walking through a landed plan one at a time, start with plain-language context (root `AGENTS.md` "Talking to the
+user"): what the work was about, in product terms. Then walk the maintainer through the report rather than pasting it:
+what landed, the things they should know, the open questions and possible follow-ups, anything the Landing section adds
+(what it landed alongside, fixes made while landing), and a link to the full report on GitHub,
 `https://github.com/<OWNER/NAME>/blob/main/plans/reports/<slug>.report.md`. Then ask for a decision:
 
 - approve: `queue approve`, which removes the plan's `REPORTS.md` line, its plan file and its report. The work stays on
