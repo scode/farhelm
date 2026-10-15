@@ -51,3 +51,26 @@ Implementation stayed in the main session under the no-workhorse requirement. Re
 wording readers used gpt-6.1-sol at medium effort. Review decisions and external per-turn usage are retained in the
 private galaxy-brain session record; exact reported model attribution, native-reader usage and main-session usage are
 unavailable. The delivery report also receives the required native cold read.
+
+### Landing
+
+Landed as #2033, after settings-lockout-scope (#2032) in the same round; the two share nothing but TODO.md, where each
+removed its own entry and both removals were kept in the rebase. Main had also gained a change to the release brick-test
+tooling, which does not touch the supervisor.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. The test checks the live, in-memory capture and the restart
+offer the session list publishes, not only the stored rows: Resume after the definitive failure, Not captured after
+success. It would fail if the rollback were removed or if the published entry kept the old conversation after success.
+The injected failure is a genuinely definitive pre-start failure after the generation advanced, and the test confirms
+that. One nit left as is: its docstring calls the restart path "public", though it is crate-internal.
+
+#### Checks
+
+- Run now, on the rebased tree: `cargo fmt --all -- --check`, `dprint check TODO.md`, the sleep checker (299 delays,
+  none missing a reason), `cargo clippy -p farhelm-supervisor --all-targets -- -D warnings`, and the new test through
+  the recorder with pinned tmux, run `f47fe52d-a2b8-4706-b4a7-804adfa4e456`: 1 passed. The 1117 skips are other tests
+  outside the selection.
+- Reused: the executor's four recorded runs of the same test.
+- Not run: anything wider; only this test and TODO.md changed.
