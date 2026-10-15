@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`ui-retry-and-notice-fixes`](reports/ui-retry-and-notice-fixes.report.md) landed 2026-10-12 in #1936: 3 triage outcomes: Replace retries reuse their request key, an "outcome unknown" uninstall notice when the window never saw it finish, and a note when a paste leaves an item out
 - [`codex-resident-launcher`](reports/codex-resident-launcher.report.md) landed 2026-10-13 in #1945: capture a Codex session's conversation through a launcher named `codex` that stays running as Codex's parent, by pinning the first reporting Codex process
 - [`feedback-dialog-polish`](reports/feedback-dialog-polish.report.md) landed 2026-10-13 in #1946: restyle the send feedback dialog to match the approved mockup: header with ×, dark fields, quiet labels, pinned footer
 - [`app-settings-pinned`](reports/app-settings-pinned.report.md) landed 2026-10-13 in #1949: pin the app settings dialog's header and footer, add an × close, and group the settings into sections, per the approved mockup
