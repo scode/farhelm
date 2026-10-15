@@ -13669,7 +13669,8 @@
 - Completion criteria: distinct raw identities, including ones containing literal escape notation and the empty value,
   always render differently in the adopt prompt and mismatch evidence, with a regression test. Remove this feedback file
   and its index entry.
-- Execution: planned in `plans/queue/adopt-identity-escaping.md`.
+- Execution: complete in change `ouzmpnsskyksvkozttoxlnllpznlqsqt`, bookmark
+  `plan/adopt-identity-escaping/01-identity-escape`; PR https://github.com/scode/farhelm/pull/2083/changes.
 
 ## file-disclosure-misses-invisible-path-characters.md
 
