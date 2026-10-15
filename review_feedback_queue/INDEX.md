@@ -66,9 +66,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`guarded-choice-becomes-omp-yolo.md`](guarded-choice-becomes-omp-yolo.md) — Switching the launcher to OMP can clear
   an explicit guarded choice and select YOLO.
 
-- [`codex-upgrade-replays-legacy-selection.md`](codex-upgrade-replays-legacy-selection.md) — Pending reports spanning an
-  offline upgrade can restore a discarded Codex conversation and send Restart to it.
-
 - [`installation-identity-escape-collision.md`](installation-identity-escape-collision.md) — Distinct peer-chosen
   installation identities can display identically in an adoption prompt.
 
