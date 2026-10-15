@@ -50,3 +50,38 @@ The prescribed fresh-context gpt-6.1-sol review at high effort, through the exte
 after reading the complete diff, plan, triage decision and surrounding selection, confirmation and deletion code. Commit
 and PR wording passed a separate fresh-context cold read after the title was clarified. No scope departure or unresolved
 finding remains.
+
+### Landing
+
+Landed as #2080, the first of the round's two plans; triage-layout-filter-and-devbuild (#2076, #2079, #2081) landed
+after it. Main had gained a batch of 50 triage decisions (#2082) and plan bookkeeping, which touch no trash code; the
+rebase met an index conflict where both sides removed entries, and both removals were kept.
+
+#### Review
+
+An independent fresh-context review found the new text accurate in every case, checked against how cleanup actually
+works: listed entries are either checked or unchecked, and cleanup reopens every selected entry, deleting what it can
+now verify and nothing a session still uses, only forgetting missing or mismatched records, and leaving everything else
+in place. With only unchecked entries selected the confirmation now warns of permanent loss; with checked entries only
+it is unchanged; mixed, both paragraphs agree. The text matches SPEC.md and the docs' trash section, and no test quoted
+the old sentence.
+
+#### Fix made while landing
+
+The changelog fragment spoke of "initially unchecked entries" that cleanup can "verify"; it now says what the user sees:
+when emptying the trash includes entries Farhelm could not check when it listed them, the confirmation warns that those
+can still be deleted for good, losing work never committed or pushed.
+
+#### Left as is
+
+No test renders the confirmation with only unchecked entries, so the fix itself has no regression test; the plan scoped
+tests out. A short browser test with a fake trash listing of unchecked entries, checking the confirmation says "lost
+permanently", would protect it.
+
+#### Checks
+
+- Run now, on the rebased change: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the UI crate's
+  clippy; the UI crate in full with the desktop feature through the recorder, run
+  `098fceae-d181-47ab-be16-a12890f527ff`: 649 passed; the trash dialog spec on Chromium and WebKit, run
+  `9c65574c-3aae-42d7-883a-b0f7a42a1c83`: 18 passed.
+- Not run: other specs; only the confirmation's text changed.
