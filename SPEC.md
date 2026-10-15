@@ -2720,8 +2720,8 @@ host's sessions exactly that authority over the fleet, including changing what l
 anywhere. A retried create is a new request and is asked about like one, so how long agent-originated retry records are
 kept is not a security question. The one exception is a create into a managed checkout: a retry with the same
 idempotency key returns, or finishes, the attempt the user already approved, without asking again. That stays outside
-the retention question because the replay can only complete that exact approved request, and only for the session that
-asked. None of this waives correctness of user-initiated GUI requests.
+the retention question because the replay can only complete that exact approved request, and only for the session, on
+the host, that asked. None of this waives correctness of user-initiated GUI requests.
 
 Reading is separate from acting, and stays open for now. Any attached host may obtain any template's full contents,
 including a command line and resume command it carries: an approved spawn that applies a template, or any spawn from a
