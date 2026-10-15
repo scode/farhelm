@@ -15161,7 +15161,8 @@
   item.
 - Completion criteria: the test no longer compiles on macOS and still runs and passes on Linux with its existing
   assertions; run it through the recorder on Linux. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/rust-test-portability.md`.
+- Execution: complete in jj change `trzsqnlnrzlk`, bookmark `plan/rust-test-portability/03-token-filename`,
+  [PR #2097](https://github.com/scode/farhelm/pull/2097/changes).
 
 ## pending-folder-save-overwrites-newer-save.md
 

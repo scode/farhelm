@@ -1119,7 +1119,9 @@ mod tests {
     /// Unsupported paths must be refused before rotation revokes credentials.
     /// The database exists and has a token, so a missing database cannot stand
     /// in for the UTF-8 refusal; neither a lock nor a changed token is allowed.
-    #[cfg(unix)]
+    // APFS refuses invalid UTF-8 names at creation, before rotation can be
+    // exercised. Keep this refusal-before-lock proof on other Unix filesystems.
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[farhelm_testtrace::test]
     async fn rotate_refuses_non_utf8_before_changing_state() {
         use std::os::unix::ffi::OsStringExt;
