@@ -1182,6 +1182,13 @@ EOF
     if [ -n "${FARHELM_INSTALL_SUMS_FILE:-}" ]; then
       set -- "$@" --update-only
     fi
+    # The app's updater since this installer says what it read under the
+    # installation lock when it decided to update; the locked work refuses
+    # with status 75 if the installation changed since, and the updater
+    # looks again later.
+    if [ -n "${FARHELM_INSTALL_EXPECT:-}" ]; then
+      set -- "$@" --expect "$FARHELM_INSTALL_EXPECT"
+    fi
     # An app an older installer built without this layout's record may be
     # replaced whole. The check runs here, before the lock, so the approval
     # names the folder it was made for by its inode, read before and after
@@ -1200,7 +1207,12 @@ EOF
     if [ -f "$STAGING_DIR/install-failure" ]; then
       error '%s\n' "$(sed -n 1p "$STAGING_DIR/install-failure")"
       sed '1d' "$STAGING_DIR/install-failure" >&2
-      exit 1
+      # The locked work's own status (75 for a changed installation, which
+      # the app's updater tells apart from a failure), never 0.
+      if [ "$install_rc" -eq 0 ]; then
+        install_rc=1
+      fi
+      exit "$install_rc"
     fi
     if [ "$install_rc" -ne 0 ] || [ ! -f "$STAGING_DIR/install-result" ]; then
       if [ "$install_rc" -eq 2 ]; then

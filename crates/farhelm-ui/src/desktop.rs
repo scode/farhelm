@@ -468,7 +468,13 @@ impl DesktopBootstrap {
                     // it, so a `farhelm helm run` typed in a session would
                     // silently push this launch's payloads, possibly long
                     // after the app that set it has quit.
-                    .env_remove("FARHELM_HELM_PAYLOAD_DIR");
+                    .env_remove("FARHELM_HELM_PAYLOAD_DIR")
+                    // The reopen marker is for this one reopened app alone
+                    // (design, section 1: at most once). Inherited, it would
+                    // reach every session, where a Farhelm started from one
+                    // would take it as its own: refusing as "replaced by
+                    // another installation", or never reopening itself.
+                    .env_remove(bundle::REOPENED_ENV);
                 if let Some(tmux) = &supervisor_tmux {
                     command.env(farhelm_supervisor::tmux::TMUX_PROGRAM_ENV, tmux);
                 }

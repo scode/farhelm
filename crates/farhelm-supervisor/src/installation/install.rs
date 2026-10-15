@@ -87,6 +87,11 @@ pub struct InstallRequest {
     pub replace_legacy_bundle: Option<u64>,
     /// How long to wait for a running install or uninstall.
     pub lock_wait: Duration,
+    /// What this release's app's updater read under the lock when it
+    /// decided to update (`FARHELM_INSTALL_EXPECT`); a run whose
+    /// installation no longer matches changes nothing and reports
+    /// [`STATE_CHANGED`]. Absent for Terminal runs and older apps' updaters.
+    pub expect: Option<super::Expectation>,
 }
 
 /// How a run ended well.
@@ -99,11 +104,24 @@ pub struct Installed {
     pub notes: Vec<String>,
 }
 
-/// Why a run stopped: one line for the error marker, then lines of advice.
+/// The exit status of a run that found the installation no longer what the
+/// updater's expectation said: nothing was changed, and the updater simply
+/// looks again later. 75 is `EX_TEMPFAIL`; every other refusal exits 1.
+pub const STATE_CHANGED: i32 = 75;
+
+/// The exit status of a run that found the installation lock held by
+/// another install or uninstall for longer than it waits: nothing was
+/// changed, and the app's updater tries again shortly rather than showing a
+/// failure. 74 so it stays apart from [`STATE_CHANGED`].
+pub const BUSY: i32 = 74;
+
+/// Why a run stopped: one line for the error marker, then lines of advice,
+/// and the exit status the script passes on.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Refusal {
     pub message: String,
     pub advice: Vec<String>,
+    pub status: i32,
 }
 
 impl Refusal {
@@ -111,6 +129,7 @@ impl Refusal {
         Self {
             message: message.into(),
             advice: advice.iter().map(|line| line.to_string()).collect(),
+            status: 1,
         }
     }
 }
@@ -151,17 +170,21 @@ pub fn install(request: &InstallRequest, hook: StepHook<'_>) -> Result<Installed
             &["Re-run the installer to retry."],
         )
     };
-    let lock = lock_installation(&request.applications, request.lock_wait).map_err(|error| {
-        match error {
-            super::InstallLockError::Busy => Refusal::new(
-                "another Farhelm install or uninstall is running right now; wait for it to finish \
-                 and re-run",
-                &[],
-            ),
-            super::InstallLockError::Unsupported(path) => unsupported_refusal(&path),
-            other => fail("taking the installation lock", &other),
-        }
-    })?;
+    let lock =
+        lock_installation(&request.applications, request.lock_wait).map_err(
+            |error| match error {
+                super::InstallLockError::Busy => Refusal {
+                    status: BUSY,
+                    ..Refusal::new(
+                        "another Farhelm install or uninstall is running right now; wait for it to \
+                     finish and re-run",
+                        &[],
+                    )
+                },
+                super::InstallLockError::Unsupported(path) => unsupported_refusal(&path),
+                other => fail("taking the installation lock", &other),
+            },
+        )?;
     let compat = take_compat_lock_folder(&lock).map_err(|error| match error {
         super::CompatLockError::HeldByOlderTool(path) => Refusal::new(
             format!(
@@ -247,6 +270,28 @@ impl Context<'_> {
         // at its place when the run decides what is there.
         self.remove_own_leftovers()?;
         let found = self.inspect()?;
+        // The updater's expectation is compared before anything changes,
+        // through the very folder the update then works in (the inspected
+        // `Contents/`), so a different installation Finder put at the place
+        // can never be updated on another one's say-so.
+        if let Some(expect) = &self.request.expect {
+            let now = match &found {
+                Found::Ours { contents, .. } => Some(super::read_contents(contents.as_fd())),
+                Found::Replaceable { .. } => None,
+            };
+            if !now.is_some_and(|now| expect.matches(&now)) {
+                return Err(Refusal {
+                    status: STATE_CHANGED,
+                    ..Refusal::new(
+                        format!(
+                            "{} changed since this update was decided; nothing was changed",
+                            self.app_path.display()
+                        ),
+                        &[],
+                    )
+                });
+            }
+        }
         if self.request.update_only {
             self.check_update_only(&found)?;
         }
