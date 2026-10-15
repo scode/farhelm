@@ -13,7 +13,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 3935e5] `remote-uninstall-fixes.md` — Remote uninstall finishes on hosts with uutils coreutils and after an interrupted run, and its fixture test runs off GNU systems (3 outcomes, each gated)
 - [pending] `launcher-fixes.md` — New-session dialog fixes: retry key after a template resets permissions, Launch after a repository pick, the setup field after the folder is cleared, custom flags kept on a model choice, and the active repository suggestion kept visible (5 outcomes, each gated)
 - [in-flight 1cd1b3] `update-failure-reporting.md` — The version hover names why an automatic update install failed, and the install guide stops saying failures are only logged (2 outcomes, each gated)
-- [pending] `docs-accuracy-fixes.md` — The paste guide and resume docs stop overpromising, and the docs preview refreshes release notes on edit (3 outcomes, each gated)
+- [in-flight f7114d] `docs-accuracy-fixes.md` — The paste guide and resume docs stop overpromising, and the docs preview refreshes release notes on edit (3 outcomes, each gated)
 - [pending] `host-picker-dotted-i.md` — Typing İ repeatedly in the host picker cycles through hosts whose names start with it (gated)
 - [pending] `setup-advice-state-directory.md` — Setup's sign-in advice names the state directory when it came from the environment (gated)
 - [pending] `copy-guidance-resize.md` — The "this drag did not copy" notice is measured at its origin so narrowing the window does not collapse it (gated)
