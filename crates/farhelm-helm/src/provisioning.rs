@@ -5874,6 +5874,10 @@ mod tests {
     /// itself a symlink and leaves both the link and its target, removes the
     /// real tree under a symlinked parent, and removes a tree and then skips
     /// it; every mutator refuses the local transport.
+    ///
+    /// Linux-only: this fixture executes the remote Linux scripts locally,
+    /// including stat's GNU-compatible `-c` interface; macOS stat cannot run it.
+    #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
     async fn uninstall_host_commands_refuse_setup_units_and_skip_finished_work() {
         let root = tempfile::tempdir().unwrap();
