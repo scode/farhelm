@@ -804,6 +804,7 @@ impl Harness {
         state.clipboard_sink = old_state.clipboard_sink.clone();
         state.link_opener = old_state.link_opener.clone();
         state.downloads_dir = old_state.downloads_dir.clone();
+        state.file_opener = old_state.file_opener.clone();
         state.feedback = old_state.feedback.clone();
         let state = Arc::new(state);
         let device_secret = state

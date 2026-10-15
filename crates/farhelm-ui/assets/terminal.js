@@ -3536,6 +3536,7 @@
           endpoint: baseUrl + spec.path.split('/term')[0] + '/files',
           secret: deviceSecret,
           native: typeof window[WEBVIEW_DEVICE_SECRET] === 'string',
+          isMac: IS_MAC,
         });
         // Both link providers identify the web target currently under the pointer.
         // A file hover never qualifies for withholding program input.
@@ -3598,14 +3599,15 @@
           // OSC spans still take precedence over plain web/path providers.
           linkHandler: {
             allowNonHttpProtocols: true,
-            activate(_event, uri) {
+            activate(event, uri) {
               // A selection means this release finished a drag, just as in
               // the plain-link adapter below. Neither navigation nor a file
               // download belongs to a gesture made to copy terminal text.
               if (term.getSelection()) return;
               const target = window.farhelmTerminalFiles.oscTarget(uri);
               if (target?.kind === 'web' && linkClickMode() !== 'program') window.farhelmTerminalLinks.openTerminalUrl(uri);
-              else if (target?.kind === 'file') fileLinks.download(target.path);
+              // Both OSC and prose paths use the addon's native modifier rule.
+              else if (target?.kind === 'file') fileLinks.download(target.path, event);
             },
             hover(event, uri, range) {
               const target = window.farhelmTerminalFiles.oscTarget(uri);

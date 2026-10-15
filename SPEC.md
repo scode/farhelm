@@ -1580,10 +1580,16 @@ whatever the agent renders is what you see. There is no composer, no message abs
   must be readable regular files no larger than 100 MB, including while transferring; directories are refused. A browser
   saves a complete file by basename. The desktop app saves into Downloads under a unique name and shows where it went,
   with no partial file after failure or interruption. Status appears at the top of that terminal: success fades after a
-  few seconds, while a failure stays until the next click or download there. Nothing is opened or executed. Any file the
-  session's account can read is in reach, within the existing shell authority; hover discloses the agent-provided target
-  before an explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly
-  limited to http, https and file; every other scheme is ignored.
+  few seconds, while a failure stays until the next click or download there. Plain click only downloads. In the desktop
+  app, Cmd-click on macOS (Ctrl-click elsewhere) also opens the completed save with the default app, only when its final
+  extension is .md or .txt, case-insensitively. Other types are saved without opening; an opening failure leaves the
+  save successful and says why it was not opened. A browser modifier-click only downloads. The hover uses a file icon
+  and bright name, the host and full directory on a second line, and decimal size with the action hints on a third. A
+  left stripe and size color show under 1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals
+  are red and checking has a neutral stripe. Only an eligible desktop file has the opening hint. Any file the session's
+  account can read is in reach, within the existing shell authority; hover discloses the agent-provided target before an
+  explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to
+  http, https and file; every other scheme is ignored.
 
 ## Attachments
 
@@ -2591,9 +2597,13 @@ rule; it is the remote program's own display.
 
 Clicking a disclosed file path in a terminal transfers that file from the session's host to the user's machine. Any file
 the session's Unix account can read is in reach; the hover shows the host, resolved path and size before the click can
-download it. Farhelm never opens or executes the result. The desktop app deliberately does not set the macOS quarantine
-flag on downloaded files, so these saves do not carry the "downloaded from the internet" prompt a browser save would
-carry. The click authorizes this transfer across the host boundary, including for agent-controlled files.
+download it. Confirmed 2026-10-14: only an explicit Cmd-click in the desktop app (Ctrl-click on non-macOS desktop
+builds) also opens the completed local save with the default app, and only for final .md or .txt extensions, ignoring
+case. No other file type is opened; a plain click or any browser click only downloads. HTML is deliberately excluded:
+opening it in the default browser would let an agent's page run scripts and navigate outside the link permissions. The
+desktop app deliberately does not set the macOS quarantine flag on downloaded files, so these saves do not carry the
+"downloaded from the internet" prompt a browser save would carry. The click authorizes this transfer across the host
+boundary, including for agent-controlled files.
 
 Opening a link is another bounded effect across the host boundary. Only an admitted HTTP(S) URL may reach the user's
 browser, after an Allow/Open click or under the requesting host's matching link permission. With **Open local-network

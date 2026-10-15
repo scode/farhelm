@@ -49,9 +49,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Investigate suppressing Claude Code’s Project Trust prompt.** Determine whether a supported CLI argument exists;
   consider whether Farhelm could update the user’s configuration on their behalf. Approach/details TBD.
 
-- **Click to open agent-provided paths.** Extend click-to-download for paths agents provide to also support
-  click-to-open. How and implementation details are TBD. Plan: `plans/queue/click-to-open-paths.md`.
-
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
   the keyboard quick switcher. The nearest thing today is Stop followed later by Restart, which ends the agent but keeps

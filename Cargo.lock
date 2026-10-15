@@ -2022,6 +2022,7 @@ dependencies = [
  "farhelm-teststate",
  "farhelm-testtrace",
  "futures-channel",
+ "gio",
  "gloo-timers",
  "mime_guess",
  "percent-encoding",

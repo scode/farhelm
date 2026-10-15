@@ -3,7 +3,92 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { pathTokens, oscTarget, bufferLinks, boundedBlob, MAX_BYTES } = require('../assets/terminal-files.js');
+const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, MAX_BYTES } = require('../assets/terminal-files.js');
+
+/** Decimal display and exact byte thresholds must agree with the host cap;
+ * rounding a just-refused file below 100 MB would contradict its refusal.
+ */
+test('file sizes and tiers use decimal boundaries including the exact cap', () => {
+  for (const [bytes, text, tier] of [
+    [0, '0 B', 'small'], [999, '999 B', 'small'], [4800, '4.8 KB', 'small'],
+    [999999, '1000 KB', 'small'], [1000000, '1 MB', 'medium'],
+    [8400000, '8.4 MB', 'medium'], [10000000, '10 MB', 'large'],
+    [87000000, '87 MB', 'large'], [100000000, '100 MB', 'large'],
+  ]) {
+    assert.equal(formatSize(bytes), text);
+    assert.equal(sizeTier({ status: 'ready', size: bytes }), tier);
+  }
+  assert.equal(formatSize(100000001), '100 MB');
+  for (const status of ['too_large', 'folder', 'not_found', 'not_readable', 'not_regular']) {
+    assert.equal(sizeTier({ status, size: 1 }), 'danger', 'a refusal overrides its size');
+  }
+});
+
+/** Icons describe file kinds only. An unknown extension stays generic rather
+ * than acquiring a document-opening claim from its visual similarity.
+ */
+test('file icons distinguish documents, PDFs, images, archives and folders', () => {
+  assert.equal(fileIcon('/work/notes.MD', 'ready'), '\uf15c');
+  assert.equal(fileIcon('/work/main.rs', 'ready'), '\uf15c');
+  assert.equal(fileIcon('/work/report.pdf', 'ready'), '\uf1c1');
+  assert.equal(fileIcon('/work/shot.png', 'ready'), '\uf1c5');
+  assert.equal(fileIcon('/work/files.tar.gz', 'ready'), '\uf1c6');
+  assert.equal(fileIcon('/work/notes.md', 'folder'), '\uf07b');
+  assert.equal(fileIcon('/work/notes.txt.command', 'ready'), '\uf15b');
+});
+
+/** A server's answer cannot make a browser gesture open a local file. Native
+ * hints follow the supplied capability, without a second JS extension list.
+ */
+test('hover preserves both path pieces and advertises open only for native admitted types', async () => {
+  for (const [native, isMac, canOpen, hint] of [
+    [false, true, true, null], [true, true, true, '⌘-click to open'],
+    [true, false, true, 'Ctrl-click to open'], [true, true, false, null],
+  ]) {
+    const fixture = hoverFixture(native, isMac);
+    const pending = fixture.addon.hover({}, 'notes.txt', hoverLink());
+    fixture.requests[0].reply({ status: 'ready', host: 'host', path: '/work/notes.txt', size: 4800, can_open: canOpen });
+    await pending;
+    const [name, directory, detail] = fixture.shown.at(-1).lines;
+    assert.equal(name.text, 'notes.txt');
+    assert.equal(directory.text, 'host:/work/');
+    assert.equal(detail.text, '4.8 KB');
+    assert.equal(detail.suffix.includes('click to open'), hint !== null);
+    if (hint) assert.ok(detail.suffix.includes(hint));
+    fixture.addon.dispose();
+  }
+});
+
+/** Both xterm adapters pass the click event to this shared admission path.
+ * A native modifier requests opening even for refused types, so the server
+ * reports a completed save with its reason; web modifiers only download.
+ */
+test('modifier opening is native-only and save outcomes survive opener refusal', async () => {
+  for (const [native, isMac, event, opens] of [
+    [true, true, { metaKey: true }, true], [true, true, { ctrlKey: true }, false],
+    [true, false, { ctrlKey: true }, true], [true, false, { metaKey: true }, false],
+    [false, true, { metaKey: true }, false], [false, false, { ctrlKey: true }, false],
+    [true, true, {}, false],
+  ]) {
+    const fixture = noticeFixture(native, true, false, isMac);
+    let requested;
+    fixture.addon.request = async (operation, path, _signal, open) => {
+      requested = { operation, path, open };
+      return native ? { json: async () => ({ path: '/Downloads/report.pdf', opened: false, open_error: 'only document types open' }) } : new Response('bytes');
+    };
+    await fixture.addon.download('report.pdf', event);
+    assert.deepEqual(requested, { operation: 'download', path: '/output/report.pdf', open: opens });
+    assert.match(fixture.notice().textContent, native ? /^saved to / : /^downloaded /);
+    if (opens) assert.match(fixture.notice().textContent, /not opened: only document types open/);
+    assert.equal(fixture.addon.failureMessage, false);
+    fixture.addon.dispose();
+  }
+  const success = noticeFixture(true, true, false, true);
+  success.addon.request = async () => ({ json: async () => ({ path: '/Downloads/notes.md', opened: true }) });
+  await success.addon.download('report.pdf', { metaKey: true });
+  assert.equal(success.notice().textContent, 'saved to /Downloads/notes.md · opened');
+  success.addon.dispose();
+});
 
 /** The positive/negative table pins prose boundaries and the existing URL policy. */
 test('paths exclude diagnostic locations, prose punctuation, URLs and versions', () => {
@@ -65,7 +150,7 @@ test('bounded Blob refuses excess bytes and mid-stream errors', async () => {
  * clock. The disclosure sink records every replacement, so preserving its
  * final text alone cannot hide an intermediate spinner or blanking regression.
  */
-function hoverFixture() {
+function hoverFixture(native = false, isMac = false) {
   const tasks = new Map();
   const requests = [];
   const shown = [];
@@ -83,7 +168,7 @@ function hoverFixture() {
     }),
   });
   vm.runInContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
-  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native: false, ...clock });
+  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, ...clock });
   addon.activate({ element: { querySelector: selector => selector.endsWith('.terminal-file-target') ? display : null, removeEventListener() {} },
     registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '' });
   addon.show = (_event, lines, checking = false) => { display.hidden = false; shown.push({ lines: [...lines], checking }); };
@@ -287,7 +372,7 @@ test('disposal clears pending hover teardown and rejects late replies', async ()
  * Only notice, click and save primitives are modeled; xterm geometry and real
  * browser rendering remain the two-engine integration suite's responsibility.
  */
-function noticeFixture(native = true, opened = true, defaultTimers = false) {
+function noticeFixture(native = true, opened = true, defaultTimers = false, isMac = false) {
   const children = [];
   const listeners = new Map();
   const timers = new Map();
@@ -332,7 +417,7 @@ function noticeFixture(native = true, opened = true, defaultTimers = false) {
     URL: { createObjectURL: () => 'blob:owned', revokeObjectURL() {} },
   });
   vm.runInContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
-  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, ...(defaultTimers ? {} : clock) });
+  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, ...(defaultTimers ? {} : clock) });
   const term = { element: opened ? root : undefined, registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '' };
   addon.activate(term);
   addon.hovered = { path: 'report.pdf', info: { status: 'ready', path: '/output/report.pdf' }, controller: new AbortController() };

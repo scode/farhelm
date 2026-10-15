@@ -123,6 +123,7 @@ mod browser;
 /// an embedding shell registered a [`ClipboardSink`].
 mod clipboard;
 pub use browser::LinkOpener;
+pub use downloads::{FileOpener, NativeDownloads};
 
 /// The web UI tree a release build compiles into this binary (D12/D13) —
 /// `build.rs`'s counterpart. Public so `farhelm-desktop` (Step 4) can reach
@@ -521,6 +522,9 @@ struct AppState {
     /// The desktop resolves its account's Downloads folder at startup; tests
     /// inject a private directory without changing the process environment.
     downloads_dir: Option<PathBuf>,
+    /// Receives only a newly published, allowlisted save. Separate from the
+    /// hardened HTTP(S) opener so local files never widen that URL boundary.
+    file_opener: Option<FileOpener>,
     /// The cap on native clipboard writes in flight at once, so a hung OS
     /// clipboard cannot pile blocking threads up behind it (see
     /// `clipboard::ClipboardAdmission`). Per helm rather than process-wide,
@@ -608,6 +612,7 @@ impl AppState {
             clipboard_sink: None,
             link_opener: None,
             downloads_dir: None,
+            file_opener: None,
             clipboard_admission: clipboard::ClipboardAdmission::new(),
             // Test-built helms never reach the production endpoint; a
             // feedback test injects its own stand-in instead.
@@ -1928,13 +1933,14 @@ pub struct EmbeddedReady {
 /// disappeared meaning as sending the signal.
 ///
 /// The native shell supplies clipboard and Downloads capabilities for this
-/// window's account. An absent Downloads directory leaves native-save requests
-/// refused; it never asks the webview to save in its place.
+/// window's account, including dispatch of an allowlisted completed save to its
+/// default app. An absent Downloads capability leaves saves and opening refused;
+/// it never asks the webview to save in its place.
 pub async fn run_embedded(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
     link_opener: Option<LinkOpener>,
-    downloads_dir: Option<PathBuf>,
+    downloads: Option<NativeDownloads>,
     ready: std::sync::mpsc::Sender<EmbeddedReady>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
@@ -1942,7 +1948,7 @@ pub async fn run_embedded(
         args,
         clipboard_sink,
         link_opener,
-        downloads_dir,
+        downloads,
         Some(ready),
         Some(shutdown),
         ServingMode::Embedded,
@@ -1961,7 +1967,7 @@ async fn run_with_ready(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
     link_opener: Option<LinkOpener>,
-    downloads_dir: Option<PathBuf>,
+    downloads: Option<NativeDownloads>,
     ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
     shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
     mode: ServingMode,
@@ -2018,7 +2024,10 @@ async fn run_with_ready(
     )?;
     app.clipboard_sink = clipboard_sink;
     app.link_opener = link_opener;
-    app.downloads_dir = downloads_dir;
+    if let Some(downloads) = downloads {
+        app.downloads_dir = Some(downloads.directory);
+        app.file_opener = Some(downloads.opener);
+    }
     let state = Arc::new(app);
     // The manager was started before this state existed — it is one of the
     // state's own fields — so the handler that answers an agent's questions

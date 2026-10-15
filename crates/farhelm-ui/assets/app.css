@@ -1250,7 +1250,18 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 /* File checks disclose the full host path. Unlike a web address, this is
    the evidence needed to admit a click, so long paths wrap rather than elide. */
-.terminal-file-target { max-height: calc(100vh - 8px); overflow: auto; }
+.terminal-file-target { max-height: calc(100vh - 8px); overflow: auto; border-left: 3px solid var(--fg-2); }
+.terminal-file-name { color: var(--fg-0); font-weight: 600; }
+.terminal-file-directory { color: var(--fg-2); }
+.terminal-file-size { font-weight: 600; }
+.terminal-file-hint { color: var(--fg-1); font-weight: 400; }
+.terminal-file-target[data-tier="small"] { border-left-color: var(--ok); }
+.terminal-file-target[data-tier="small"] .terminal-file-size { color: var(--ok); }
+.terminal-file-target[data-tier="medium"] { border-left-color: var(--info); }
+.terminal-file-target[data-tier="large"] { border-left-color: var(--warn); }
+.terminal-file-target[data-tier="large"] .terminal-file-size { color: var(--warn); }
+.terminal-file-target[data-tier="danger"] { border-left-color: var(--danger); }
+.terminal-file-refusal { color: var(--danger); }
 .terminal-file-checking::before {
   content: "";
   display: inline-block;
