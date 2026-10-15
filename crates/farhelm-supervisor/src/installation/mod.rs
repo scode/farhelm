@@ -282,8 +282,10 @@ pub enum CompatLockError {
 /// The old installers' lock folder, held while this value lives and removed
 /// (renamed away, then deleted) on [`CompatLockFolder::release`] or drop.
 #[derive(Debug)]
-pub struct CompatLockFolder<'lock> {
-    applications: BorrowedFd<'lock>,
+pub struct CompatLockFolder {
+    /// Its own descriptor for `~/Applications` (a duplicate of the lock's),
+    /// so the folder can be held beside the lock that protects it.
+    applications: OwnedFd,
     path: PathBuf,
     released: bool,
 }
@@ -291,7 +293,7 @@ pub struct CompatLockFolder<'lock> {
 /// Take [`COMPAT_LOCK_FOLDER`] while holding `lock`.
 pub fn take_compat_lock_folder(
     lock: &InstallationLock,
-) -> Result<CompatLockFolder<'_>, CompatLockError> {
+) -> Result<CompatLockFolder, CompatLockError> {
     let applications = lock.applications();
     let path = lock.applications_path().join(COMPAT_LOCK_FOLDER);
     let io_error = |what: &'static str, error: io::Error| CompatLockError::Io {
@@ -340,6 +342,9 @@ pub fn take_compat_lock_folder(
             return Err(io_error("placing the lock folder", error.into()));
         }
     }
+    let applications = applications
+        .try_clone_to_owned()
+        .map_err(|error| io_error("holding ~/Applications", error))?;
     Ok(CompatLockFolder {
         applications,
         path,
@@ -347,23 +352,25 @@ pub fn take_compat_lock_folder(
     })
 }
 
-impl CompatLockFolder<'_> {
+impl CompatLockFolder {
     /// Remove the folder: rename it away, then delete it, so an older tool
     /// never sees a half-removed folder under the real name.
     pub fn release(mut self) -> Result<(), CompatLockError> {
         self.released = true;
-        remove_folder(self.applications, COMPAT_LOCK_FOLDER).map_err(|error| CompatLockError::Io {
-            what: "removing the lock folder",
-            path: self.path.clone(),
-            error,
+        remove_folder(self.applications.as_fd(), COMPAT_LOCK_FOLDER).map_err(|error| {
+            CompatLockError::Io {
+                what: "removing the lock folder",
+                path: self.path.clone(),
+                error,
+            }
         })
     }
 }
 
-impl Drop for CompatLockFolder<'_> {
+impl Drop for CompatLockFolder {
     fn drop(&mut self) {
         if !self.released {
-            let _ = remove_folder(self.applications, COMPAT_LOCK_FOLDER);
+            let _ = remove_folder(self.applications.as_fd(), COMPAT_LOCK_FOLDER);
         }
     }
 }
@@ -563,6 +570,24 @@ impl OwnershipRecord {
     pub fn link_path(&self) -> &Path {
         Path::new(OsStr::from_bytes(&self.link))
     }
+}
+
+/// Move the ownership record inside `contents` to its next "removing"
+/// generation, durably (flushed, renamed over the old one, `Contents/`
+/// flushed): what uninstall writes after it holds every lock and before it
+/// removes anything, so an update already on its way cannot finish into a
+/// half-removed app, and the app and its updater can tell an interrupted
+/// uninstall. A missing or unreadable record is left as it is.
+pub fn mark_removing(contents: BorrowedFd<'_>) -> io::Result<()> {
+    let Some(bytes) = dirs::read_small(contents, RECORD_FILE, RECORD_LIMIT)? else {
+        return Ok(());
+    };
+    let Some(record) = OwnershipRecord::parse(&bytes) else {
+        return Ok(());
+    };
+    let next = record.advanced(InstallState::Removing);
+    dirs::replace_file(contents, RECORD_FILE, &mut next.render().as_slice(), 0o600)?;
+    full_sync(contents)
 }
 
 // ---------------------------------------------------------------------------

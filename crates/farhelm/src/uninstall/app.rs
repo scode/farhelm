@@ -28,6 +28,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::ErrorKind;
 use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
+use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 
 /// The ownership record's identifier for this layout.
@@ -68,6 +69,78 @@ pub(crate) struct AppPlan {
     pub(crate) root: PathBuf,
     pub(crate) removals: Vec<Removal>,
     pub(crate) link: LinkPlan,
+    /// How many of `removals` come before the retry command's own pieces:
+    /// everything up to here goes first, and the folders it changed are
+    /// flushed before the rest goes (design, section 6).
+    pub(crate) early: usize,
+    /// Every version kept in the app, with its program, so uninstall can
+    /// take each version's lock exclusively before removing anything.
+    pub(crate) versions: Vec<VersionProgram>,
+    /// The version this uninstall itself runs from.
+    pub(crate) own_version: OsString,
+    /// The app folder's device and inode when it was inspected. Part of
+    /// the plan so the re-check after the confirmation sees a different
+    /// app put at the same place (a Finder swap while the prompt waited)
+    /// as a change, even when its files look the same, rather than remove
+    /// an app nobody confirmed.
+    pub(crate) identity: (u64, u64),
+    /// The installation id in the app's record (installers since the
+    /// race-free installer write one; older ones do not), for the same
+    /// reason.
+    pub(crate) installation_id: Option<Vec<u8>>,
+}
+
+/// One version kept in the app and its program.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct VersionProgram {
+    pub(crate) name: OsString,
+    pub(crate) program: PathBuf,
+}
+
+/// Whether `path` is a temporary file an installer left: a regular file
+/// (not a link) whose name starts with `.farhelm-new.`.
+fn is_installer_temporary(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.as_bytes().starts_with(b".farhelm-new."))
+        && fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file())
+}
+
+/// The installer temporaries directly inside `folder`, sorted.
+fn installer_temporaries(folder: &Path) -> Result<Vec<PathBuf>> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(folder)
+        .with_context(|| format!("enumerating bundle directory {}", path_text(folder)))?
+    {
+        let entry =
+            entry.with_context(|| format!("enumerating bundle directory {}", path_text(folder)))?;
+        if is_installer_temporary(&entry.path()) {
+            found.push(entry.path());
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+/// [`reject_unexpected`], also allowing installer temporaries (which the
+/// caller removes).
+fn reject_unexpected_but_temporaries(path: &Path, allowed: &[&str]) -> Result<()> {
+    for entry in fs::read_dir(path)
+        .with_context(|| format!("enumerating bundle directory {}", path_text(path)))?
+    {
+        let entry =
+            entry.with_context(|| format!("enumerating bundle directory {}", path_text(path)))?;
+        let known = allowed
+            .iter()
+            .any(|name| entry.file_name().as_bytes() == name.as_bytes());
+        if !known && !is_installer_temporary(&entry.path()) {
+            bail!(
+                "bundle directory {} contains unexpected entry {}",
+                path_text(path),
+                path_text(&entry.path())
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Inspect the app bundle that holds the running CLI.
@@ -99,6 +172,9 @@ pub(super) fn inspect_app(
     validate_dir(root, uid, classifier)?;
     validate_dir(contents, uid, classifier)?;
     validate_dir(versions, uid, classifier)?;
+    let identity = fs::symlink_metadata(root)
+        .map(|meta| (meta.dev(), meta.ino()))
+        .with_context(|| format!("inspecting {}", path_text(root)))?;
 
     let record = contents.join(FLAT_RECORD);
     // Two fields as older installers write it, or five as installers since
@@ -120,9 +196,17 @@ pub(super) fn inspect_app(
         return repair_refusal(&record, "its magic field is not farhelm-app-v2");
     }
     let link = link_field(&fields[1], &record)?;
+    let installation_id = fields.get(2).cloned();
 
     reject_unexpected(root, &["Contents"])?;
-    reject_unexpected(
+    // An install or uninstall killed while writing a file leaves a regular
+    // `.farhelm-new.*` file beside it (`installation::dirs::replace_file`),
+    // the one temporary shape installers put inside the app. They are
+    // accepted and removed first, rather than refusing the uninstall a
+    // retry is meant to finish.
+    let mut temporaries = Vec::new();
+    temporaries.extend(installer_temporaries(contents)?);
+    reject_unexpected_but_temporaries(
         contents,
         &[FLAT_RECORD, "Info.plist", "MacOS", "Resources", "Versions"],
     )?;
@@ -139,7 +223,7 @@ pub(super) fn inspect_app(
         let entry = entry
             .with_context(|| format!("enumerating bundle directory {}", path_text(versions)))?;
         let name = entry.file_name();
-        if name == "installed" {
+        if name == "installed" || is_installer_temporary(&entry.path()) {
             continue;
         }
         if !is_version_name(&name) {
@@ -152,12 +236,14 @@ pub(super) fn inspect_app(
         versions_present.push(name.to_os_string());
     }
     versions_present.sort();
+    temporaries.extend(installer_temporaries(versions)?);
     // The running version and the Installed one are both what
     // `farhelm uninstall` may run as on a retry: the forwarder picks the
     // running one from inside a surviving session, the Installed one
     // anywhere else. Both stay until the late steps.
     let installed = read_installed(&versions.join("installed"), uid, classifier)?;
     let mut late = Vec::new();
+    let mut version_programs = Vec::new();
     for name in &versions_present {
         let folder = versions.join(name);
         validate_dir(&folder, uid, classifier)?;
@@ -167,6 +253,10 @@ pub(super) fn inspect_app(
                 .as_deref()
                 .is_some_and(|installed| name.as_bytes() == installed.as_bytes());
         let target = if keep_late { &mut late } else { &mut early };
+        version_programs.push(VersionProgram {
+            name: name.clone(),
+            program: folder.join("farhelm"),
+        });
         push_file(target, &folder.join("farhelm"), uid, classifier)?;
         target.push(Removal {
             path: folder,
@@ -175,11 +265,13 @@ pub(super) fn inspect_app(
     }
     let has_macos = exists_dir(&macos, uid, classifier)?;
     if has_macos {
-        reject_unexpected(&macos, &["farhelm", "farhelm-desktop"])?;
+        temporaries.extend(installer_temporaries(&macos)?);
+        reject_unexpected_but_temporaries(&macos, &["farhelm", "farhelm-desktop"])?;
         push_file(&mut early, &macos.join("farhelm-desktop"), uid, classifier)?;
     }
     if exists_dir(&resources, uid, classifier)? {
-        reject_unexpected(&resources, &["Farhelm.icns"])?;
+        temporaries.extend(installer_temporaries(&resources)?);
+        reject_unexpected_but_temporaries(&resources, &["Farhelm.icns"])?;
         push_file(&mut early, &resources.join("Farhelm.icns"), uid, classifier)?;
         early.push(Removal {
             path: resources,
@@ -214,11 +306,26 @@ pub(super) fn inspect_app(
     });
 
     let link = inspect_link(link, &macos.join("farhelm"))?;
+    // Temporaries go first of all.
+    let mut early: Vec<Removal> = temporaries
+        .into_iter()
+        .map(|path| Removal {
+            path,
+            directory: false,
+        })
+        .chain(early)
+        .collect();
+    let early_count = early.len();
     early.extend(late);
     Ok(AppPlan {
         root: root.to_path_buf(),
         removals: early,
         link,
+        early: early_count,
+        versions: version_programs,
+        own_version: OsString::from_vec(program.version.as_bytes().to_vec()),
+        identity,
+        installation_id,
     })
 }
 
