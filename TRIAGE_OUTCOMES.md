@@ -13386,7 +13386,8 @@
 - Completion criteria: a failed save of the setting that turns confirmations back on is shown to the user, so they know
   the opt-out still stands. If SPEC.md's list of silent persistence failures says otherwise for this preference, narrow
   it in the same change. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/confirmations-save-error.md`.
+- Execution: complete; jj change `llkqpmolqxnvunyzvskyoxuvyvrpypzk`; bookmark
+  `plan/confirmations-save-error/01-confirmations-error`; https://github.com/scode/farhelm/pull/2054/changes.
 
 ## interrupted-checkout-retains-evictable-cache-dependency.md
 

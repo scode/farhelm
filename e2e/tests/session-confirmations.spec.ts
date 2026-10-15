@@ -3,12 +3,12 @@
  * timing a classifier or reboot; requests, guards and resulting IDs stay real.
  */
 import { expect, test } from "./helpers/evidence";
-import type { Page, Route } from "@playwright/test";
+import type { APIRequestContext, Page, Route } from "@playwright/test";
 import {
   cleanupSession, createResumableSession, createSession, listSessions,
   openRowMenu, patchPreferences, readPreferences, stopSession,
 } from "./helpers/fleet";
-import { installTerminalSuiteHooks } from "./helpers/terminal-suite";
+import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 import { routeGate } from "./helpers/route-gate";
 
 installTerminalSuiteHooks();
@@ -20,6 +20,153 @@ installTerminalSuiteHooks();
 // failures. Null is the default every spec starts from.
 test.afterEach(async ({ request }) => {
   await patchPreferences(request, { skip_session_confirmations: null });
+});
+
+/** Answer a held preference write unless teardown already disposed it.
+ *
+ * The restoration tests' teardown navigates away first, so no later write can
+ * leave the page, then releases any write a handler still holds. Replying to
+ * a request the navigation disposed throws; that race, and only that race, is
+ * tolerated here, as `showStatus` below tolerates its own. */
+async function replyUnlessTornDown(reply: () => Promise<void>) {
+  try {
+    await reply();
+  } catch (e) {
+    const raced = e instanceof Error
+      && /Route is already handled|Target page, context or browser has been closed|Test ended/.test(e.message);
+    if (!raced) throw e;
+  }
+}
+
+/** Stop a restoration test's page and put the helm-wide opt-out back.
+ *
+ * A body that fails between clicks can leave the page's write queue about to
+ * send an opt-out (skip confirmations) after the routes are gone, possibly
+ * after the file-level reset, which would leave every later spec skipping
+ * confirmations. Navigating away ends the queue before anything is released,
+ * and the explicit reset covers a write that was already in flight. */
+async function endRestorationTest(page: Page, request: APIRequestContext, release: () => void) {
+  await page.goto("about:blank");
+  release();
+  await page.unrouteAll({ behavior: "wait" });
+  await patchPreferences(request, { skip_session_confirmations: null });
+}
+
+/** A failed restoration must not masquerade as a saved safety choice. Keep
+ * this page's choice, warn about reload, and allow a later click to recover.
+ * Failing the safe opt-out direction remains silent. */
+test("restoring confirmations reports save failure and recovers", async ({ page, request }) => {
+  await patchPreferences(request, { skip_session_confirmations: true });
+  expect((await readPreferences(request)).skip_session_confirmations).toBe(true);
+  let failWrites = true;
+  await page.route("**/api/preferences", async (route) => {
+    if (route.request().method() !== "PUT"
+      || !("skip_session_confirmations" in route.request().postDataJSON())) return route.fallback();
+    if (failWrites) await replyUnlessTornDown(() => fulfillAsHelm(route, { status: 503, body: "fixture save refused" }));
+    else await replyUnlessTornDown(() => route.continue());
+  });
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "settings", exact: true });
+    const toggle = settings.getByRole("checkbox", { name: "skip session confirmations", exact: true });
+    const error = settings.getByRole("alert");
+    await expect(toggle).toBeChecked();
+    await toggle.uncheck();
+    await expect(error).toHaveText("Confirmations may still be off for this helm. Try again.");
+    await expect(toggle).not.toBeChecked();
+    expect((await readPreferences(request)).skip_session_confirmations).toBe(true);
+
+    // Observe the failed opt-out response too: clearing the old error alone
+    // would not prove this direction stays silent after its save settles.
+    const failedOptOut = page.waitForResponse((reply) => reply.request().method() === "PUT"
+      && new URL(reply.url()).pathname === "/api/preferences"
+      && reply.request().postDataJSON().skip_session_confirmations === true);
+    await toggle.check();
+    expect((await failedOptOut).status()).toBe(503);
+    await expect(error).toHaveCount(0);
+    failWrites = false;
+    await toggle.uncheck();
+    await expect.poll(async () => (await readPreferences(request)).skip_session_confirmations).toBe(false);
+    await expect(error).toHaveCount(0);
+    await page.reload();
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await expect(toggle).not.toBeChecked();
+    await expect(error).toHaveCount(0);
+  } finally {
+    await endRestorationTest(page, request, () => {});
+  }
+});
+
+/** Off/on/off returns to the same value but creates a new save. The first
+ * failure must not warn while that newer restoration is still pending. */
+test("superseded restoration cannot report an older failure", async ({ page, request }) => {
+  await patchPreferences(request, { skip_session_confirmations: true });
+  expect((await readPreferences(request)).skip_session_confirmations).toBe(true);
+  const firstReached = routeGate();
+  const firstRelease = routeGate();
+  const newestReached = routeGate();
+  const newestRelease = routeGate();
+  let restoringWrites = 0;
+  await page.route("**/api/preferences", async (route) => {
+    if (route.request().method() !== "PUT"
+      || route.request().postDataJSON().skip_session_confirmations !== false) return route.fallback();
+    restoringWrites += 1;
+    if (restoringWrites === 1) {
+      firstReached.release();
+      await firstRelease.wait();
+      await replyUnlessTornDown(() => fulfillAsHelm(route, { status: 503, body: "fixture older save refused" }));
+    } else {
+      newestReached.release();
+      await newestRelease.wait();
+      await replyUnlessTornDown(() => route.continue());
+    }
+  });
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "settings", exact: true });
+    const toggle = settings.getByRole("checkbox", { name: "skip session confirmations", exact: true });
+    await expect(toggle).toBeChecked();
+    // Supersession releases the old completion on the intervening opt-out,
+    // before the first HTTP response. Retain even a transient warning there:
+    // the final restoring click clears errors and could otherwise hide it.
+    const warnings = await settings.evaluateHandle((element) => {
+      const seen: string[] = [];
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (node instanceof Element && node.matches('[role="alert"]')) seen.push(node.textContent ?? "");
+          }
+        }
+      });
+      observer.observe(element, { childList: true, subtree: true });
+      return { seen, observer };
+    });
+    await toggle.uncheck();
+    await firstReached.wait();
+    await toggle.check();
+    await toggle.uncheck();
+    firstRelease.release();
+    await newestReached.wait();
+    // A real second request is pending: neither equal values nor the old
+    // failed response may settle the newest click's acknowledgment.
+    expect(restoringWrites).toBe(2);
+    expect((await readPreferences(request)).skip_session_confirmations).toBe(true);
+    await expect(toggle).not.toBeChecked();
+    await expect(settings.getByRole("alert")).toHaveCount(0);
+    expect(await warnings.evaluate((state) => state.seen)).toEqual([]);
+    newestRelease.release();
+    await expect.poll(async () => (await readPreferences(request)).skip_session_confirmations).toBe(false);
+    await expect(settings.getByRole("alert")).toHaveCount(0);
+    await warnings.evaluate((state) => state.observer.disconnect());
+    await warnings.dispose();
+  } finally {
+    await endRestorationTest(page, request, () => {
+      firstRelease.release();
+      newestRelease.release();
+    });
+  }
 });
 
 /** Change only the named fixture's displayed status. Keeping the real reply's

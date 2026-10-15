@@ -21,9 +21,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`wrapped-file-link-partial-redraw-keeps-old-target.md`](wrapped-file-link-partial-redraw-keeps-old-target.md) —
   Repainting only part of a wrapped link can leave its previous click target active.
 
-- [`confirmation-restoration-failure-reloads-optout.md`](confirmation-restoration-failure-reloads-optout.md) — If
-  turning confirmations back on fails to save, reloading can silently restore first-click destructive actions.
-
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 
