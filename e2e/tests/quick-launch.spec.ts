@@ -296,7 +296,9 @@ for (const recover of [false, true]) {
 
 /** Fresh shared reads may replace acknowledged state, but they cannot undo
  * this window's explicit dirty choice. Hold the PUT before it reaches the helm
- * (or refuse it), then close Templates and observe the actual create payload. */
+ * (or refuse it), then close Templates and observe the actual create payload.
+ * A held save also fences the shortcut's read until released; once acknowledged,
+ * only the newly persisted mark can decide which template launches. */
 for (const failed of [false, true]) {
   test(`quick launch honors a ${failed ? "failed" : "held"} local mark over the shared read`, async ({ page, request }) => {
     const prefix = `quick-local-mark-${Date.now()}`;
@@ -304,8 +306,16 @@ for (const failed of [false, true]) {
     const gate = routeGate();
     let held = 0;
     let settled = 0;
+    let preferenceReads = 0;
+    // Arrival order at the route: "read" for a preference read, "save-reply"
+    // when the held mark save starts answering the page.
+    const events: string[] = [];
     const bodies: any[] = [];
     await page.route("**/api/preferences", async (route) => {
+      if (route.request().method() === "GET") {
+        preferenceReads++;
+        events.push("read");
+      }
       if (route.request().method() !== "PUT" || route.request().postDataJSON().quick_launch_template !== chosen) {
         return route.continue();
       }
@@ -315,7 +325,9 @@ for (const failed of [false, true]) {
         settled++;
       } else {
         await gate.wait();
-        await route.fulfill({ response: await route.fetch() });
+        const response = await route.fetch();
+        events.push("save-reply");
+        await route.fulfill({ response });
       }
     });
     await page.route("**/api/sessions", async (route) => {
@@ -342,7 +354,25 @@ for (const failed of [false, true]) {
       expect((await readPreferences(request)).quick_launch_template).toBe(old);
       await dialog.locator(".templates-close").click();
       await expect(dialog).toHaveCount(0);
+      const readsBeforeShortcut = preferenceReads;
+      const eventsBeforeShortcut = events.length;
+      const trigger = page.locator(".quick-launch-trigger");
+      const previousOpening = Number(await trigger.getAttribute("data-opening-generation"));
       await chord(page);
+      if (!failed) {
+        await expect.poll(async () => Number(await trigger.getAttribute("data-opening-generation"))).toBeGreaterThan(previousOpening);
+        // sleep-ok: observe whether a shortcut admitted during the held save dispatches its dependent read.
+        await page.waitForTimeout(150);
+        expect(preferenceReads, "the shortcut read cannot overtake the held mark save").toBe(readsBeforeShortcut);
+        expect(bodies).toHaveLength(0);
+        gate.release();
+        // The shortcut's read does happen, and only once the save is
+        // answering: without the ordering it would have been sent while the
+        // save was still held, ahead of "save-reply".
+        await expect.poll(() => events.slice(eventsBeforeShortcut)).toContain("read");
+        const after = events.slice(eventsBeforeShortcut);
+        expect(after[0], `the shortcut's read waited for the save: ${after}`).toBe("save-reply");
+      }
       const form = page.locator(".create-session-form");
       await expect(form).toBeVisible();
       await expect(form.locator(".create-session-error")).toContainText("local mark launch fixture refusal");

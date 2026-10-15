@@ -1279,8 +1279,9 @@ pub(super) fn TemplatesDialog(
         let base = save_base.clone();
         busy.set(true);
         error.set(None);
+        let saving_request = crate::api::put_template(&base, &value.name, &value.fields);
         spawn(async move {
-            let result = crate::api::put_template(&base, &value.name, &value.fields).await;
+            let result = saving_request.await;
             let result = match (result, old) {
                 (Ok(()), Some(old)) if old != value.name => {
                     // Another window may have marked this name, or moved the
@@ -1334,13 +1335,14 @@ pub(super) fn TemplatesDialog(
                             return;
                         }
                     }
+                    let deleting_request = crate::api::delete_template(&base, &old);
                     if !crate::api::prepare_template_delete(&old).await {
                         busy.set(false);
                         error.set(Some("the new name was saved, but a shortcut write was interrupted; the old template was kept".into()));
                         templates.restart();
                         return;
                     }
-                    crate::api::delete_template(&base, &old).await
+                    deleting_request.await
                 }
                 (result, _) => result,
             };
@@ -1401,6 +1403,7 @@ pub(super) fn TemplatesDialog(
         let base = delete_base.clone();
         busy.set(true);
         error.set(None);
+        let deleting_request = crate::api::delete_template(&base, &name);
         spawn(async move {
             if !crate::api::prepare_template_delete(&name).await {
                 busy.set(false);
@@ -1409,7 +1412,7 @@ pub(super) fn TemplatesDialog(
                 ));
                 return;
             }
-            match crate::api::delete_template(&base, &name).await {
+            match deleting_request.await {
                 Ok(()) => {
                     if preferences.0.peek().quick_launch_template.as_ref() == Some(&name) {
                         preferences.0.write().quick_launch_template = None;
@@ -1468,20 +1471,18 @@ pub(super) fn TemplatesDialog(
         let base = undo_base.clone();
         busy.set(true);
         error.set(None);
+        // Validation belongs before this save's ticket. Both futures are
+        // declared now, so later requests still see the pending restoration.
+        let listed = crate::api::fetch_templates(&base);
+        let saving_request =
+            crate::api::put_template(&base, &value.template.name, &value.template.fields);
         spawn(async move {
-            let result = match crate::api::fetch_templates(&base).await {
+            let result = match listed.await {
                 Ok(rows) => {
                     let names = ListedNames::Loaded(rows.iter().map(|t| t.name.as_str()).collect());
                     match save_name_refusal(None, &value.template.name, &names) {
                         Some(message) => Err(message),
-                        None => {
-                            crate::api::put_template(
-                                &base,
-                                &value.template.name,
-                                &value.template.fields,
-                            )
-                            .await
-                        }
+                        None => saving_request.await,
                     }
                 }
                 Err(message) => Err(format!(

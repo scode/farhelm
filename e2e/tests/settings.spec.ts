@@ -354,10 +354,10 @@ test("post-clone command stays locked until its initial read completes", async (
   }
 });
 
-/** The command field owns a separate save path from the folder field. Hold
- * its real PUT before forwarding, prove it is pending and locked, then close
- * Settings; persistent readback must still observe the submitted command. */
-test("a pending post-clone command save survives closing settings", async ({ page, request }) => {
+/** A save outlives its dismissed field. Reopening must wait for that save
+ * before seeding an editable draft, or an older held save could overwrite
+ * a newer one while the reopened Settings claims the newer value was saved. */
+test("a pending post-clone save orders reopened settings before the next save", async ({ page, request }) => {
   const previous = await readPostClone(request);
   let release!: () => void;
   let signalSubmitted!: () => void;
@@ -392,11 +392,24 @@ test("a pending post-clone command save survives closing settings", async ({ pag
     expect(await readPostClone(request)).toEqual(previous);
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
+    // The old field is gone: this lock must belong to the reopened read,
+    // not the previous component's local saving flag.
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await expect(command).not.toBeEditable();
+    expect(await readPostClone(request)).toEqual(previous);
+    // sleep-ok: observe the reopened field while the earlier save is held; initial loading alone is not an ordering proof.
+    await page.waitForTimeout(150);
+    await expect(command).not.toBeEditable();
     release();
     await expect.poll(() => readPostClone(request)).toEqual({ command: chosen });
-    await page.getByRole("button", { name: "settings", exact: true }).click();
     await expect(command).toBeEditable();
     await expect(command).toHaveValue(chosen);
+    const newer = "printf 'newer save wins'";
+    await command.fill(newer);
+    await field.getByRole("button", { name: "save", exact: true }).click();
+    await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+    expect(await readPostClone(request)).toEqual({ command: newer });
   } finally {
     release();
     // Settle the owned PUT before restoration even when an assertion fails,
