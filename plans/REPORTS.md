@@ -8,3 +8,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`click-to-open-paths`](reports/click-to-open-paths.report.md) landed 2026-10-15 in #2034: Cmd-click a terminal file path in the desktop app to save and open it (.md, .txt, .html only), plus the redesigned file hover
 - [`triage-power-loss-spec`](reports/triage-power-loss-spec.report.md) landed 2026-10-15 in #2039, #2043: Spec: downloads and new checkouts need not survive a power loss (two triage outcomes)
 - [`triage-trusted-host-values-spec`](reports/triage-trusted-host-values-spec.report.md) landed 2026-10-15 in #2040, #2042: Spec: the user's own host names and paths are trusted in copied SSH help commands (two triage outcomes)
+- [`triage-hand-edited-units-spec`](reports/triage-hand-edited-units-spec.report.md) landed 2026-10-15 in #2041, #2049: Spec: a hand-edited Farhelm service voids setup and uninstall guarantees (two triage outcomes)

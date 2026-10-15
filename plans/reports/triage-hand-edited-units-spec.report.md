@@ -51,3 +51,38 @@ Implementation stayed in the main session under the no-workhorse requirement. Wo
 effort. Private galaxy-brain records retain source-review decisions and external per-turn usage; exact reported model
 attribution and native/main usage are unavailable. The two PRs touch no files under `plans/`, remain drafts and are not
 merged by the executor.
+
+### Landing
+
+Landed as #2041 and #2049, last of the round's three spec-only plans. The rebase of #2049 met a conflict in the review
+feedback index, where triage-power-loss-spec (#2043) had removed the neighbouring entry; both removals were kept.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. It traced every place Farhelm reads a service unit:
+`farhelm helm setup` and its uninstall mode, `farhelm uninstall`, the hosts panel on the helm's own machine (which reads
+the unit only to word its refusal), and the hosts panel's remote setup, Update and uninstall. The covered operations
+match the code, none is missing, and the refusal to install at a program path containing `$` is decided from the install
+path, not a unit, so the exception does not reach it.
+
+#### Fixes made while landing
+
+Two SPEC.md passages still read as absolute rules that the new exception voids, which is how the continuation-line
+finding arose:
+
+- The 2026-10-10 service-type paragraph now says a type change is a hand edit, so its refusal is best effort: an edit
+  that hides the type or start command from Farhelm's reading may not be refused.
+- The uninstall section's rule for recognising services now says a hand-edited unit is outside that guarantee and may be
+  attributed to another installation, with a link to the exception.
+
+#### Left as is
+
+Nits: the refusal rule's parenthetical says "where this section says otherwise" though the hand-edit exception sits in
+another section (the link covers it), and the new paragraph sits in a section whose opening is about remote hosts, as
+the triage outcome asked.
+
+#### Checks
+
+- Run now: `dprint check` on SPEC.md after the fixes and on the index after the conflict resolution; no conflict markers
+  on main after all three plans landed.
+- Not run: anything else; only Markdown changed.

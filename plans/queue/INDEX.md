@@ -3,7 +3,6 @@
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [in-flight 91b19d] `triage-conversation-tracking-spec.md` — Spec: Restart may resume the previous conversation in the cases the maintainer accepted (six triage outcomes)
-- [landing 52c3e5] `triage-hand-edited-units-spec.md` — Spec: a hand-edited Farhelm service voids setup and uninstall guarantees (two triage outcomes)
 - [complete] `triage-highest-discards.md` — Remove seven discarded review findings from the queue
 - [in-flight 1b33bf] `confirmations-save-error.md` — Settings shows an error when turning session confirmations back on fails to save
 - [in-flight 58ac98] `legacy-template-edits-gated.md` — Older templates: no silent command edits and no Undo that cannot work, only if trivially fixable
