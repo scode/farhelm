@@ -43,3 +43,21 @@ before publication, then completed with the actual shared draft URL. The same re
 that finding resolved and reported no remaining findings. The commit and PR wording passed a separate cold read. The
 documentation pass covered the changed ledger and index. The PR remains a draft; the executor has neither marked it
 ready nor merged it.
+
+### Landing
+
+Landed as #2050, the round's only plan. Main had gained the three triage spec plans of the previous round, which also
+edited the review feedback index and the triage ledger; the rebase was clean and no entry this plan removes was touched
+by them.
+
+#### Review
+
+An independent fresh-context review found nothing to change. Exactly the seven discarded findings are removed, file and
+index entry each; only their seven Execution fields changed in the ledger, each naming this change, bookmark and PR; no
+specification, code, TODO.md, review filter or plans file changed. The TODO entry about an ordered transport between the
+app and the helm still points at two of these findings' ledger entries, which remain.
+
+#### Checks
+
+- Reused: the executor's `dprint check` on both changed files; the rebase changed neither.
+- Not run: anything else; only queue records and Markdown changed.
