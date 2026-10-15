@@ -21,27 +21,12 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`wrapped-file-link-partial-redraw-keeps-old-target.md`](wrapped-file-link-partial-redraw-keeps-old-target.md) —
   Repainting only part of a wrapped link can leave its previous click target active.
 
-- [`pending-command-save-overwrites-newer-save.md`](pending-command-save-overwrites-newer-save.md) — After reopening
-  Settings, a successful replacement or removal can later be undone by an older pending save, restoring a command the
-  user no longer wants executed.
-
 - [`confirmation-restoration-failure-reloads-optout.md`](confirmation-restoration-failure-reloads-optout.md) — If
   turning confirmations back on fails to save, reloading can silently restore first-click destructive actions.
-
-- [`quick-launch-template-identity-follows-successor.md`](quick-launch-template-identity-follows-successor.md) — A
-  pending quick launch or number shortcut may execute on a replacement installation behind the same host entry.
 
 - [`template-undo-refuses-legacy-session-names.md`](template-undo-refuses-legacy-session-names.md) — Deleting an older
   template containing joined emoji or hidden characters offers Undo, but Undo always fails and the retained copy
   expires.
-
-- [`quick-launch-host-removal-falls-back-silently.md`](quick-launch-host-removal-falls-back-silently.md) — A quick
-  launch or number shortcut intended for a remote host can create its checkout and start its agent on the default host
-  without showing the changed destination.
-
-- [`quick-launch-acknowledgment-revives-previous-mark.md`](quick-launch-acknowledgment-revives-previous-mark.md) — After
-  marking template B or assigning it a number key, a shortcut can execute template A instead, including A’s command and
-  destination.
 
 - [`reboot-discards-pending-new-conversation.md`](reboot-discards-pending-new-conversation.md) — If the host reboots
   before a newly reported conversation is recorded, Restart can return to the session’s previous conversation even after
@@ -89,17 +74,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`os-trusted-proxy-can-read-feedback.md`](os-trusted-proxy-can-read-feedback.md) — An OS-trusted interception proxy
   can inspect feedback; its intentional trust policy lacks explicit confidentiality acceptance in the specifications.
 
-- [`folder-history-replaces-highlighted-reset.md`](folder-history-replaces-highlighted-reset.md) — Initial folder
-  history can turn a highlighted local-home reset into a remote recent folder before Enter.
-
-- [`codex-ancestor-clear-withdraws-unverified-resume.md`](codex-ancestor-clear-withdraws-unverified-resume.md) — An
-  unverified ancestor clear can discard the current Codex Resume offer before verifying its replacement.
-
 - [`ntfy-token-follows-changed-server.md`](ntfy-token-follows-changed-server.md) — Changing the notification server can
   send the previous server's access token to the new one.
-
-- [`quick-launch-changes-inherited-destination.md`](quick-launch-changes-inherited-destination.md) — Quick launch can
-  inherit another session's host and folder while its template is loading; number shortcuts use the same path.
 
 - [`guarded-choice-becomes-omp-yolo.md`](guarded-choice-becomes-omp-yolo.md) — Switching the launcher to OMP can clear
   an explicit guarded choice and select YOLO.

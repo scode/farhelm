@@ -13289,7 +13289,9 @@
   reference to the specific issues that prompted this."
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes. The TODO.md Near
   term entry "Consider an ordered transport between the GUI and the helm" names this item.
-- Execution: planned in `plans/queue/triage-highest-discards.md`.
+- Execution: `complete`; feedback file and index entry removed under the recorded discard decision, without code, spec
+  or filter changes. Change `vynrtwwrplpvrnusslrvvkstopkoutvw`, bookmark
+  `plan/triage-highest-discards/01-discarded-findings`, [PR #2050](https://github.com/scode/farhelm/pull/2050/changes).
 
 ## quick-launch-changes-inherited-destination.md
 
@@ -13300,7 +13302,9 @@
 - Decision: on 2026-10-14, discarded with `quick-launch-acknowledgment-revives-previous-mark.md` (see the user's words
   there).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-highest-discards.md`.
+- Execution: `complete`; feedback file and index entry removed under the recorded discard decision, without code, spec
+  or filter changes. Change `vynrtwwrplpvrnusslrvvkstopkoutvw`, bookmark
+  `plan/triage-highest-discards/01-discarded-findings`, [PR #2050](https://github.com/scode/farhelm/pull/2050/changes).
 
 ## quick-launch-host-removal-falls-back-silently.md
 
@@ -13310,7 +13314,9 @@
 - Decision: on 2026-10-14, discarded with `quick-launch-acknowledgment-revives-previous-mark.md` (see the user's words
   there); the trigger needs a second interface to the helm.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-highest-discards.md`.
+- Execution: `complete`; feedback file and index entry removed under the recorded discard decision, without code, spec
+  or filter changes. Change `vynrtwwrplpvrnusslrvvkstopkoutvw`, bookmark
+  `plan/triage-highest-discards/01-discarded-findings`, [PR #2050](https://github.com/scode/farhelm/pull/2050/changes).
 
 ## quick-launch-template-identity-follows-successor.md
 
@@ -13321,7 +13327,9 @@
 - Decision: on 2026-10-14, discarded with `quick-launch-acknowledgment-revives-previous-mark.md` (see the user's words
   there).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-highest-discards.md`.
+- Execution: `complete`; feedback file and index entry removed under the recorded discard decision, without code, spec
+  or filter changes. Change `vynrtwwrplpvrnusslrvvkstopkoutvw`, bookmark
+  `plan/triage-highest-discards/01-discarded-findings`, [PR #2050](https://github.com/scode/farhelm/pull/2050/changes).
 
 ## pending-command-save-overwrites-newer-save.md
 
@@ -13334,7 +13342,9 @@
   transport TODO names (see `quick-launch-acknowledgment-revives-previous-mark.md`).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes. The TODO.md Near
   term entry "Consider an ordered transport between the GUI and the helm" names this item.
-- Execution: planned in `plans/queue/triage-highest-discards.md`.
+- Execution: `complete`; feedback file and index entry removed under the recorded discard decision, without code, spec
+  or filter changes. Change `vynrtwwrplpvrnusslrvvkstopkoutvw`, bookmark
+  `plan/triage-highest-discards/01-discarded-findings`, [PR #2050](https://github.com/scode/farhelm/pull/2050/changes).
 
 ## codex-ancestor-clear-withdraws-unverified-resume.md
 
@@ -13350,7 +13360,9 @@
 - Decision: on 2026-10-14 the user: "forget any edge case having to do with upgrading rom old versions if its combined
   with "super rare unlikely situation". its ok."
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: planned in `plans/queue/triage-highest-discards.md`.
+- Execution: `complete`; feedback file and index entry removed under the recorded discard decision, without code, spec
+  or filter changes. Change `vynrtwwrplpvrnusslrvvkstopkoutvw`, bookmark
+  `plan/triage-highest-discards/01-discarded-findings`, [PR #2050](https://github.com/scode/farhelm/pull/2050/changes).
 
 ## confirmation-restoration-failure-reloads-optout.md
 
@@ -13418,7 +13430,9 @@
   recent remote folder instead, because the highlight is kept by position. The draft shows the result before Launch.
 - Decision: on 2026-10-14 the user: "discard for now but no filter/rule/spec".
 - Completion criteria: remove this feedback file and its index entry, without code, spec or filter changes.
-- Execution: planned in `plans/queue/triage-highest-discards.md`.
+- Execution: `complete`; feedback file and index entry removed under the recorded discard decision, without code, spec
+  or filter changes. Change `vynrtwwrplpvrnusslrvvkstopkoutvw`, bookmark
+  `plan/triage-highest-discards/01-discarded-findings`, [PR #2050](https://github.com/scode/farhelm/pull/2050/changes).
 
 ## post-clone-editor-normalizes-literal-carriage-returns.md
 
