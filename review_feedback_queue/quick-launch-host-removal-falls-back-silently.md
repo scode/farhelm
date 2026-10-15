@@ -40,3 +40,20 @@ additions read. Highest-candidate independent drop review remains for the collec
 
 Runtime evidence: None, as requested. Static review only; changed tests assessed against the supplied checklist. No
 files created, modified or deleted; no fetch, rebase or nested agents.
+
+## Trailing review: number shortcuts
+
+Additional reviewed commit: `4fced22e4d9bc501bbb84948a77cd52ef26203d6`, checked at pinned tip
+`507dbcbbcfa00173ca7e4d24c79f3990025963b6`. Source: separate adversarial trailing-review agent, templates scope.
+Suggested bucket remains `highest`. Confidence: confirmed static shared path; the browser interleaving was not executed.
+Proposed drop: duplicate file only; retain number-key reachability here. Possible cover: this item's existing
+removal/default-host trigger and consequence.
+
+The number callback at `list/view.rs:3372–3390` uses the same automatic form path. Template host application at
+`list/create_form.rs:572–580` still stores a registry ID; removal can reach default-host fallback at
+`list/shared.rs:466–480` and `list/view.rs:1188–1214`. Target changes at `create_form.rs:2914–2923` do not spend
+automatic intent. Once the replacement preview at `2969–3005` succeeds, submission at `4083–4142` can proceed on the
+default host. The original bug is unchanged; this commit adds number-key admission to it.
+
+A fresh independent reviewer confirmed that this extension retains the whole candidate. Same-entry retarget acceptance
+does not exclude fallback to a different host entry.

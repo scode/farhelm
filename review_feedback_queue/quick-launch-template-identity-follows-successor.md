@@ -38,3 +38,19 @@ additions read. Highest-candidate independent drop review remains for the collec
 
 Runtime evidence: None, as requested. Static review only; changed tests assessed against the supplied checklist. No
 files created, modified or deleted; no fetch, rebase or nested agents.
+
+## Trailing review: number shortcuts
+
+Additional reviewed commit: `4fced22e4d9bc501bbb84948a77cd52ef26203d6`, checked at pinned tip
+`507dbcbbcfa00173ca7e4d24c79f3990025963b6`. Source: separate adversarial trailing-review agent, templates scope.
+Suggested bucket remains `highest`. Confidence remains `likely`: the healthy-successor observation sequence without an
+unavailable snapshot has not been reproduced. Proposed drop: duplicate file only; no specification exclusion. Possible
+cover: this item's existing disputed identity/retarget scope.
+
+Number shortcuts at `list/view.rs:3372–3390` enter the same automatic path after resolving a template name. Target
+reconciliation at `list/create_form.rs:2914–2923`, preview at `2969–3005` and submission at `4083–4142` therefore expose
+the same potential successor substitution. This adds a caller, not stronger evidence for the required timing.
+
+A fresh independent reviewer agreed to retaining the number variant here and explicitly did not agree to dropping the
+underlying candidate on specification coverage. The original competing acceptance text and caveats remain unresolved for
+human triage.

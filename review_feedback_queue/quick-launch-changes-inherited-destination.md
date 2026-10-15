@@ -32,3 +32,19 @@ accepts destination substitution.
 
 Current-main status: persists by inspection at `4c9e9612d217be9f2ffe4d586c6bffaf8e1cd703`; no fixing commit found. The
 reviewer read the full commit diff and relevant traces; this is not an exhaustive review of unchanged surrounding code.
+
+## Trailing review: number shortcuts
+
+Additional reviewed commit: `4fced22e4d9bc501bbb84948a77cd52ef26203d6`, checked at pinned tip
+`507dbcbbcfa00173ca7e4d24c79f3990025963b6`. Source: separate adversarial trailing-review agent, templates scope.
+Suggested bucket remains `highest`. Confidence: confirmed static shared path, without a browser reproduction. Proposed
+drop: duplicate file only; retain number-key reachability here. Possible cover: this item's existing trigger and
+consequence.
+
+Number keys now enter the same pending preparation callback. Selecting another session remains admitted at
+`list/view.rs:2795–2816`; the later `open_new` callback at `3301–3330` still reads the current inherited host and
+directory. The number-specific branch at `3334–3390` only changes which template name is resolved, so a template without
+its own destination can execute in the newly selected session's project. The underlying bug predates this commit; the
+new shortcut exposes it through another entry path.
+
+A fresh independent reviewer confirmed the shared mechanism and agreed to this extension, with no substantive exclusion.
