@@ -62,3 +62,37 @@ The prescribed fresh-context gpt-6.1-sol review at high effort, through the exte
 issues. It covered the full diff, plan, triage decision, surrounding approval/reconciliation code and the full
 test-authoring checklist. Commit and PR wording passed separate cold reads. No scope departure, unresolved finding or
 maintainer decision remains.
+
+### Landing
+
+Landed as #2086, the second of the round's four plans, tested stacked with the other three on top of main (see
+claude-trust-decimals for the shared runs).
+
+#### Review
+
+An independent fresh-context review found nothing blocking. The key that a managed-checkout retry is matched by now
+includes the host the request arrived on: the registry entry of the live connection, never a host named in the request.
+Both callers that build the key (create, which covers spawn and managed checkouts, and clone) are bound, and nothing
+else rebuilds it. Host ids are never reused, so a removed host's attempts cannot be inherited. Old and new keys cannot
+cross-match, so a retry pending across the upgrade fails toward approval, never toward a wrong match; the stored request
+fingerprints are unchanged. The new regression test would fail without the fix.
+
+#### Fixes made while landing
+
+- The changelog fragment said "retry key", a name users never see; it now names `agent create` and `--idempotency-key`
+  and says such a request is asked about like any other.
+- SPEC_impl.md still said keys are scoped to the asking session; both places now say the session and its host, matching
+  SPEC.md.
+- The key function's comment now says what the upgrade does to an old retry (approved afresh, creating a new session or
+  checkout instead of returning the earlier one) and that the host is the registry entry, which approvals follow across
+  a destination change or an adopted identity.
+
+#### Left as is
+
+A retry pending across the upgrade creates a second session or checkout instead of returning the first; the plan
+accepted this one-time effect, and the original stays visible for the user to delete. Not verified: whether such a
+managed-checkout retry gets a fresh path or a conflict message; either tells the agent what to do.
+
+#### Checks
+
+See claude-trust-decimals: the helm package was part of the protocol, helm and supervisor run (2386 passed).

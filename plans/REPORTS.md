@@ -7,3 +7,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`triage-layout-filter-and-devbuild`](reports/triage-layout-filter-and-devbuild.report.md) landed 2026-10-15 in #2076, #2079, #2081: Review queue: add the oversized-dialog filter and drop two layout findings under it, discard the devbuild finding
 - [`adopt-identity-escaping`](reports/adopt-identity-escaping.report.md) landed 2026-10-15 in #2083: Adopt prompt: distinct installation identities never render alike
 - [`claude-trust-decimals`](reports/claude-trust-decimals.report.md) landed 2026-10-15 in #2089: Claude checkout trust edits keep unrelated numbers in Claude's settings exact
+- [`checkout-recovery-host-binding`](reports/checkout-recovery-host-binding.report.md) landed 2026-10-15 in #2086: Agent creates into managed checkouts: retry replay bound to the asking host
