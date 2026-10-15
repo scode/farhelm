@@ -13700,7 +13700,9 @@
 - Completion criteria: a template's model or folder containing presentation-unsafe characters is shown escaped and
   cannot be silently edited into different bytes; saving another field keeps it exactly; clearing it works. Covered by
   tests. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/template-editor-unsafe-values.md`.
+- Execution: complete in jj change `nuvsruqyxzyk`, bookmark `plan/template-editor-unsafe-values/01-read-only-values`;
+  [PR #2087](https://github.com/scode/farhelm/pull/2087/changes); unsafe model and folder values are escaped and
+  read-only, with raw bytes retained until explicit replacement.
 
 ## checkout-recovery-requester-not-bound-to-host.md
 

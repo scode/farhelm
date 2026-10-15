@@ -36,9 +36,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`codex-guide-calls-trust-bypass-warning-harmless.md`](codex-guide-calls-trust-bypass-warning-harmless.md) — The Codex
   guide calls a hook-trust bypass warning harmless without disclosing its configured-hook consequence.
 
-- [`template-editor-conceals-peer-model-and-folder.md`](template-editor-conceals-peer-model-and-folder.md) — Saving a
-  cloned session opens template controls that conceal host-supplied model and folder characters.
-
 ## High priority: material UX degradation
 
 - [`claude-trust-cleanup-delays-desktop-start.md`](claude-trust-cleanup-delays-desktop-start.md) — Retrying trust
