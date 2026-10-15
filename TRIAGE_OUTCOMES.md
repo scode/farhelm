@@ -13746,3 +13746,1383 @@
   configured-hook consequence, without changing the accepted integration behavior. Remove this feedback file and its
   index entry.
 - Execution: planned in `plans/queue/codex-guide-hook-warning.md`.
+
+## uninstall-stale-socket-loses-private-client.md
+
+- Outcome: `fix code`.
+- Assessment: an uninstall run can stop after Farhelm's private directory (which holds its private tmux) has been
+  removed but before the host is forgotten: the helm stops, or the registry deletion fails. Every Retry after that then
+  fails on a host whose supervisor and tmux are already gone, and the host stays listed with a tmux "not found" error.
+  The cause is the stop step's shell script (`SystemBackend::stop` in
+  `crates/farhelm-helm/src/provisioning/backend.rs`). It runs the frozen client whenever `stat` finds the socket path,
+  and only the "no such file" stat result is excused. The repository says tmux leaves its socket file behind when the
+  server exits; see `kill_tmux_server`'s docs in `crates/farhelm-teststate/src/lib.rs` and the "tmux can leave a stale
+  socket" comment in the provisioning test. So the socket is normally still there after the first run's successful stop,
+  and the plan's client, `<lib>/tmux` on hosts without an acceptable host tmux, is what the next step deletes. Verified
+  by code reading. The existing regression in `crates/farhelm-helm/src/provisioning.rs` deletes the socket by hand
+  before its missing-client check, which hides exactly this case. Settled by: SPEC_impl.md "UNINSTALL is the third
+  operation…": "An absent server skips this cleanup, including a retry after the lib directory was removed; any other
+  tmux failure leaves the host listed so uninstall can be retried." The spec also says "a failed run continues from
+  wherever it stopped".
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in the stop script, once the
+  server is proven gone or told to exit, unlink the socket file (`rm -f -- "$socket"`) in the same shell. That covers a
+  successful `kill-server` and the excused "no server running on …" (ECONNREFUSED) result. A later lib-gone retry then
+  sees the path absent and skips. Then change the regression so it no longer removes the socket by hand. It should
+  assert that the first stop leaves no socket, and that a retry with a removed client is `Skipped`. Complexity gate:
+  confined to the stop script in `backend.rs` and its test in `provisioning.rs`, with no new provisioning action, plan
+  field, API or persisted state. Never unlink after an unexcused tmux failure. Hosts already stranded by older releases
+  (lib gone, stale socket) are out of scope. They fall under the FILTER.md upgrade filter, which applies only when an
+  older release is combined with a rare interruption. If a correct fix needs a socket probe that does not use the
+  client, a plan reordering, or a new action, stop and return the item to the maintainer.
+- Completion criteria: after a successful or excused stop, no socket file remains, and an uninstall retried after the
+  lib directory was removed skips the tmux cleanup and goes on to forget the host. The updated real-user-manager
+  regression covers the stale-socket and missing-client combination without manual socket removal. Remove the feedback
+  file and its index entry.
+- Execution: pending.
+
+## claude-trust-tests-compare-lexical-temp-paths.md
+
+- Outcome: `fix code`.
+- Assessment: on a developer machine whose temporary directory sits behind a symlink (macOS `/var` → `/private/var`),
+  the new trust round-trip test fails even though trust works. `resolve()` returns the canonical config path and the
+  canonical project key. The test compares the config path with the raw `tempdir()` spelling, and seeds its `"keep"`
+  project entry under the raw spelling, so the first `as_object().unwrap()` on the canonical key panics. The launch test
+  `claude_trust_launch_is_opt_in_and_best_effort_after_ready` (`crates/farhelm-supervisor/src/launch.rs`) makes the same
+  `config_path == config` comparison against an uncanonicalized fixture path. Verified by code reading. It is not
+  reproduced on macOS. Settled by: `.agents/test-authoring.md`: "Assert the fixture premise before the action or
+  measurement that depends on it." The precedent is three identical symlinked-tempdir fixes the maintainer approved on
+  2026-10-10 (`tilde-replay-test-equates-display-canonical-paths.md`,
+  `directory-browse-test-compares-canonical-output-uncanonicalized-fixture.md`, and
+  `checkout-recovery-compares-canonical-roots-unresolved-fixture.md`; PR #1834).
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: canonicalize the fixture root
+  once at the start of `trust_round_trip_preserves_other_keys_mode_and_symlink` in `trust.rs`, and derive the config,
+  alias and seeded project key from it. In the launch test, compare against `fs::canonicalize(&config)`. Complexity
+  gate: test-only edits in those two tests, with no production change and no change to the test process's environment.
+  If more than canonicalizing fixture paths is needed, stop and return the item.
+- Completion criteria: both tests pass whether or not the temporary root is a symlink, and each states the canonical
+  premise before the trust operation. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## host-picker-folded-letter-cycling-misses-dotted-i.md
+
+- Outcome: `fix code`.
+- Assessment: in the launcher's host field, typing the same letter again should move to the next host starting with it,
+  but for İ (whose lowercase form is two characters, i plus U+0307) the second press appends to the query instead, so
+  the highlight stays on the first match. Repetition is tested by `old.chars().all(|ch| letter.starts_with(ch))` in the
+  `onkeydown` handler of `crates/farhelm-ui/src/list/host_picker.rs`, and U+0307 never starts `"i̇"`. Verified by code
+  reading. Settled by: SPEC_impl.md (launcher host field paragraph): "Typeahead uses a case-insensitive prefix,
+  restarting after a one-second pause and cycling repeated letters."
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: treat a key as repeated when the
+  previous prefix equals its full lowercase form, i.e. compare whole folded keys rather than characters. Because a
+  repeat resets the prefix to the single letter, this keeps today's behavior for ASCII. Extract the decision into a
+  small pure function so it can be unit-tested. Complexity gate: confined to `host_picker.rs`, with no change to
+  matching, timing or other keys. If a correct fix needs locale-aware folding or changes how prefixes match labels, stop
+  and return the item.
+- Completion criteria: two İ presses within a second move from the first İ-prefixed host to the next one, and ASCII
+  repeat and multi-letter prefixes behave as before. A unit test covers İ, ASCII repetition and a mixed prefix. Remove
+  the feedback file and its index entry.
+- Execution: pending.
+
+## automatic-install-warning-omits-cause.md
+
+- Outcome: `fix code`.
+- Assessment: when an automatic (or on-demand) update fails to install, the version readout says **check failed**, and
+  the hover always reads "installing Farhelm X did not finish (the app's log says why)". The actual cause, such as a
+  failed download, an installer exit status, or a local file error, is only logged. In
+  `crates/farhelm-ui/src/desktop/updater.rs` the install error is logged with `tracing::warn!` and dropped, and
+  `CheckResult::InstallFailed` gets fixed text. Verified by code reading. Settled by: SPEC.md "Installation and
+  updates": "An install failure shows **check failed** beside the version immediately, with its reason in the hover;
+  release downloads failing after a successful `/latest` probe count as install failures."
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: keep the install error in the
+  engine's check function and put a one-line, length-bounded summary of its context chain into the `InstallFailed` text,
+  for example "installing Farhelm X failed: fetching …: HTTP 404". The installed record should still decide whether the
+  install succeeded. When the installer reported success but the installed record does not show the version, use a
+  specific reason for that case. Update the test that pins the generic wording. Complexity gate: confined to
+  `updater.rs` (the install-failure branch and its tests), with no new persisted state, no change to retry scheduling,
+  the three-day probe grace, or verification-failure handling, and no change to the install function's signature. If the
+  error text needs restructuring of `run_installer`'s errors or a redaction policy beyond truncation, stop and return
+  the item.
+- Completion criteria: an install failure's hover names its cause (stage and error) in bounded text, and the fallback
+  case says the installer finished without installing. Tests cover an erroring install and an install that leaves the
+  installed record unchanged. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## host-picker-refusal-fixture-enters-version-mismatch.md
+
+- Outcome: `fix code`.
+- Assessment: the browser test "host picker closed Enter launches and remains disabled during the write"
+  (`e2e/tests/host-picker.spec.ts`) fakes the launch refusal with a bare `route.fulfill` that has no build stamp. The UI
+  treats the missing stamp as a version mismatch, so the recovery assertions run on a degraded page rather than one that
+  saw an ordinary refusal. Verified by code reading. The `fulfillAsHelm` docs in `e2e/tests/helpers/terminal-suite.ts`
+  describe exactly this failure mode, and the spec already installs the terminal suite hooks that capture the helm
+  build. Settled by: SPEC_impl.md requires every helm reply to carry its build stamp. `.agents/test-authoring.md` says
+  "Assert the fixture premise before the action". The precedent is
+  `yolo-refusal-fixture-unintentionally-puts-page-into.md`, the same defect, approved as `fix code` on 2026-10-10.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: fulfill the held POST through
+  `fulfillAsHelm(route, { status: 500, contentType: "text/plain", body: … })`, and assert that no version-mismatch
+  notice is shown after the refusal. Complexity gate: confined to that one test in `host-picker.spec.ts`. If the helper
+  cannot be used there, stop and return the item.
+- Completion criteria: the refusal reply carries the helm's stamp, the test asserts the absence of the mismatch notice,
+  and the selected spec passes on Chromium and WebKit. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## paste-regression-loses-session-cleanup-ownership.md
+
+- Outcome: `fix code`.
+- Assessment: in `e2e/tests/terminal-attachments.spec.ts`, `openAttachmentSession` creates a live fake-agent session and
+  then awaits navigation, selection, reveal and the agent banner before returning. The caller only learns the id, and so
+  only takes on cleanup, after that. A setup failure therefore leaves the session running while the suite's `afterAll`
+  deletes its directory. The bracketed-paste test is the one named, but every caller of the helper shares the gap.
+  Verified by code reading. Settled by: `.agents/test-authoring.md`: "Check the actual child lifetime and inherited
+  resources, including failure and cancellation paths."
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: have `openAttachmentSession`
+  delete the session it created (via the existing `cleanupSession`) if any readiness await after creation throws, then
+  rethrow. This fixes every caller without touching each test. Complexity gate: confined to `openAttachmentSession` in
+  that spec file, with no change to `createTabSession` or the suite hooks. If callers depend on a session surviving a
+  failed open, stop and return the item.
+- Completion criteria: a failure after creation inside the helper deletes that session before the error propagates, and
+  the attachment spec passes on Chromium and WebKit. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## installation-guide-hides-update-failures.md
+
+- Outcome: `fix code`.
+- Assessment: the installation guide (`docs/install_uninstall.md`, the self-update paragraph) tells users that "A failed
+  automatic check is only logged, in the app's log". The current app shows **check failed** beside the version for
+  install failures right away, and for probe failures after three days. The guide also never mentions that selecting the
+  version (with no update waiting) checks for updates. Verified by reading the guide against the spec. Settled by:
+  SPEC.md "Install and uninstall": the guide "must document the current installation, update and uninstall process in
+  user-facing terms and stay accurate as that behavior changes". The behavior is in SPEC.md "Installation and updates"
+  (the **check failed** notice, the three-day grace and streak rules, and "Without an update waiting, selecting the
+  version checks for updates").
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: rewrite that paragraph's failure
+  sentence to match SPEC.md, covering install failures shown immediately, probe failures shown after three days of
+  failing, the reason in the hover, and the retry at the next check. Add the version-click check alongside the `?` menu
+  and host menu entries. Complexity gate: a documentation-only edit to `docs/install_uninstall.md`, with no code, spec
+  or website change. Validate only with `dprint check`. If the spec's behavior turns out to be unclear enough to need a
+  spec edit, stop and return the item.
+- Completion criteria: the guide's update section agrees with SPEC.md on when failures are visible and how to check on
+  demand, and `dprint check` passes. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## teststate-socket-probe-blocks-sweep.md
+
+- Outcome: `fix code`.
+- Assessment: test runs on a machine with an abandoned, wedged private tmux server whose listen backlog has filled can
+  hang before any fixture starts. `kill_tmux_server` in `crates/farhelm-teststate/src/lib.rs` first does a blocking
+  `UnixStream::connect`. On Linux that call blocks indefinitely on a full Unix-socket backlog, and it runs before the
+  five-second child deadline and outside the thirty-second pass budget. The sweep runs synchronously from
+  `tempdir_with_sweep`, so every later Rust fixture, and the browser stack's startup sweep, would stall. Verified by
+  code reading. The reviewer demonstrated the blocking syscall on a private listener, but not against a real tmux
+  server. Settled by: this is not SPEC text. It is the crate's own documented contract on `TMUX_KILL_DEADLINE`: "the
+  sweep must never hang: a wedged server … can accept the connection and simply never answer, and one such entry must
+  not block every subsequent harness startup". The FILTER.md "hung private tmux server" filter does not match, because
+  the consequence is harness startup on the whole machine, not one supervisor's host.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: make the preliminary probe a
+  nonblocking connect (`libc` is already a dependency). Only `ECONNREFUSED`/`ENOENT` count as absent.
+  `EAGAIN`/`EINPROGRESS` or any other result falls through to the existing deadline-bound `tmux kill-server` child,
+  which already preserves the directory on timeout. Add a regression with a private listener whose backlog is full,
+  showing the sweep returns promptly and keeps the directory. Complexity gate: confined to `kill_tmux_server` and its
+  tests in `farhelm-teststate`, with no change to sweep policy, budgets or directory selection. If a nonblocking probe
+  cannot be done without a new dependency or platform-specific branching beyond `libc`, stop and return the item.
+- Completion criteria: a sweep over a directory whose socket has a full backlog completes within the existing budgets
+  and preserves that directory. The new test is bounded and annotated per the test-sleep checker. Remove the feedback
+  file and its index entry.
+- Execution: pending.
+
+## git-discovery-fixtures-inherit-bare-git-config.md
+
+- Outcome: `fix code`.
+- Assessment: running the repository-discovery tests with `GIT_CONFIG` set in the environment lets the fixture
+  `local_config_includes_are_not_followed` write `include.path` into whatever file `GIT_CONFIG` names, and that file may
+  belong to the user or to another repository. Git treats `GIT_CONFIG` as an implicit `--file` for `git config`. The
+  fixture's `run_git` helper in `crates/farhelm-supervisor/src/repository_discovery.rs` strips `GIT_DIR`,
+  `GIT_WORK_TREE`, `GIT_COMMON_DIR` and `GIT_CONFIG_*`, but not bare `GIT_CONFIG`, and the fixture runs
+  `git config include.path …` without `--local`. Verified by code reading. Production discovery is unaffected, because
+  its only `git config` call passes `--local`. Settled by: the completed outcome
+  `git-fixture-setup-modify-delete-callers-repository.md` (TRIAGE_OUTCOMES.md) requires that "the fixture's git children
+  run without the repository-selecting and `GIT_CONFIG_*` variables". Its intent, that inherited Git context must not
+  redirect fixture writes (stated in the helper's own docstring), plainly includes `GIT_CONFIG`. CLAUDE.md's testability
+  rule, never change the test process's environment, also holds for the fix.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: add `env_remove("GIT_CONFIG")` to
+  the fixture `run_git` helper. Add the same to production `run_git` for parity, which is harmless. Optionally pass
+  `--local` in that fixture's `git config` call. Complexity gate: confined to `repository_discovery.rs`, removing
+  variables from the child `Command` only, never from the test process. If more is needed, stop and return the item.
+- Completion criteria: fixture Git children never inherit `GIT_CONFIG`, so the include fixture writes only to its own
+  repository's config, and the existing discovery tests pass. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## setup-advice-omits-environment-selected-state-directory.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading. Suppose someone runs `XDG_STATE_HOME=/srv/state farhelm helm setup`. Setup pins
+  `/srv/state/farhelm` into both services, but the closing sign-in advice is a bare `farhelm helm token show`. Run in an
+  ordinary shell, that command resolves `~/.local/state/farhelm`, so it shows a different helm's token, or creates a
+  database there and mints new credentials, and the browser sign-in fails. In `crates/farhelm/src/setup.rs` the advice
+  qualifies the command only when `opts.state_dir.is_some()`, while `state_dir` is also chosen from `ctx.xdg_state_home`
+  when no flag is given. Settled by: SPEC_impl.md CLI section, `farhelm helm setup`: "One state directory is resolved
+  from setup's own environment and pinned into both units, so a shell-only `XDG_STATE_HOME` cannot leave the two
+  services on different trees". Prior decision `setups-sign-in-command-ignores-selected-state-directory.md` in
+  TRIAGE_OUTCOMES.md: the advice must carry the selected directory, because "a bare token show can read or create
+  credentials for an unrelated default helm". This finding is the environment-selected trigger that fix left uncovered.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in `setup.rs`, at the advice
+  block that builds `show_command`, qualify with the shell-quoted `--state-dir` whenever the resolved `state_dir`
+  differs from `farhelm_supervisor::default_state_dir_for(None, &ctx.home)`, as well as when the flag was given. Always
+  qualifying would also do. The bare-default case stays unqualified, which the existing test that asserts
+  `farhelm helm token show # the browser sign-in token` relies on. Complexity gate: confined to the advice block in
+  `setup.rs` and its unit tests. Change no unit rendering, no state directory resolution, and no CLI argument. If the
+  comparison needs anything beyond the existing resolver (for example new environment plumbing into `ctx`), stop and
+  return the item to the maintainer.
+- Completion criteria: after setup with an environment-selected `XDG_STATE_HOME`, the printed command names that
+  directory with `--state-dir=`, and it parses back to the same path. The default-environment advice is unchanged. Add a
+  unit regression in `setup.rs` with `xdg_state_home` set and no `--state-dir`. Remove the feedback file and its index
+  entry.
+- Execution: pending.
+
+## claude-trust-browser-fixtures-escape-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading of `e2e/tests/claude-trust.spec.ts`. Three steps can throw before the `try` and
+  skip all cleanup: the second `createSession` (the neighbor), the `context.newPage()` call, and the initial trust PUT
+  assertion after `resetPreferences`. When they do, the first session keeps running in the shared test stack. Inside
+  `finally`, closing the page, clearing `claude_trust_hint_dismissed`, resetting checkout trust and deleting both
+  sessions run in sequence, so one failure skips the rest. Later specs can then inherit a changed preference or setting,
+  or a live session. Settled by: the test-authoring checklist (`.agents/test-authoring.md`): "Check the actual child
+  lifetime and inherited resources, including failure and cancellation paths." Prior decisions on the identical shape,
+  all `fix code` under "Fix all, with gate": `busy-selection-test-loses-source-second-creation-fails.md` ("each acquired
+  session and route is owned by cleanup as soon as it exists") and
+  `history-fixtures-policy-restoration-skip-remaining-cleanup.md` ("a failed restore does not skip the remaining cleanup
+  steps (each runs and failures are reported together)").
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in this one test, record each
+  session ID as it is created, inside the protected lifetime. Create the observer page inside the `try` (or track it as
+  optional), and make `finally` attempt each restoration and deletion independently. Collect the failures and report
+  them together; `e2e/tests/sidebar.spec.ts` already has a local `AggregateError` pattern to follow. Complexity gate:
+  confined to `e2e/tests/claude-trust.spec.ts`. No change to the shared fleet helpers or to the product. If it needs a
+  shared helper refactor that touches other specs, stop and return the item.
+- Completion criteria: a failure at any setup step after the first resource exists, or at any single cleanup step, still
+  deletes every created session and attempts every preference and setting restoration, and reports the failures. The
+  test body's assertions are unchanged. Validate with this spec on Chromium and WebKit; a failure-injection check is
+  optional. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## repository-selection-keeps-global-search-launch-block.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading of `crates/farhelm-ui/src/list/create_form.rs`. The user types `gh:...` in the
+  launcher's search, switches to managed checkout, then selects a repository in the dedicated repository field. The
+  preview succeeds, but Launch stays disabled. `select_repository` sets the draft and advances the preview revision
+  without touching `composer_search`. Meanwhile `LaunchPrerequisites.github_search` and the submit-time guard
+  (`if scoped_query(&composer_search()).0 == SearchScope::Github { return; }`) both still treat the lingering `gh:`
+  search as unfinished. Accepting a global `gh:` result (`apply_composer_search_result` path) clears the search; the
+  dedicated selection does not. Settled by: SPEC.md "Managed checkouts": "Selecting a repository from the field's
+  suggestions, or selecting `gh:owner/repo` in the composer, explicitly requests a new checkout on the selected host."
+  SPEC_impl.md (launcher managed type): explicit `gh:` search owns the discovery query only "while scoped search is
+  active".
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in `select_repository`, clear
+  `composer_search` and close the search surface, mirroring
+  `composer_search.set(String::new()); composer_search_open.set(false);` on the global-result path. Complexity gate:
+  confined to `select_repository` in `create_form.rs`, plus a regression test. Leave the `LaunchPrerequisites` rule and
+  discovery-worker ownership unchanged. If clearing the search conflicts with an existing test or contract that needs
+  the search text retained, or if the fix grows into reworking the gh:/field ownership, stop and return the item.
+- Completion criteria: after a lingering `gh:` search, an explicit selection in the dedicated field leaves Launch
+  enabled once the preview is ready. An unselected or invalid gh: search still cannot launch. Add a regression covering
+  the sequence (a UI unit test, or a targeted browser test if no unit seam exists). Remove the feedback file and its
+  index entry.
+- Execution: pending.
+
+## inline-checkout-setup-retains-stale-config-eligibility.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading of `crates/farhelm-ui/src/list/create_form.rs`. The trigger: the launcher is
+  open on managed checkout with a repository selected, and the host's checkout folder is cleared from the CLI or another
+  client. The checkout preview refreshes and fails, but the inline "set the checkout folder" field never appears. The
+  user recovers only by refocusing the repository field or reopening the launcher. `checkout_root_observation` holds
+  `(RepositoryAuthority, bool)` and is filtered only by host, connection and installation identity. A retained `false`
+  answer turns off discovery for a selected repository (`observed_root_required != Some(false)`), so no new
+  `needs_checkout_root` answer arrives. The configuration revision (`observed_checkout_revision`, already used in
+  `PreviewAuthority.config_revision`) is not consulted. Settled by: SPEC.md (checkout folder setup): "When the selected
+  host has no checkout folder in effect, the launcher's managed-checkout destination offers the same explicit-save field
+  … Selecting a repository before setup does not hide the field." SPEC.md (composer search): "observed configuration
+  changes invalidate an undispatched preview." SPEC_impl.md's retention text ("Once a reply confirms a folder is in
+  effect, selected repositories return to preview-only behavior") does not accept staleness after a configuration
+  change.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: record
+  `observed_checkout_revision` with the setup observation, and treat the observation as absent once the observed
+  revision has advanced past it. Discovery then runs again and answers `needs_checkout_root` afresh. Ordinary title
+  edits must keep the existing no-rescan behavior. Complexity gate: confined to the `checkout_root_observation` logic in
+  `create_form.rs` and its tests. No change to the discovery REST reply, the supervisor protocol or persisted state. If
+  the configuration revision does not reliably advance in the open launcher for a CLI or other-client root change, or
+  the fix needs a new invalidation feed or reply field, stop and return the item.
+- Completion criteria: with a repository selected and a configured folder, clearing the effective folder elsewhere
+  brings the inline setup field back without reopening the launcher. Title edits still do not restart a configured scan.
+  Add a regression, preferably extending the existing `github-checkout-composer.spec.ts` inline-setup test or a UI unit
+  seam. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## copy-guidance-measures-stale-resize-position.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading. The reviewer also reproduced it in a minimal Chromium layout. The trigger: the
+  "this drag did not copy" notice is showing near the right edge and the window is made narrower. The notice collapses
+  into a thin, tall column with most of its text clipped, and its pointer-transparent body cannot be scrolled. In
+  `crates/farhelm-ui/assets/copy-on-select.js`, `createDragCopyNotice`'s `reposition` measures with
+  `getBoundingClientRect()` at the old `left`/`top`. The auto-width fixed box therefore wraps to whatever room is left
+  at its previous position. `tooltip.js` already avoids this by moving the box to `0px`/`0px` before measuring. Settled
+  by: SPEC_impl.md (drag-copy notice): "CSS caps the box to the viewport … Resize repositions it". The function's own
+  contract reads "Keep the measured box inside the current viewport, including after resize."
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in `reposition`, set
+  `el.style.left` and `el.style.top` to `0px` before measuring, as `tooltip.js` does (all in one task, so nothing paints
+  at the origin). Complexity gate: confined to `copy-on-select.js` and its JS unit test
+  (`crates/farhelm-ui/js-tests/copy-on-select.test.js`). No CSS redesign and no change to the timer or show/hide
+  behavior. If a readable box needs CSS changes beyond the measurement reset, stop and return the item.
+- Completion criteria: after showing near the right edge and narrowing the viewport, the notice keeps its natural
+  wrapped width (capped by the viewport) inside the window. Update the unit fixture so the measured size depends on
+  position at measurement time; it must fail without the fix (the current constant-size fake cannot). Run `node --test`
+  in `crates/farhelm-ui/js-tests`. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## trash-fixture-cleanup-compares-lexical-root.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading; the macOS run itself was not executed. In `e2e/tests/github-checkouts.spec.ts`,
+  `checkoutFixture().close` selects owned trash entries with `entry.path.startsWith(root + path.sep)`, where `root`
+  comes from the lexical `/tmp/fh-e2e.*` stack state directory (`e2e/start-stack.sh`, `helpers/scratch.ts`). The
+  supervisor reports archive paths under the canonicalized checkout root (`checkout_trash.rs`:
+  `Path::new(&row.canonical_root)…`). On macOS `/tmp` resolves to `/private/tmp`, so the filter matches nothing. The
+  trash records survive while `finally` removes the scratch folder, and later specs see leftover missing-root trash
+  issues. On Linux the two spellings coincide, so nothing goes wrong there. Settled by: the fixture's own contract ("Own
+  the source and destination until all sessions have released them") and the test-authoring checklist's failure-path
+  ownership rule. Prior decision on the same canonical-versus-lexical `/tmp` mistake:
+  `checkout-recovery-compares-canonical-roots-unresolved-fixture.md` (`fix code`). The same file's composer sibling
+  already compares against `realpath(root)`.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: canonicalize the root once
+  (`await fs.realpath(root)`) after creating it, and use that for the owned-entry prefix match. Complexity gate:
+  confined to `checkoutFixture` in `github-checkouts.spec.ts`. No product change. If the supervisor's reported paths
+  turn out not to share the realpath prefix for another reason, stop and return the item.
+- Completion criteria: the cleanup selects and deletes this fixture's trash records whether or not the stack's `/tmp`
+  path is a symlink, and the existing `removed` equality assertion still holds. Validate with the affected spec on
+  Linux; a macOS run is a bonus. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## checkout-composer-test-skips-configuration-restoration.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading of `e2e/tests/github-checkout-composer.spec.ts` (inline checkout folder setup
+  test). In `finally`, `await cli("clear-root", ...)` runs first. If it rejects (nonzero exit or its 10-second timeout),
+  restoring the global checkout root and removing the temporary directory are both skipped. Later browser specs in the
+  same private stack then see a host override pointing at a deleted fixture folder. A failing `restored.ok()` assertion
+  likewise skips the `rm`. Settled by: test-authoring checklist (failure and cancellation paths). Prior decision on the
+  same shape: `history-fixtures-policy-restoration-skip-remaining-cleanup.md` ("each runs and failures are reported
+  together").
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: run the override clear, the
+  global restore and the directory removal as independent attempts in `finally`, then report the collected failures (an
+  `AggregateError`, as in `sidebar.spec.ts`). Complexity gate: confined to this test's `finally` block. No helper or
+  product change. If it needs restructuring the test body, stop and return the item.
+- Completion criteria: a failure in any one cleanup step still attempts the others and surfaces the failure. Test
+  behavior on success is unchanged. Validate with this spec on Chromium and WebKit. Remove the feedback file and its
+  index entry.
+- Execution: pending.
+
+## tab-retarget-fixture-escapes-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading of `e2e/tests/terminal-tabs.spec.ts`. In "retargeting an open tab-close question
+  focuses the new answer", `openSessionWithTabs` and the `page.route` registration run before the `try`. The helper
+  itself creates a live session (`createTabSession`), then navigates, attaches, adds tabs and waits for reveal with no
+  failure cleanup. A failure after creation therefore loses the session ID for every caller, and this caller also skips
+  `cleanupSession`. The agent and its shell tabs keep running until a later reset or stack shutdown. Settled by:
+  test-authoring checklist (failure and cancellation paths). Prior decision on the same ownership mistake in another
+  spec: `busy-selection-test-loses-source-second-creation-fails.md` ("each acquired session and route is owned by
+  cleanup as soon as it exists").
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in `openSessionWithTabs`, wrap
+  the steps after `createTabSession` so that a failure runs `cleanupSession` for the new session and rethrows. In the
+  retarget test, move `page.route` inside the `try`. Complexity gate: confined to `openSessionWithTabs` and the retarget
+  test in `terminal-tabs.spec.ts`. Other callers may only benefit implicitly; do not restructure them. If the helper's
+  failure cleanup interferes with tests that rely on its current return contract, stop and return the item.
+- Completion criteria: a failure during the helper's setup, or during route registration, leaves no session from this
+  test running. Successful runs are unchanged. Validate with the retarget test (and a couple of other helper callers) on
+  Chromium and WebKit. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## custom-permission-model-choice-erases-draft.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading of `crates/farhelm-ui/src/list/create_form.rs`, `apply_composer_search_result`.
+  The trigger: the user picks Claude with custom permissions, types flags with an unfinished quote (for example
+  `--permission-mode 'ask me`), then picks a Claude model through composer search, or picks Claude again there. The
+  flags field goes blank. Both the `Model` and `Harness` arms parse the editor text through `permission_words`, which
+  returns `None` for malformed text, and then set `structured_permission_flags` from the reconciled words. Malformed
+  text therefore becomes an empty string even though neither the agent nor the permission mode changed. Well-formed
+  flags are respelled through `shell_words::join` but keep their meaning. The dedicated model picker does not
+  reconstruct the text. The suggested `highest` bucket conflicts with the maintainer's 2026-10-14 note that losing
+  unsaved form input is not losing user-owned work. Settled by: SPEC_impl.md (Protocol 49 / custom permissions):
+  "Editable UI text is separate from words so malformed quotes remain repairable without submitting a different
+  command." The same section clears words only on "A harness switch … because words belong to the source CLI" or
+  "another permission edit".
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in the `Model` and `Harness`
+  arms, keep the existing `structured_permission_flags` text when the reconciled selection's harness and permission
+  equal the `before` values. Reseed from words only when reconciliation actually changed the harness or permission.
+  Complexity gate: confined to `apply_composer_search_result` in `create_form.rs` and its tests. Leave reconciliation
+  logic and the dedicated picker unchanged. If preserving the text requires changing
+  `reconcile_harness_for_catalog_read` or `LaunchSelection`, stop and return the item.
+- Completion criteria: malformed and well-formed custom flags survive a same-harness model search choice and a
+  current-harness re-selection byte for byte. A real harness switch still clears them. Add a regression covering both
+  arms, as a UI unit test if a seam exists, otherwise a targeted browser test. Remove the feedback file and its index
+  entry.
+- Execution: pending.
+
+## browser-git-fixture-can-change-caller-repository.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading of `e2e/tests/github-checkout-composer.spec.ts`. The inline checkout setup
+  test's `git -C <clone> init`, `remote add origin` and `config --get` calls go through `promisify(execFile)` with the
+  worker's inherited environment. An inherited absolute `GIT_DIR` (as git sets for hooks) or `GIT_CONFIG_*` overrides
+  therefore redirect the writes into the developer's own repository. The assertion then reads that same repository back,
+  so it passes. The sibling `github-checkouts.spec.ts` `checkoutFixture` already builds a child environment with every
+  `GIT_` and `FARHELM_` variable removed, plus explicit isolation settings. Settled by: CLAUDE.md "Testability and
+  tests" and the fixture convention: a child environment, never `process.env` mutation. Prior decision on the same
+  isolation problem in the Rust fixtures: `git-fixture-setup-modify-delete-callers-repository.md` (`fix code`, PR
+  #1798): "the fixture's git children run without the repository-selecting and `GIT_CONFIG_*` variables; only the child
+  environment changes, never the test process's own."
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: give this test's `git` children
+  an explicit `env` that filters out `GIT_`-prefixed variables (as `checkoutFixture` does), passed through the
+  `execFile` options. Complexity gate: confined to the git invocations in `github-checkout-composer.spec.ts`. Never
+  touch `process.env`. If sharing the env builder with `github-checkouts.spec.ts` needs more than a trivial helper
+  extraction, keep the fix local instead; if that is not possible, stop and return the item.
+- Completion criteria: with `GIT_DIR` pointing at another repository, the fixture's git commands act only on the
+  temporary clone. The test still passes normally. A quick check with an inherited `GIT_DIR` is good evidence; otherwise
+  run the spec. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## default-approval-reset-renews-retry-key.md
+
+- Outcome: `fix code`.
+- Assessment: In the new-session dialog, applying a template whose permission is an explicit reset
+  (`"permissions": null`) leaves the launcher's permission choice unset. The first press of Launch then never settles on
+  a stable request key. On a host that asks before YOLO launches (OMP/Goose default to YOLO), confirming the YOLO
+  question just brings it back again, so the template cannot be launched. On any host, including guarded-default
+  Claude/Codex, retrying an unchanged launch after a lost reply sends a new key and can start a second session. Verified
+  by code reading (no browser run): the initial selection in the submit handler of
+  `crates/farhelm-ui/src/list/create_form.rs` is passed through `launch_composer::normalized_permissions`, but the
+  post-mint re-read inside the mint loop builds `LaunchSelection { permissions: *structured_permissions.peek(), .. }`
+  without that call. The template reset path (`structured_permissions.set(None)` in template application) makes the two
+  differ, so each submit mints again. Settled by: the submit path's own documented contract in `create_form.rs` says the
+  key is "Minted at first submit, reused by every later submit of the same" binding, and the re-read exists only to
+  catch a real edit during the mint. SPEC.md, the idempotency rules around "An optional idempotency key makes retries
+  safe" and the YOLO confirmation rules ("An agent launch counts as YOLO when its stored permission is custom or YOLO,
+  including omitted permissions ...") assume a confirmed or retried unchanged launch keeps its key. Nothing in the spec
+  accepts an unanswerable YOLO loop.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in the post-mint structured
+  re-read in `create_form.rs`, normalize `permissions` with
+  `crate::launch_composer::normalized_permissions(harness, ...)`, the same helper the initial selection uses. Best done
+  by having both sites share one small selection-building helper so they cannot drift again. Complexity gate: confined
+  to the structured-selection construction in `create_form.rs`'s submit path, plus an optional shared helper beside it.
+  No change to the protocol, to template application, to `launch_composer` normalization or to key storage. If the fix
+  appears to need changes to how a reset template stores its permission, or to server-side key matching, stop and return
+  the item to the maintainer.
+- Completion criteria: after a null-permission template, an unchanged Launch binds one key across the mint re-read and
+  across unchanged retries, and confirming a YOLO question launches instead of asking again. Add a regression test, a
+  unit test on the shared selection helper or a focused browser route fixture: a null-reset OMP or Goose template
+  completes YOLO consent with one request key, and a null-reset guarded-default template keeps its key across an
+  unchanged retry. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## custom-permission-test-skips-template-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading. In the browser suite, the cleanup in `e2e/tests/custom-permissions.spec.ts`
+  ("custom template words round trip ...") and in `e2e/tests/permission-switch.spec.ts` ("template permissions are
+  compared after the complete template transaction") deletes its owned templates in one loop that throws on the first
+  failed DELETE or status assertion. The later templates are then left in the shared test helm's catalog, where nothing
+  else removes them. Test-isolation only; no product impact. Settled by: the maintainer's earlier decisions on the same
+  shape, `history-fixtures-policy-restoration-skip- remaining-cleanup.md` and
+  `keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md` in TRIAGE_OUTCOMES.md ("Fix all, with gate"; "a
+  failed restore does not skip the remaining cleanup steps (each runs and failures are reported together)"). The suite
+  already has this pattern in `cleanupOwnedSteps` (sidebar.spec.ts) and `cleanupReplaceFixtures` (replace.spec.ts).
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: attempt every owned template
+  deletion independently, collect the failures, and report them together: an `AggregateError` that fails a passing body,
+  or is logged when the body already failed. Complexity gate: confined to those two `finally` blocks, plus at most a
+  small local helper per file or a shared helper in `e2e/tests/helpers/` that mirrors `cleanupOwnedSteps`. No product
+  code, no new suite-wide hooks. If it grows into refactoring other specs' cleanup, stop and return the item.
+- Completion criteria: a failure deleting one template no longer prevents deleting the others, and cleanup failures stay
+  visible without masking the body's own failure. A focused failure-injection check (one DELETE refused) is desirable
+  but optional given the trivial shape; at least run both specs on Chromium and WebKit. Remove the feedback file and its
+  index entry.
+- Execution: pending.
+
+## uninstall-command-fixture-requires-gnu-stat.md
+
+- Outcome: `fix code`.
+- Assessment: For a developer running the helm's tests on macOS, the
+  `uninstall_host_commands_refuse_setup_units_and_skip_finished_work` test in `crates/farhelm-helm/src/provisioning.rs`
+  fails for a reason unrelated to the product. Its `FixtureHomeLauncher` runs the remote stop script locally with
+  `PATH=<fixture bin>:/usr/bin:/bin`. That script (the supervisor stop in `backend.rs`) runs `stat -L -c '%F'`, which
+  BSD/macOS `stat` rejects (it has `-f`, not `-c`). The resulting error is not the excused missing-path diagnostic, so
+  the `.stop(...).unwrap()` assertions panic. Verified by code reading; native macOS was not run, but BSD `stat` lacking
+  `-c` is certain. Settled by: the same file's established rule for this substrate. Every other test that executes a
+  remote Linux shell script locally is `#[cfg(target_os = "linux")]` with a doc line such as "Linux-only: the production
+  command targets Linux hosts and uses GNU stat" (`remote_upload_script_preserves_stdin_and_closes_without_poll_delay`,
+  `remote_upload_script_preserves_cat_failure`, `failed_remote_upload_removes_partial_temporary`, and others).
+  `.agents/test-authoring.md`: "Measure an owned process with the intended runner and substrate."
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: gate the test
+  `#[cfg(target_os = "linux")]` and add the matching doc sentence. Splitting out only the stop/socket half as a
+  Linux-only test, leaving the platform-neutral parts ungated, is acceptable if it stays small. Complexity gate:
+  test-only change in `provisioning.rs`; do not change the production script's `stat` usage (remote hosts are Linux) and
+  do not add a `stat` shim. If the platform-neutral parts turn out to need GNU tools too, gate the whole test rather
+  than chasing more shims.
+- Completion criteria: the test no longer compiles on macOS (or its stop half is Linux-only), with a docstring saying
+  why. On Linux it still runs and passes (`cargo nextest` on that one test through the recorder), and
+  `cargo clippy --all-targets` stays clean. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## single-trash-test-skips-configuration-restoration.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading. In `e2e/tests/github-checkouts.spec.ts`, "single trash delete removes one real
+  archive ..." runs `cleanupSession` in a loop and then `fixture.close(request)` in the same `finally`. `cleanupSession`
+  throws on transport errors or non-404 refusals (`helpers/fleet.ts`), so one failed session cleanup skips `close`,
+  which restores the shared private Git config, clears the checkout root and post-clone command, and removes the
+  scratch. "agent managed checkout approval and keyed recovery" has the same chain (`driver.close`, session cleanup, two
+  approval-preference resets, `close`). It also creates the fixture and `context.newPage()` before entering `try`, so a
+  `newPage` failure skips `close` entirely. Later tests in the shared stack then inherit that configuration.
+  Test-isolation only. Settled by: the TRIAGE_OUTCOMES.md precedent decisions
+  `history-fixtures-policy-restoration-skip-remaining- cleanup.md` and
+  `keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md` ("Fix all, with gate"; each cleanup step runs
+  and failures are reported together). The file's own trash-cue test already nests `try/finally` so `fixture.close` runs
+  even when host removal or session cleanup fails. `close`'s docstring requires it to run after session cleanup, so the
+  order must be kept.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in the two named tests, run every
+  cleanup step independently in its existing order (session cleanup attempts first, then preference resets, then
+  `fixture.close`), collecting failures as `cleanupOwnedSteps` does, and move the agent test's `context.newPage()`
+  inside the guarded region, or arm `fixture.close` before it. Complexity gate: confined to `github-checkouts.spec.ts`.
+  The same small local helper may be applied to the file's other identical `cleanupSession`-then-`fixture.close`
+  `finally` blocks, but nothing outside this file. No product code. If it turns into restructuring `checkoutFixture`
+  itself, stop and return the item.
+- Completion criteria: a failing session cleanup or preference reset no longer skips `fixture.close`. Cleanup errors
+  remain visible without masking the body's failure. The two named tests (and any converted siblings) pass on Chromium
+  and WebKit. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## confirmation-test-optout-survives-cleanup-failure.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed by code reading. In `e2e/tests/delete-precondition.spec.ts`, the opted-out variant persists
+  `skip_session_confirmations: true`, and its `finally` restores it only after `cleanupSession` succeeds. That helper
+  throws on non-404 refusals, so a failed cleanup leaves confirmations disabled in the shared test helm, and later tests
+  that expect a confirmation delete directly and fail confusingly. The same test also calls `readPreferences` after
+  `createSession` but before `try`, so a failed read leaks the session. In `e2e/tests/settings.spec.ts` ("settings
+  reverses a permanent removal answer ..."), the session-preference restore is skipped if the preceding host-preference
+  restore, or a transport failure in host deletion, throws. That half is partly correct: its host DELETEs do not assert
+  status, so only transport errors throw there. Test-isolation only. Settled by: same precedent as above
+  (`history-fixtures-policy-restoration-skip-remaining-cleanup.md`, "Fix all, with gate").
+  `session-confirmations.spec.ts` already uses an independent `afterEach` reset of `skip_session_confirmations` for
+  exactly this reason.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in both files, attempt each
+  cleanup and restore step independently and report failures together, or add an `afterEach` reset of
+  `skip_session_confirmations` like session-confirmations.spec.ts. In delete-precondition, read preferences before
+  creating the session, or arm session cleanup before the read. Complexity gate: confined to those two spec files. No
+  product code, no shared helper changes beyond an optional small local helper. Stop and return the item if it needs
+  changes to `helpers/fleet.ts` semantics.
+- Completion criteria: a failed session or host cleanup no longer leaves `skip_session_confirmations` (or the host
+  preference) changed, and setup failures between session creation and `try` no longer leak the session. Cleanup errors
+  stay visible. Both specs pass on Chromium and WebKit. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## failed-feedback-cleanup-loses-evidence.md
+
+- Outcome: `fix code`.
+- Assessment: In the release brick test's coordinator, cleaning up the final P0 pair after a failed or could-not-run P1
+  feedback check deletes both guests without checking that P1's recorded evidence files are still intact. If the
+  exported screenshot was lost or altered, the guest, which may be the only remaining copy, is deleted anyway. Confirmed
+  by code reading of `releasing/mac-vm-test/brick_test.py`. In `cleanup`,
+  `retained = self.verdict(p1) == 'pass' or all(result['status'] != 'pass' ...)`, and `verdict()` only hashes artifacts
+  for results whose status is `pass` (nonpassing results return before the hash loop). Every recorded result carries
+  `sha256` for its bound references (`record`). The finding cites a synthetic-substrate reproduction (run ac7dd320-...).
+  Whether a real guest still holds evidence the export lacks is unverified, but the missing gate is what the procedure
+  forbids. Settled by: `releasing/mac-vm-test/RECIPE.md` step 4: "Retain failure evidence before cleanup; a P1 failure
+  ... does not prevent ordinary cleanup of this pair". BRICK-TEST.md: "A valid P1 product failure or unavailable
+  observation does not require retaining the clones ...; its evidence and verdict remain saved." The existing
+  `test_lost_p1_success_evidence_preserves_guests_until_recovered` already enforces this for a passing P1.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in `cleanup`, require for
+  nonpassing P1 results that every recorded `sha256` reference still hashes to its digest before treating P1 as
+  retained, by factoring the per-result digest check out of `verdict()` into a helper both use. On mismatch, refuse with
+  the existing "incomplete or failed ... --discard-failed" message, before any shutdown or deletion. Complexity gate:
+  confined to `brick_test.py`'s `cleanup` and a small digest-check helper shared with `verdict()`, plus tests in
+  `test_brick_test.py`. Do not change verdict semantics, P1's nonblocking status, the `--discard-failed` path, or the
+  guest-tester protocol. If failed results turn out not to carry reliable `sha256` maps, stop and return the item.
+- Completion criteria: with P0 passed and P1 recorded as `fail` or `could-not-run` with an image, damaging or removing
+  that image makes cleanup refuse before any Tart call, and restoring the bytes lets cleanup proceed. With intact
+  evidence a failed P1 still cleans up normally. Extend the lost-evidence regression to the failed and unavailable
+  statuses; run `python3 releasing/mac-vm-test/test_brick_test.py` (the affected cases). Remove the feedback file and
+  its index entry.
+- Execution: pending.
+
+## paste-guide-overstates-control-byte-protection.md
+
+- Outcome: `fix code`.
+- Assessment: The user guide's "Copy, paste, and links" section
+  (`website/src/content/docs/docs/using/work-in-a-session.mdx`) says "Pasted text has hidden control characters removed,
+  so a paste cannot type keystrokes you did not see." The implementation (`sanitizePastedText` in
+  `crates/farhelm-ui/assets/term-bytes.js`) removes only ESC bytes and the embedded bracketed-paste end marker. Ctrl-C,
+  Ctrl-D and other control bytes still reach the program, so a reader can trust a protection that does not exist.
+  Verified by code reading; no end-to-end paste reproduction. Settled by: SPEC.md (Terminal experience, and the security
+  section) says "A user-initiated paste intentionally sends the pasted content to the selected terminal". The
+  sanitizer's documented purpose is to keep pasted text inside the terminal's bracketed-paste frame. The spec promises
+  no broader control-byte filtering, so the guide must match the implementation, not the other way round.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: rewrite that one sentence to
+  state the real protection, for example that pasted text cannot break out of the terminal's paste framing because
+  Farhelm strips escape sequences from it, without claiming other control characters are removed. Follow
+  `website/EDITORIAL_RULES.md` and the scode-voice skill. Complexity gate: docs-only, that sentence (and an identical
+  claim elsewhere in the docs, if a search finds one). Do not touch `term-bytes.js` or paste behavior, and do not edit
+  the docs Overview page or intro SVGs. If the maintainer's editorial rules call for a broader paste explanation,
+  propose it rather than writing it.
+- Completion criteria: no docs page claims pasted control characters are removed or that a paste cannot send unseen
+  keystrokes, and the remaining text matches `sanitizePastedText`. The website build passes
+  (`cd website && bun run build`) and `dprint check` is clean. No runtime tests. Remove the feedback file and its index
+  entry.
+- Execution: pending.
+
+## pin-test-skips-owned-session-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on current main. In the browser test "pin from the menu groups the sidebar and
+  unpin restores title order", the `finally` restores preferences and closes the observer page before it deletes the two
+  sessions, and it deletes them in a plain loop. If an earlier cleanup step throws, or the first deletion throws, the
+  remaining sessions stay alive in the shared Playwright stack for later specs. Failure injection was not run. Settled
+  by: `.agents/test-authoring.md` ("Check the actual child lifetime and inherited resources, including failure and
+  cancellation paths"). Precedent: TRIAGE_OUTCOMES.md `history-fixtures-policy-restoration-skip-remaining-cleanup.md`
+  and `keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md` were ruled `fix code` ("a failed restore
+  does not skip the remaining cleanup steps (each runs and failures are reported together)").
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in `e2e/tests/pins.spec.ts`, run
+  preference reset, `other.close()` and each `cleanupSession` as independent steps and report the collected failures.
+  Use the same shape as `cleanupOwnedSteps` in `e2e/tests/sidebar.spec.ts`, moving that helper to `e2e/tests/helpers/`
+  if it is reused. Complexity gate: confined to `pins.spec.ts`, plus moving the existing `cleanupOwnedSteps` helper into
+  a shared helper file without changing its behavior. No product code, no new fixture machinery. If more than that is
+  needed, stop and return the item to the maintainer.
+- Completion criteria: every owned cleanup step is attempted even when an earlier one throws. A failure in the test body
+  stays the primary failure, and cleanup failures are reported alongside it. The pin test still passes on Chromium and
+  WebKit. A one-off local injection of an early cleanup failure (not committed) shows both session deletions still run.
+  Remove the feedback file and its index entry.
+- Execution: pending.
+
+## number-shortcut-test-skips-session-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on current main. In `e2e/tests/quick-launch.spec.ts`, the parametrized test "…
+  quick launch / number shortcut owns input and submits once without showing New" creates its source session, then
+  awaits `page.route(...)` before entering `try`, so a failed route registration leaks the source. Its `finally` runs
+  `unroute`, a `page.evaluate`, created-session cleanup and source cleanup in sequence, so an earlier throw skips the
+  source deletion. The `afterEach` only restores preferences. The sibling test "the quick switcher row launches through
+  the fresh direct path" has the same shape. Not reproduced. Settled by: `.agents/test-authoring.md` (failure and
+  cancellation paths). Precedent: TRIAGE_OUTCOMES.md `busy-selection-test-loses-source-second-creation-fails.md` ("each
+  acquired session and route is owned by cleanup as soon as it exists") and the "Fix all, with gate" family.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: enter the `try` (or an equivalent
+  cleanup guard) immediately after `createSession`. In `finally`, attempt gate release, unroute, observer disconnect,
+  each created-session cleanup, source cleanup and template deletion as independent steps with aggregated reporting,
+  using the same pattern as `cleanupOwnedSteps` in `sidebar.spec.ts`. Apply the same change to the sibling switcher
+  test. Complexity gate: confined to `quick-launch.spec.ts`, plus the shared cleanup helper if it is moved to
+  `helpers/`. No product code and no new harness hooks. If it needs more, stop and return the item to the maintainer.
+- Completion criteria: the source session is owned by cleanup from creation, and every owned cleanup is attempted
+  independently. The tests still pass on Chromium and WebKit. A one-off local injection of a route-registration or
+  early-cleanup failure shows the source is still deleted. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## live-sibling-test-returns-before-reap-completion.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on current main. `dead_tab_panes_are_reaped_by_the_tick_and_live_tabs_survive`
+  (`crates/farhelm-supervisor/src/service/ticker.rs`) stops waiting as soon as both dead panes are gone, takes the
+  survivor snapshot and returns. The close task is still running at that point: per the helper's own doc, panes are
+  killed before the close's marker sweep and detach. The test can therefore pass before the sweep that could wrongly
+  touch the live sibling has run, and the fixture is torn down while supervisor work is still in flight.
+  `a_tab_is_reaped_on_pane_death_without_waiting_for_a_tick` likewise ends on pane absence plus ticker shutdown. Not
+  reproduced. Settled by: `.agents/test-authoring.md` ("Wait on the named readiness oracle for the intended boundary";
+  "Keep failure diagnostics inside the lifetime of the owned fixture they inspect"). The existing
+  `wait_for_reaped_panes` helper documents exactly this boundary: "Completion is panes gone AND every session's
+  lifecycle claim released …".
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: after the reap loop, call
+  `wait_for_reaped_panes(&sup, &[dead_a, dead_b])`, then take the survivor snapshot from a fresh `pane_states()`. In the
+  pane-death test, await `wait_for_reaped_panes(&sup, &[pane])` before `ticker.shutdown()`. The second sibling's close
+  may need later ticks, so keep driving `sample_pass` until the panes are gone, as now. Complexity gate: test-only
+  changes in `ticker.rs` using the existing helper. No product code. If completion cannot be observed with
+  `wait_for_reaped_panes` (for example, because the deferred second close needs a new oracle), stop and return the item
+  to the maintainer.
+- Completion criteria: both tests assert survival, or return, only after every close has released its lifecycle claim.
+  Both pass in a focused recorded nextest run, and the sleep checker passes. Remove the feedback file and its index
+  entry.
+- Execution: pending.
+
+## managed-checkout-row-hides-accessible-directory.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on current main. In the default (non-compact) session list, a row whose session
+  uses a managed checkout replaces the directory with `ManagedCheckoutMark { show_repository: true }`
+  (`crates/farhelm-ui/src/list/row.rs`). That mark's accessible text is only "managed checkout" plus the repository
+  (`crates/farhelm-ui/src/icons.rs`). The checkout path, a differing session folder and the trash-on-last-delete
+  explanation exist only in `data-tooltip`, which `assets/tooltip.js` keeps out of the accessibility tree. The hidden
+  directory copy in `row.rs` is emitted only `if compact`. So screen-reader users get the directory for ordinary rows
+  and compact rows, but not for full managed-checkout rows. No screen reader was run. Settled by: SPEC_impl.md tooltip
+  section: "the hover texts that carry information a screen-reader user needs … are also exposed as accessible
+  descriptions". The row code's own comment shows the directory is meant to reach assistive technology when it is not
+  visible as text ("assistive technology through this clipped copy").
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: give the managed-checkout mark an
+  accessible description carrying its tooltip text (checkout path, differing session folder, lifetime), using the
+  existing `aria_describedby` plus `visually-hidden` pattern (`hosts.rs` host status descriptions). Alternatively, emit
+  the hidden directory copy for managed rows in full mode too, and add a description only for the lifetime sentence.
+  Complexity gate: confined to `ManagedCheckoutMark` in `icons.rs` and the row markup in `row.rs`, plus updating the
+  browser helper that checks the mark's hidden label. No visible layout change, no new props beyond what this needs, no
+  change to compact-row behavior. If ids or row structure need a redesign, stop and return the item to the maintainer.
+- Completion criteria: in both densities a managed-checkout row exposes the session's directory, and the mark's
+  path/lifetime explanation, to assistive technology. Nothing visible changes. A browser test asserts the accessible
+  description (or hidden text) for a full managed row, and existing tooltip-coverage tests still pass. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## native-download-collision-exceeds-filename-limit.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on current main. When the desktop app saves a terminal file link into Downloads
+  and the name is taken, `candidates()` (`crates/farhelm-helm/src/downloads.rs`) appends ` (n)` to the full stem without
+  shortening it. For a basename near the 255-byte component limit, every numbered candidate exceeds the limit, and
+  `StagedStream::publish_no_clobber` (`crates/farhelm-supervisor/src/files.rs`) retries only on `AlreadyExists`. The
+  save then fails the same way on every retry until the user renames or removes the existing file. Not reproduced. The
+  trigger (a basename of about 250 bytes or more) is rare. Settled by: SPEC.md terminal file links: "The desktop app
+  saves into Downloads under a unique name and shows where it went". SPEC_impl.md: "Atomic no-clobber publication uses
+  `report.pdf`, `report (1).pdf`, and so on, preserving the final extension."
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in `candidates()`, when
+  `stem + " (n)" + extension` would exceed 255 bytes, truncate the stem at a UTF-8 character boundary so the candidate
+  fits, keeping the extension and the numbered suffix. The unsuffixed first candidate is unchanged. Complexity gate:
+  confined to `candidates()` (and its unit tests) in `crates/farhelm-helm/src/downloads.rs`. Use a fixed 255-byte
+  component limit, with no per-filesystem `pathconf` query, no new error handling in `publish_no_clobber` and no other
+  naming changes. If the extension alone leaves no room, keep failing with the existing error. If more is needed, stop
+  and return the item to the maintainer.
+- Completion criteria: a second save of a file with a 251-byte stem plus `.pdf` publishes as a truncated stem with
+  ` (1).pdf` within 255 bytes. Ordinary names keep `name (n).ext` unchanged. Multi-byte names are never split inside a
+  character. Unit tests cover these cases. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## listing-regression-fixtures-escape-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on current main. `e2e/tests/listing-mutation-fence.spec.ts` creates the source
+  session, then awaits `observeFeedReaders`, `stubFeed` and `page.route(...)` before entering `try`, so a setup failure
+  leaks the source. In `finally`, the new or replacement session's `cleanupSession` runs before the source's. Because
+  `cleanupSession` throws on non-404 refusals or transport errors (`helpers/fleet.ts`), a first failure skips source
+  cleanup. In the create variant that source is still a live `sleep`. Not reproduced. Settled by:
+  `.agents/test-authoring.md` (failure paths). Precedent: TRIAGE_OUTCOMES.md
+  `busy-selection-test-loses-source-second-creation-fails.md` and
+  `history-fixtures-policy-restoration-skip-remaining-cleanup.md` (`fix code`).
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: enter `try` immediately after
+  `createSession`, with route and feed setup inside it. In `finally`, release both gates and attempt each session's
+  cleanup independently with aggregated reporting (`cleanupOwnedSteps` pattern). Complexity gate: confined to
+  `listing-mutation-fence.spec.ts`, plus the shared cleanup helper if it is moved. No product code. If more is needed,
+  stop and return the item to the maintainer.
+- Completion criteria: the source is owned by cleanup from creation, and a failing first cleanup does not skip the
+  second. Both variants pass on Chromium and WebKit. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## template-regression-fixtures-arm-cleanup-too-late.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on current main. "tl: search reports a failed template read and retries it" in
+  `e2e/tests/templates.spec.ts` stores its template with `putTemplate`, then runs a GET, header assertions and
+  `page.route(...)` before entering `try`. "opening a template reports the launcher's catalog read failure" in
+  `e2e/tests/quick-switcher.spec.ts` has the same gap. Any failure there leaves the template in the shared helm catalog
+  for later specs. Not reproduced. Settled by: `.agents/test-authoring.md` (failure paths). Precedent: the `fix code`
+  family under `history-fixture-enables-yolo-installing-restoration-guard.md` ("the restore is armed before the setting
+  can change").
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in both tests, move the PUT and
+  the subsequent setup inside the `try`, so the existing `finally` deletion (404-tolerant `deleteTemplate` in
+  templates.spec.ts; make the quick-switcher deletion tolerate 404 too) owns the template from before the write.
+  Complexity gate: confined to those two tests. No product code and no new helper beyond tolerating 404 on deletion. If
+  more is needed, stop and return the item to the maintainer.
+- Completion criteria: a failure after the template write still deletes it, and a failure before the write does not turn
+  into a cleanup error. Both tests pass on Chromium and WebKit. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## save-template-composing-escape-discards-draft.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on current main. The "save as template" panel's `onkeydown`
+  (`crates/farhelm-ui/src/list/save_template.rs`) treats every Escape as cancel, without the `!is_composing()` check
+  that its own Enter handler, the rename dialog and about fifteen other dialogs (`settings.rs`, `bell.rs`, `trash.rs`,
+  `templates.rs`, `hosts.rs` and others) apply. Pressing Escape to dismiss an input-method candidate while typing the
+  template name therefore closes the panel and drops the typed name and checkbox choices. The launcher's own choices
+  survive. Native IME delivery was not reproduced. The bucket should be `other`, not `highest`: CLAUDE.md says unsaved
+  form input the user can recreate in a moment is not user-owned work. Settled by: no SPEC text covers IME Escape, but
+  this restores the codebase-wide convention that the composing key belongs to the IME. That is the same class as
+  TRIAGE_OUTCOMES.md `ime-confirmation-save-template-prematurely.md` (`fix code`: "Add the same composition check before
+  saving on Enter").
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: add `&& !event.is_composing()` to
+  the panel's Escape condition in `save_template.rs`. Complexity gate: a one-condition change in `save_template.rs`,
+  plus a test if an existing harness can dispatch a composing Escape keydown (as the rename or Enter fix's test does).
+  No other behavior changes. If testing needs new harness machinery, land the fix with the closest existing test pattern
+  or stop and return the item to the maintainer.
+- Completion criteria: a composing Escape keydown leaves the panel open with its draft. A non-composing Escape still
+  returns to the launcher (SPEC.md launcher Escape behavior). Remove the feedback file and its index entry.
+- Execution: pending.
+
+## missing-ca-bundle-blocks-helm-start.md
+
+- Outcome: `fix code`.
+- Assessment: on a Linux helm machine with no CA certificates package, the whole helm (web UI and every host view) exits
+  at startup instead of starting with release downloads and feedback unavailable. This happens even with `--payload-dir`
+  or on a developer build, neither of which downloads anything. Verified by code reading on current main:
+  `production_payloads` (`crates/farhelm-helm/src/provisioning/payloads.rs`) evaluates `release_client()?` eagerly. With
+  no CA roots, reqwest's client build fails, and the error propagates through `ProvisioningService::production`
+  (`provisioning/service.rs`) and `AppState::new` (`lib.rs`) out of helm startup. Not reproduced. Settled by: SPEC.md
+  does not address the case directly. The maintainer-approved design note that #1909 added beside the reqwest dependency
+  in `Cargo.toml` records the accepted behavior: "on a Linux machine with no CA bundle, building ANY reqwest client
+  fails ... The helm survives it: the feedback forwarder logs the error and reports that it cannot send, and
+  provisioning fails with 'building the release download HTTP client'." The code contradicts that note. There is also a
+  precedent decision, `embedded-payload-cleanup-blocks-helm-start.md` (`fix code`, complete): provisioning-side failures
+  that do not need to block the helm must not stop it from starting. Caveat: the settling text is that note and the
+  precedent, not SPEC.md itself.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in `payloads.rs`, build the HTTP
+  client only for the arms that download (`PayloadSelection::Release` and the release-build `Default` arm). If the build
+  fails, return a refusing `PayloadSource`, like the existing `UnreleasedPayloads`, whose `path()` fails with the
+  client-build error under the existing context ("building the release download HTTP client"). The `Directory`,
+  `NoPayloads` and `UnreleasedPayloads` arms must never construct a client. `production_payloads_with_key` can take the
+  client as a `Result`, or as a closure, to keep the tests' injection seam. Complexity gate: stays in
+  `provisioning/payloads.rs` (plus test call sites of `production_payloads_with_key`). No change to the TLS/root-store
+  choice in `Cargo.toml`, no new API or persisted state, and no change to the feedback forwarder. If startup still fails
+  somewhere else on a client build (another eager reqwest client in helm startup), or the fix needs more than a refusing
+  source and lazy construction, stop and return the item to the maintainer.
+- Completion criteria: a helm whose release client cannot be built still starts and serves the UI. Provisioning through
+  a download source reports the client-build error. `--payload-dir` and developer builds never attempt the build. Add a
+  focused unit test that injects a failing client result and checks both the refusing source and the non-downloading
+  arms. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## resume-docs-promise-newest-conversation.md
+
+- Outcome: `fix code`.
+- Assessment: the docs website tells readers that after `/clear`, Restart no longer resumes the old conversation
+  (`website/src/content/docs/docs/agents/codex.md`, the `/clear` bullet). It also says reporters make a restart resume
+  the conversation "you were actually in ... instead of the one you threw away"
+  (`website/src/content/docs/docs/how-it-works/agent-hook-injection.md`, opening paragraph). The spec now accepts that
+  Restart may resume the earlier conversation within a brief window after a switch, then continue with it. A reader
+  relying on the docs is promised more than Farhelm guarantees. Verified by reading both pages and SPEC.md on current
+  main. The commit that changed the spec (#2038, `84520906`) touched no website page. Settled by: SPEC.md, the
+  "Confirmed 2026-10-14" paragraph: "after a session or its conversation is replaced ... Restart resuming the previous
+  conversation within a brief window is acceptable, and so is Farhelm then continuing with the conversation Restart
+  resumed". `website/EDITORIAL_RULES.md` "What the site is not": "A page must agree with them."
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: reword the Codex `/clear` bullet
+  and the hook-injection page's opening sentence. They should say that Restart resumes the conversation Farhelm last
+  learned of, and that Farhelm learns the new one once Codex has finished its next reply. Restarting before then can
+  bring back the earlier conversation. Follow the editorial rules' vocabulary. Complexity gate: docs-only, confined to
+  those two pages (plus any other non-Overview page found making the same absolute promise). No new section or page. No
+  edit to the Overview page or README, which are the maintainer's: if they carry the same promise, propose the edit
+  instead. No spec change.
+- Completion criteria: neither page promises that Restart never returns to the cleared conversation, and both agree with
+  SPEC.md's tracking limits. `dprint check` and the website build pass. Name the pages in the report. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## cached-launch-error-overrides-completed-stop.md
+
+- Outcome: `fix code`.
+- Assessment: Stop a session while its checkout is still being cloned or its post-clone hook is running. If the Stop
+  commits before the ticker's launch-evidence batch, the supervisor records "exited, stopped". The status reply still
+  shows Error, and keeps showing it until a relaunch or a supervisor reload. Verified by code reading, not reproduced.
+  In `observe_entries` (`service/ticker.rs`) the observer caches the preparation-failure detail in `run.launch_error`
+  before calling `transition_many`. The store refuses `SentinelError` against a stop-annotated `Exited` (`store.rs`,
+  `Transition::apply`). `mirror_committed_outcome` (`service/hints.rs`) clears `launch_error` only for a committed
+  `Error`. The status reply builder (`service/status.rs`, around the `launch_error` override) then lets the cached
+  detail win over the durable annotated exit. Later observations skip launch reads for annotated exits
+  (`sentinel_could_still_apply` in `launch_artifacts.rs`), so nothing repairs it. Not covered by FILTER.md: the trigger
+  is a successful ordinary Stop, not a crash or a partly failed operation, and the wrong status persists, which excludes
+  the rare-glitch filter. Settled by: SPEC.md session statuses: "A user-initiated stop yields exited with an
+  annotation". SPEC_impl.md (ticker/list paragraph): "Found but uncommitted launch errors stay in generation-local
+  memory for replies". A rejected error is not merely uncommitted; the store's documented precedence makes it
+  uncommittable.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in the status reply, apply the
+  cached `launch_error` only while `sentinel_could_still_apply` holds for the mirrored outcome, i.e. never over a
+  stop-annotated `Exited` (an `Error` outcome already wins). Optionally also clear the cache in
+  `mirror_committed_outcome` when the committed outcome makes a sentinel inapplicable. The read-side guard alone covers
+  the concurrent-publication ordering. Complexity gate: confined to `service/status.rs` and, optionally,
+  `service/hints.rs`. No store, protocol or schema change, and no change to the store's transition rules. If it turns
+  out to need reordering the ticker's cache-then-commit sequence or new synchronization, stop and return the item to the
+  maintainer.
+- Completion criteria: a session whose durable outcome is a stop-annotated exit is listed as exited (stopped) even when
+  an observer cached a launch or preparation error for that generation. A cached error still shows for Running,
+  StopRequested, unannotated `Exited` and `Interrupted` outcomes. Add a unit test that seeds both the cache and an
+  annotated outcome and checks the reply. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## checkout-settings-test-restores-before-save-settles.md
+
+- Outcome: `fix code`.
+- Assessment: in the browser test "settings saves and clears the all-hosts checkout folder"
+  (`e2e/tests/settings.spec.ts`), suppose an assertion fails while the page's save PUT is still in flight. The `finally`
+  block then restores the previous checkout folder at once, and the late PUT can land afterwards. Later specs on the
+  shared stack then inherit a changed folder. Verified by code reading on current main. The adjacent tests ("a pending
+  post-clone save ..." and the pending checkout-folder test) already settle their submitted request before restoring.
+  Settled by: precedent decisions under "Fix all, with gate"
+  (`history-fixture-enables-yolo-installing-restoration-guard.md` and its nine siblings, 2026-10-11): test cleanup gaps
+  that only show after a failed step are fixed. Also the test checklist (`.agents/test-authoring.md`): "Check the actual
+  child lifetime ..., including failure and cancellation paths."
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: record the page's
+  `PUT /api/checkout-root` requests (a `page.on("request")` filter or a pass-through route). In `finally`, await each
+  one's response, tolerating failure, before sending the restoration PUT. Mirror the existing pending-save test.
+  Complexity gate: test-only, confined to this one test in `settings.spec.ts`. No helper or product change. If settling
+  needs a new shared helper, keep it in this file or stop and return the item to the maintainer.
+- Completion criteria: the restoration PUT is never sent while a PUT from the page is unsettled. The test still passes
+  on Chromium and WebKit. `python -B scripts/check-test-sleeps.py` passes. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## docs-preview-does-not-watch-external-changelog.md
+
+- Outcome: `fix code`.
+- Assessment: while the docs preview (`website/scripts/preview.sh`) is running, editing `CHANGELOG.md` or a release's
+  screenshot list (`website/src/release-notes/<tag>.json`) does not regenerate the Release notes page. The maintainer
+  sees stale notes until the server restarts. Production builds are unaffected. Verified by code reading on current main
+  against the installed Astro 7.3.8: `addWatchFile` only appends to `settings.watchFiles`
+  (`node_modules/astro/dist/integrations/hooks.js`). That list is consulted only to decide whether an event the watcher
+  already emitted should restart (`core/dev/restart.js`), and nothing adds it to the watcher. `CHANGELOG.md` sits
+  outside the website root that Vite watches and is read with `readFileSync`. The screenshot JSON files are inside the
+  root but are neither imported nor registered. Not reproduced live. Settled by: `website/AGENTS.md` "Previewing
+  drafts": "The server picks up every saved edit by itself". The integration's own comment in `astro.config.mjs` says
+  "Watching the changelog restarts the dev server when it changes".
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: add an `astro:server:setup` hook
+  to the `farhelm-release-notes` integration in `website/astro.config.mjs`. It adds `changelogPath` and `screenshotsDir`
+  to `server.watcher` and calls `writeReleaseNotes()` on change, add or unlink events for those paths. The generated
+  page sits in the content collection, so the existing content watch picks it up. Keep the existing `addWatchFile`
+  registration. Complexity gate: confined to `website/astro.config.mjs` (and exporting what it needs from
+  `website/scripts/release-notes.mjs`, which already exports both paths). No change to page generation, the build, or
+  `preview.sh`. If Astro offers no supported way to reach the dev server's watcher from an integration, stop and return
+  the item to the maintainer.
+- Completion criteria: with the preview running, saving `CHANGELOG.md`, or adding, editing or deleting a release
+  screenshot JSON, updates the Release notes page on reload without restarting the server. `bun run build` and
+  `dprint check` still pass. Remove the feedback file and its index entry (which also holds the screenshot-list scope).
+- Execution: pending.
+
+## appearance-test-restoration-skips-session-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: in the browser test "host-appearance: choices persist and redraw rows in two open clients"
+  (`e2e/tests/terminal-multihost.spec.ts`), the `finally` block closes the observer context, restores the remote host's
+  appearance, asserts that the restore succeeded, and only then calls `cleanupSession`. If any earlier step throws, the
+  test's session and fake agent stay on the shared stack for later specs. Verified by code reading on current main.
+  Settled by: the precedent "Fix all, with gate" decisions for test cleanup gaps that only show after a failed step
+  (`history-fixture-enables-yolo-installing-restoration-guard.md` and siblings, plus
+  `history-fixtures-policy-restoration-skip-remaining-cleanup.md`).
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: run the context close, the
+  appearance restore (with its assertion) and `cleanupSession` as independent attempts. Collect their failures and
+  rethrow after all three have run, without hiding the test's own failure. Complexity gate: test-only, confined to this
+  test's `finally` block. No helper changes beyond what an existing aggregation helper already offers. If a new shared
+  cleanup utility seems needed, stop and return the item to the maintainer.
+- Completion criteria: a failure in any one cleanup step still runs the others. The test passes on Chromium and WebKit.
+  Remove the feedback file and its index entry.
+- Execution: pending.
+
+## download-regression-fixtures-arm-cleanup-too-late.md
+
+- Outcome: `fix code`.
+- Assessment: several file-hover tests in `e2e/tests/terminal-files.spec.ts` create a real session and then await
+  `page.route(...)` or `page.addInitScript(...)` before entering the `try` whose `finally` calls `cleanupSession`. If
+  that setup rejects or times out, the session and its shell remain on the shared stack until the stack is torn down.
+  Verified by code reading on current main. The pattern appears at the redraw cases (`createSession` then `page.route`
+  near the top of the file), the OSC-label case, the per-kind case, the refusal case (`addInitScript`) and the
+  cancellation case. Settled by: the precedent decisions for this class, in particular
+  `template-regression-fixtures-arm-cleanup-too-late.md`, `keyboard-launch-fixture-has-same-separate-setup-ownership.md`
+  and the "Fix all, with gate" group.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in each affected test, move the
+  setup awaits that follow `createSession` inside the cleanup-owning `try`, so cleanup is armed as soon as the session
+  exists. Complexity gate: test-only, confined to `terminal-files.spec.ts`. No change to `helpers/fleet.ts` or the
+  evidence fixture. If it needs a shared ownership helper, stop and return the item to the maintainer.
+- Completion criteria: in every test in the file, no fallible await sits between a successful `createSession` and its
+  cleanup scope. The file passes on Chromium and WebKit. Remove the feedback file and its index entry (which also holds
+  the redraw/OSC-label scope).
+- Execution: pending.
+
+## header-regression-fixtures-escape-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: the browser test "header restart and replace refresh the sidebar under build skew"
+  (`e2e/tests/ui-plan-regressions.spec.ts`) calls `createResumableSession` before entering its cleanup `try`. That
+  helper (`e2e/tests/helpers/fleet.ts`) creates the session and then waits for it to become resumable
+  (`waitForResumable`). If the wait fails, nobody deletes the session. In `finally`, a throwing `cleanupSession(source)`
+  also skips the replacement's cleanup. Verified by code reading on current main. Settled by: precedent decisions for
+  this class (`busy-selection-test-loses-source-second-creation-fails.md`,
+  `history-fixtures-policy-restoration-skip-remaining-cleanup.md`, and the "Fix all, with gate" group).
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in `createResumableSession` (and
+  its YOLO sibling if it shares the shape), clean up the created session and rethrow when the readiness wait fails. In
+  the test's `finally`, attempt the source and replacement cleanups independently and rethrow collected failures
+  afterwards. Complexity gate: test-only. Confined to `ui-plan-regressions.spec.ts` and the readiness phase of the
+  resumable-session helpers in `helpers/fleet.ts`, with no change to their success-path behavior or signature. If other
+  callers would need changes, stop and return the item to the maintainer.
+- Completion criteria: a readiness-wait failure leaves no session behind, and a source cleanup failure still attempts
+  the replacement's cleanup. The affected specs pass on Chromium and WebKit. Remove the feedback file and its index
+  entry.
+- Execution: pending.
+
+## file-stat-test-compares-unresolved-temp-path.md
+
+- Outcome: `fix code`.
+- Assessment: the supervisor unit test `service::downloads::tests::stat_checks_kind_readability_size_and_symlink_target`
+  (`crates/farhelm-supervisor/src/service/downloads.rs`) compares `info.path` with the fixture path as spelled. On macOS
+  `/tmp` resolves to `/private/tmp`, so the test fails there even when file hover works. Production `inspect`
+  canonicalizes the path it reports, and `farhelm_teststate::tempdir` returns a literal `/tmp/...` spelling. The module
+  is plain `#[cfg(test)]` with no Linux gate, so it does run on macOS. Verified by code reading, not executed on macOS.
+  Settled by: precedent decisions for symlinked-tempdir false failures
+  (`directory-browse-test-compares-canonical-output-uncanonicalized-fixture.md`,
+  `tilde-replay-test-equates-display-canonical-paths.md`,
+  `checkout-recovery-compares-canonical-roots-unresolved-fixture.md`, all `fix code`). The production contract is
+  unchanged.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: canonicalize the expected file
+  path (`std::fs::canonicalize(&file)`) once before the loop and compare `info.path` against it. Keep the symlink-target
+  assertions. Complexity gate: a test-only change inside this one test. No production change. If anything beyond the
+  expected-path spelling differs on macOS, stop and return the item to the maintainer.
+- Completion criteria: the test asserts the canonical path, passes on Linux, and does not depend on `/tmp` being
+  unresolved. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## uninstall-uutils-stat-rejects-missing-socket.md
+
+- Outcome: `fix code`.
+- Assessment: Removing a remote host (uninstall) on a Linux host whose `stat` comes from uutils coreutils (the default
+  on Ubuntu 26.04) stops the supervisor, then fails at the "stop the supervisor and private tmux server" step whenever
+  the private tmux socket is already gone, and every retry fails the same way, so the lib directory and the host entry
+  are never removed. Verified by reading `SystemBackend::stop` in `crates/farhelm-helm/src/provisioning/backend.rs`: the
+  shell `case` excuses only `'stat: cannot stat'*': No such file or directory'`, while uutils prints the same text
+  followed by ` (os error 2)`. The failure is also on record from a real run (FLAKES.md, 2026-10-14 entry for
+  `uninstall_host_commands_refuse_setup_units_and_skip_finished_work`, which quotes the exact uutils diagnostic).
+  BusyBox prints `stat: can't stat '<path>': No such file or directory`, which also misses the pattern. This is not
+  COVERED: the only matching record is TODO.md's "Remote uninstall and uutils stat" entry, which sits in
+  `## Tricky bugs`, not `## Planned`, and it asks for exactly this fix. Settled by: SPEC.md (provisioning paragraph in
+  "Hosts"): "V1 provisioning targets any Linux host with a usable systemd user manager … The distribution is not a
+  requirement", and on BusyBox: "Farhelm accommodates them only where that takes a trivial change". uutils is one of
+  "its usual replacements" and is supported outright.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in the `stop` script in
+  `crates/farhelm-helm/src/provisioning/backend.rs`, add case patterns that also excuse the uutils spelling
+  (`'stat: cannot stat'*': No such file or directory (os error 2)'`) and, because it is a one-pattern change, the
+  BusyBox spelling (`'stat: can'"'"'t stat'*': No such file or directory'`). Keep every other diagnostic, including
+  permission denied and I/O errors in either spelling, on the refusal branch. Update the comment above the script that
+  says only the GNU missing-path diagnostic excuses the bypass. Add a test in `crates/farhelm-helm/src/provisioning.rs`
+  that uses the existing `write_fake_tool` bin-directory seam to install a fake `stat` printing each implementation's
+  absence diagnostic (and one permission-denied diagnostic in uutils form), and asserts that absence is skipped and that
+  the permission error still refuses. Complexity gate: confined to the `stop` script's `case` patterns and comment in
+  `backend.rs`, plus tests built on the existing fake-tool seam. No change to other uninstall steps, no new protocol, no
+  new state, no switch away from `stat`. If the fix needs a different absence probe or changes to any other step, or if
+  the BusyBox spelling cannot be added with a single pattern, drop the BusyBox part (or stop) and return the item to the
+  maintainer.
+- Completion criteria: an uninstall whose socket is already absent completes the stop step on GNU, uutils and BusyBox
+  `stat`, and permission or I/O failures still refuse. New regression tests cover the uutils and BusyBox absence
+  spellings and a uutils non-absence refusal; the existing uninstall test still passes. Remove TODO.md's "Remote
+  uninstall and uutils stat" entry in the same change. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## trash-host-totals-exclude-unchecked-archives.md
+
+- Outcome: `fix code`.
+- Assessment: In the trash dialog, a host whose archived checkouts include entries Farhelm could not check (ownership or
+  path inspection failed) shows a host summary computed only from the checked entries. A host with only unchecked
+  entries reads "0 checkouts · 0 B", and a mixed host shows a size that is not marked partial, even though the unchecked
+  archives' sizes are unknown. The diagnostics themselves stay visible and the confirmation and global totals already
+  account for unchecked entries, so this is a misleading per-host summary, not a cleanup risk. Verified by reading the
+  `host_count`/`host_size` computation in the host header of `crates/farhelm-ui/src/list/trash.rs`, which reads only
+  `listing.checkouts`. By contrast, `target()` in the same file counts `unchecked` and the bulk confirmation treats
+  `unchecked > 0` as partial. Settled by: SPEC.md, session list trash paragraph: "Unknown sizes make totals explicitly
+  partial." SPEC_impl.md "Archived-checkout trash": "Unknown host counts stay unknown".
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in the host header of
+  `crates/farhelm-ui/src/list/trash.rs`, mark the host size partial when `listing.issues` is non-empty, and qualify the
+  host count with the number of distinct unchecked entries, using the vocabulary the bulk confirmation already uses
+  ("unchecked entries"). Prefer one helper shared with `target()` so the host row and the confirmation cannot drift
+  apart again. Complexity gate: confined to `crates/farhelm-ui/src/list/trash.rs` (display text and a small shared
+  helper) and its tests. No supervisor, protocol or listing-shape change, no new wording beyond the existing "unchecked"
+  terms. If the count qualification needs a new design (a separate badge, a layout change) or the global total's
+  behavior has to change, keep only the partial-size part, or stop and return the item to the maintainer.
+- Completion criteria: a host listing with unchecked entries never shows an unqualified count or a size without the
+  partial mark; an issue-only host no longer reads as an exact zero. A unit test in `trash.rs` (beside the existing
+  `target()` tests) covers issue-only and mixed listings. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## checkout-override-error-points-to-global-settings.md
+
+- Outcome: `fix code`.
+- Assessment: When a host has a command-line checkout folder override that is unusable (for example a dangling symlink
+  or an inaccessible parent), a checkout preview or creation on that host fails with "change the folder in Settings".
+  Settings changes only the all-hosts folder, and the override keeps winning, so following the advice leaves the host
+  broken. Verified by reading the `unusable` closure in `resolve_checkout_root` in
+  `crates/farhelm-supervisor/src/service/core.rs` (the same text for every root, whatever its source) and the per-field
+  override resolution in `crates/farhelm-helm/src/checkout_config.rs`. Commit 126bbe26 (#1828) replaced the earlier
+  command-line advice with the Settings advice when Settings gained the all-hosts folder. Settled by: SPEC.md, managed
+  checkout configuration paragraph: "The all-hosts checkout folder and post-clone command can be set or cleared in
+  Settings or with the command line; per-host overrides remain command-line only." The current advice points at a remedy
+  that, per that sentence, cannot reach the folder actually in effect.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: reword the supervisor's
+  unusable-folder message so it names both remedies, for example "change the folder in Settings, or, if this host has
+  its own folder, with `farhelm helm checkout-config`" (exact subcommand spelling from the CLI). The supervisor does not
+  know which source the root came from, so a neutral message avoids any plumbing. Complexity gate: a string change in
+  `resolve_checkout_root` plus any test that asserts the old text. No protocol field, no helm-side provenance tracking,
+  no change to other messages (the missing-root messages are correct, because an override never clears the root). If the
+  maintainer-facing wording turns out to need the source of the root (helm annotation or a new reply field), stop and
+  return the item to the maintainer.
+- Completion criteria: the unusable-folder error names both the Settings remedy and the command-line remedy for a host
+  override; tests asserting the message are updated. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## link-click-tests-skip-preference-restoration.md
+
+- Outcome: `fix code`.
+- Assessment: In the terminal link-click browser tests, the test that switches link clicks to "program only" sets the
+  shared helm preference before entering its `try`, and every such test restores the preference only after
+  `cleanupSession`, which throws on transport errors or non-404 refusals. One failed session creation or cleanup
+  therefore leaves the shared test helm in "program only" mode, and later link-opening tests fail for an unrelated
+  reason. Verified by reading `e2e/tests/terminal-link-clicks.spec.ts` (the `link-no-mouse` test sets
+  `terminal_link_click: "program"` and calls `createSession` before `try`; the `finally` blocks run `cleanupSession`
+  before `patchPreferences`) and `cleanupSession` in `e2e/tests/helpers/fleet.ts`. Settled by: precedent from the
+  maintainer's decisions on the same defect shape in other fixtures,
+  `history-fixtures-policy-restoration-skip-remaining-cleanup.md` and
+  `keyboard-launch-fixtures-policy-restoration-skip-session-deletion.md` (both `fix code`, "Fix all, with gate": "a
+  failed restore does not skip the remaining cleanup steps (each runs and failures are reported together)"). CLAUDE.md
+  "Sharing the machine with other agents" also relies on harness state not leaking between runs.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in
+  `terminal-link-clicks.spec.ts`, arm preference restoration before the first preference write (move the write and
+  `createSession` inside the `try`, guarding cleanup of a session that was never created), and run session cleanup and
+  preference restoration independently in `finally` so one failing does not skip the other, rethrowing the collected
+  errors afterwards. Reuse whatever all-steps cleanup helper the precedent fix (PR #1930) introduced if one exists.
+  Complexity gate: confined to `e2e/tests/terminal-link-clicks.spec.ts` (and reuse of an existing helper). No changes to
+  `fleet.ts` semantics, the Playwright config or the evidence fixture, and no new global reset. If independent cleanup
+  needs a new shared helper or fixture lifecycle change, stop and return the item to the maintainer.
+- Completion criteria: in every test in this spec that changes `terminal_link_click`, a failure in session creation or
+  cleanup still restores the preference, and cleanup errors are still reported. Run the changed spec on Chromium and
+  WebKit through the recorder. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## repository-picker-selection-moves-offscreen.md
+
+- Outcome: `fix code`.
+- Assessment: In the launcher's managed-checkout repository field, when the suggestion list is longer than its scroll
+  area, ArrowDown or ArrowUp (including wrapping to the last row) moves the highlighted repository out of view. A
+  keyboard user cannot see which repository Enter will select. Verified by reading the repository input's `onkeydown` in
+  `crates/farhelm-ui/src/list/create_form.rs`, which only sets `repository_index`; the options are non-focusable buttons
+  in a bounded, scrolling `launch-composer-repository-options` list. The same file already scrolls the active row for
+  the composer search (`scroll_composer_search_result`) and the folder field (`scroll_folder_result`). Settled by: no
+  sentence names the repository field specifically. SPEC_impl.md, launcher fields, requires "keyboard scrolling of the
+  active row" for the folder combobox's bounded list, and the model and search lists follow the same pattern. This is
+  the least spec-explicit item classified FIX-CODE here; it is included because no product choice is involved (nobody
+  wants the active row hidden) and the fix copies an existing in-file pattern.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: add a
+  `scroll_repository_result(index)` helper beside the two existing ones (same `scrollIntoView({ block: 'nearest' })` on
+  `checkout-repository-{index}`) and call it after arrow navigation changes `repository_index`, from a post-render
+  effect like the folder list's so a just-opened list is mounted. Complexity gate: confined to
+  `crates/farhelm-ui/src/list/create_form.rs`, mirroring the existing folder/search scroll helpers. No change to
+  selection, filtering, focus handling or CSS. If the scroll needs focus changes or a new active-descendant model, stop
+  and return the item to the maintainer.
+- Completion criteria: arrow navigation, including wrap-around, keeps the active repository row visible in an
+  overflowing list. A browser regression in `e2e/tests/github-checkout-composer.spec.ts` (or beside it) supplies enough
+  suggestions to overflow, presses ArrowUp to wrap, and asserts the active option is within the list's visible area; run
+  on Chromium and WebKit through the recorder. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## sound-tests-skip-remaining-cleanup-and-preferences.md
+
+- Outcome: `fix code`.
+- Assessment: The device-sounds browser tests create two sessions and change the helm's shared auto-select preference;
+  their `afterEach` awaits `cleanupSession` for each session in turn and then calls `resetPreferences`. If one cleanup
+  throws (transport error or non-404 refusal), the other session is never deleted and preferences are never reset, so
+  the shared test stack carries a live session and a changed preference into later tests. Verified by reading the
+  `test.describe("device sounds")` `afterEach` in `e2e/tests/sounds.spec.ts` and `cleanupSession` in
+  `e2e/tests/helpers/fleet.ts`. Settled by: same precedent as
+  `history-fixtures-policy-restoration-skip-remaining-cleanup.md` ("a failed restore does not skip the remaining cleanup
+  steps (each runs and failures are reported together)"), decided `fix code` by the maintainer.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: in the `afterEach`, attempt every
+  remaining session cleanup and the preference reset regardless of earlier failures, collect the errors, and rethrow
+  them together afterwards. Reuse the all-steps cleanup helper from the precedent fix (PR #1930) if one exists.
+  Complexity gate: confined to `e2e/tests/sounds.spec.ts` (plus reuse of an existing helper). No change to `fleet.ts`
+  semantics, the fixture's assertions or the evidence fixture. If it needs a new shared fixture lifecycle, stop and
+  return the item to the maintainer.
+- Completion criteria: one failing cleanup no longer skips the other session's deletion or the preference reset, and the
+  failure is still reported. Run `sounds.spec.ts` on Chromium and WebKit through the recorder. Remove the feedback file
+  and its index entry.
+- Execution: pending.
+
+## token-rotation-test-invalid-apfs-name.md
+
+- Outcome: `fix code`.
+- Assessment: On a Mac, the helm unit test `rotate_refuses_non_utf8_before_changing_state` fails at its first fixture
+  step, because it creates a directory named `state-\xff` and APFS refuses names that are not valid UTF-8 (EILSEQ). The
+  test never reaches the token-rotation refusal it is meant to check, so macOS workspace validation reports a failure
+  unrelated to rotation. Verified by reading `crates/farhelm-helm/src/token_control.rs` (`#[cfg(unix)]`, unconditional
+  `std::fs::create_dir(...).unwrap()`) and by the repository's own established fact in
+  `crates/farhelm/src/uninstall/locks.rs` (`stale_install_lock_advice_omits_commands_for_unprintable_paths`: "APFS
+  refuses invalid UTF-8 names at creation (EILSEQ)"). Not run on macOS. Settled by: the same APFS constraint was already
+  corrected in `locks.rs` by restricting the raw-byte case to non-macOS filesystems; CLAUDE.md treats macOS as a
+  validation platform (macOS-only acceptance suites, Python 3.13 on macOS for the recorder). Test-authoring checklist:
+  "Assert the fixture premise before the action or measurement that depends on it." The premise (a token-bearing
+  database under a non-UTF-8 directory) cannot exist on APFS.
+- Decision: on 2026-10-15 the user delegated this class of decision: "for everything that's left in any bucket: please
+  assess which ones are CLEARLY settled by the spec, don't need my judgement, and can be fixed without significant
+  complexity or scope creep. triage those as 'fix code' with explicit complexity gates." A fresh-context pre-triage
+  review, checked by the triaging session, classed this finding that way. Planned fix: gate the test with
+  `#[cfg(all(unix, not(target_os = "macos")))]` and add a short comment matching the `locks.rs` one explaining that APFS
+  cannot hold such a directory, so the refusal-before-lock contract is checked on Linux. Do not replace the fixture
+  creation with a caught error; that would not prove the refusal precedes lock and token changes. Complexity gate:
+  confined to that one test's attribute and comment in `token_control.rs`. No production change, no new seam. If the
+  maintainer's intent requires macOS coverage of the refusal, which needs a new pre-filesystem seam, stop and return the
+  item.
+- Completion criteria: the test no longer compiles on macOS and still runs and passes on Linux with its existing
+  assertions; run it through the recorder on Linux. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## pending-folder-save-overwrites-newer-save.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. Closing and reopening Settings during a slow checkout-folder save could let the older save
+  land after a newer one and revert the folder. 8caeacb8 (#2062, "fix: order app requests after configuration saves")
+  registers each save synchronously and makes a reopened folder field wait for it before reading, so a newer save can no
+  longer be overtaken by an older acknowledged one. The remaining case, a save whose reply is lost and which the helm
+  applies later, is accepted in SPEC_impl.md. Verified by reading current main.
+- Decision: already fixed; recorded as `discard` per the triage rule for findings already fixed on main, which carries
+  no judgement about the finding.
+- Completion criteria: remove this feedback file and its index entry.
+- Execution: complete; feedback file and index entry removed in the same change that recorded this entry.
