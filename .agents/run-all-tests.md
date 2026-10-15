@@ -21,6 +21,9 @@ and clippy failing in CI because CI's floating Rust stable had moved to 1.99 whi
   low-risk fix inside the existing design: a test that assumes an old limit, a lint, a renamed symbol. Anything that
   grows scope, adds complexity, or needs a design or product decision is not fixed here: record it where the deflake
   protocol says (a `TODO.md` bucket, with the evidence) and list it in the final report for the maintainer to decide.
+- Act on failures as they arrive: investigate and make reasonable fixes proactively, without waiting for the sweep or
+  the whole flow to finish, or for another request from the maintainer. During the sweep, defer only runtime validation
+  that would compete with its timing-sensitive phases, as step 3 describes; that is not a reason to postpone the fix.
 - Flakes are recorded, not chased: the deflake protocol's record (a `TODO.md` Deflake entry, a dated `FLAKES.md` entry
   and a `deflake/known-flakes.txt` line), one PR per flake, no narrow-test ladder.
 - Never mark a PR ready and never merge; landing is a separate request.
