@@ -53,3 +53,44 @@ It read the full plan, triage decision, patch, test-authoring checklist and pinn
 precise parsing without a number-representation change and an independent regression oracle. Commit/PR wording passed a
 separate cold read. A separate documentation pass covered the dependency rationale, trust-code comment and test. No
 scope departure or unresolved finding remains.
+
+### Landing
+
+Landed as #2089, the first of the round's four plans; checkout-recovery-host-binding (#2086),
+template-editor-unsafe-values (#2087) and codex-guide-hook-warning (#2091) landed after it, and all four were tested
+stacked on top of main. Their only overlap was the review feedback index, where each removed its own entry; all removals
+were kept.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. The change turns on serde_json's `float_roundtrip` feature
+for the whole workspace, including the browser and desktop builds. That feature only makes float parsing correctly
+rounded; it does not change how numbers are represented, so the known `arbitrary_precision` breakages in untagged,
+flattened and internally tagged types do not apply, and the lockfile is unchanged. Protocol frames are JSON; the only
+other format is TOML. The new test compares against Rust's own float parser and checks negative zero through its bits.
+
+#### Fixes made while landing
+
+- The Claude trust feature this follows (#2070) is not released yet. The repository rule is that a follow-up to
+  unreleased work edits that work's changelog fragment rather than adding a second entry, so this PR's separate "fixed"
+  fragment was removed and the feature's fragment now says Farhelm changes only the folder's trust entry and leaves
+  every other value as Claude wrote it.
+- The test's values all took the parser's fast path; two values with more than 19 significant digits or at the largest
+  finite double now exercise the long path, where the default parser was least accurate.
+
+#### Left as is
+
+- A number outside the double range (such as `1e400`) makes the edit refuse with "Claude config is not JSON", which is
+  misleading; JavaScript never writes such a value.
+- The plan read "preserve every unrelated number exactly" as "the same double Claude reads", so `-0` is written as
+  `-0.0` and integers beyond 64 bits in float spelling.
+- Suspected, not measured: the precise parser adds some size to the browser build.
+
+#### Checks
+
+- Run on the four plans stacked on main: format, lint, changelog and sleep checks;
+  `cargo clippy --all-targets -- -D warnings` and the other clippy configurations; `cargo check -p farhelm-desktop`; the
+  protocol, helm and supervisor packages in full through the recorder with pinned tmux, after rebuilding the CLI, run
+  `69e07000-0f82-4cef-9e98-4ba2fdd30993`: 2386 passed; the UI crate with the desktop feature, run
+  `00253155-266a-4b7c-82d2-a9289e13eb9b`: 651 passed; the JS harness and the website build; the templates, quick-launch
+  and tooltip-coverage specs on Chromium and WebKit, run `d1693e60-8499-40e2-b168-278df93a2f5d`: 128 passed.
