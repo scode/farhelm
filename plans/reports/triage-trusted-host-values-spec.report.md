@@ -47,3 +47,30 @@ Each PR passed its required fresh-context gpt-6.1-sol source review at high effo
 and idiomatic prose. No findings. Commit and PR wording passed separate cold reads. The documentation pass covered the
 specification paragraph and both ledger updates. Both PRs remain drafts; the executor has marked neither ready nor
 merged either one.
+
+### Landing
+
+Landed as #2040 and #2042, second of the round's three spec-only plans, after triage-power-loss-spec (#2039, #2043) and
+before triage-hand-edited-units-spec (#2041, #2049). The hand-edit plan adds its own exception to the 2026-10-10 refusal
+rule right below this plan's paragraph; the two read together without conflict.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. It checked the code: the SSH help's copied commands are
+built only from the stored or typed destination, the helm's own state directory, the helm's working directory when that
+path is relative, and fixed options. Stored destinations are written only by host registration, the change-destination
+action and `--ensure-hosts`; no remote supervisor can set them. The session header's copy actions, which do carry remote
+text, stay outside the new trust, and the escaping rule for remote text is unchanged.
+
+#### Fix made while landing
+
+- The paragraph said only that the commands "need not defend against" unusual characters, while the 2026-10-10 rule
+  right after it requires unsupported configurations to be refused with a clear message. It now says Farhelm need
+  neither defend against such values nor detect or refuse them, so a later reviewer cannot file "accepted without
+  refusal" under the refusal rule.
+- It now names the working directory a relative state path resolves against, which the copied command also contains.
+
+#### Checks
+
+- Run now: `dprint check` on SPEC.md after the fix, and on main after all three plans landed.
+- Not run: anything else; only Markdown changed.

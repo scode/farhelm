@@ -7,3 +7,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`goose-named-restart-test`](reports/goose-named-restart-test.report.md) landed 2026-10-15 in #2033: supervisor test that a named Goose restart clears the captured conversation in memory and a definitive failure restores it
 - [`click-to-open-paths`](reports/click-to-open-paths.report.md) landed 2026-10-15 in #2034: Cmd-click a terminal file path in the desktop app to save and open it (.md, .txt, .html only), plus the redesigned file hover
 - [`triage-power-loss-spec`](reports/triage-power-loss-spec.report.md) landed 2026-10-15 in #2039, #2043: Spec: downloads and new checkouts need not survive a power loss (two triage outcomes)
+- [`triage-trusted-host-values-spec`](reports/triage-trusted-host-values-spec.report.md) landed 2026-10-15 in #2040, #2042: Spec: the user's own host names and paths are trusted in copied SSH help commands (two triage outcomes)
