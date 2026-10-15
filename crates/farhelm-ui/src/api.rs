@@ -1,9 +1,7 @@
-//! The helm's HTTP contract, as this UI speaks it: one `async fn` per
-//! endpoint — the session routes
-//! (fetch/create/stop/restart/rename/delete/tab-open/tab-close), the host
-//! registry's (list/probe/provision/update/retarget/remove/adopt/retry) since
-//! PLAN_M7.md item 7 extended the M6 host surface —
-//! generally expose failures — transport, status, or body-read — as a
+//! The helm's HTTP contract, as this UI speaks it. The session routes
+//! (fetch/create/stop/restart/rename/delete/tab-open/tab-close) and host
+//! registry routes (list/probe/provision/update/retarget/remove/adopt/retry)
+//! generally expose transport, status and body-read failures as a
 //! single displayable `String`. Fresh-checkout submission also preserves
 //! whether the server proved the attempt definitely unaccepted: the composer
 //! needs that distinction to retain an ambiguous request's original key and
@@ -32,7 +30,7 @@
 //! WebSocket's path and query. `encode_bytes` is their shared,
 //! module-private implementation.
 //!
-//! One endpoint deliberately breaks the one-async-fn-per-endpoint,
+//! One endpoint deliberately breaks the one-request-per-endpoint,
 //! error-as-displayable-string mold: the shared preference
 //! (`fetch_preferences`, `store_preference`, and the serialized write queue
 //! behind it). Most writes are fire-and-forget under SPEC.md's best-effort
@@ -41,17 +39,23 @@
 //! their own failures. Its reader is `lib.rs`'s `PreferencesGate` rather than
 //! a view component.
 //!
-//! Every protected request below is issued through this module's own [`send`],
+//! Every protected request below uses this module's shared send funnel,
 //! which attaches the device secret and reads the helm's build stamp off the
 //! reply (`skew`). The sole exception is [`exchange_token`]: it is the public
 //! bootstrap request that obtains that credential, so it cannot traverse an
 //! authenticated funnel. It performs the same build-stamp classification
 //! explicitly.
 //!
+//! Configuration saves register synchronously and fence later reads and actions
+//! through `save_order`. Their wait consumes the request's existing deadline;
+//! unrelated saves and reads remain concurrent. The shortcut preference queue
+//! attaches tickets to batches, not dirty values, so credential recovery can
+//! read its seed before restarting failed writes.
+//!
 //! The cross-module entry points are `pub(crate)`: they exist to be
 //! called from the view components in `list`, `session_view`, and
 //! `tabs`, never from outside this crate — `main.rs` only ever reaches
-//! `App`/`ApiBase` (see `lib.rs`). Internal helpers (`client`, `send`,
+//! `App`/`ApiBase` (see `lib.rs`). Internal helpers (`client`, `send`, `send_save`,
 //! `encode_bytes`, `install_field`, `eval_minted_id`, and the two
 //! failure-text builders) stay private to this module.
 
@@ -63,6 +67,12 @@ use crate::github_checkout::{
 use crate::skew;
 use crate::{CommandLaunch, Host, HostId, LaunchSelection, Session, Tab};
 use serde::Deserialize;
+
+mod save_order;
+
+/// UI-owned configuration writes outlive authentication and modal remounts.
+static CONFIGURATION_SAVES: std::sync::LazyLock<save_order::Saves> =
+    std::sync::LazyLock::new(Default::default);
 
 /// Mirror of the helm's whole `GET /api/sessions` reply (farhelm-helm's
 /// `SessionListBody`): `{"sessions": [...], "total": N, "matching": N,
@@ -481,19 +491,23 @@ pub(crate) async fn fetch_ntfy_settings(
 
 /// Explicit saves carry only a replacement token, never a fetched secret or a
 /// preference replay. The response's presence bit confirms replace/clear succeeded.
-pub(crate) async fn save_ntfy_settings(
+/// Declaring the future registers the save before the caller can spawn it.
+pub(crate) fn save_ntfy_settings(
     base: &str,
     settings: farhelm_proto::ntfy::SaveSettings,
-) -> Result<farhelm_proto::ntfy::Settings, String> {
+) -> impl Future<Output = Result<farhelm_proto::ntfy::Settings, String>> + use<> {
     let url = format!("{base}/api/ntfy-alerts");
-    let response = send(client().put(&url).json(&settings)).await?;
-    if !response.status().is_success() {
-        return Err(refusal_text("PUT", &url, response).await);
+    let sending = send_save(client().put(&url).json(&settings));
+    async move {
+        let response = sending.await?;
+        if !response.status().is_success() {
+            return Err(refusal_text("PUT", &url, response).await);
+        }
+        response
+            .json()
+            .await
+            .map_err(|_| "could not read saved ntfy alert settings".to_string())
     }
-    response
-        .json()
-        .await
-        .map_err(|_| "could not read saved ntfy alert settings".to_string())
 }
 
 /// Test the saved helm configuration even while the form has unsaved changes.
@@ -523,15 +537,23 @@ pub(crate) async fn fetch_checkout_root(base: &str) -> Result<Option<String>, St
 /// Save only on user request and return the helm's refusal to the field.
 /// Unlike queued preferences, a folder write is not silent or optimistic;
 /// callers refresh dependent discovery/preview only after this succeeds.
-pub(crate) async fn save_checkout_root(base: &str, root: Option<String>) -> Result<(), String> {
+/// Registration is synchronous; dismissing and reopening a field must order its
+/// initial read after the already-declared save.
+pub(crate) fn save_checkout_root(
+    base: &str,
+    root: Option<String>,
+) -> impl Future<Output = Result<(), String>> + use<> {
     let url = format!("{base}/api/checkout-root");
-    let resp = send(client().put(&url).json(&CheckoutRootBody { root })).await?;
-    if !resp.status().is_success() {
-        // A refusal can arrive without a body (an auth or origin guard, a
-        // proxy); `refusal_text` keeps the field's alert from being blank.
-        return Err(refusal_text("PUT", &url, resp).await);
+    let sending = send_save(client().put(&url).json(&CheckoutRootBody { root }));
+    async move {
+        let resp = sending.await?;
+        if !resp.status().is_success() {
+            // A refusal can arrive without a body (an auth or origin guard, a
+            // proxy); `refusal_text` keeps the field's alert from being blank.
+            return Err(refusal_text("PUT", &url, resp).await);
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Keep the command route separate from the folder's independent explicit save.
@@ -557,16 +579,21 @@ pub(crate) async fn fetch_checkout_post_clone(base: &str) -> Result<Option<Strin
 
 /// Return the helm's refusal to the explicit-save field without losing its draft.
 /// This is configuration, not a best-effort preference write.
-pub(crate) async fn save_checkout_post_clone(
+/// Registration happens before polling, so a reopened field's read cannot
+/// overtake this save and seed a second edit from stale configuration.
+pub(crate) fn save_checkout_post_clone(
     base: &str,
     command: Option<String>,
-) -> Result<(), String> {
+) -> impl Future<Output = Result<(), String>> + use<> {
     let url = format!("{base}/api/checkout-post-clone");
-    let resp = send(client().put(&url).json(&CheckoutPostCloneBody { command })).await?;
-    if !resp.status().is_success() {
-        return Err(refusal_text("PUT", &url, resp).await);
+    let sending = send_save(client().put(&url).json(&CheckoutPostCloneBody { command }));
+    async move {
+        let resp = sending.await?;
+        if !resp.status().is_success() {
+            return Err(refusal_text("PUT", &url, resp).await);
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Which field of the shared preference a writer owns.
@@ -592,6 +619,12 @@ pub(crate) enum PreferenceField {
 }
 
 impl PreferenceField {
+    /// Only launch bindings affect later reads/actions; ordinary view choices
+    /// must not add a configuration round trip to session switching.
+    fn orders_requests(self) -> bool {
+        matches!(self, Self::QuickLaunchTemplate | Self::TemplateShortcuts)
+    }
+
     /// The field's wire key in a `PUT /api/preferences` patch.
     fn key(self) -> &'static str {
         match self {
@@ -716,6 +749,10 @@ struct FieldWrite {
     /// already being sent: another client may have committed in between.
     recorded_since_send: bool,
     completion: Option<PreferenceCompletion>,
+    /// Tickets move with a batch into its actual PUT. Keeping later queued
+    /// tickets separate lets an earlier reader resume despite a stream of edits.
+    queued_saves: Vec<save_order::Ticket>,
+    sending_saves: Vec<save_order::Ticket>,
 }
 
 /// Retire the matching mark entirely, or just the deleted name from a map.
@@ -763,6 +800,7 @@ struct PreferenceCompletion {
 /// OUTSIDE every remounted subtree.
 #[derive(Default)]
 struct PreferenceWrites {
+    saves: save_order::Saves,
     welcome_seen: FieldWrite,
     sort: FieldWrite,
     selected: FieldWrite,
@@ -807,7 +845,9 @@ impl PreferenceWrites {
         completion: Option<PreferenceCompletion>,
     ) -> bool {
         let field = value.field();
+        let ticket = field.orders_requests().then(|| self.saves.register());
         let slot = self.field(field);
+        slot.queued_saves.extend(ticket);
         if let Some(previous) = slot.completion.take() {
             let _ = previous.sender.send(false);
         }
@@ -825,6 +865,7 @@ impl PreferenceWrites {
     /// The value the writer should send next — always the newest recorded.
     fn next_to_send(&mut self, field: PreferenceField) -> Option<PreferenceValue> {
         let slot = self.field(field);
+        slot.sending_saves = std::mem::take(&mut slot.queued_saves);
         slot.recorded_since_send = false;
         slot.latest.clone()
     }
@@ -841,6 +882,7 @@ impl PreferenceWrites {
     /// never a retry loop against a helm that is refusing.
     fn finished(&mut self, field: PreferenceField, sent: &PreferenceValue, success: bool) -> bool {
         let slot = self.field(field);
+        slot.sending_saves.clear();
         if slot.recorded_since_send || slot.latest.as_ref() != Some(sent) {
             return true;
         }
@@ -861,6 +903,8 @@ impl PreferenceWrites {
     /// dirty so nothing pretends it was persisted.
     fn writer_lost(&mut self, field: PreferenceField) {
         let slot = self.field(field);
+        slot.sending_saves.clear();
+        slot.queued_saves.clear();
         slot.in_flight = false;
         if let Some(completion) = slot.completion.take() {
             let _ = completion.sender.send(false);
@@ -944,11 +988,15 @@ impl PreferenceWrites {
     /// or `None` when there is nothing dirty or a writer already owns it.
     fn begin_replay(&mut self, field: PreferenceField) -> Option<PreferenceValue> {
         let value = self.dirty(field)?;
+        let saves = self.saves.clone();
         let slot = self.field(field);
         if slot.in_flight {
             return None;
         }
         slot.in_flight = true;
+        if field.orders_requests() {
+            slot.queued_saves.push(saves.register());
+        }
         Some(value)
     }
 }
@@ -958,7 +1006,12 @@ impl PreferenceWrites {
 /// remounted by credential recovery (the browser's, or on desktop a failed
 /// sign-in replacing the whole `AppBody`) — see [`PreferenceWrites`].
 static PREFERENCE_WRITES: std::sync::LazyLock<std::sync::Mutex<PreferenceWrites>> =
-    std::sync::LazyLock::new(Default::default);
+    std::sync::LazyLock::new(|| {
+        std::sync::Mutex::new(PreferenceWrites {
+            saves: CONFIGURATION_SAVES.clone(),
+            ..Default::default()
+        })
+    });
 
 fn preference_writes() -> std::sync::MutexGuard<'static, PreferenceWrites> {
     PREFERENCE_WRITES
@@ -1053,8 +1106,11 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
 /// cancelled with whatever component happened to call `store_preference`,
 /// and a selection made on the way out of a view still deserves its write.
 fn spawn_preference_writer(base: String, field: PreferenceField) {
+    // Own cancellation before the first poll too: a task dropped while queued
+    // must release both its field and its ordering tickets.
+    let guard = WriterGuard { field, armed: true };
     dioxus::core::spawn_forever(async move {
-        let mut guard = WriterGuard { field, armed: true };
+        let mut guard = guard;
         loop {
             let Some(value) = preference_writes().next_to_send(field) else {
                 break;
@@ -1074,7 +1130,14 @@ fn spawn_preference_writer(base: String, field: PreferenceField) {
 async fn send_preference_patch(base: &str, value: &PreferenceValue) -> bool {
     let url = format!("{base}/api/preferences");
     let patch = serde_json::json!({ value.field().key(): value.wire_value() });
-    let outcome = match send(client().put(&url).json(&patch)).await {
+    // Binding writes already own queue tickets. Waiting here would wait on
+    // themselves; unrelated preference fields remain ordinary dependent requests.
+    let sending = send_inner_ordered(
+        client().put(&url).json(&patch),
+        REQUEST_TIMEOUT,
+        !value.field().orders_requests(),
+    );
+    let outcome = match sending.await.map_err(send_error_text) {
         Ok(resp) if resp.status().is_success() => return true,
         Ok(resp) => read_failure("PUT", &url, resp).await,
         Err(detail) => detail,
@@ -1092,13 +1155,16 @@ async fn send_preference_patch(base: &str, value: &PreferenceValue) -> bool {
 /// failures and writer loss leave the choice dirty for credential recovery.
 /// Receiver cancellation never cancels that process-wide writer. A rename
 /// retains both names if its particular choice is not acknowledged.
-pub(crate) async fn write_template_binding(base: &str, value: PreferenceValue) -> bool {
+pub(crate) fn write_template_binding(
+    base: &str,
+    value: PreferenceValue,
+) -> impl Future<Output = bool> + use<> {
     let field = value.field();
     debug_assert!(matches!(
         field,
         PreferenceField::QuickLaunchTemplate | PreferenceField::TemplateShortcuts
     ));
-    preference_write_completion(base, value).await
+    preference_write_completion(base, value)
 }
 
 /// Queue restoration now, before the caller spawns its completion waiter.
@@ -1462,10 +1528,25 @@ const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// seed. A recognized 401 raises the full-page token prompt in browser
 /// builds; the desktop build has nothing to recover with (its credential
 /// cannot be revoked; see `send_inner`) and reports it as an error.
-async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
-    send_inner(request, REQUEST_TIMEOUT)
-        .await
-        .map_err(send_error_text)
+fn send(
+    request: reqwest::RequestBuilder,
+) -> impl Future<Output = Result<reqwest::Response, String>> {
+    let sending = send_inner(request, REQUEST_TIMEOUT);
+    async move { sending.await.map_err(send_error_text) }
+}
+
+/// Register an explicit configuration save before its task can be polled.
+/// Independent saves bypass the barrier; their guard releases later requests
+/// on response, failure, timeout, or a component cancelling the returned future.
+fn send_save(
+    request: reqwest::RequestBuilder,
+) -> impl Future<Output = Result<reqwest::Response, String>> {
+    let ticket = CONFIGURATION_SAVES.register();
+    let sending = send_inner_ordered(request, REQUEST_TIMEOUT, false);
+    async move {
+        let _ticket = ticket;
+        sending.await.map_err(send_error_text)
+    }
 }
 
 /// [`send`] with a caller-chosen deadline instead of [`REQUEST_TIMEOUT`].
@@ -1476,11 +1557,12 @@ async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, Str
 /// (see [`PREFERENCE_SEED_TIMEOUT`]). Everything else goes through
 /// [`send`] or [`send_read`]; a deadline chosen per call site is a deadline
 /// someone eventually forgets.
-async fn send_within(
+fn send_within(
     request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
-) -> Result<reqwest::Response, String> {
-    send_inner(request, timeout).await.map_err(send_error_text)
+) -> impl Future<Output = Result<reqwest::Response, String>> {
+    let sending = send_inner(request, timeout);
+    async move { sending.await.map_err(send_error_text) }
 }
 
 /// [`send`] at [`READ_TIMEOUT`] — the deadline the idempotent reads share.
@@ -1491,8 +1573,10 @@ async fn send_within(
 /// a read — it is `browse_directory`, and it goes through [`send`]. (The
 /// GitHub repository scan is the one bounded remote read that stays here;
 /// see [`READ_TIMEOUT`].)
-async fn send_read(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
-    send_within(request, READ_TIMEOUT).await
+fn send_read(
+    request: reqwest::RequestBuilder,
+) -> impl Future<Output = Result<reqwest::Response, String>> {
+    send_within(request, READ_TIMEOUT)
 }
 
 /// Failure at the one response-classification point every Rust-side API
@@ -1633,52 +1717,77 @@ fn send_error_text(error: SendError) -> String {
 /// Most endpoints flatten its errors through `send` or `send_read`; plain
 /// Replace retains their origin so a consumed 401 ends its retry intent.
 /// Only `send_within` chooses a deadline; other callers use a fixed constant.
-async fn send_inner(
+fn send_inner(
     request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
-) -> Result<reqwest::Response, SendError> {
-    let request = match crate::auth::device_secret() {
-        Some(secret) => request.bearer_auth(secret),
-        None => request,
-    };
-    // reqwest's per-request timeout runs until the body has been read, so it
-    // bounds the 401 body read below too.
-    let (client, built) = request.timeout(timeout).build_split();
-    let built = built.map_err(|error| SendError::Request(error.to_string()))?;
-    let resp = execute_with_receipt(&client, built)
-        .await
-        .map_err(|error| SendError::Request(error.to_string()))?;
-    // Called for its effect, in a statement of its own. Folding it into a
-    // `.map()` reads as a transformation of the response and is not one —
-    // the value is unchanged and the point is entirely the side effect.
-    skew::note_build(&resp);
-    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        let body = resp
-            .text()
+) -> impl Future<Output = Result<reqwest::Response, SendError>> {
+    send_inner_ordered(request, timeout, true)
+}
+
+/// Take the preceding-save snapshot and deadline at entry, before any await.
+/// Only tracked saves bypass ordering, avoiding self-dependencies and preserving
+/// parallel saves to different settings. All other HTTP keeps the same funnel.
+fn send_inner_ordered(
+    request: reqwest::RequestBuilder,
+    timeout: std::time::Duration,
+    dependent: bool,
+) -> impl Future<Output = Result<reqwest::Response, SendError>> {
+    let started = web_time::Instant::now();
+    let waiting = dependent.then(|| CONFIGURATION_SAVES.preceding());
+    async move {
+        let timeout = save_order::remaining(
+            async move {
+                if let Some(waiting) = waiting {
+                    waiting.await;
+                }
+            },
+            started,
+            timeout,
+        )
+        .await?;
+        let request = match crate::auth::device_secret() {
+            Some(secret) => request.bearer_auth(secret),
+            None => request,
+        };
+        // reqwest's per-request timeout runs until the body has been read, so it
+        // bounds the 401 body read below too.
+        let (client, built) = request.timeout(timeout).build_split();
+        let built = built.map_err(|error| SendError::Request(error.to_string()))?;
+        let resp = execute_with_receipt(&client, built)
             .await
-            .map_err(|error| SendError::Refused(error.to_string()))?;
-        if device_auth_required(&body) {
-            // Stamp classification happens first. A bundle that disagrees
-            // with the helm cannot safely interpret even this marker, so the
-            // skew prompt wins and this one stays dormant. Only the browser
-            // owns the token prompt. The desktop app has nothing to recover
-            // with: its credential is an in-memory one its own embedded helm
-            // minted, which rotation cannot revoke, so a refusal here means
-            // something is broken and is reported as such.
-            #[cfg(not(native_desktop))]
-            if !skew::build_skew_detected_now() {
-                crate::auth::require_token();
+            .map_err(|error| SendError::Request(error.to_string()))?;
+        // Called for its effect, in a statement of its own. Folding it into a
+        // `.map()` reads as a transformation of the response and is not one —
+        // the value is unchanged and the point is entirely the side effect.
+        skew::note_build(&resp);
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            let body = resp
+                .text()
+                .await
+                .map_err(|error| SendError::Refused(error.to_string()))?;
+            if device_auth_required(&body) {
+                // Stamp classification happens first. A bundle that disagrees
+                // with the helm cannot safely interpret even this marker, so the
+                // skew prompt wins and this one stays dormant. Only the browser
+                // owns the token prompt. The desktop app has nothing to recover
+                // with: its credential is an in-memory one its own embedded helm
+                // minted, which rotation cannot revoke, so a refusal here means
+                // something is broken and is reported as such.
+                #[cfg(not(native_desktop))]
+                if !skew::build_skew_detected_now() {
+                    crate::auth::require_token();
+                }
+                return Err(SendError::Unauthenticated);
             }
-            return Err(SendError::Unauthenticated);
+            let detail = body.trim();
+            return Err(SendError::Refused(if detail.is_empty() {
+                "the helm refused this request as unauthorized".to_string()
+            } else {
+                detail.to_string()
+            }));
         }
-        let detail = body.trim();
-        return Err(SendError::Refused(if detail.is_empty() {
-            "the helm refused this request as unauthorized".to_string()
-        } else {
-            detail.to_string()
-        }));
+        Ok(resp)
     }
-    Ok(resp)
 }
 
 /// Whether a 401 body is the helm's "sign in again" answer
@@ -3489,47 +3598,64 @@ pub(crate) async fn fetch_launch_catalog(base: &str) -> Result<Vec<LaunchCatalog
 /// Read when the launcher or the Templates panel opens. Preserve read failures
 /// so callers can offer a retry and distinguish an unavailable catalog from
 /// a successful empty list or a deleted named template.
-pub(crate) async fn fetch_templates(
+/// Capture ordering on declaration: name-validation reads must be declared
+/// before the save whose precondition they establish.
+pub(crate) fn fetch_templates(
     base: &str,
-) -> Result<Vec<farhelm_proto::launcher::LaunchTemplate>, String> {
+) -> impl Future<Output = Result<Vec<farhelm_proto::launcher::LaunchTemplate>, String>> + use<> {
     #[derive(Deserialize)]
     struct TemplatesBody {
         templates: Vec<farhelm_proto::launcher::LaunchTemplate>,
     }
     let url = format!("{base}/api/templates");
-    let resp = send_read(client().get(&url)).await?;
-    if !resp.status().is_success() {
-        return Err(read_failure("GET", &url, resp).await);
+    let sending = send_read(client().get(&url));
+    async move {
+        let resp = sending.await?;
+        if !resp.status().is_success() {
+            return Err(read_failure("GET", &url, resp).await);
+        }
+        resp.json::<TemplatesBody>()
+            .await
+            .map(|body| body.templates)
+            .map_err(|error| error.to_string())
     }
-    resp.json::<TemplatesBody>()
-        .await
-        .map(|body| body.templates)
-        .map_err(|error| error.to_string())
 }
 
 /// Create or replace the template named `name` with `fields`; the helm's
 /// refusal text (a bad name, an oversized field) comes back as the error.
-pub(crate) async fn put_template(
+/// Registers synchronously; dropping the future cancels its ordering ticket,
+/// including when validation refuses the save before the first HTTP poll.
+pub(crate) fn put_template(
     base: &str,
     name: &str,
     fields: &farhelm_proto::launcher::TemplateFields,
-) -> Result<(), String> {
+) -> impl Future<Output = Result<(), String>> + use<> {
     let url = format!("{base}/api/templates/{}", encode_path_segment(name));
-    let resp = send(client().put(&url).json(fields)).await?;
-    if !resp.status().is_success() {
-        return Err(refusal_text("PUT", &url, resp).await);
+    let sending = send_save(client().put(&url).json(fields));
+    async move {
+        let resp = sending.await?;
+        if !resp.status().is_success() {
+            return Err(refusal_text("PUT", &url, resp).await);
+        }
+        Ok(())
     }
-    Ok(())
 }
 
-/// Delete the template named `name`.
-pub(crate) async fn delete_template(base: &str, name: &str) -> Result<(), String> {
+/// Register deletion now, including time spent retiring queued shortcut writes.
+/// Dropping an unpolled future releases the ticket if that preparation fails.
+pub(crate) fn delete_template(
+    base: &str,
+    name: &str,
+) -> impl Future<Output = Result<(), String>> + use<> {
     let url = format!("{base}/api/templates/{}", encode_path_segment(name));
-    let resp = send(client().delete(&url)).await?;
-    if !resp.status().is_success() {
-        return Err(refusal_text("DELETE", &url, resp).await);
+    let sending = send_save(client().delete(&url));
+    async move {
+        let resp = sending.await?;
+        if !resp.status().is_success() {
+            return Err(refusal_text("DELETE", &url, resp).await);
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Fetch reusable launch and folder suggestions for the explicitly selected
@@ -4221,6 +4347,79 @@ mod http_contract_tests;
 
 #[cfg(test)]
 mod tests {
+    /// An older read must wait for its queued shortcut batch, then resume even
+    /// when the writer continues with edits registered after that read.
+    #[farhelm_testtrace::test]
+    fn shortcut_save_barriers_follow_batches_without_starvation() {
+        use std::task::{Context, Waker};
+        let mut queue = super::PreferenceWrites::default();
+        let field = super::PreferenceField::QuickLaunchTemplate;
+        let value = |name: &str| super::PreferenceValue::QuickLaunchTemplate(Some(name.into()));
+        assert!(queue.record(value("A")));
+        let first = queue.next_to_send(field).unwrap();
+        assert!(!queue.record(value("B")));
+        let mut read = std::pin::pin!(queue.saves.preceding());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(read.as_mut().poll(&mut cx).is_pending());
+        assert!(queue.finished(field, &first, true));
+        assert!(
+            read.as_mut().poll(&mut cx).is_pending(),
+            "B is still queued"
+        );
+        let second = queue.next_to_send(field).unwrap();
+        assert_eq!(second, value("B"));
+        assert!(!queue.record(value("C")));
+        assert!(queue.finished(field, &second, true));
+        assert!(
+            read.as_mut().poll(&mut cx).is_ready(),
+            "C cannot extend the wait"
+        );
+    }
+
+    /// Dirty does not mean active: a refused or cancelled shortcut save must
+    /// free the reauthentication seed that will eventually restart its writer.
+    #[farhelm_testtrace::test]
+    fn failed_and_cancelled_shortcut_writes_release_reads() {
+        use std::task::{Context, Waker};
+        for cancelled in [false, true] {
+            let mut queue = super::PreferenceWrites::default();
+            let field = super::PreferenceField::TemplateShortcuts;
+            let value = super::PreferenceValue::TemplateShortcuts(Default::default());
+            assert!(queue.record(value.clone()));
+            queue.next_to_send(field).unwrap();
+            let mut read = std::pin::pin!(queue.saves.preceding());
+            let mut cx = Context::from_waker(Waker::noop());
+            assert!(read.as_mut().poll(&mut cx).is_pending());
+            if cancelled {
+                queue.writer_lost(field);
+            } else {
+                assert!(!queue.finished(field, &value, false));
+            }
+            assert!(queue.dirty(field).is_some());
+            assert!(read.as_mut().poll(&mut cx).is_ready());
+            assert!(queue.begin_replay(field).is_some());
+            let mut replay_read = std::pin::pin!(queue.saves.preceding());
+            assert!(replay_read.as_mut().poll(&mut cx).is_pending());
+            queue.writer_lost(field);
+            assert!(replay_read.as_mut().poll(&mut cx).is_ready());
+        }
+    }
+
+    /// Selecting sessions is a view preference, so its writes must never fence
+    /// a later request or add a configuration round trip to navigation.
+    #[farhelm_testtrace::test]
+    fn view_preference_writes_do_not_order_requests() {
+        use std::task::{Context, Waker};
+        let mut queue = super::PreferenceWrites::default();
+        assert!(queue.record(super::PreferenceValue::Selected("session".into())));
+        let mut read = std::pin::pin!(queue.saves.preceding());
+        assert!(
+            read.as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_ready()
+        );
+    }
+
     /// One-time selectors are request fields, never part of reusable choices.
     /// Both create and Restart with must preserve that boundary even when
     /// they send an otherwise unchanged selection.

@@ -181,14 +181,18 @@ pub(super) fn SaveTemplatePanel(
         saving.set(true);
         error.set(None);
         let base = base.clone();
+        // Snapshot validation before registering this save, or the validation
+        // read would wait for the very save whose precondition it checks.
+        let listed = api::fetch_templates(&base);
+        let saving_request = api::put_template(&base, &template.name, &template.fields);
         spawn(async move {
-            let listed = api::fetch_templates(&base).await;
+            let listed = listed.await;
             if let Some(refusal) = new_name_refusal(&template.name, listed.as_deref().ok()) {
                 error.set(Some(refusal));
                 saving.set(false);
                 return;
             }
-            match api::put_template(&base, &template.name, &template.fields).await {
+            match saving_request.await {
                 Ok(()) => {
                     saving.set(false);
                     on_saved.call(template);

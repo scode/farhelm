@@ -85,12 +85,13 @@ pub(crate) fn CheckoutRootField(note: String, on_saved: EventHandler<()>) -> Ele
                         let value = draft().trim().to_string();
                         draft.set(value.clone());
                         let mounted = mounted.clone();
+                        let saving_request = save_checkout_root(&base,
+                            if value.is_empty() { None } else { Some(value) });
                         // Closing a modal must not retract an explicit Save.
                         // The request is app-owned; all local handles remain
                         // component-owned and must be checked after the await.
                         dioxus::core::spawn_forever(async move {
-                            let result = save_checkout_root(&base,
-                                if value.is_empty() { None } else { Some(value) }).await;
+                            let result = saving_request.await;
                             if !mounted.get() { return; }
                             saving.set(false);
                             let saved = result.is_ok();

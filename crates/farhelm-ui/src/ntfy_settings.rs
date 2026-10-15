@@ -132,8 +132,9 @@ pub(crate) fn NtfySettings() -> Element {
                     busy.set(true); outcome.set(None);
                     let request = save_request(draft(), token(), clear());
                     let base = base.clone(); let mounted = mounted.clone();
+                    let saving_request = save_ntfy_settings(&base, request);
                     dioxus::core::spawn_forever(async move {
-                        let result = save_ntfy_settings(&base, request).await;
+                        let result = saving_request.await;
                         if !mounted.get() { return; }
                         busy.set(false);
                         match result {

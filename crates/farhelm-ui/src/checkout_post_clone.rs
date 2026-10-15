@@ -105,10 +105,13 @@ pub(crate) fn CheckoutPostCloneField() -> Element {
                             Some(value)
                         };
                         let mounted = mounted.clone();
+                        // Declare the save in the click handler so a reopened
+                        // Settings read sees it even before this task is polled.
+                        let saving_request = save_checkout_post_clone(&base, value);
                         // Explicit Save belongs to the app's request lifetime;
                         // dismissing Settings only retires its local view.
                         dioxus::core::spawn_forever(async move {
-                            let result = save_checkout_post_clone(&base, value).await;
+                            let result = saving_request.await;
                             if !mounted.get() { return; }
                             saving.set(false);
                             let saved = result.is_ok();

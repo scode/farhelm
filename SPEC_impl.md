@@ -178,15 +178,35 @@ remounted tree, and after the browser's credential recovery the gate overlays an
 never got through, so reauthentication cannot roll the current client back to the helm's older row. The desktop app
 never signs in again, so nothing remounts its tree. The seed read runs under a seconds-scale deadline of its own and
 expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty
-seconds. The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the
-selection is a bare session id (the browser's old `{helm, id}` record was keyed by helm identity only because
-origin-scoped storage could outlive a state-directory swap, and a row in the helm's own database cannot describe another
-helm's fleet). An absent or unrecognized sort word still reads as the UI default (`activity`) on the client, because the
-row outlives the build that validated it. Nothing is kept per client: no localStorage key, no field in
-`desktop-client.json` (which holds no credentials either, only the webview readiness counter the desktop smoke reads and
-the desktop app's automatic-updates setting, which is a setting of that app installation rather than one of these shared
-preferences), no eval round trip. The visible consequences are the ones SPEC.md names — one answer shared by every
-client, and a second client attaching to whatever was selected most recently anywhere.
+seconds.
+
+The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
+number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
+synchronously before its task is polled. Template name-validation reads capture their place before registering the save
+they validate, so validation cannot wait on itself. Saves to different settings remain parallel; same-field preference
+writes retain their serialized latest-wins queue. A dependent request snapshots the preceding tickets, including queued
+preference choices, and waits only for those batches, so newer edits cannot starve it. Its existing deadline includes
+that wait; only the remaining budget reaches HTTP. Completion, refusal, timeout and cancellation release tickets. Dirty
+idle preferences are not pending work: failure or writer loss releases readers, including the reauthentication seed
+whose completion restarts replay. A lost reply still has an unknown remote outcome: later requests can proceed while the
+helm may still apply that save, with no new retry or remote-order guarantee.
+
+Read/unread and notification marks, every preference field other than the template bindings, and host settings register
+no tickets; host mutations can wait on remote operations and must not hold every read behind them. These requests still
+wait for preceding tracked configuration saves. Reads and actions remain concurrent with each other. Terminals, the
+event feed and the page JavaScript's own HTTP calls (attachments, file stat/download, client log and clipboard) bypass
+this Rust funnel and are unaffected. No helm or protocol change is involved, and separate clients remain
+last-writer-wins.
+
+The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the selection is
+a bare session id (the browser's old `{helm, id}` record was keyed by helm identity only because origin-scoped storage
+could outlive a state-directory swap, and a row in the helm's own database cannot describe another helm's fleet). An
+absent or unrecognized sort word still reads as the UI default (`activity`) on the client, because the row outlives the
+build that validated it. Nothing is kept per client: no localStorage key, no field in `desktop-client.json` (which holds
+no credentials either, only the webview readiness counter the desktop smoke reads and the desktop app's
+automatic-updates setting, which is a setting of that app installation rather than one of these shared preferences), no
+eval round trip. The visible consequences are the ones SPEC.md names — one answer shared by every client, and a second
+client attaching to whatever was selected most recently anywhere.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
