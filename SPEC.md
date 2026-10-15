@@ -366,6 +366,23 @@ a later check verifies and installs or finds nothing newer, or a newer Farhelm i
 relaunch it returns with the first check that fails the same way. It follows the stable channel only; prereleases are
 not offered.
 
+Every check first reads the installation as the installer left it, under the same lock installs and uninstall take. When
+an install or uninstall was interrupted, the updater installs nothing, automatically or on demand, and the version
+readout carries the reinstall warning's mark with a hover saying that Farhelm does not update itself until the install
+is finished, and the installer command that finishes it (or, for an interrupted uninstall, that running uninstall again
+finishes it and the installer keeps Farhelm). Such a check, like one that finds another install or uninstall running or
+cannot read the installation, still reads the release advisories, so a withdrawal is shown and a withdrawn waiting
+update loses its restart offer. An installation record that is there but cannot be read is shown as a failed check. The
+warning clears at the next check that finds the installation complete. Another install or uninstall running at that
+moment, or one that changes the installation between the check and the update's own install, is not a failure: an
+automatic check tries again about a minute later without showing anything, and a check the user started says why it did
+nothing.
+
+When the app starts and its own version of Farhelm is already gone (an update or uninstall removed it between the app
+opening and holding it), it opens itself again, once, if the same installation is still at its place on another version
+whose program is there; otherwise it refuses to start with one sentence: that Farhelm was uninstalled, that an install
+was interrupted and the installer finishes it, or to open Farhelm again.
+
 Every update check also reads signed release advisories. When the running release was withdrawn, the version readout
 carries a warning whose hover includes the maintainer's reason. The ordinary update path can still install a newer,
 unwithdrawn release; automatic and on-demand checks never install a withdrawn target. A withdrawn update already
