@@ -62,15 +62,17 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   }
   await expect(efforts.getByRole("button", { name: "ultra", exact: true })).toHaveCount(0);
 
-  // OMP offers YOLO and Approve; omission selects YOLO. Goose-only
-  // approval modes are not offered.
-  await expect(permissions.getByRole("button")).toHaveCount(2);
-  for (const choice of ["yolo", "approve"]) {
+  // OMP offers guarded (its write mode), YOLO, custom flags and Approve;
+  // omission selects YOLO. Goose-only approval modes are not offered. The
+  // choices are named rather than counted, because the section also holds
+  // the permission help button.
+  for (const choice of ["guarded", "yolo", "custom", "approve"]) {
     await expect(permissions.getByRole("button", { name: choice, exact: true })).toBeVisible();
   }
-  await expect(
-    permissions.getByRole("button", { name: "smart approve", exact: true }),
-  ).toHaveCount(0);
+  await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+  for (const absent of ["smart approve", "chat"]) {
+    await expect(permissions.getByRole("button", { name: absent, exact: true })).toHaveCount(0);
+  }
 
   // A suggested model with the maximal explicit choices serializes OMP's
   // documented selection: provider-qualified model, OMP effort, and the
@@ -103,6 +105,11 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   await expect(form).toContainText("fixture captured launch");
 });
 
+/**
+ * Explicit approval must stay distinct from an older omitted OMP permission.
+ * Both hover and screen-reader text name the mode and stored start command;
+ * the invocation alone cannot establish which permission the launch recorded.
+ */
 test("an OMP session row shows the OMP glyph and its actual permission", async ({ page, request }) => {
   const catalogResponse = await request.get("/api/launch-catalog");
   const build = catalogResponse.headers()["x-farhelm-build"];
@@ -148,8 +155,10 @@ test("an OMP session row shows the OMP glyph and its actual permission", async (
     approveRow.locator(".session-agent svg.permission-glyph[data-glyph='shielded']"),
   ).toBeVisible();
 
-  await expect(approveRow.locator(".permission-glyph").locator("..")).toHaveAttribute("data-tooltip", "approve permission mode");
-  await expect(approveRow.locator(".session-agent .visually-hidden")).toContainText("approve permission mode");
+  const approveDescription = /^OMP — approve: the agent asks before every tool action\n\n[\s\S]*\n\nLaunched with: omp$/;
+  await expect(approveRow.locator(".session-agent")).toHaveAttribute("data-tooltip", approveDescription);
+  await expect(approveRow.locator(".permission-glyph").locator("..")).toHaveAttribute("data-tooltip", approveDescription);
+  await expect(approveRow.locator(".session-agent .visually-hidden")).toHaveText(approveDescription);
 
   // Old snapshots with no permission use the same YOLO default as a new
   // structured OMP launch; explicit Approve above remains distinct.

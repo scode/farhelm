@@ -3847,14 +3847,14 @@ test("compact rows retain distinct ended and harness glyphs within two character
     // Every mark comes from the launch, never the command line: a command
     // launch shows its declared agent and the YOLO answer it was launched
     // with, an agent launch its mode, a legacy session the question mark.
-    { id: "stopped", invocation: "codex --yolo", harness: "codex", permission: "yolo", description: "YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm", launch: commandLaunchRow("codex --yolo {farhelm_args}", { yolo: true, agent: "codex" }), status: { state: "exited", exit_code: 0 }, annotation: "stopped by user" },
-    { id: "exited", invocation: "muse --yolo", harness: "muse", permission: "yolo", description: "YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm", launch: commandLaunchRow("muse --yolo {farhelm_args}", { yolo: true, agent: "muse" }), status: { state: "exited", exit_code: 7 }, annotation: null },
-    { id: "interrupted", invocation: "claude --dangerously-skip-permissions", harness: "claude", permission: "yolo", description: "YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm", launch: commandLaunchRow("claude --dangerously-skip-permissions {farhelm_args}", { yolo: true, agent: "claude" }), status: { state: "interrupted" }, annotation: null },
-    { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", description: "YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm", launch: commandLaunchRow("opencode --auto {farhelm_args}", { yolo: true, agent: "open_code" }), status: { state: "error", detail: "cannot launch" }, annotation: null },
-    { id: "default", invocation: "codex", harness: "codex", permission: "shielded", description: "default permission mode", launch: agentLaunchRow({ harness: "codex", model: null, effort: null, permissions: null }), status: { state: "idle" }, annotation: null },
-    { id: "approve", invocation: "omp --approval-mode always-ask", harness: "omp", permission: "shielded", description: "approve permission mode", launch: agentLaunchRow({ harness: "omp", model: null, effort: null, permissions: "approve" }), status: { state: "idle" }, annotation: null },
-    { id: "full-auto", invocation: "codex --yolo", harness: "codex", permission: "shielded", description: "not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm", launch: commandLaunchRow("codex --yolo {farhelm_args}", { agent: "codex" }), status: { state: "idle" }, annotation: null },
-    { id: "unknown", invocation: "codex --yolo", harness: "terminal", permission: "unknown", description: "unclassified — a command from before launch kinds, which Farhelm never classified", launch: { kind: "legacy", invocation: "codex --yolo", agent_kind: "generic", resume_template: null }, status: { state: "idle" }, annotation: null },
+    { id: "stopped", invocation: "codex --yolo", harness: "codex", permission: "yolo", description: "Codex — YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — codex --yolo", launch: commandLaunchRow("codex --yolo {farhelm_args}", { yolo: true, agent: "codex" }), status: { state: "exited", exit_code: 0 }, annotation: "stopped by user" },
+    { id: "exited", invocation: "muse --yolo", harness: "muse", permission: "yolo", description: "Muse Code — YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — muse --yolo", launch: commandLaunchRow("muse --yolo {farhelm_args}", { yolo: true, agent: "muse" }), status: { state: "exited", exit_code: 7 }, annotation: null },
+    { id: "interrupted", invocation: "claude --dangerously-skip-permissions", harness: "claude", permission: "yolo", description: "Claude Code — YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — claude --dangerously-skip-permissions", launch: commandLaunchRow("claude --dangerously-skip-permissions {farhelm_args}", { yolo: true, agent: "claude" }), status: { state: "interrupted" }, annotation: null },
+    { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", description: "OpenCode — YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — opencode --auto", launch: commandLaunchRow("opencode --auto {farhelm_args}", { yolo: true, agent: "open_code" }), status: { state: "error", detail: "cannot launch" }, annotation: null },
+    { id: "default", invocation: "codex", harness: "codex", permission: "own-setting", description: /^Codex — Not classified · agent's own setting\n[\s\S]*\n\nLaunched with: codex$/, launch: agentLaunchRow({ harness: "codex", model: null, effort: null, permissions: null }), status: { state: "idle" }, annotation: null },
+    { id: "approve", invocation: "omp --approval-mode always-ask", harness: "omp", permission: "shielded", description: /^OMP — approve: the agent asks before every tool action\n\n[\s\S]*\n\nLaunched with: omp$/, launch: agentLaunchRow({ harness: "omp", model: null, effort: null, permissions: "approve" }), status: { state: "idle" }, annotation: null },
+    { id: "full-auto", invocation: "codex --yolo", harness: "codex", permission: "shielded", description: "Codex — not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by Farhelm — codex --yolo", launch: commandLaunchRow("codex --yolo {farhelm_args}", { agent: "codex" }), status: { state: "idle" }, annotation: null },
+    { id: "unknown", invocation: "codex --yolo", harness: "terminal", permission: "unknown", description: "command — unclassified — a command from before launch kinds, which Farhelm never classified — codex --yolo", launch: { kind: "legacy", invocation: "codex --yolo", agent_kind: "generic", resume_template: null }, status: { state: "idle" }, annotation: null },
   ];
   await patchPreferences(request, { compact: true });
   await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
@@ -3868,12 +3868,14 @@ test("compact rows retain distinct ended and harness glyphs within two character
     for (const item of cases) {
       const row = page.locator(`[data-session-id="${item.id}"]`);
       await expect(row.locator(`.harness-glyph[data-glyph="${item.harness}"]`)).toBeVisible();
-      await expect(row.locator(".harness-glyph").locator("..")).toHaveAttribute("data-tooltip", / — /);
-      await expect(row.locator(".session-agent")).toHaveAttribute("data-tooltip", new RegExp(item.invocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      // Agent, permission and accessible text describe the same stored launch.
+      // The agent cases pin the mode and stored command across the shared caveat's blank lines.
+      await expect(row.locator(".harness-glyph").locator("..")).toHaveAttribute("data-tooltip", item.description);
+      await expect(row.locator(".session-agent")).toHaveAttribute("data-tooltip", item.description);
       await expect(row.locator(".permission-glyph")).toHaveCount(1);
       await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", item.permission);
       await expect(row.locator(".permission-glyph").locator("..")).toHaveAttribute("data-tooltip", item.description);
-      await expect(row.locator(".session-agent .visually-hidden")).toContainText(item.description);
+      await expect(row.locator(".session-agent .visually-hidden")).toHaveText(item.description);
       // Let the browser resolve the token, including future non-hex palettes.
       // This catches later CSS rules that override the intended mark color.
       const expectedColor = await row.evaluate((el, token) => {
@@ -3883,7 +3885,7 @@ test("compact rows retain distinct ended and harness glyphs within two character
         const color = getComputedStyle(probe).color;
         probe.remove();
         return color;
-      }, item.permission === "shielded" ? "--ok" : "--warn");
+      }, item.permission === "own-setting" ? "--fg-1" : item.permission === "shielded" ? "--ok" : "--warn");
       await expect(row.locator(".permission-glyph")).toHaveCSS("color", expectedColor);
       if (["stopped", "exited", "interrupted", "error"].includes(item.id)) {
         await expect(row.locator(`.ended-status-glyph[data-glyph="${item.id}"]`)).toBeVisible();
