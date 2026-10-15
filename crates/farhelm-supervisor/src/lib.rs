@@ -63,6 +63,7 @@ pub mod repository_discovery;
 // stating here. A doc comment rather than this plain one would re-home
 // the module's docs into lib.rs's link scope and break every intra-doc
 // link inside them.
+pub mod installation;
 mod procs;
 pub mod scope;
 pub mod service;

@@ -63,7 +63,8 @@ recorder wrapping is fine but not required for these; record each result in the 
 - `cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-desktop`
 - `scripts/check-desktop-assets.sh`
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
-- The CI install-script job's Alpine/BusyBox run (the `docker run ... alpine:3` step in `.github/workflows/ci.yml`; the
+- The CI install-script job's Alpine/BusyBox run (the `docker run ... alpine:3` step in `.github/workflows/ci.yml`, with
+  a static musl `farhelm` from `cargo build -p farhelm --target x86_64-unknown-linux-musl` passed as `--farhelm`; the
   sweep runs `test-install-sh.sh` only under the host's GNU userland)
 - `dprint check`
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`

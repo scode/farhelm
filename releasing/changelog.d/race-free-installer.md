@@ -13,5 +13,8 @@ ship together; later PRs in the stack edit this fragment rather than adding thei
 and the forwarder's claim; the desktop app holding its own version from startup (if that version was removed while the
 app was starting, the app now says to open Farhelm again instead of failing later); new sessions holding their version while the
 user's shell startup files run (a session started just before Farhelm quits can still lose its version to an install
-in a short window, and then fails to start, visibly; starting it again works). Installs and uninstall start
-honoring the locks in later PRs of the same release.
+in a short window, and then fails to start, visibly; starting it again works); the installer's work under its lock moving into the new release's `farhelm` (installs
+keep any version something still runs from; an interrupted install no longer leaves a lock folder to remove by hand,
+and the next run finishes it; an update started by an older app's updater no longer reinstalls a removed app or goes
+back over a newer version installed from Terminal). Uninstall starts honoring the locks in a later PR of the same
+release.

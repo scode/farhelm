@@ -1136,6 +1136,84 @@ enum InternalCmd {
         #[arg(long)]
         launched: PathBuf,
     },
+    /// The locked part of the Mac installer, run by `scripts/install.sh`
+    /// from the release it just downloaded and checked (see
+    /// `farhelm_supervisor::installation::install`). The script reads the
+    /// outcome from two files in the staging folder rather than from this
+    /// program's output, so its own error formatting stays in one place.
+    ///
+    /// The command line is part of the contract with every `install.sh`
+    /// from this release on; an older `farhelm` rejects it as an unknown
+    /// subcommand (exit status 2), which the script reports as a release
+    /// too old for it.
+    Install(InstallArgs),
+}
+
+/// `farhelm internal install`'s arguments; see
+/// `farhelm_supervisor::installation::install::InstallRequest` for each.
+#[derive(clap::Args)]
+struct InstallArgs {
+    #[arg(long)]
+    staging: PathBuf,
+    #[arg(long)]
+    version: String,
+    #[arg(long)]
+    applications: PathBuf,
+    #[arg(long)]
+    bin_dir: PathBuf,
+    #[arg(long)]
+    link: PathBuf,
+    #[arg(long)]
+    running_record: Vec<PathBuf>,
+    #[arg(long)]
+    update_only: bool,
+    /// The inode of the app folder `install.sh` found to be an older
+    /// installer's (see `InstallRequest::replace_legacy_bundle`).
+    #[arg(long)]
+    replace_legacy_bundle: Option<u64>,
+}
+
+/// Run the locked install and leave its outcome where `install.sh` reads
+/// it: `install-result` (`updated` or `installed` on the first line, then
+/// the notes for the closing message as they are to be printed) on
+/// success, `install-failure` (the error
+/// line, then advice lines) on a refusal. A program that cannot even write
+/// those reports on stderr, which the script shows as is.
+fn run_install(args: InstallArgs) -> anyhow::Result<()> {
+    use farhelm_supervisor::installation::install::{InstallRequest, install};
+    let request = InstallRequest {
+        staging: args.staging.clone(),
+        version: args.version,
+        applications: args.applications,
+        bin_dir: args.bin_dir,
+        link: args.link,
+        running_records: args.running_record,
+        update_only: args.update_only,
+        replace_legacy_bundle: args.replace_legacy_bundle,
+        lock_wait: farhelm_supervisor::installation::TERMINAL_LOCK_WAIT,
+    };
+    match install(&request, &mut |_| Ok(())) {
+        Ok(done) => {
+            let mut report = if done.updated { "updated" } else { "installed" }.to_string();
+            report.push('\n');
+            for note in done.notes {
+                report.push_str(&note);
+                report.push('\n');
+            }
+            std::fs::write(args.staging.join("install-result"), report)?;
+            Ok(())
+        }
+        Err(refusal) => {
+            let mut report = refusal.message;
+            for line in refusal.advice {
+                report.push('\n');
+                report.push_str(&line);
+            }
+            report.push('\n');
+            std::fs::write(args.staging.join("install-failure"), report)?;
+            std::process::exit(1)
+        }
+    }
 }
 
 /// Hold this program's own version for the rest of the process, when it runs
@@ -1403,6 +1481,7 @@ fn main() -> anyhow::Result<()> {
                 ready_fd,
                 launched,
             } => farhelm_supervisor::session_hold::run_keeper(watch, &launched, ready_fd),
+            InternalCmd::Install(args) => run_install(args),
             InternalCmd::VersionLock { fd } => {
                 // Silent by contract: the forwarder runs this with every
                 // stream pointed at /dev/null and reads only the status.

@@ -127,7 +127,7 @@ fn inspect_flat(
         .ok_or_else(|| anyhow!("{} has no installation directory", path_text(&executable)))?
         .to_path_buf();
     let metadata = root.join(FLAT_RECORD);
-    let fields = match read_record(&metadata, 4, inputs.effective_uid, true, classifier) {
+    let fields = match read_record(&metadata, &[4], inputs.effective_uid, true, classifier) {
         Ok(fields) => fields,
         Err(error)
             if error
@@ -194,10 +194,11 @@ pub(super) fn repair_refusal<T>(path: &Path, reason: &str) -> Result<T> {
     )
 }
 
-/// Read a bounded NUL record without following its final directory entry.
+/// Read a bounded NUL record without following its final directory entry,
+/// accepting it only with one of `counts` fields.
 pub(super) fn read_record(
     path: &Path,
-    count: usize,
+    counts: &[usize],
     uid: u32,
     private: bool,
     classifier: &impl MetadataClassifier,
@@ -224,7 +225,7 @@ pub(super) fn read_record(
         .split_inclusive(|byte| *byte == 0)
         .map(|field| field[..field.len() - 1].to_vec())
         .collect();
-    if !bytes.ends_with(&[0]) || fields.len() != count {
+    if !bytes.ends_with(&[0]) || !counts.contains(&fields.len()) {
         return repair_refusal(path, "it is not the expected NUL-terminated field layout");
     }
     Ok(fields)

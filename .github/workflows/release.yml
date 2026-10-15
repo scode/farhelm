@@ -254,6 +254,17 @@ jobs:
             --runner nextest --kind release --selection 'macOS uninstall unit tests' --concurrency '4 nextest slots; retries 0' \
             --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'
+          # Version locks, the installation lock and the session keeper rest on
+          # macOS behavior Linux only approximates (flock on an APFS folder,
+          # extended attributes, RENAME_EXCL, F_FULLFSYNC, kqueue NOTE_EXIT).
+          python3 scripts/record-test-run.py \
+            --runner nextest --kind release --selection 'macOS version and installation lock tests' --concurrency '4 nextest slots; retries 0' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/installation::|version_lock::|session_hold::/)'
+          python3 scripts/record-test-run.py \
+            --runner nextest --kind release --selection 'macOS version-lock process tests' --concurrency '4 nextest slots; retries 0' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo nextest run -p farhelm --test session_hold --test version_lock_forwarder
           python3 scripts/record-test-run.py \
             --kind release --selection 'macOS installed uninstall acceptance' --concurrency 'one fixture at a time' \
             --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \

@@ -146,8 +146,9 @@ selects by test name across files.
 
 ## The batteries without a narrow mode
 
-- `scripts/test-install-sh.sh` — one monolithic pass over every install.sh scenario, no per-scenario selection. It is
-  cheap enough (312 checks in ~7s on a 4-vCPU sandbox) that carving it up has not been worth it.
+- `scripts/test-install-sh.sh --farhelm target/debug/farhelm` — one monolithic pass over every install.sh scenario, no
+  per-scenario selection, after `cargo build -p farhelm`. The locked install work it reaches has narrow Rust module
+  tests (`cargo nextest run -p farhelm-supervisor -E 'test(/installation::/)'`); start there for a failure inside it.
 - `scripts/desktop-smoke.sh` — monolithic, ~5 minutes, and its legs share one built app and one Xvfb; there is no
   supported way to run a single leg.
 - `scripts/test-provision-centos.sh` — already narrow where it counts: the cargo part is a single named test
