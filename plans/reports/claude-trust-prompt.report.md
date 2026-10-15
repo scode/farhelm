@@ -113,3 +113,68 @@ before delivery. Private galaxy session `d389963b-3fd4-4459-94ac-1ab17a206b5d` r
 evidence under the standard galaxy session-record location. Source-review counters are available; native and
 orchestrator usage are unavailable, and some launch/decision records were written after the launches. No complete cost
 total is claimed.
+
+### Landing
+
+Landed as #2070, the round's only plan. Main had gained nothing since the plan's own rebase except its report delivery,
+so the change landed on exactly the tree that was tested.
+
+#### Review
+
+An independent fresh-context review found nothing blocking and confirmed the security boundary. Only checkouts Farhelm
+itself creates are ever trusted, never a folder the user picks; the path is allocated by the supervisor, checked before
+the clone and resolved through symlinks before the edit; the setting comes only from helm configuration, cannot be
+supplied by agent requests or restricted clients, and is frozen into create and retry. The vendor file is edited under
+Claude's lock without stealing a foreign one, read without following symlinks and within a size cap, refused unless it
+is a JSON object, and replaced atomically with its mode kept, after checking it was not replaced meanwhile. Removal runs
+only on a confirmed archive or missing-folder retirement and holds the path until done. Protocol 51 and its pin test,
+the refusal of an old supervisor, schema 53's migration and the rewound fixtures are all consistent.
+
+#### Fixes made while landing
+
+- The new field made every managed-checkout create fingerprint carry `"claude_trust":false`. Supervisors compare stored
+  fingerprints as exact strings, so a create retried across the upgrade would have been refused as a reused key. The
+  field is now omitted when off, which keeps the encoding identical to before, and a test pins that.
+- The two Settings switches and the hint's three buttons had no hover text, which SPEC.md requires for every clickable
+  control; each now has one.
+- Removing trust when Claude's config file (or its directory) is gone failed and kept the removal record, so startup
+  recovery retried it with a warning on every start. A missing config now counts as nothing to remove, with a test;
+  trusting still requires the file.
+
+#### Left as is
+
+- Follow-up: the hint's live region is added together with its text, which screen readers, especially VoiceOver, often
+  do not announce; the browser test only checks the attribute. Keeping a live region mounted and swapping its content
+  would fix it, but needs care around the terminal layout and a browser check.
+- Follow-up: startup recovery of pending trust removals runs inline, one checkout at a time with the full 12 s lock
+  budget, so a stale Claude lock file would delay supervisor start by that much per pending removal. Moving it to a
+  background worker that keeps ownership of the path is a design change.
+- Nits: a custom command that sets `CLAUDE_CONFIG_DIR` makes Farhelm edit the default file while Claude reads another
+  (trust then silently does not apply); the hint re-reads the trust setting on every session detail update; the harness
+  map in `agent_kind/mod.rs` does not mention the new Claude config edit; closing Settings opened from the hint returns
+  focus to the gear; the "could not mark this folder trusted" line is likely overwritten by Claude's screen; the band's
+  capitalized button labels differ from the app's lowercase buttons; "trust key" on the docs page reads as jargon.
+- Suspected, not verified: that Claude locks the selected (symlink) file name rather than its target, as the executor
+  observed with Claude 2.1.300; and that numbers in unrelated keys keep full precision through the rewrite.
+
+#### Checks
+
+- Run now, on the rebased change with the fixes in:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (301 delays, none missing a
+    reason);
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the UI crate's clippy
+    with the desktop feature and `cargo check -p farhelm-desktop`;
+  - the changed trust, checkout-encoding and fingerprint tests first, run `9c393c66-23b2-4299-8a7c-44804b3f150b`: 52
+    passed;
+  - the protocol, helm and supervisor packages in full through the recorder with pinned tmux, run
+    `3724077b-fddd-4dec-b153-f4b877f6a3fe`: 2382 passed, 2 failed. Both failures were helm provisioning tests that
+    install the already-built `farhelm` binary as the supervisor; that binary predated this change's protocol bump, so
+    the helm refused it as v50. After `cargo build`, the helm's provisioning tests passed, run
+    `f27d6e5a-5f94-4062-a4b1-1684eeff312a`: 205 passed;
+  - the CLI's managed-checkout and Claude end-to-end scenarios, run `e585f70f-e89c-4e79-899b-c1656f7caed2`: 14 passed;
+  - the UI crate in full with the desktop feature, run `4044f352-1be6-43ca-bcea-5631dd87bd39`: 649 passed;
+  - the JS harness (248 passed) and the website build;
+  - the claude-trust, settings, github-checkouts, github-checkout-composer, terminal and tooltip-coverage specs on
+    Chromium and WebKit, run `1017c544-8183-43b5-9e19-3823741b4607`: 218 passed.
+- Not run: a real Claude create-and-archive walkthrough, which needs a signed-in Claude; the rest of the Rust workspace
+  and other browser specs.
