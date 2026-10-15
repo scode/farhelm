@@ -38,9 +38,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 
-- [`restart-ignores-retryable-conversation-admission.md`](restart-ignores-retryable-conversation-admission.md) — If the
-  latest conversation report cannot be admitted, Restart can still resume the previously recorded conversation.
-
 - [`long-launch-refusal-displaces-replace-warning.md`](long-launch-refusal-displaces-replace-warning.md) — After a long
   refusal, Replace can remain visible while its warning about killing the source session is below the viewport.
 
