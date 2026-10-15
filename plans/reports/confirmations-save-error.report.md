@@ -66,3 +66,51 @@ Implementation and investigation stayed in the executor as required. Source revi
 review used native sol medium. Private evidence is in galaxy-brain session `f3bba8d1-cfeb-4c58-a67b-11f4d7f260c3`.
 External per-turn counters are retained; exact reported model attribution, native reader usage and executor usage were
 unavailable. No usage totals were inferred.
+
+### Landing
+
+Landed as #2054, the first of the round's two Settings fixes; post-clone-carriage-return-gated (#2053) landed after it
+and touches a different Settings field. Main had gained the two template-editor fixes (#2051, #2052) and plan
+bookkeeping; the rebase met a conflict in the review feedback index, where those fixes had removed neighbouring entries,
+and all three removals were kept. Both plans were tested together on top of main.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. Restoring confirmations is queued before its waiter starts,
+so a later opt-out cannot overtake it; a newer click releases an older waiter and the per-click generation ignores it,
+so off/on/off never shows an earlier failure; writes survive closing Settings. The only other user of the changed
+completion channel, the template-rename acknowledgment, behaves as before.
+
+#### Fixes made while landing
+
+- The error lives in the Settings dialog, so closing Settings before a failing save settles drops it, and the failure is
+  then only logged: a quick Escape after the click hits that case. SPEC.md said only that Settings shows the error; it
+  now says this happens while Settings is still open, and the changelog fragment says the same.
+- If one of the two new browser tests failed between clicks, the page's write queue could send the opt-out after the
+  test's routes were removed and after the file-level reset, leaving the helm skipping confirmations for every later
+  spec, the cascade this file has caused before. Both tests now end by navigating away first, then releasing held
+  writes, removing the routes and resetting the preference; the held replies tolerate only the teardown race, as the
+  neighbouring status rewrite does.
+- The shared error style's comment now names both errors that use it.
+
+#### Left as is
+
+- Follow-up for the maintainer: keeping the warning after Settings closes would need the failure held outside the dialog
+  (for example in the process-wide write queue) and shown whenever Settings next opens while it is unresolved. That is
+  new design beyond the agreed outcome.
+- Nits: two "no error" checks pass without waiting for the client to handle the save's reply, the transient-warning
+  observer sees only alerts added directly, "Try again" does not say how (switch skip on and off again), and the error
+  is not tied to the switch through `aria-describedby`.
+
+#### Checks
+
+- Run now, on both plans stacked on main with all fixes in:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (299 delays, none missing a
+    reason);
+  - `cargo clippy --all-targets -- -D warnings` and the UI crate's clippy with the desktop feature;
+  - the UI crate in full with the desktop feature through the recorder, run `441aab8b-8554-4cf8-a41b-8c47b249ecb7`: 634
+    passed;
+  - the JS harness: 248 passed;
+  - the settings, session-confirmations, yolo-guard, ntfy-settings, notifications and tooltip-coverage specs on Chromium
+    and WebKit, run `9be5c0fa-2e23-4f0b-b256-5331d2ce290e`: 70 passed.
+- Not run: the Rust workspace beyond the UI crate and other browser specs; only Settings changed.
