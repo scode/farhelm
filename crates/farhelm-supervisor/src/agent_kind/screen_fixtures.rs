@@ -145,7 +145,7 @@ fn file_name(path: &Path) -> String {
 /// Hand-rolled because the supervisor has no regex dependency and this is its
 /// only use; it errs toward flagging, which costs a rename in the capture
 /// tool's scrubber rather than a leak.
-fn contains_email(text: &str) -> bool {
+pub(super) fn contains_email(text: &str) -> bool {
     let is_local = |c: char| c.is_ascii_alphanumeric() || "._%+-".contains(c);
     let is_domain = |c: char| c.is_ascii_alphanumeric() || ".-".contains(c);
     text.match_indices('@').any(|(at, _)| {

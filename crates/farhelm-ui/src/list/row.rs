@@ -449,7 +449,7 @@ fn permission_description(permission: PermissionGlyph) -> &'static str {
 /// launch its declared agent type (or the generic terminal mark) and the
 /// YOLO assertion it was launched with; a legacy session its stored agent
 /// kind and the unclassified mark.
-fn agent_badge(session: &Session) -> AgentBadge {
+fn launch_badge(session: &Session) -> AgentBadge {
     if let Some(launch) = session.agent_selection() {
         let harness = harness_glyph(launch.harness);
         // Own-setting needs the same admission gate as YOLO but a different
@@ -530,6 +530,36 @@ fn agent_badge(session: &Session) -> AgentBadge {
         permission,
         description,
     }
+}
+
+/// Escalate the drawn launch shield only when the supervisor saw a bypass footer.
+///
+/// The launch description stays intact for hover and assistive technology. In
+/// particular Cursor's own-setting glyph still escalates even though admission
+/// already treats that choice as YOLO. Screen evidence never makes a launch safer.
+fn agent_badge(session: &Session) -> AgentBadge {
+    let mut badge = launch_badge(session);
+    if let Some(mode) = session
+        .launch
+        .as_ref()
+        .and_then(|launch| launch.agent_type())
+        .and_then(crate::launch_composer::screen_yolo_mode)
+        .filter(|_| session.screen_yolo)
+    {
+        if !matches!(
+            badge.permission,
+            PermissionGlyph::Yolo | PermissionGlyph::AssertedYolo
+        ) {
+            badge.permission = PermissionGlyph::Yolo;
+        }
+        // Lead with the observation: a red shield's hover and screen-reader
+        // text must not open by describing the safer launch mode.
+        badge.description = format!(
+            "YOLO observed on the agent's status line: {mode}. Best effort; allow rules, hooks and managed policy are not visible.\n\nLaunched as: {}",
+            badge.description
+        );
+    }
+    badge
 }
 
 /// The glyph for an agent type.
@@ -2499,6 +2529,7 @@ pub(super) fn SessionRow(
 #[cfg(test)]
 pub(super) fn row_specimen(id: &str) -> Session {
     Session {
+        screen_yolo: false,
         id: id.to_string(),
         title: "stable".to_string(),
         cwd: "/tmp".to_string(),
@@ -2529,6 +2560,51 @@ pub(super) fn row_specimen(id: &str) -> Session {
 
 #[cfg(test)]
 mod tests {
+    /// The live override is a glyph decision, so Cursor's own-setting mark
+    /// escalates too. Removing evidence restores exactly the original launch
+    /// badge; it never rewrites the launch used by permission inheritance.
+    #[farhelm_testtrace::test]
+    fn observed_yolo_escalates_the_drawn_shield_and_keeps_launch_context() {
+        for harness in [LaunchHarness::Claude, LaunchHarness::Cursor] {
+            let mut session = row_specimen("mode");
+            session.launch = agent_launch(crate::LaunchSelection {
+                workspace_trust: None,
+                harness,
+                model: None,
+                effort: None,
+                permissions: (harness == LaunchHarness::Claude)
+                    .then_some(crate::LaunchPermission::Guarded),
+                permission_flags: None,
+            });
+            let launch = session.launch.clone();
+            let original = agent_badge(&session);
+            session.screen_yolo = true;
+            let observed = agent_badge(&session);
+            assert_eq!(observed.permission, PermissionGlyph::Yolo);
+            assert!(observed.description.contains(&original.description));
+            assert!(observed.description.starts_with("YOLO observed"));
+            assert!(observed.description.contains("Best effort"));
+            assert!(
+                observed
+                    .description
+                    .contains(crate::launch_composer::screen_yolo_mode(harness).unwrap())
+            );
+            assert_eq!(session.launch, launch);
+            session.screen_yolo = false;
+            assert_eq!(agent_badge(&session), original);
+        }
+        let mut legacy = row_specimen("legacy");
+        legacy.screen_yolo = true;
+        assert_eq!(agent_badge(&legacy).permission, PermissionGlyph::Unknown);
+        let mut command = crate::SessionLaunch::plain_command("wrapped-agent");
+        if let crate::SessionLaunch::Command(command) = &mut command {
+            command.agent = Some(LaunchHarness::Grok);
+        }
+        legacy.launch = Some(command);
+        assert_eq!(agent_badge(&legacy).permission, PermissionGlyph::Yolo);
+        assert!(agent_badge(&legacy).description.contains("always-approve"));
+    }
+
     use super::*;
     use crate::peer::detail_text;
 

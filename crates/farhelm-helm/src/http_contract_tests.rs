@@ -51,6 +51,7 @@ fn session_list_body() -> SessionListBody {
     })
     .expect("a valid Codex selection compiles");
     let info = SessionInfo {
+        screen_yolo: false,
         agent_kind: farhelm_proto::AgentKind::Codex,
         id: "fh-0123abcd".to_string(),
         parent: Some("fh-89abcdef".to_string()),

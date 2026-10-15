@@ -6266,6 +6266,7 @@ impl Supervisor {
                 row.id.clone(),
                 Arc::new(SessionEntry {
                     info: SessionInfo {
+                        screen_yolo: false,
                         parent: row.parent,
                         id: row.id,
                         title: row.title,
@@ -8526,6 +8527,7 @@ impl Supervisor {
                     .unwrap_or_default();
                 let snapshot = IntegrationSnapshot::of(&row.launch);
                 let info = SessionInfo {
+                    screen_yolo: false,
                     parent: row.parent,
                     restart_offer: snapshot.restart_offer(
                         row.captured_conversation.as_deref(),
@@ -9460,6 +9462,7 @@ impl Supervisor {
             },
         );
         let info = SessionInfo {
+            screen_yolo: false,
             parent,
             id: id.clone(),
             title,
@@ -11751,6 +11754,7 @@ impl Supervisor {
             )
         };
         let info = SessionInfo {
+            screen_yolo: false,
             parent: entry.info.parent.clone(),
             id: entry.info.id.clone(),
             title: entry.info.title.clone(),
@@ -14090,6 +14094,7 @@ impl Supervisor {
     ) {
         let snapshot = IntegrationSnapshot::of(&row.launch);
         let info = SessionInfo {
+            screen_yolo: false,
             parent: row.parent.clone(),
             id: row.id.clone(),
             title: row.title.clone(),
@@ -17800,6 +17805,7 @@ pub(crate) mod tests {
     pub(crate) fn entry_with(terminal: Option<Terminal>, outcome: LastOutcome) -> SessionEntry {
         SessionEntry {
             info: SessionInfo {
+                screen_yolo: false,
                 agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),

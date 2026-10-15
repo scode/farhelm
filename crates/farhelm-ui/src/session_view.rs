@@ -3807,6 +3807,7 @@ mod tests {
     /// test flips exactly the one fact it is about.
     fn live_session() -> Session {
         Session {
+            screen_yolo: false,
             id: "sess".to_string(),
             title: "sess".to_string(),
             cwd: "/tmp".to_string(),
@@ -4296,6 +4297,7 @@ mod tests {
     fn the_view_follows_a_rename_of_its_own_session() {
         fn titled(id: &str, title: &str) -> Session {
             Session {
+                screen_yolo: false,
                 id: id.to_string(),
                 title: title.to_string(),
                 cwd: "/tmp".to_string(),
@@ -4349,6 +4351,7 @@ mod tests {
     fn status_badge_destination_never_targets_both_surfaces_at_once() {
         fn session(status: SessionStatus, stale: bool) -> Session {
             Session {
+                screen_yolo: false,
                 id: "sess".to_string(),
                 title: "sess".to_string(),
                 cwd: "/tmp".to_string(),
@@ -4442,6 +4445,7 @@ mod tests {
         );
 
         let unknown = Session {
+            screen_yolo: false,
             id: "sess".to_string(),
             title: "sess".to_string(),
             cwd: "/tmp".to_string(),
@@ -4511,6 +4515,7 @@ mod tests {
     fn seen_effect_eligibility_gates_on_staleness_ended_and_capability() {
         fn base() -> Session {
             Session {
+                screen_yolo: false,
                 id: "sess".to_string(),
                 title: "t".to_string(),
                 cwd: "/tmp".to_string(),
@@ -4541,6 +4546,7 @@ mod tests {
         );
         assert!(
             !seen_effect_eligible(&Session {
+                screen_yolo: false,
                 stale: true,
                 ..base()
             }),
@@ -4548,6 +4554,7 @@ mod tests {
         );
         assert!(
             !seen_effect_eligible(&Session {
+                screen_yolo: false,
                 status: crate::SessionStatus::Exited { exit_code: Some(0) },
                 ..base()
             }),
@@ -4555,6 +4562,7 @@ mod tests {
         );
         assert!(
             !seen_effect_eligible(&Session {
+                screen_yolo: false,
                 seen_activity_at: None,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
@@ -4573,6 +4581,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn an_eligible_but_already_seen_session_has_nothing_to_write() {
         let already_seen = Session {
+            screen_yolo: false,
             id: "sess".to_string(),
             title: "t".to_string(),
             cwd: "/tmp".to_string(),

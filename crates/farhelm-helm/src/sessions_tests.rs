@@ -164,6 +164,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    screen_yolo: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
@@ -276,6 +277,7 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        screen_yolo: false,
                         agent_kind: farhelm_proto::AgentKind::Codex,
                         parent: None,
                         id: id.into(),
@@ -488,6 +490,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        screen_yolo: false,
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         parent: None,
                         id: "structured-tilde".into(),
@@ -660,6 +663,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        screen_yolo: false,
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         parent: None,
                         id: id.into(),
@@ -918,6 +922,7 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    screen_yolo: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
@@ -2457,6 +2462,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         assert_eq!(title, Some("sess-1".to_string()));
         assert_eq!(intent_key, None);
         let created = SessionInfo {
+            screen_yolo: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -2633,6 +2639,7 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    screen_yolo: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
@@ -2926,6 +2933,7 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
             panic!("expected CreateSession, got {request:?}");
         };
         let created = SessionInfo {
+            screen_yolo: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -3061,6 +3069,7 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
             panic!("expected CreateSession, got {request:?}");
         };
         let created = SessionInfo {
+            screen_yolo: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -3212,6 +3221,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
             .unwrap();
 
         let created = SessionInfo {
+            screen_yolo: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -3419,6 +3429,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         assert_eq!(title, Some("replaced-with-title".to_string()));
         assert_eq!(intent_key, None);
         let created = SessionInfo {
+            screen_yolo: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -3639,6 +3650,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
             ))
         );
         let created = SessionInfo {
+            screen_yolo: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -3869,6 +3881,7 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    screen_yolo: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
@@ -4060,6 +4073,7 @@ async fn each_listing_row_carries_its_own_hosts_identity() {
 #[farhelm_testtrace::test]
 async fn get_session_passes_a_non_empty_tabs_list_through() {
     let harness = rest_harness::helm_listing(vec![farhelm_proto::SessionInfo {
+        screen_yolo: false,
         tabs: vec![
             farhelm_proto::TabInfo { id: "tab-1".into() },
             farhelm_proto::TabInfo { id: "tab-2".into() },
@@ -4386,6 +4400,7 @@ async fn restart_session_passes_consent_through_and_returns_the_session() {
             .write_control(&ControlMsg::SessionRestarted {
                 req_id,
                 session: farhelm_proto::SessionInfo {
+                    screen_yolo: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
@@ -4797,6 +4812,7 @@ async fn rename_session_forwards_the_title_verbatim() {
         // must fail the full-struct comparison below even if the
         // title alone looked right.
         let expected_session = SessionInfo {
+            screen_yolo: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-1".into(),
@@ -4974,6 +4990,7 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
                 .write_control(&ControlMsg::SessionRenamed {
                     req_id,
                     session: farhelm_proto::SessionInfo {
+                        screen_yolo: false,
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         parent: None,
                         id: "sess-1".into(),
@@ -5399,6 +5416,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    screen_yolo: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-new".into(),
@@ -7718,6 +7736,7 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
             rest_harness::HostScript {
                 identity: Some("identity-original".to_string()),
                 sessions: vec![farhelm_proto::SessionInfo {
+                    screen_yolo: false,
                     title: "the work in progress".to_string(),
                     cwd: "/home/user/project".to_string(),
                     canonical_cwd: None,
@@ -7793,6 +7812,7 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
             identity: Some("identity-local".to_string()),
             sessions: vec![
                 farhelm_proto::SessionInfo {
+                    screen_yolo: false,
                     parent: Some("root-session".to_string()),
                     ..filterable(
                         "local-running",
@@ -7826,6 +7846,7 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
                         SessionStatus::Waiting,
                     ),
                     farhelm_proto::SessionInfo {
+                        screen_yolo: false,
                         parent: Some("root-session".to_string()),
                         ..filterable(
                             "alpha-exited",

@@ -361,6 +361,10 @@ pub(crate) const SAMPLING_ADMISSION_PERMITS: usize = 1;
 /// and any interval.
 #[derive(Debug, Default)]
 pub(crate) struct ActivitySample {
+    /// Last definite permission-footer reading of this run. An unreadable screen
+    /// retains it; replacement/reload resets it, so a prior agent cannot lend its
+    /// mode to a new process. It never participates in admission or inheritance.
+    pub(crate) screen_yolo: bool,
     /// A reloaded pane has no process-local screen history yet. While this
     /// is true, the list reply leaves its status provisional so the helm
     /// can keep the last cached answer until this process sees real evidence.
@@ -450,6 +454,21 @@ pub(crate) struct ActivitySample {
 }
 
 impl ActivitySample {
+    /// Accept definite footer evidence and report whether clients need a fresh list.
+    fn observe_permission(
+        &mut self,
+        harness: Option<farhelm_proto::LaunchHarness>,
+        text: &str,
+    ) -> bool {
+        let Some(reading) = harness
+            .and_then(|harness| crate::agent_kind::screen_reader::status_line_yolo(harness, text))
+        else {
+            return false;
+        };
+        let changed = self.screen_yolo != reading;
+        self.screen_yolo = reading;
+        changed
+    }
     /// A cell for a session nothing has looked at yet — what every
     /// freshly built [`SessionEntry`] starts with.
     ///
@@ -1577,11 +1596,13 @@ async fn sample_pass(
         // and comparison counts change every sample and are not compared:
         // no client sees them.
         let status_before = super::status::live_status(entry);
-        let (observation, report_fallback) = {
+        let (observation, report_fallback, permission_changed) = {
             let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
+            let permission_changed =
+                activity.observe_permission(entry.info.launch.agent_type(), &tail);
             let observation = activity.observe_screen(reader, &tail, &title);
             let report = activity.note_fallback(&observation, reader.has_screen_rules());
-            (observation, report)
+            (observation, report, permission_changed)
         };
         if report_fallback {
             // No screen content in the log: pane text can carry anything the
@@ -1593,7 +1614,7 @@ async fn sample_pass(
                  the agent's UI may have changed, see docs/agent-screen-fixtures.md)"
             );
         }
-        if super::status::live_status(entry) != status_before {
+        if permission_changed || super::status::live_status(entry) != status_before {
             sup.hint_sessions_changed();
         }
         if observation.dates_activity() {
@@ -1903,6 +1924,50 @@ async fn reap_dead_tabs(
 
 #[cfg(test)]
 mod tests {
+    /// Definite modes reach replies, unknown grids retain them, and a replacement
+    /// resets them. Otherwise an unreadable dialog or a restarted agent could
+    /// silently show a safer mode or inherit the old process's bypass evidence.
+    #[test]
+    fn permission_evidence_reaches_replies_and_resets_with_the_run() {
+        use farhelm_proto::LaunchHarness;
+        let mut entry = entry_with(Some(a_terminal()), LastOutcome::Running);
+        let yolo = "⏵⏵ bypass permissions on (shift+tab to cycle)";
+        {
+            let mut sample = entry.run.activity.lock().unwrap();
+            assert!(!sample.screen_yolo);
+            assert!(sample.observe_permission(Some(LaunchHarness::Claude), yolo));
+            assert!(!sample.observe_permission(Some(LaunchHarness::Claude), yolo));
+            assert!(!sample.observe_permission(Some(LaunchHarness::Claude), "dialog"));
+        }
+        let reply =
+            super::super::status::entry_info(&entry, &Default::default(), &Default::default());
+        assert!(reply.screen_yolo);
+        assert!(
+            entry
+                .run
+                .activity
+                .lock()
+                .unwrap()
+                .observe_permission(Some(LaunchHarness::Claude), "⏸ manual mode on")
+        );
+        assert!(
+            !super::super::status::entry_info(&entry, &Default::default(), &Default::default())
+                .screen_yolo
+        );
+        entry
+            .run
+            .activity
+            .lock()
+            .unwrap()
+            .observe_permission(Some(LaunchHarness::Claude), yolo);
+        entry.run.activity = ActivitySample::replacement(&entry.run.activity);
+        assert!(
+            !super::super::status::entry_info(&entry, &Default::default(), &Default::default())
+                .screen_yolo
+        );
+        assert!(!ActivitySample::reloaded().lock().unwrap().screen_yolo);
+    }
+
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::core::RunCells;
     use super::super::core::tests::{StateDir, a_terminal, dummy_exe, entry_with, no_uploads};

@@ -870,6 +870,12 @@ impl SessionStatus {
 /// (SPEC.md); the helm never invents or mutates these fields.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionInfo {
+    /// Advisory permission-footer evidence from the current agent run. False
+    /// means no observed bypass, not proof of guardrails. Never use this to admit
+    /// launches or inherit permissions; only the stored launch has that authority.
+    /// Older peers omit it and older decoders ignore it, so no protocol bump is needed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub screen_yolo: bool,
     pub id: String,
     /// The session that created this one through `farhelm spawn`, if any
     /// (PLAN_M7.md item 2). `None` covers interactive sessions,
@@ -4394,6 +4400,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_created_at_json_shape_is_pinned() {
         let info = SessionInfo {
+            screen_yolo: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -4422,6 +4429,32 @@ mod tests {
             serde_json::to_value(&info).unwrap()["canonical_cwd"],
             serde_json::json!("/resolved/tmp"),
             "the accepted identity is distinct from the display spelling on the wire"
+        );
+    }
+
+    /// Old supervisors omit advisory screen evidence; false must also stay off
+    /// the wire so this display addition preserves old golden messages and peers.
+    #[farhelm_testtrace::test]
+    fn screen_yolo_is_additive_and_false_is_omitted() {
+        let value = serde_json::json!({
+            "id": "s", "title": "demo", "created_at": 1, "cwd": "/work",
+            "invocation": "agent", "launch": SessionLaunch::plain_command("agent")
+        });
+        let mut info: SessionInfo = serde_json::from_value(value).expect("old sender");
+        assert!(!info.screen_yolo);
+        assert!(
+            serde_json::to_value(&info)
+                .unwrap()
+                .get("screen_yolo")
+                .is_none()
+        );
+        info.screen_yolo = true;
+        let encoded = serde_json::to_value(&info).unwrap();
+        assert_eq!(encoded["screen_yolo"], true);
+        assert!(
+            serde_json::from_value::<SessionInfo>(encoded)
+                .unwrap()
+                .screen_yolo
         );
     }
     /// The GitHub-checkout vocabulary is protocol 24's surface, so its wire
@@ -4532,6 +4565,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_github_fields_decode_absent_and_roundtrip() {
         let mut info = SessionInfo {
+            screen_yolo: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -5675,6 +5709,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_agent_kind_decodes_absent_as_generic_and_roundtrips() {
         let info = SessionInfo {
+            screen_yolo: false,
             parent: None,
             id: "s1".to_string(),
             title: "demo".to_string(),
@@ -5732,6 +5767,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
+            screen_yolo: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -5881,6 +5917,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_effective_activity_falls_back_to_creation_time_only_when_unknown() {
         let at = |created_at: i64, last_activity_at: i64| SessionInfo {
+            screen_yolo: false,
             agent_kind: crate::AgentKind::Generic,
             id: "s1".to_string(),
             parent: None,
@@ -5923,6 +5960,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn effective_work_start_falls_back_stably_and_saturates() {
         let mut info = SessionInfo {
+            screen_yolo: false,
             agent_kind: crate::AgentKind::Generic,
             id: "s1".to_string(),
             parent: None,
@@ -5968,6 +6006,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_tabs_json_shape_is_pinned() {
         let info = SessionInfo {
+            screen_yolo: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -6598,6 +6637,7 @@ mod tests {
         let reply = ControlMsg::SessionRestarted {
             req_id: 42,
             session: SessionInfo {
+                screen_yolo: false,
                 agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
@@ -6735,6 +6775,7 @@ mod tests {
         let msg = ControlMsg::SessionRestarted {
             req_id: 8,
             session: SessionInfo {
+                screen_yolo: false,
                 agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
@@ -6876,6 +6917,7 @@ mod tests {
                 ControlMsg::SessionRenamed {
                     req_id: 50,
                     session: SessionInfo {
+                        screen_yolo: false,
                         agent_kind: crate::AgentKind::Generic,
                         parent: None,
                         id: "s1".to_string(),
@@ -7481,6 +7523,7 @@ mod tests {
         let fat = ControlMsg::SessionList {
             req_id: 1,
             sessions: vec![SessionInfo {
+                screen_yolo: false,
                 agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),

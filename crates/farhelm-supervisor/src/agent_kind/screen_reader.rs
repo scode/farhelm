@@ -45,6 +45,11 @@
 //! there is what lets a rename share that history and a relaunch start a
 //! fresh one without any reader having to know about either.
 //!
+//! Permission display is separate from activity: [`status_line_yolo`] reads
+//! a launch harness's footer and returns only definite bypass/non-bypass
+//! evidence. Its history also lives in the sampler, so an obscuring dialog
+//! retains the last mode and a replacement starts without old-run evidence.
+//!
 //! Robustness: readers run on arbitrary terminal bytes that survived a
 //! lossy UTF-8 decode, on a supervisor that is also serving live
 //! terminals. Wrong is cosmetic (SPEC.md, Status); panicking is not, so a
@@ -52,6 +57,93 @@
 
 use super::{codex_working, is_codex_composer_padding};
 use farhelm_proto::AgentKind;
+
+/// Read only a vendor's permission footer, never its transcript or slash-command output.
+///
+/// `None` means there is no definite reading: callers retain their last answer until
+/// another footer says otherwise. This is advisory display evidence, not permission
+/// authority. Dispatch uses the launch harness because Muse and Cursor share the
+/// generic activity reader, and a legacy integration kind does not declare a harness.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub(crate) fn status_line_yolo(harness: farhelm_proto::LaunchHarness, text: &str) -> Option<bool> {
+    use farhelm_proto::LaunchHarness;
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    match harness {
+        LaunchHarness::Claude => claude_permission_footer(&lines),
+        LaunchHarness::Grok => grok_permission_footer(&lines),
+        LaunchHarness::Muse => muse_permission_footer(&lines),
+        LaunchHarness::Cursor => cursor_permission_footer(&lines),
+        LaunchHarness::Codex
+        | LaunchHarness::Goose
+        | LaunchHarness::Pi
+        | LaunchHarness::Omp
+        | LaunchHarness::OpenCode => None,
+    }
+}
+
+/// Claude's mode follows its composer and custom status line; dialogs may hide it.
+///
+/// Plan mode is deliberately not a non-YOLO reading: Claude says a session
+/// started with bypass permissions keeps bypassing in plan mode ("plan mode
+/// won't ask before most edits or commands"), so it keeps the last reading.
+fn claude_permission_footer(lines: &[&str]) -> Option<bool> {
+    let line = *lines.last()?;
+    if line.starts_with("⏵⏵ bypass permissions on") {
+        Some(true)
+    } else if ["⏸ manual mode on", "⏸ auto mode on", "⏵⏵ accept edits on"]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+    {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Grok puts the mode in the lower border of its composer, above optional key hints.
+fn grok_permission_footer(lines: &[&str]) -> Option<bool> {
+    let border = lines
+        .iter()
+        .rev()
+        .take(3)
+        .find(|line| line.starts_with('╰') && line.ends_with('╯'))?;
+    if border.contains(" · always-approve ─") {
+        Some(true)
+    } else if border.contains(" · auto-review ─") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Muse's footer immediately follows the composer's lower rule, even on a tall grid.
+fn muse_permission_footer(lines: &[&str]) -> Option<bool> {
+    let [.., rule, footer] = lines else {
+        return None;
+    };
+    if !rule.chars().all(|c| c == '─') {
+        return None;
+    }
+    if footer.contains(" · YOLO") {
+        Some(true)
+    } else if footer.contains(" · Auto-review") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Cursor exposes only the enabled label. Its absence is not evidence of a safe mode.
+fn cursor_permission_footer(lines: &[&str]) -> Option<bool> {
+    let [.., footer, _cwd] = lines else {
+        return None;
+    };
+    footer.ends_with("Run Everything").then_some(true)
+}
 
 /// How many of a session's OWN consecutive comparisons must show an
 /// unchanged screen before the generic rule reads it idle rather than

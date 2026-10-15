@@ -488,6 +488,7 @@ mod tests {
                 row.id,
                 "identity-known",
                 vec![farhelm_proto::SessionInfo {
+                    screen_yolo: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "remembered".to_string(),

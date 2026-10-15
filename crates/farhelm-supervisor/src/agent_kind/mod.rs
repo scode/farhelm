@@ -93,7 +93,8 @@
 //!   (`claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `omp.rs`, `pi.rs`) for
 //!   that kind's own helpers: argv grammar, record and locator parsing, and
 //!   the vendor-file verification some locators need. Screen readers:
-//!   `screen_reader.rs`.
+//!   `screen_reader.rs`, including the exhaustive launch-harness permission-footer
+//!   reader (separate from activity kinds so Muse and Cursor remain distinguishable).
 //! - **Stateful per-kind behavior in the supervisor** (report admission,
 //!   resume verification, launch provenance):
 //!   `service/core/vendor/<kind>.rs`, dispatched from `service/core.rs` by
@@ -176,6 +177,8 @@ mod records;
 #[cfg(test)]
 mod screen_fixtures;
 pub(crate) mod screen_reader;
+#[cfg(test)]
+mod status_line_fixtures;
 pub use grok::{
     encode_report as encode_grok_report, validate_event_time as validate_grok_event_time,
 };

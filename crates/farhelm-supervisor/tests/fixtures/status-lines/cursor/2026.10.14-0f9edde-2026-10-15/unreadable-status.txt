@@ -1,0 +1,42 @@
+
+  ╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │                                                                                                                               │
+  │  ⚠ Workspace Trust Required                                                                                                   │
+  │                                                                                                                               │
+  │  Cursor Agent can execute code and access files in this directory.                                                            │
+  │                                                                                                                               │
+  │  Do you trust the contents of this directory?                                                                                 │
+  │                                                                                                                               │
+  │    /work/cursor-mode                                                          │
+  │                                                                                                                               │
+  │                                                                                                                               │
+  │    [a] Trust this workspace                                                                                                   │
+  │    [q] Quit                                                                                                                   │
+  │                                                                                                                               │
+  │  ⏳ Trusting workspace...                                                                                                     │
+  │                                                                                                                               │
+  ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+  Cursor Agent
+  v2026.10.14-0f9edde
+  Tip: Use /skills to give Cursor specialized knowledge for tasks.
+
+
+
+
+  → Plan, search, build anything
+
+
+  GPT-5.6 Luna 272K Low
+  /work/cursor-mode
+
+
+
+
+
+
+
+
+
+
