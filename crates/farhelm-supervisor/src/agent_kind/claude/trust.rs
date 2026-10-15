@@ -223,6 +223,8 @@ fn edit_with_retry(
         bytes.len() <= 16 * 1024 * 1024,
         "Claude config grew beyond read limit"
     );
+    // The workspace's float_roundtrip feature preserves the double values
+    // Claude reads when this whole-document write touches only its trust key.
     let mut document: Value =
         serde_json::from_slice(&bytes).context("Claude config is not JSON")?;
     let object = document
@@ -336,6 +338,64 @@ mod tests {
             2,
             "no temporary file or lock remains"
         );
+    }
+
+    /// Granting and removing trust must preserve unrelated JavaScript numbers.
+    /// Seed decimal text directly: a json! fixture would already have passed
+    /// through Rust's float conversion and could hide the parser regression.
+    /// Compare against the standard float parser, not serde_json parsing the
+    /// same input on both sides of the assertion.
+    #[farhelm_testtrace::test]
+    fn trust_round_trip_preserves_unrelated_number_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(dir.path()).unwrap();
+        let config = root.join(".claude.json");
+        let numbers = [
+            "0.9176884786531495",
+            "-0.9176884786531495",
+            "-0.0",
+            "1e-310",
+            "18446744073709551617",
+            // More than 19 significant digits takes the precise parser's long
+            // path, where the default parser is least accurate.
+            "9007199254740993.00000000000000000001",
+            "1.7976931348623157e308",
+        ];
+        let expected = numbers.map(|number| number.parse::<f64>().unwrap().to_bits());
+        fs::write(
+            &config,
+            format!(r#"{{"unrelated":[{}],"projects":{{}}}}"#, numbers.join(",")),
+        )
+        .unwrap();
+        let record = resolve(
+            &Environment {
+                home: root.clone(),
+                config_dir: None,
+                custom_oauth: false,
+            },
+            &root,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(record.config_path, config);
+        for trusted in [true, false] {
+            edit(Some(&record), trusted).unwrap();
+            let document: Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+            let actual = document["unrelated"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|number| number.as_f64().unwrap().to_bits())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual, expected,
+                "unrelated numbers after trusted={trusted}"
+            );
+            assert_eq!(
+                document["projects"][&record.project_path].get("hasTrustDialogAccepted"),
+                trusted.then_some(&Value::Bool(true))
+            );
+        }
     }
 
     /// Removal after the user deleted Claude's config (or its directory)

@@ -13728,7 +13728,8 @@
 - Decision: on 2026-10-15 the user chose `fix code`.
 - Completion criteria: trust edits preserve every unrelated number exactly, or refuse a document they cannot preserve; a
   round-trip test uses a decimal that distinguishes the parsers. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/claude-trust-decimals.md`.
+- Execution: complete in change `sltmqlozoqlkwltrytwxnkpukryomwyr`, bookmark
+  `plan/claude-trust-decimals/01-exact-numbers`; PR https://github.com/scode/farhelm/pull/2089/changes.
 
 ## ntfy-token-follows-changed-server.md
 
