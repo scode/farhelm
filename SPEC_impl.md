@@ -3695,6 +3695,26 @@ missing or removed before the lock was taken, refuses startup with one sentence 
 does one still held exclusively after the five-second wait. The lock's descriptor is close-on-exec, so neither the
 supervisor nor the updater's installer inherits it.
 
+A session's window runs the supervisor's own versioned `farhelm`, not the forwarder, so in this layout the supervisor
+starts it as `<farhelm> internal hold <spec> -- <shell argv>` (`crates/farhelm-supervisor/src/session_hold.rs`) to hold
+the version through the login shell's startup. The hold step takes the version lock, starts a keeper
+(`internal keep-version`) and waits up to ten seconds for it to report ready, writes `<id>.<generation>.held` beside the
+launch spec with its own pid, and replaces itself with the shell, which inherits neither the lock's descriptor nor its
+variable. The keeper adopts the hold step's lock through `FARHELM_VERSION_LOCK_FD`; it is detached by a double fork into
+a session of its own, with its streams on `/dev/null`, ignoring SIGINT, SIGQUIT, SIGTSTP and SIGHUP, and carries the
+session's `FARHELM_SESSION_ID` and `FARHELM_AGENT_ID` so stopping the session finds it. It watches the hold step's pid
+(kqueue `NOTE_EXIT` on macOS, registered before it reports ready) and exits when that process exits or when
+`<id>.<generation>.launched` names that pid, which the launch shim writes with its own pid once it holds its own lock.
+Hold step, shell and shim replace one another in place, so they share that pid. A keeper that cannot start fails the
+session's start, recorded in the launch's status file like any launch failure, and so does a hold step or shim that
+cannot hold its version. The marks follow the spec through the startup sweep, a retaken create and delete. On an orderly
+stop the supervisor waits up to three seconds for the windows it started to show a `held` mark naming their pane's pid,
+including windows still being created when the stop begins; every tmux query in that wait is cut off at the remaining
+budget, so a tmux server that does not answer cannot hold the stop. A window that has not got there by then, or whose
+keeper is killed before the shim holds its own lock, is unprotected until it does; if an install removes its version in
+that moment the session fails to start, visibly, and starting it again works. A shell whose startup files `exec` another
+shell never reaches the shim, and its keeper then holds the version until the window closes.
+
 ### The desktop app's updater
 
 The updater is native code in the desktop build of `farhelm-ui` (`desktop/updater.rs`), in the same process as the

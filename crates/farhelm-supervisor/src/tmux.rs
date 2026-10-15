@@ -3243,28 +3243,44 @@ impl TmuxDriver {
     /// concurrent external `kill-session` and the whole private server
     /// having gone away — are [`PaneProbe::Gone`] instead.
     pub async fn pane_process(&self, session: &str, pane: &str) -> anyhow::Result<PaneProbe> {
+        self.pane_process_within(session, pane, None).await
+    }
+
+    /// [`Self::pane_process`], bounded by `deadline` when one is given: a
+    /// tmux that does not answer in time is an error, and its client is
+    /// killed (see [`Self::run_bytes_within`]). For callers that must not
+    /// wait on tmux past a budget, such as an orderly stop.
+    pub async fn pane_process_within(
+        &self,
+        session: &str,
+        pane: &str,
+        deadline: Option<std::time::Duration>,
+    ) -> anyhow::Result<PaneProbe> {
         let out = match self
-            .run(&[
-                "display-message",
-                "-p",
-                "-t",
-                pane,
-                // SPACE-FREE FIELDS FIRST, session name LAST — the same
-                // ordering `PANE_FACT_FORMAT` uses, and for the same
-                // reason. tmux session names may contain spaces, so a name
-                // in any position but the last cannot be told apart from
-                // the fields following it. With the name leading (as this
-                // did until the spaced-name regression), a session called
-                // `renamed session` truncated to `renamed`, and one called
-                // `<expected name> suffix` matched the expected name on
-                // its first token and then wedged every lifecycle verb on
-                // a parse error trying to read `suffix` as a pid. As the
-                // trailing remainder, neither is expressible.
-                "#{pane_pid} #{pane_dead} #{session_name}",
-            ])
+            .run_bytes_within(
+                &[
+                    "display-message",
+                    "-p",
+                    "-t",
+                    pane,
+                    // SPACE-FREE FIELDS FIRST, session name LAST — the same
+                    // ordering `PANE_FACT_FORMAT` uses, and for the same
+                    // reason. tmux session names may contain spaces, so a name
+                    // in any position but the last cannot be told apart from
+                    // the fields following it. With the name leading (as this
+                    // did until the spaced-name regression), a session called
+                    // `renamed session` truncated to `renamed`, and one called
+                    // `<expected name> suffix` matched the expected name on
+                    // its first token and then wedged every lifecycle verb on
+                    // a parse error trying to read `suffix` as a pid. As the
+                    // trailing remainder, neither is expressible.
+                    "#{pane_pid} #{pane_dead} #{session_name}",
+                ],
+                deadline,
+            )
             .await
         {
-            Ok(out) => out,
+            Ok(out) => String::from_utf8_lossy(&out).into_owned(),
             // Matched against tmux's raw stderr, not the rendered chain:
             // the rendered error embeds the pane target and this driver's
             // own context, so a state-directory path or session name that

@@ -66,6 +66,7 @@ pub mod repository_discovery;
 mod procs;
 pub mod scope;
 pub mod service;
+pub mod session_hold;
 pub mod store;
 pub mod tmux;
 pub mod version_lock;

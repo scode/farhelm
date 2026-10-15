@@ -756,9 +756,14 @@ pub fn spec_path_for_launch(state_dir: &Path, id: &str, generation: i64) -> Path
 /// is unambiguous; anything that does not parse is left alone rather than
 /// guessed at, since an unrecognized file in this directory is not this
 /// code's to delete.
+///
+/// Besides the spec (`.json`) and its sentinel (`.status`), a launch in the
+/// Mac app's version layout leaves two marks with the same stem
+/// (`crate::session_hold`'s `.held` and `.launched`), so every sweep and
+/// delete that enumerates this directory removes them with their launch.
 pub fn parse_launch_file_name(name: &str) -> Option<(&str, i64)> {
     let (rest, extension) = name.rsplit_once('.')?;
-    if extension != "json" && extension != "status" {
+    if !matches!(extension, "json" | "status" | "held" | "launched") {
         return None;
     }
     let (id, generation) = rest.rsplit_once('.')?;
@@ -1861,7 +1866,7 @@ fn acquire_preparation_lock(lock_path: &Path) -> std::io::Result<PreparationLock
 /// write's own failure detail. Shared by every early-return path in
 /// [`exec_launch_spec_with_seam`], not just the exec-failure one at the
 /// bottom, so every launch-failure class gets identical durable evidence.
-fn record_launch_failure(
+pub(crate) fn record_launch_failure(
     status_path: &Path,
     report: String,
     seam: &dyn crate::files::FaultSeam,
