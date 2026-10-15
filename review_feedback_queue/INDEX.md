@@ -110,9 +110,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`installation-identity-escape-collision.md`](installation-identity-escape-collision.md) — Distinct peer-chosen
   installation identities can display identically in an adoption prompt.
 
-- [`continued-unit-line-bypasses-service-type-guard.md`](continued-unit-line-bypasses-service-type-guard.md) — Continued
-  unit text can bypass the non-simple-service refusal and misclassify a service spanning installations.
-
 - [`codex-guide-calls-trust-bypass-warning-harmless.md`](codex-guide-calls-trust-bypass-warning-harmless.md) — The Codex
   guide calls a hook-trust bypass warning harmless without disclosing its configured-hook consequence.
 
