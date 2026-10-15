@@ -4,9 +4,10 @@
 #
 # This is the idle half of "drain the plans and keep monitoring" and of "monitor for complete plans"
 # (plans/AGENTS.md). A monitoring agent used to wake every hour (a background sleep) and spend a full model round
-# discovering that nothing had changed; each such wake-up re-reads the agent's whole conversation uncached. This script
-# does the cheap part instead: it polls the git tree hash of plans/ on the remote branch and exits only when that hash
-# differs from the baseline the agent last drained against, so the agent's background-task completion is the wake-up.
+# discovering that nothing had changed; each such wake-up re-reads the agent's whole conversation, often uncached.
+# This script does the cheap part instead: it polls the git tree hash of plans/ on the remote branch and exits only
+# when that hash differs from the baseline the agent last drained against, so the agent's background-task completion
+# is the wake-up.
 #
 # Why plans/ alone is enough: everything that can give an idle executor new work arrives as a change under plans/ on
 # main, because the plans queue script (scripts/plans-queue.py) records every state change as a commit there. A new
@@ -46,9 +47,11 @@
 # merges both streams, still sees exactly one line):
 #   0   `changed <baseline> <current>`: plans/ differs from the baseline (and, with --wake-check, the check said
 #       `wake`); drain now.
-#   10  `idle <baseline>`: --max-wait elapsed with no change; restart with the same baseline. The cap exists because
-#       agent harnesses bound how long a background command may run (Claude Code: two hours), and a watcher the
-#       harness kills is indistinguishable from one that failed.
+#   10  `idle <baseline>`: --max-wait elapsed with no change; restart with the same baseline. By default there is no
+#       cap in practice (about 32 years), because every `idle` exit costs a model wake-up that re-reads the agent's
+#       whole conversation only to restart the watcher. Pass --max-wait when something should end the wait anyway: a
+#       harness that kills long commands (a watcher the harness kills is indistinguishable from one that failed), or
+#       an agent that wants the periodic wake-up for its own sake, as the landing monitor does.
 #   3   `error: <what> (<last gh error line>)`: --max-failures consecutive requests failed, or --max-wait elapsed
 #       without a successful poll. Fewer consecutive failures are retried silently, since one dropped request is not
 #       worth a model wake-up. The gh error line is what tells an expired login (HTTP 401) from an outage.
@@ -64,7 +67,8 @@ wake_check=""
 wake_for=executor
 branch="main"
 interval=300
-max_wait=6600
+# The largest value --max-wait accepts (see set_uint), so "no cap" needs no special case in the deadline arithmetic.
+max_wait=999999999
 max_failures=3
 request_timeout=60
 

@@ -351,8 +351,8 @@ fi
 
 # --- Idle cap ----------------------------------------------------------------------------------------------------
 
-# With no change, the watcher exits 10 at --max-wait instead of running until a harness kills it, and it polls once
-# more at the deadline rather than skipping the last interval.
+# With no change and a --max-wait given (the default is effectively no cap), the watcher exits 10 at that deadline
+# instead of running on, and it polls once more at the deadline rather than skipping the last interval.
 d=$(case_dir idle "tree $A")
 run_case "$d" --baseline "$A" --interval 1 --max-wait 2
 if expect "idle at max-wait" "$d" 10 "idle $A"; then
