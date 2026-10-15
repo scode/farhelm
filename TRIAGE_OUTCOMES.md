@@ -13111,7 +13111,7 @@
   consequence of whatever bug stopped it, not a defect in itself. The spec change is made once, by whichever of the six
   items executes first; the others record that it covers them. No code change. Remove this feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-conversation-tracking-spec.md`.
 
 ## restart-ignores-retryable-conversation-admission.md
 
@@ -13123,7 +13123,7 @@
   `restart-drain-skips-newly-published-conversation.md`; brief-window case.
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-conversation-tracking-spec.md`.
 
 ## reboot-discards-pending-new-conversation.md
 
@@ -13135,7 +13135,7 @@
   `restart-drain-skips-newly-published-conversation.md`; brief-window case.
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-conversation-tracking-spec.md`.
 
 ## restart-withdrawal-discards-new-codex-selection.md
 
@@ -13148,7 +13148,7 @@
   `restart-drain-skips-newly-published-conversation.md`; the never-learned case, mitigated by the existing notification.
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-conversation-tracking-spec.md`.
 
 ## codex-upgrade-replays-legacy-selection.md
 
@@ -13160,7 +13160,7 @@
   `restart-drain-skips-newly-published-conversation.md`; the recorded-conversation-stops-updating case.
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-conversation-tracking-spec.md`.
 
 ## codex-transcript-error-discards-new-selection.md
 
@@ -13173,7 +13173,7 @@
   `restart-drain-skips-newly-published-conversation.md`; the recorded-conversation-stops-updating case.
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-conversation-tracking-spec.md`.
 
 ## native-download-publication-lacks-directory-durability.md
 
@@ -13189,7 +13189,7 @@
   required at most of the installer and of the helm's and supervisors' own state, and not of downloaded files or managed
   checkouts. The spec change is made once, by whichever of the two items executes first. No code change. Remove this
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-power-loss-spec.md`.
 
 ## first-use-checkout-root-missing-durability-barriers.md
 
@@ -13200,7 +13200,7 @@
   words there).
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-power-loss-spec.md`.
 
 ## ssh-help-fish-command-quoting.md
 
@@ -13215,7 +13215,7 @@
   not defend against them. The help commands also embed the host's state path; if the wording cannot cover that value
   without going beyond the user's principle, bring it back to the user. The spec change is made once, by whichever of
   the two items executes first. No code change. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-trusted-host-values-spec.md`.
 
 ## ssh-help-copies-hidden-terminal-controls.md
 
@@ -13226,7 +13226,7 @@
 - Decision: on 2026-10-14, decided with `ssh-help-fish-command-quoting.md` (see the user's words there).
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-trusted-host-values-spec.md`.
 
 ## unit-reader-dollar-decoding-selects-wrong-installation.md
 
@@ -13240,7 +13240,7 @@
   guarantees about how setup, Update and uninstall treat it, including attributing it to the wrong installation. The
   spec change is made once, by whichever of the two items executes first. No code change. Remove this feedback file and
   its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-hand-edited-units-spec.md`.
 
 ## continued-unit-line-bypasses-service-type-guard.md
 
@@ -13252,7 +13252,7 @@
   words there).
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-hand-edited-units-spec.md`.
 
 ## quick-launch-acknowledgment-revives-previous-mark.md
 
@@ -13271,7 +13271,7 @@
   reference to the specific issues that prompted this."
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes. The TODO.md Near
   term entry "Consider an ordered transport between the GUI and the helm" names this item.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-highest-discards.md`.
 
 ## quick-launch-changes-inherited-destination.md
 
@@ -13282,7 +13282,7 @@
 - Decision: on 2026-10-14, discarded with `quick-launch-acknowledgment-revives-previous-mark.md` (see the user's words
   there).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-highest-discards.md`.
 
 ## quick-launch-host-removal-falls-back-silently.md
 
@@ -13292,7 +13292,7 @@
 - Decision: on 2026-10-14, discarded with `quick-launch-acknowledgment-revives-previous-mark.md` (see the user's words
   there); the trigger needs a second interface to the helm.
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-highest-discards.md`.
 
 ## quick-launch-template-identity-follows-successor.md
 
@@ -13303,7 +13303,7 @@
 - Decision: on 2026-10-14, discarded with `quick-launch-acknowledgment-revives-previous-mark.md` (see the user's words
   there).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-highest-discards.md`.
 
 ## pending-command-save-overwrites-newer-save.md
 
@@ -13316,7 +13316,7 @@
   transport TODO names (see `quick-launch-acknowledgment-revives-previous-mark.md`).
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes. The TODO.md Near
   term entry "Consider an ordered transport between the GUI and the helm" names this item.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-highest-discards.md`.
 
 ## codex-ancestor-clear-withdraws-unverified-resume.md
 
@@ -13332,7 +13332,7 @@
 - Decision: on 2026-10-14 the user: "forget any edge case having to do with upgrading rom old versions if its combined
   with "super rare unlikely situation". its ok."
 - Completion criteria: remove this feedback file and its index entry, without code or spec changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-highest-discards.md`.
 
 ## confirmation-restoration-failure-reloads-optout.md
 
@@ -13345,7 +13345,7 @@
 - Completion criteria: a failed save of the setting that turns confirmations back on is shown to the user, so they know
   the opt-out still stands. If SPEC.md's list of silent persistence failures says otherwise for this preference, narrow
   it in the same change. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/confirmations-save-error.md`.
 
 ## interrupted-checkout-retains-evictable-cache-dependency.md
 
@@ -13377,7 +13377,7 @@
 - Completion criteria: editing such a command either keeps it exactly or refuses visibly, through a change of no more
   than trivial complexity. If that is not possible, stop and record the item as discarded under the user's rule rather
   than building more. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/legacy-template-edits-gated.md`.
 
 ## template-undo-refuses-legacy-session-names.md
 
@@ -13390,7 +13390,7 @@
 - Completion criteria: Undo restores such a template exactly as stored, or deletion says up front that it cannot be
   undone, through a change of no more than trivial complexity. If that is not possible, stop and record the item as
   discarded under the user's rule. Remove this feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/legacy-template-edits-gated.md`.
 
 ## folder-history-replaces-highlighted-reset.md
 
@@ -13400,4 +13400,52 @@
   recent remote folder instead, because the highlight is kept by position. The draft shows the result before Launch.
 - Decision: on 2026-10-14 the user: "discard for now but no filter/rule/spec".
 - Completion criteria: remove this feedback file and its index entry, without code, spec or filter changes.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-highest-discards.md`.
+
+## post-clone-editor-normalizes-literal-carriage-returns.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by static tracing and the HTML textarea contract, not reproduced. The post-clone command in
+  Settings is a multi-line text box; the browser turns a stored carriage return into a newline on any edit, so saving
+  after an unrelated edit changes what the command does (different `printf` output, or a line hidden with a carriage
+  return starting to run). A carriage return can only be stored through the CLI or API, which accept it today.
+- Decision: on 2026-10-14, asked whether the older-templates complexity gate applies here too (this case is current
+  data, not older data), the user: "sure complexity gated fix". The gate is the one recorded under
+  `legacy-template-edit-sanitizes-before-save-refusal.md`: fix it only if the fix adds no more than trivial complexity.
+- Completion criteria: editing a stored post-clone command that contains a carriage return either keeps it exactly or
+  refuses visibly, through a change of no more than trivial complexity. If that is not possible, stop and record the
+  item as discarded under the gate rather than building more. Remove this feedback file and its index entry.
+- Execution: planned in `plans/queue/post-clone-carriage-return-gated.md`.
+
+## guarded-choice-becomes-omp-yolo.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by static trace, not reproduced. In the New launcher, explicitly choosing Guarded for Claude,
+  Codex, Grok or Muse and then switching the agent to OMP sets the mode to YOLO: the switch clears a permission equal to
+  the previous agent's default, and OMP's own default, YOLO, fills in. OMP supports Guarded (`--approval-mode write`).
+  The launcher shows YOLO before Launch, and a host set to ask before YOLO still asks. OMP is the only agent that offers
+  Guarded while defaulting to YOLO; Claude, Codex, Grok and Muse already default to Guarded, Pi and OpenCode offer only
+  YOLO, Cursor offers YOLO or custom flags, and Goose offers YOLO, approve, smart approve and chat but no mode Farhelm
+  calls Guarded.
+- Decision: on 2026-10-14 the user first asked for automatic changes toward a more dangerous mode to be very hard to
+  miss: "whenever the permission modes changes in the direction of MORE dangerous, we visually highlight it in a way
+  that is very hard to miss ... some kind of animation or similar for a second or two along with a message card
+  temporarily saying it changed because you switched agents." From mockups of five options they chose the banner: "C
+  looks best to me but can we be clear that the reason is that guarded is not supported by that agent type?" Told that
+  OMP does support Guarded, they decided: "if OMP now supports guarded then we should change the default to be that
+  instead", "and make sure we do this for ALL agents if any other agent currently both supports guraded yet somehow yolo
+  is the default", and "this shoudl also be a SPEC rule: For any agent that supports guarded, guarded is always the
+  default. (this does not override launcher remembering most recent choice being yolo that's fine, just talking about
+  what the default is, not changing when the default is applied)". They were told that OMP gets no waiting-state
+  recognition, so a Guarded OMP session stuck on an approval prompt shows no waiting alert, and gave this direction
+  after that.
+- Completion criteria: SPEC.md states the rule that for any agent that supports Guarded, Guarded is the default (the
+  permission a launch gets when none is chosen), without changing when the default applies or the remembered last
+  choice. OMP's default becomes Guarded for new launches; stored launches keep the meaning they were recorded with, and
+  the upgrade path stays intact. When switching agents in the launcher changes the permission mode to a more dangerous
+  one, a red banner slides down across the top of the launcher naming the old and new modes and saying the change
+  happened because the new agent does not support the previous mode, with Undo (back to the previous agent and mode) and
+  dismiss; the mode control gets a thick red outline for about two and a half seconds and the banner stays about eight
+  seconds; with reduced motion the outline is static while the banner shows. Remove this feedback file and its index
+  entry.
+- Execution: planned in `plans/queue/guarded-default-and-escalation-banner.md`.
