@@ -19003,6 +19003,182 @@ pub(crate) mod tests {
         assert_eq!(after_pid, tab_pid, "restart must not replace the tab shell");
     }
 
+    /// Named Goose Restart with must retire the old capture everywhere, but
+    /// a definitive failure before spawn must restore it everywhere.
+    ///
+    /// The store-only test cannot see the live capture cell or the session
+    /// list's Restart offer. A stale mirror would let plain Restart resume
+    /// the old conversation after the user selected a different one. Drive
+    /// the public restart path, failing after its generation claim first,
+    /// then succeeding against the restored capture.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn named_goose_restart_clears_live_capture_and_restores_it_on_definitive_failure() {
+        let state = StateDir::new();
+        // This existing fixture pattern supplies a live pane without an
+        // installed vendor agent. It stands in for the launch shim, not
+        // Goose's reporting or resume implementation; capture is seeded
+        // through the supervisor's generation-fenced reporting seam.
+        let shim = state.path().join("restart-shim");
+        std::fs::write(&shim, "#!/bin/sh\nexec sleep 300\n").expect("write restart stand-in");
+        std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("make restart stand-in executable");
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            shim,
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                launch_shell: Some("/bin/sh".into()),
+                ..scopeless_seams()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let cwd = state.path().join("work");
+        std::fs::create_dir(&cwd).expect("private session directory");
+        let launch = SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                harness: LaunchHarness::Goose,
+                model: None,
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+                permission_flags: None,
+            },
+            start: vec![
+                "sh".into(),
+                "-c".into(),
+                "exec sleep 300".into(),
+                "{farhelm_args}".into(),
+            ],
+            resume: Some(vec![
+                "sh".into(),
+                "-c".into(),
+                "exec sleep 300".into(),
+                "farhelm-test-resume".into(),
+                "{conversation}".into(),
+                "{farhelm_args}".into(),
+            ]),
+        };
+        let created = sup
+            .create_session(
+                CreateInputs {
+                    named_start: None,
+                    cwd: cwd.to_str().expect("UTF-8 fixture path"),
+                    parent: None,
+                    github_checkout: None,
+                    launch: launch.clone(),
+                    title: None,
+                    cols: 80,
+                    rows: 24,
+                },
+                None,
+            )
+            .await
+            .expect("create Goose agent session");
+        sup.record_conversation_for_test(&created.id, TEST_CONVERSATION)
+            .await;
+        let before = sup.store.session(&created.id).await.unwrap().unwrap();
+        let entry = sup.sessions.lock().await[&created.id].clone();
+        let agent = entry.terminal.as_ref().expect("agent terminal");
+        assert!(
+            matches!(
+                sup.tmux.pane_process(&agent.tmux_name, &agent.pane).await.expect("agent probe"),
+                PaneProbe::Owned(process) if !process.dead
+            ),
+            "fixture premise: a live agent pane must reach the ordinary restart path"
+        );
+        assert_eq!(
+            before.captured_conversation.as_deref(),
+            Some(TEST_CONVERSATION)
+        );
+        assert_eq!(before.conversation_source.as_deref(), Some("hook"));
+        assert_eq!(
+            entry.run.capture.lock().unwrap().committed_conversation(),
+            Some(TEST_CONVERSATION),
+            "fixture premise: the old capture exists in memory"
+        );
+        let named = farhelm_proto::NamedConversationStart {
+            conversation: "named-target".into(),
+            argv: IntegrationSnapshot::of(&launch)
+                .filled_named_resume_argv("named-target")
+                .expect("named resume argv"),
+        };
+
+        // A launch-spec collision happens after begin_relaunch cleared
+        // capture, before tmux can spawn. The advanced generation below
+        // distinguishes rollback from a refusal during admission.
+        let obstruction =
+            crate::launch::spec_path_for_launch(state.path(), &created.id, before.generation + 1);
+        drop(std::fs::File::create_new(&obstruction).expect("occupy next launch spec"));
+        let error = sup
+            .restart_session_named(
+                &created.id,
+                true,
+                Some(launch.clone()),
+                None,
+                Some(named.clone()),
+            )
+            .await
+            .expect_err("the launch-spec collision must abort the named restart");
+        assert!(
+            format!("{error:#}").contains("publishing this restart's launch spec"),
+            "failure must come from the definitive pre-spawn seam: {error:#}"
+        );
+        let restored = sup.store.session(&created.id).await.unwrap().unwrap();
+        assert_eq!(restored.generation, before.generation + 1);
+        assert_ne!(restored.outcome, LastOutcome::Launching);
+        assert_eq!(restored.captured_conversation, before.captured_conversation);
+        assert_eq!(restored.conversation_source, before.conversation_source);
+        assert_eq!(
+            restored.capture_ownership_version,
+            before.capture_ownership_version
+        );
+        let restored_entry = sup.sessions.lock().await[&created.id].clone();
+        {
+            let capture = restored_entry.run.capture.lock().unwrap();
+            assert_eq!(capture.committed_conversation(), Some(TEST_CONVERSATION));
+            assert_eq!(
+                capture.committed_ownership_version(),
+                Some(before.capture_ownership_version)
+            );
+        }
+        let listed = crate::service::listing::list_all(&sup)
+            .await
+            .expect("list after definitive failure")
+            .sessions
+            .into_iter()
+            .find(|row| row.id == created.id)
+            .expect("failed restart republishes the session");
+        assert_eq!(listed.restart_offer, farhelm_proto::RestartOffer::Resume);
+
+        std::fs::remove_file(&obstruction).expect("remove the deliberate collision");
+        sup.restart_session_named(&created.id, true, Some(launch), None, Some(named))
+            .await
+            .expect("named restart succeeds after removing the obstruction");
+        let cleared = sup.store.session(&created.id).await.unwrap().unwrap();
+        assert_eq!(cleared.generation, restored.generation + 1);
+        assert_eq!(cleared.captured_conversation, None);
+        assert_eq!(cleared.conversation_source, None);
+        assert_eq!(cleared.capture_ownership_version, 0);
+        let cleared_entry = sup.sessions.lock().await[&created.id].clone();
+        {
+            let capture = cleared_entry.run.capture.lock().unwrap();
+            assert_eq!(capture.committed_conversation(), None);
+            assert_eq!(capture.committed_ownership_version(), None);
+        }
+        let listed = crate::service::listing::list_all(&sup)
+            .await
+            .expect("list after successful named restart")
+            .sessions
+            .into_iter()
+            .find(|row| row.id == created.id)
+            .expect("successful restart republishes the session");
+        assert_eq!(
+            listed.restart_offer,
+            farhelm_proto::RestartOffer::NotCaptured
+        );
+    }
+
     /// A tmux process can forge the agent marker on a user tab, so that
     /// marker may report an ambiguous old window but must never authorize
     /// killing it when the recorded agent pane has disappeared.
