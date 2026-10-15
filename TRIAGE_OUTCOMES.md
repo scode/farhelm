@@ -13586,7 +13586,9 @@
 - Decision: on 2026-10-15, covered by the layout filter recorded under
   `trash-confirmation-scroll-hides-deletion-context.md`.
 - Completion criteria: this feedback file and its index entry are removed under that filter.
-- Execution: planned in `plans/queue/triage-layout-filter-and-devbuild.md`.
+- Execution: complete in jj change `oppmwwzwnnkm`, bookmark `plan/triage-layout-filter-and-devbuild/02-replace-finding`;
+  [PR #2079](https://github.com/scode/farhelm/pull/2079/changes); removed under FILTER.md's "Dialog explanations out of
+  view but reachable by scrolling" filter.
 
 ## unchecked-trash-selection-omits-deletion-warning.md
 
