@@ -13465,7 +13465,11 @@
 - Completion criteria: editing a stored post-clone command that contains a carriage return either keeps it exactly or
   refuses visibly, through a change of no more than trivial complexity. If that is not possible, stop and record the
   item as discarded under the gate rather than building more. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/post-clone-carriage-return-gated.md`.
+- Execution: complete in jj change `pvlnzuoznlurzmtvxlptlkxzolvmnmto`, bookmark
+  `plan/post-clone-carriage-return-gated/01-save-refusal`. Complexity gate met: the existing loaded value refuses
+  nonblank saves with a visible reason when it contains a carriage return; clearing and ordinary commands keep their
+  existing save path. No new API, stored state or editing mode. Feedback file and index entry removed.
+  [PR #2053](https://github.com/scode/farhelm/pull/2053/changes).
 
 ## guarded-choice-becomes-omp-yolo.md
 

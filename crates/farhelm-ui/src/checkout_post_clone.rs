@@ -12,6 +12,9 @@ use std::{cell::Cell, rc::Rc};
 /// newlines are part of the command. Reading an explicit disable displays an
 /// empty box without rewriting it. Saves survive dismissal, while completion
 /// touches component-owned handles only if this field is still mounted.
+/// A stored carriage return makes nonblank saves unsafe: textarea input can
+/// normalize it before the draft reaches us. Clearing remains available, and
+/// commands requiring that character can still be changed through the CLI.
 #[component]
 pub(crate) fn CheckoutPostCloneField() -> Element {
     let base = use_context::<ApiBase>().0;
@@ -41,6 +44,12 @@ pub(crate) fn CheckoutPostCloneField() -> Element {
         .and_then(|value| value.as_ref().err())
         .cloned();
     let locked = !initialized() || saving();
+    let stored_carriage_return = command
+        .read()
+        .as_ref()
+        .and_then(|value| value.as_ref().ok())
+        .and_then(|value| value.as_deref())
+        .is_some_and(|value| value.contains('\r'));
 
     rsx! {
         div { class: "checkout-post-clone-field",
@@ -77,10 +86,16 @@ pub(crate) fn CheckoutPostCloneField() -> Element {
                     "data-tooltip": "save the post-clone command for future managed checkouts",
                     onclick: move |_| {
                         if !initialized() || saving() { return; }
+                        let value = draft();
+                        // Judge the loaded command, not the browser's normalized
+                        // draft; after a successful clear, the refetch lifts this refusal.
+                        if stored_carriage_return && !value.trim().is_empty() {
+                            outcome.set(Some(Err("the saved command contains a carriage return this field would turn into a newline; change it with `farhelm helm checkout-config set-post-clone` on the helm's machine, or save an empty field to clear it".into())));
+                            return;
+                        }
                         saving.set(true);
                         outcome.set(None);
                         let base = base.clone();
-                        let value = draft();
                         let value = if value.trim().is_empty() {
                             // A blank save clears the command; show it cleared
                             // rather than leaving whitespace beside "saved".

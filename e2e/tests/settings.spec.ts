@@ -238,6 +238,78 @@ test("settings saves and clears the all-hosts post-clone command", async ({ page
   }
 });
 
+/** Textarea normalization must not silently rewrite an executable command.
+ * Seed real CR and CRLF values through the API, prove editing cannot persist
+ * their normalized form, then clear and save normally in the same mounted field.
+ */
+test("post-clone commands with carriage returns refuse edits but can be cleared", async ({ page, request }) => {
+  const previous = await readPostClone(request);
+  let writes = 0;
+  const submitted: Request[] = [];
+  const intercept = async (route: Route) => {
+    if (route.request().method() === "PUT") {
+      writes++;
+      submitted.push(route.request());
+    }
+    await route.continue();
+  };
+  await page.route("**/api/checkout-post-clone", intercept);
+  try {
+    await page.goto("/");
+    const gear = page.getByRole("button", { name: "settings", exact: true });
+    const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+    const field = dialog.locator(".checkout-post-clone-field");
+    const command = field.getByRole("textbox", { name: "post-clone command", exact: true });
+    const save = field.getByRole("button", { name: "save", exact: true });
+    for (const stored of ["printf 'one\rtwo'", "printf 'one\r\ntwo'"]) {
+      const seeded = await request.put("/api/checkout-post-clone", { data: { command: stored } });
+      expect(seeded.ok(), await seeded.text()).toBe(true);
+      expect(await readPostClone(request)).toEqual({ command: stored });
+      await gear.click();
+      await expect(command).toBeEditable();
+      await expect(command).toHaveValue(stored.replace(/\r\n?/g, "\n"));
+      await command.focus();
+      await expect(command).toBeFocused();
+      await command.press("End");
+      await command.pressSequentially(" # edited");
+      const edited = await command.inputValue();
+      expect(edited).not.toContain("\r");
+      expect(edited).toContain("# edited");
+      const before = writes;
+      await save.click();
+      await expect(field.getByRole("alert")).toContainText("carriage return this field would turn into a newline");
+      await expect(command).toHaveValue(edited);
+      expect(writes).toBe(before);
+      expect(await readPostClone(request)).toEqual({ command: stored });
+
+      await command.fill(" \n\t ");
+      const refetched = page.waitForResponse(response =>
+        response.url().endsWith("/api/checkout-post-clone") && response.request().method() === "GET"
+      );
+      await save.click();
+      await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+      expect(await (await refetched).json()).toEqual({ command: null });
+      expect(await readPostClone(request)).toEqual({ command: null });
+      await expect(field.getByRole("alert")).toHaveCount(0);
+      await command.fill("printf 'ordinary'");
+      await save.click();
+      await expect(field.getByRole("status")).toHaveText("post-clone command saved");
+      expect(await readPostClone(request)).toEqual({ command: "printf 'ordinary'" });
+      await dialog.getByRole("button", { name: "close", exact: true }).click();
+    }
+  } finally {
+    // Even an assertion during a save cannot let its late PUT undo restoration.
+    for (const put of submitted) {
+      const reply = await put.response();
+      if (reply) await reply.finished();
+    }
+    await page.unroute("**/api/checkout-post-clone", intercept);
+    const restored = await request.put("/api/checkout-post-clone", { data: previous });
+    expect(restored.ok(), await restored.text()).toBe(true);
+    expect(await readPostClone(request)).toEqual(previous);
+  }
+});
+
 /** A delayed initial read cannot turn the blank placeholder into a clear.
  * Hold the GET at the network boundary and try Save while locked, then release
  * it and require the stored command to seed the field without any PUT. */
