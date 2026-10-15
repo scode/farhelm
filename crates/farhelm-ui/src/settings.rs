@@ -18,7 +18,9 @@
 
 use dioxus::prelude::*;
 
-use crate::api::{PreferenceValue, TerminalLinkClick, store_preference};
+use crate::api::{
+    PreferenceValue, TerminalLinkClick, restore_session_confirmations, store_preference,
+};
 use crate::app_updater::use_app_updater;
 use crate::hosts::settings_dialog::{HostDialogHeader, install_dialog_with_selector};
 use crate::list::SharedPreferences;
@@ -50,9 +52,10 @@ fn restore_automatic_checkbox(in_force: bool) {
 
 /// Expose session/host choices, terminal link ownership, sounds and checkout settings.
 ///
-/// Writes use the ordinary preference queue and its silent failure behavior.
-/// Controls stay enabled: preferences have no host-operation lock or outcome
-/// surface, and closing the dialog must not cancel a queued preference write.
+/// Writes use the ordinary preference queue. Restoring session confirmations
+/// reports a failed save because a reload could otherwise silently restore the
+/// opt-out; other switch preferences keep their silent failure behavior.
+/// Controls stay enabled, and closing the dialog must not cancel a queued write.
 /// The checkout and ntfy fields are exceptions: their explicit saves expose validation
 /// refusals rather than treating arbitrary text like a switch preference.
 /// Only the grouped body scrolls; both dismissal paths stay outside it and
@@ -66,6 +69,10 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
     let setup = preferences.0.read().skip_host_setup_confirmation == Some(true);
     let remove = preferences.0.read().skip_host_remove_confirmation == Some(true);
     let skip_sessions = preferences.0.read().skip_session_confirmations == Some(true);
+    // Superseded writes also report false. Only the latest click may explain
+    // its failure, including when an intervening click opted out again.
+    let mut session_generation = use_signal(|| 0_u64);
+    let mut session_error = use_signal(|| false);
     let updater = use_app_updater();
     // Read once when the dialog opens and then kept locally: the file is
     // this app's own, so nothing else changes it while the dialog is up.
@@ -118,16 +125,32 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                                 checked: skip_sessions,
                                 aria_describedby: "session-confirmations-help",
                                 onchange: move |event| {
-                                    preferences.0.write().skip_session_confirmations = Some(event.checked());
-                                    store_preference(
-                                        &session_base,
-                                        PreferenceValue::SessionConfirmations(event.checked()),
-                                    );
+                                    let skip = event.checked();
+                                    preferences.0.write().skip_session_confirmations = Some(skip);
+                                    let generation = session_generation() + 1;
+                                    session_generation.set(generation);
+                                    session_error.set(false);
+                                    if skip {
+                                        store_preference(&session_base, PreferenceValue::SessionConfirmations(true));
+                                    } else {
+                                        let completion = restore_session_confirmations(&session_base);
+                                        spawn(async move {
+                                            let saved = completion.await;
+                                            if session_generation() == generation {
+                                                session_error.set(!saved);
+                                            }
+                                        });
+                                    }
                                 },
                             }
                         }
                         p { id: "session-confirmations-help", class: "host-settings-help",
                             "Delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash confirmations still follow their own rules. This choice applies to this helm; other open clients pick it up when they reload."
+                        }
+                        if session_error() {
+                            p { class: "host-settings-help app-settings-error", role: "alert",
+                                "Confirmations may still be off for this helm. Try again."
+                            }
                         }
                     }
                     section { class: "host-settings-section", aria_label: "hosts",

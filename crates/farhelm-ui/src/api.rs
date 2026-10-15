@@ -35,10 +35,11 @@
 //! One endpoint deliberately breaks the one-async-fn-per-endpoint,
 //! error-as-displayable-string mold: the shared preference
 //! (`fetch_preferences`, `store_preference`, and the serialized write queue
-//! behind it). Its writes are fire-and-forget — SPEC.md's Errors and
-//! diagnostics makes preference persistence the one best-effort exception,
-//! so failures are logged here and never surfaced — and its reader is
-//! `lib.rs`'s `PreferencesGate` rather than a view component.
+//! behind it). Most writes are fire-and-forget under SPEC.md's best-effort
+//! exception. Operations that need an acknowledgment, including restoring
+//! session confirmations, observe the same queue's completion and surface
+//! their own failures. Its reader is `lib.rs`'s `PreferencesGate` rather than
+//! a view component.
 //!
 //! Every protected request below is issued through this module's own [`send`],
 //! which attaches the device secret and reads the helm's build stamp off the
@@ -730,7 +731,8 @@ fn retire_template_choice(slot: &mut FieldWrite, name: &str) {
 
 /// One optional caller waiting for the field's newest choice to settle.
 ///
-/// Rename needs a successful persistence acknowledgment. Delete instead needs
+/// Restoring confirmations and renaming a template need a successful persistence
+/// acknowledgment. Delete instead needs
 /// the old request to end and its matching dirty intent retired before DELETE;
 /// the helm then clears only a matching mark, preserving another client's choice.
 struct PreferenceCompletion {
@@ -986,16 +988,18 @@ impl Drop for WriterGuard {
 /// Record one changed field of the shared preference and see that it
 /// reaches the helm, in order.
 ///
-/// Fire-and-forget by contract (SPEC.md, Errors and diagnostics: the
-/// preference is the one best-effort exception): the choice has already
-/// taken effect in this client before any request leaves, and a failure
+/// Fire-and-forget for best-effort choices (SPEC.md, Errors and diagnostics):
+/// the choice has already taken effect in this client before any request
+/// leaves, and a failure
 /// costs the NEXT launch its convenience, never this one its choice —
 /// failures are logged here, not surfaced. Always a one-field patch,
 /// because the row is shared and a whole-row write would carry this
 /// client's stale copy of the other field over whatever another client
 /// wrote since. Same-field writes are serialized latest-wins through
 /// [`PreferenceWrites`] so a burst of changes cannot land on the helm in
-/// reverse order.
+/// reverse order. Restoring session confirmations uses
+/// [`restore_session_confirmations`] instead, since losing that save can
+/// restore an older opt-out on reload.
 pub(crate) fn store_preference(base: &str, value: PreferenceValue) {
     let field = value.field();
     if preference_writes().record(value) {
@@ -1065,7 +1069,8 @@ fn spawn_preference_writer(base: String, field: PreferenceField) {
 }
 
 /// One `PUT /api/preferences` carrying a single-field patch. Failures are
-/// logged and reported to the queue, never surfaced.
+/// logged and reported to the queue; callers observing completion decide
+/// whether their operation needs a visible error.
 async fn send_preference_patch(base: &str, value: &PreferenceValue) -> bool {
     let url = format!("{base}/api/preferences");
     let patch = serde_json::json!({ value.field().key(): value.wire_value() });
@@ -1093,6 +1098,27 @@ pub(crate) async fn write_template_binding(base: &str, value: PreferenceValue) -
         field,
         PreferenceField::QuickLaunchTemplate | PreferenceField::TemplateShortcuts
     ));
+    preference_write_completion(base, value).await
+}
+
+/// Queue restoration now, before the caller spawns its completion waiter.
+///
+/// Deferring the enqueue to an async task could put this click behind a newer
+/// fire-and-forget opt-out. The owned future reports false for a failed or
+/// superseded write; the caller must reject completions from older clicks.
+pub(crate) fn restore_session_confirmations(base: &str) -> impl Future<Output = bool> + use<> {
+    preference_write_completion(base, PreferenceValue::SessionConfirmations(false))
+}
+
+/// Attach an acknowledgment without making the component own the writer.
+///
+/// Recording is synchronous so mixed observed and unobserved writes retain
+/// click order. Dropping the returned waiter never cancels the queued save.
+fn preference_write_completion(
+    base: &str,
+    value: PreferenceValue,
+) -> impl Future<Output = bool> + use<> {
+    let field = value.field();
     let (sender, receiver) = futures_channel::oneshot::channel();
     let start = preference_writes().record_with_completion(
         value,
@@ -1104,7 +1130,7 @@ pub(crate) async fn write_template_binding(base: &str, value: PreferenceValue) -
     if start {
         spawn_preference_writer(base.to_string(), field);
     }
-    receiver.await.unwrap_or(false)
+    async move { receiver.await.unwrap_or(false) }
 }
 
 /// Refresh shortcut bindings without discarding unconfirmed local choices.

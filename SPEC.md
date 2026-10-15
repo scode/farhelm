@@ -2197,14 +2197,17 @@ the agent creates it.
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
   operation succeeded when it failed. Three best-effort exceptions log a failure but stay silent rather than surfacing
   it: the helm-side preference (list order, last selection, compact layout, and the host setup and removal confirmation
-  choices, the session-confirmation opt-out, and the feedback contact), because losing next-launch convenience must not
-  turn a choice that already took effect into a failed current operation, and a helm that lost the preference falls back
-  to the defaults; and the automatic "mark seen" a session's own opening or activity advance triggers (see Status),
-  because a lost automatic mark costs nothing worse than a dot that is one open-and-close cycle behind, corrected by the
-  next successful write; and marking a session's notifications read when their list closes (see Status), for the same
-  reason: a lost mark costs a bell that stays loud until the list is next closed. The manual "mark unread"/"mark read"
-  toggle and the notification list's clear button are not covered — a failed toggle or clear surfaces like any other
-  operation.
+  choices, turning the session-confirmation opt-out on, and the feedback contact), because losing next-launch
+  convenience must not turn a choice that already took effect into a failed current operation, and a helm that lost the
+  preference falls back to the defaults; and the automatic "mark seen" a session's own opening or activity advance
+  triggers (see Status), because a lost automatic mark costs nothing worse than a dot that is one open-and-close cycle
+  behind, corrected by the next successful write; and marking a session's notifications read when their list closes (see
+  Status), for the same reason: a lost mark costs a bell that stays loud until the list is next closed. The manual "mark
+  unread"/"mark read" toggle and the notification list's clear button are not covered — a failed toggle or clear
+  surfaces like any other operation. Turning the session-confirmation opt-out off restores confirmations immediately in
+  the current client; if that save fails while Settings is still open, Settings shows an adjacent error saying
+  confirmations may still be off for this helm and to try again. Closing Settings before the save settles drops that
+  error, so the failure is then only logged. A newer switch choice clears the error and supersedes older save results.
 - Connection state per host is always visible in the host list; reconnection uses bounded retries followed by periodic
   low-frequency re-probing, so a host that comes back overnight resurfaces by itself. Actions stay in each row's menu,
   with the older-host update button also available inline, while the global details disclosure shows the evidence and
