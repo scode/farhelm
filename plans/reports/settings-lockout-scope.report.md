@@ -67,3 +67,43 @@ commit and PR wording passed a fresh gpt-6.1-sol reader at medium effort.
 Implementation stayed in the main agent under the plan's no-workhorse requirement. Required review artifacts and
 decisions are retained privately. External review usage is retained without inferring exact reported model attribution;
 native and main-agent usage are unavailable. The separate native report cold read is part of delivery.
+
+### Landing
+
+Landed as #2032, the first of the round's two plans; goose-named-restart-test (#2033), a supervisor test with no
+interaction with this one, landed after it. While this landing ran, main also gained a change to the release brick-test
+tooling and the report for click-to-open-paths (next round); neither touches host settings. The rebase met the TODO.md
+entry for the stale compact-rows test, which its own plan had just removed; both removals were kept.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. Only the setup and uninstall confirmations open a dialog.
+Both still block Settings on every host from preparation until the plan is gone, including the local host's automatic
+setup check, with no gap at the handover from preparing to a waiting plan. A one-click Update or Update all never opens
+one. The host doing an Update still keeps its own Settings unavailable, and every other use of the broader busy state is
+unchanged.
+
+#### Fix made while landing
+
+The new browser test "Update planning keeps only its own Settings unavailable" let its held planning request through at
+teardown. The page could then claim that plan and submit a real Update while the test shut down, a nondeterministic step
+that could leak into later tests. The held request is now failed at teardown, as the neighbouring uninstall test already
+does.
+
+#### Note left as is
+
+Already possible before this change: the local host's automatic setup check can open its confirmation while Settings is
+open on another host, if the local supervisor stops at that moment, and stack two dialogs. This change only lengthens
+the time Settings can be open, since it now stays usable during another host's Update. A possible follow-up is to defer
+the automatic check while a Settings dialog is open.
+
+#### Checks
+
+- Run now:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker;
+  - `cargo clippy --all-targets -- -D warnings` and `cargo check -p farhelm-ui --features desktop`;
+  - the UI crate in full with the desktop feature through the recorder, run `860a8caf-5e64-4678-a847-5eb280de51dd`: 633
+    passed, none skipped;
+  - the provisioning, settings and hover-coverage specs on Chromium and WebKit with the teardown fix in, run
+    `a7ee2fa7-ba08-40c2-a2ed-f9567a2824ad`: 140 passed, none failed.
+- Not run: other browser specs and the Rust workspace beyond the UI crate; nothing else changed.
