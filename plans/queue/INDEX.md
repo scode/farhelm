@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing 63b9e1] `adopt-identity-escaping.md` — Adopt prompt: distinct installation identities never render alike
 - [in-flight 5ba68a] `template-editor-unsafe-values.md` — Template editor shows hidden characters in model and folder, read-only like commands
 - [complete] `checkout-recovery-host-binding.md` — Agent creates into managed checkouts: retry replay bound to the asking host
-- [in-flight 74ab98] `claude-trust-decimals.md` — Claude checkout trust edits keep unrelated numbers in Claude's settings exact
+- [complete] `claude-trust-decimals.md` — Claude checkout trust edits keep unrelated numbers in Claude's settings exact
 - [in-flight 5a86d6] `ntfy-token-server-change.md` — Waiting alerts: changing the ntfy server's origin drops the saved token, and Settings says so
 - [pending] `codex-guide-hook-warning.md` — Codex docs page stops calling the hook warning harmless
 - [pending] `browser-test-cleanup.md` — Browser tests clean up their sessions, templates, preferences and fixtures even when an earlier step fails (20 triage outcomes, each gated)
