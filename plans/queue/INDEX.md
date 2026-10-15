@@ -8,7 +8,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `trash-unchecked-wording.md` — Trash cleanup's unchecked-entry text warns that verifiable entries are deleted permanently
 - [in-flight d7c81a] `adopt-identity-escaping.md` — Adopt prompt: distinct installation identities never render alike
 - [in-flight 5ba68a] `template-editor-unsafe-values.md` — Template editor shows hidden characters in model and folder, read-only like commands
-- [pending] `checkout-recovery-host-binding.md` — Agent creates into managed checkouts: retry replay bound to the asking host
+- [in-flight 2005f7] `checkout-recovery-host-binding.md` — Agent creates into managed checkouts: retry replay bound to the asking host
 - [pending] `claude-trust-decimals.md` — Claude checkout trust edits keep unrelated numbers in Claude's settings exact
 - [pending] `ntfy-token-server-change.md` — Waiting alerts: changing the ntfy server's origin drops the saved token, and Settings says so
 - [pending] `codex-guide-hook-warning.md` — Codex docs page stops calling the hook warning harmless
