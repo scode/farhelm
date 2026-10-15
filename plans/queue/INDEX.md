@@ -4,5 +4,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `pin-sessions.md` — Pin sessions to the top of the sidebar from the row menu: pin icon, separator, shared across clients, carried over on Replace
 - [landing 58a1d2] `detect-mid-session-yolo.md` — The shield turns YOLO when an agent's status line shows its no-checks mode (Claude, Grok, Muse, Cursor), best effort
-- [in-flight fc0112] `ordered-gui-helm-requests.md` — The GUI holds a request back only until its own earlier configuration saves are answered, fixing two save/read races
+- [complete] `ordered-gui-helm-requests.md` — The GUI holds a request back only until its own earlier configuration saves are answered, fixing two save/read races
 - [pending] `claude-trust-prompt.md` — Opt-in setting to pre-trust managed checkouts in Claude's config, with a hint band when Claude asks
