@@ -23,6 +23,46 @@ async function deleteTemplate(request: APIRequestContext, name: string) {
   expect(response.ok() || response.status() === 404, `deleting template ${name}`).toBe(true);
 }
 
+/** Older stored commands must reach save validation unchanged. The current
+ * API deliberately refuses these values, so the existing list interception
+ * supplies an old-rules row; any attempted PUT is counted and refused.
+ */
+for (const field of ["command", "resume_command"] as const) {
+  test(`older template ${field} stays read-only without bypassing save refusal`, async ({ page }) => {
+    const name = `legacy-command-${field}-${Date.now()}`;
+    const fields = { kind: "command", yolo: false, command: "echo safe", resume_command: "echo resume", [field]: "echo 'first\r\nsecond'" };
+    let writes = 0;
+    await page.route("**/api/templates", async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ response, json: { ...body, templates: [...body.templates, { name, fields }] } });
+    });
+    await page.route("**/api/templates/*", async route => {
+      if (route.request().method() === "PUT") writes++;
+      await route.fulfill({ status: 400, body: "old template must not be written" });
+    });
+    await page.goto("/");
+    await page.locator(".templates-button").click();
+    const dialog = page.locator(".templates-dialog");
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    await dialog.locator(".templates-row-name").getByText(name, { exact: true }).click();
+    const command = dialog.locator(field === "command" ? ".templates-command" : ".templates-resume");
+    const other = dialog.locator(field === "command" ? ".templates-resume" : ".templates-command");
+    await expect(command).toHaveJSProperty("readOnly", true);
+    await expect(other).toBeEditable();
+    await expect(dialog.locator(".templates-command-readonly")).toContainText("Remove this field with ✕ and add it again");
+    const rendered = await command.inputValue();
+    await command.focus();
+    await expect(command).toBeFocused();
+    await page.keyboard.press("End");
+    await page.keyboard.type("changed");
+    await expect(command).toHaveValue(rendered);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-error").last()).toContainText("control or invisible formatting characters");
+    expect(writes, "the untouched raw command must still fail local shape validation").toBe(0);
+  });
+}
+
 /** Keys move between saved names independently of the bolt. Keyboard Escape
  * closes only the nested menu; rename must retain the key, while delete/Undo
  * retires it permanently. An ineligible saved name still offers removal.

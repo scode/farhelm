@@ -28,9 +28,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   template containing joined emoji or hidden characters offers Undo, but Undo always fails and the retained copy
   expires.
 
-- [`legacy-template-edit-sanitizes-before-save-refusal.md`](legacy-template-edit-sanitizes-before-save-refusal.md) —
-  Editing a legacy multiline template command can silently change its argument text and then save successfully.
-
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 
