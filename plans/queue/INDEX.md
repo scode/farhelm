@@ -7,7 +7,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `triage-power-loss-spec.md` — Spec: downloads and new checkouts need not survive a power loss (two triage outcomes)
 - [complete] `triage-trusted-host-values-spec.md` — Spec: the user's own host names and paths are trusted in copied SSH help commands (two triage outcomes)
 - [in-flight 5272c6] `triage-hand-edited-units-spec.md` — Spec: a hand-edited Farhelm service voids setup and uninstall guarantees (two triage outcomes)
-- [pending] `triage-highest-discards.md` — Remove seven discarded review findings from the queue
+- [in-flight edb852] `triage-highest-discards.md` — Remove seven discarded review findings from the queue
 - [pending] `confirmations-save-error.md` — Settings shows an error when turning session confirmations back on fails to save
 - [pending] `legacy-template-edits-gated.md` — Older templates: no silent command edits and no Undo that cannot work, only if trivially fixable
 - [pending] `post-clone-carriage-return-gated.md` — Post-clone command: no silent carriage-return changes on edit, only if trivially fixable
