@@ -10,3 +10,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`triage-trusted-host-values-spec`](reports/triage-trusted-host-values-spec.report.md) landed 2026-10-15 in #2040, #2042: Spec: the user's own host names and paths are trusted in copied SSH help commands (two triage outcomes)
 - [`triage-hand-edited-units-spec`](reports/triage-hand-edited-units-spec.report.md) landed 2026-10-15 in #2041, #2049: Spec: a hand-edited Farhelm service voids setup and uninstall guarantees (two triage outcomes)
 - [`triage-highest-discards`](reports/triage-highest-discards.report.md) landed 2026-10-15 in #2050: Remove seven discarded review findings from the queue
+- [`triage-conversation-tracking-spec`](reports/triage-conversation-tracking-spec.report.md) landed 2026-10-15 in #2038, #2044, #2045, #2046, #2047, #2048: Spec: Restart may resume the previous conversation in the cases the maintainer accepted (six triage outcomes)

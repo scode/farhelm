@@ -83,3 +83,45 @@ decisions, attempts, outcomes and exposed external usage; native/main usage and 
 unavailable. A second executor resumed the published drafts after the first returned its claim with the report gate
 incomplete. The resumed run completed a fresh native resume check and the separate native report cold read before
 delivery; no new source-review or runtime claims are inferred from those process checks.
+
+### Landing
+
+Landed as #2038, #2044, #2045, #2046, #2047 and #2048, bottom-up, the round's only plan. Since the stack's base, main
+had gained only plan bookkeeping; nothing touched the specification, the triage ledger or the review feedback index.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. It confirmed that all three of the maintainer's cases are in
+the new Durability and resume paragraph, that each of the six findings is closed under the case its ledger entry
+records, that the prohibition on lasting damage and the process-cleanup and host-destination exceptions are intact, that
+SPEC_impl.md contradicts nothing, and that each PR removes only its own feedback file and index entry and changes only
+its own Execution field.
+
+#### Fixes made while landing
+
+- The specification change had deleted the 2026-10-10 clause accepting that, after a crash at one exact moment or two
+  coinciding rare faults, a session's recorded conversation may be wrong, so Restart may resume a different conversation
+  of that agent. None of the three new cases covers a conversation that is neither the previous one nor one Farhelm
+  stopped updating, so deleting the clause would have quietly turned an accepted outcome back into a defect. The plan
+  asked for a reconciliation, not a removal. The clause is restored, now as an exception to Restart resuming the
+  conversation the agent last reported, with a pointer to the new limits.
+- Two of the findings (a report discarded by Restart's own drain, and one lost to a reboot) are closed under the
+  brief-window case, yet Farhelm never learns the conversation the agent had switched to, which literally reads as the
+  "never learns of" defect. The brief-window sentence now also accepts Farhelm continuing with the conversation Restart
+  resumed, so those findings cannot be filed again under the defect case.
+- The sentence applying the limits to every harness now says a resume they accept is not the lost user work that the
+  partial-integration allowance excludes.
+
+#### Left as is
+
+- Two docs pages promise more than the specification now does. The page on how Farhelm adds its hooks to agents says a
+  restart resumes the conversation you were actually in after `/clear` or `/new`, and the Codex page says Restart
+  resumes the new conversation once Codex has finished its next reply. Both are true in the usual case but ignore the
+  accepted brief window and stopped-tracking cases. A wording follow-up for the maintainer to decide.
+- Nits: "by clicking" (the maintainer's words) does not name what is clicked, and the opening sentence of Durability and
+  resume reads awkwardly after the edit.
+
+#### Checks
+
+- Run now: `dprint check` on SPEC.md after the fix; no conflict markers on main after the stack landed.
+- Not run: anything else; only Markdown changed.
