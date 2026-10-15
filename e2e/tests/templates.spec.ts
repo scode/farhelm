@@ -50,7 +50,8 @@ for (const field of ["command", "resume_command"] as const) {
     const other = dialog.locator(field === "command" ? ".templates-resume" : ".templates-command");
     await expect(command).toHaveJSProperty("readOnly", true);
     await expect(other).toBeEditable();
-    await expect(dialog.locator(".templates-command-readonly")).toContainText("Remove this field with ✕ and add it again");
+    await expect(dialog.locator(".templates-value-readonly")).toContainText("Remove this field with ✕ and add it again");
+    await expect(command).toHaveValue("echo 'first<U+000D><U+000A>second'");
     const rendered = await command.inputValue();
     await command.focus();
     await expect(command).toBeFocused();
@@ -62,6 +63,71 @@ for (const field of ["command", "resume_command"] as const) {
     expect(writes, "the untouched raw command must still fail local shape validation").toBe(0);
   });
 }
+
+/** Host-derived model and folder values must be visibly escaped without
+ * storing the display spelling. A real API seed and later reads distinguish
+ * raw-byte preservation from an input that silently rewrites its own display.
+ * Removing and re-adding each field must restore ordinary editing.
+ */
+test("unsafe template model and folder stay raw until explicitly replaced", async ({ page, request }) => {
+  const name = `unsafe-values-${Date.now()}`;
+  const fields = { kind: "agent", agent: "claude", model: "model\u200b", destination: { folder: "/tmp/\u202eproject\r\nnext" }, name: "before" };
+  const suggested = "suggested\u200b";
+  await page.route("**/api/launch-catalog", async route => {
+    const response = await route.fetch();
+    const catalog = await response.json();
+    const seed = catalog.find((model: any) => model.harness === "claude");
+    expect(seed, "the real catalog must offer a Claude model for this fixture").toBeTruthy();
+    await route.fulfill({ response, json: [...catalog, { ...seed, id: suggested }] });
+  });
+  try {
+    await putTemplate(request, name, fields);
+    expect((await storedTemplate(request, name)).fields).toEqual(fields);
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-row-name").getByText(name, { exact: true }).click();
+    await expect(dialog.locator(".templates-model")).toHaveValue("model<U+200B>");
+    await expect(dialog.locator(".templates-destination")).toHaveValue("/tmp/<U+202E>project<U+000D><U+000A>next");
+    for (const field of ["model", "destination"]) {
+      const input = dialog.locator(`.templates-${field}`);
+      await expect(input).toHaveJSProperty("readOnly", true);
+      await expect(dialog.locator(`.templates-set-field[data-field="${field}"] .templates-value-readonly`)).toContainText("Remove this field with ✕ and add it again");
+      await input.focus();
+      await expect(input).toBeFocused();
+      await page.keyboard.press("End");
+      await page.keyboard.type("changed");
+    }
+    await dialog.locator(".templates-session-name").fill("after");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields).toEqual({ ...fields, name: "after" });
+    for (const field of ["model", "destination"]) {
+      await dialog.getByRole("button", { name: `remove ${field}`, exact: true }).click();
+    }
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields).toEqual({ kind: "agent", agent: "claude", name: "after" });
+    for (const [field, value] of [["model", "replacement model"], ["destination", "/tmp/replacement"]]) {
+      await addField(dialog, field);
+      const input = dialog.locator(`.templates-${field}`);
+      await expect(input).toBeEditable();
+      await input.fill(value);
+    }
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields).toEqual({ kind: "agent", agent: "claude", name: "after", model: "replacement model", destination: { folder: "/tmp/replacement" } });
+    const suggestion = dialog.getByRole("button", { name: "suggested<U+200B>", exact: true });
+    await expect(suggestion).toBeVisible();
+    await expect(suggestion).toHaveAttribute("data-tooltip", "set model to suggested<U+200B>");
+    await suggestion.click();
+    await expect(dialog.locator(".templates-model")).toHaveValue("suggested<U+200B>");
+    await expect(dialog.locator(".templates-model")).toHaveJSProperty("readOnly", true);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields.model).toBe(suggested);
+  } finally {
+    await deleteTemplate(request, name);
+  }
+});
 
 /** Old-rules templates cannot be restored through today's save path. Supply
  * them at the list API boundary and prove the warning precedes the DELETE;

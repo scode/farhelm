@@ -391,6 +391,29 @@ impl Field {
         }
     }
 
+    /// Unsafe text is a display-only escape, never a replacement draft value.
+    /// Single-line inputs can erase controls and conceal host-supplied model or
+    /// folder text. Keep the raw seed untouched until the field is removed or
+    /// replaced through another explicit control, including a model suggestion.
+    fn escaped_read_only_value(self, f: &TemplateFields) -> Option<String> {
+        let value = match self {
+            Self::Command => f.command.as_deref(),
+            Self::Resume => f.resume_command.as_ref().and_then(|v| v.as_deref()),
+            Self::Model => f.model.as_ref().and_then(|v| v.as_deref()),
+            Self::Destination => match &f.destination {
+                Some(TemplateDestination::Folder(v) | TemplateDestination::Github(v)) => {
+                    Some(v.as_str())
+                }
+                None => None,
+            },
+            _ => None,
+        }?;
+        value
+            .chars()
+            .any(farhelm_proto::text::is_presentation_unsafe)
+            .then(|| display_peer(value))
+    }
+
     /// Add an editable value without choosing another field on the user's
     /// behalf. In particular, model/effort/trust do not require an agent type.
     fn add(self, f: &mut TemplateFields) {
@@ -790,8 +813,9 @@ fn Choice(
 /// Changes only update the draft; they never clear another field to make it fit.
 /// Text fields keep literal commands, paths, model IDs and chosen names:
 /// browser correction and remembered form values must not rewrite them.
-/// Older commands rejected by today's shape check stay read-only: a text
-/// input can strip their newlines before an edit reaches save validation.
+/// Unsafe model, destination and command text is escaped and read-only so a
+/// browser edit cannot silently change its bytes. The draft keeps the original
+/// until an explicit replacement; old commands still reach save validation raw.
 #[component]
 fn FieldEditor(
     field: Field,
@@ -801,16 +825,8 @@ fn FieldEditor(
     disabled: bool,
 ) -> Element {
     let current = draft().fields;
-    let command_read_only = match field {
-        Field::Command => current.command.as_deref(),
-        Field::Resume => current.resume_command.as_ref().and_then(|v| v.as_deref()),
-        _ => None,
-    }
-    .is_some_and(|command| {
-        command
-            .chars()
-            .any(farhelm_proto::text::is_presentation_unsafe)
-    });
+    let escaped = field.escaped_read_only_value(&current);
+    let text_read_only = escaped.is_some();
     let flags_seed = current
         .permission_flags
         .as_ref()
@@ -827,7 +843,8 @@ fn FieldEditor(
             }
         },
         Field::Model => {
-            let value = current.model.clone().flatten().unwrap_or_default();
+            let value =
+                escaped.unwrap_or_else(|| current.model.clone().flatten().unwrap_or_default());
             // Show alternatives even for a saved or custom model. Filtering by
             // the current value would hide the catalog unless the user cleared it.
             let suggestions: Vec<_> = current
@@ -850,17 +867,17 @@ fn FieldEditor(
             rsx! {
                 label { class: "templates-field",
                     span { "model" }
-                    input { class: "templates-model", r#type: "text", value: "{value}", disabled, placeholder: "default, or type any model",
+                    input { class: "templates-model", r#type: "text", value: "{value}", disabled, readonly: text_read_only, placeholder: "default, or type any model",
                         autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                         "data-tooltip": "model: type any model; suggestions follow the agent type this template sets",
-                        oninput: move |event| draft.with_mut(|d| d.fields.model = Some((!event.value().is_empty()).then(|| event.value()))),
+                        oninput: move |event| { if !text_read_only { draft.with_mut(|d| d.fields.model = Some((!event.value().is_empty()).then(|| event.value()))); } },
                     }
                 }
                 if !suggestions.is_empty() {
                     div { class: "templates-model-suggestions", role: "group", aria_label: "model suggestions",
                         for id in suggestions {
                             button { r#type: "button", class: "templates-suggestion", disabled,
-                                "data-tooltip": "set model to {id}", onclick: move |_| draft.with_mut(|d| d.fields.model = Some(Some(id.clone()))), "{id}"
+                                "data-tooltip": "set model to {display_peer(&id)}", onclick: move |_| draft.with_mut(|d| d.fields.model = Some(Some(id.clone()))), "{display_peer(&id)}"
                             }
                         }
                     }
@@ -906,9 +923,9 @@ fn FieldEditor(
         Field::Command => rsx! {
             label { class: "templates-field",
                 span { "command" }
-                input { class: "templates-command templates-code", value: current.command.unwrap_or_default(), disabled, readonly: command_read_only, placeholder: "agent-tool {{farhelm_args}}",
+                input { class: "templates-command templates-code", value: escaped.unwrap_or_else(|| current.command.unwrap_or_default()), disabled, readonly: text_read_only, placeholder: "agent-tool {{farhelm_args}}",
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "command: the command this template puts in the launcher", oninput: move |e| { if !command_read_only { draft.with_mut(|d| d.fields.command = Some(e.value())); } },
+                    "data-tooltip": "command: the command this template puts in the launcher", oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.command = Some(e.value())); } },
                 }
             }
             span { class: "templates-hint", "Placeholders: {{cwd}} for the folder and {{farhelm_args}} for Farhelm's integration arguments; each must be a whole argument." }
@@ -916,9 +933,9 @@ fn FieldEditor(
         Field::Resume => rsx! {
             label { class: "templates-field",
                 span { "resume command" }
-                input { class: "templates-resume templates-code", value: current.resume_command.flatten().unwrap_or_default(), disabled, readonly: command_read_only, placeholder: "default, or agent-tool --resume {{conversation}} {{farhelm_args}}",
+                input { class: "templates-resume templates-code", value: escaped.unwrap_or_else(|| current.resume_command.flatten().unwrap_or_default()), disabled, readonly: text_read_only, placeholder: "default, or agent-tool --resume {{conversation}} {{farhelm_args}}",
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "resume command: an empty input resets it to the default", oninput: move |e| { if !command_read_only { draft.with_mut(|d| d.fields.resume_command = Some((!e.value().is_empty()).then(|| e.value()))); } },
+                    "data-tooltip": "resume command: an empty input resets it to the default", oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.resume_command = Some((!e.value().is_empty()).then(|| e.value()))); } },
                 }
             }
             span { class: "templates-hint", "An empty input sets the default. Placeholders: {{cwd}}, {{farhelm_args}}, {{conversation}}; each must be a whole argument." }
@@ -965,10 +982,10 @@ fn FieldEditor(
                     }
                     label {
                         span { if github { "repository" } else { "folder path" } }
-                        input { class: "templates-destination", value, disabled, placeholder: if github { "owner/name" } else { "/path/to/project" },
+                        input { class: "templates-destination", value: escaped.unwrap_or(value), disabled, readonly: text_read_only, placeholder: if github { "owner/name" } else { "/path/to/project" },
                             autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                             "data-tooltip": if github { "repository: each session gets a managed checkout" } else { "folder path: the working folder on the selected host" },
-                            oninput: move |e| draft.with_mut(|d| d.fields.destination=Some(if github { TemplateDestination::Github(e.value()) } else { TemplateDestination::Folder(e.value()) })),
+                            oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.destination=Some(if github { TemplateDestination::Github(e.value()) } else { TemplateDestination::Folder(e.value()) })); } },
                         }
                     }
                 }
@@ -979,7 +996,7 @@ fn FieldEditor(
     rsx! {
         div { class: if refusal.is_some() { "templates-set-field templates-incompatible" } else { "templates-set-field" }, "data-field": field.key(),
             div { class: "templates-field-controls", {controls}
-                if command_read_only { p { class: "templates-hint templates-command-readonly", "This command contains a control or invisible character this editor cannot preserve. Remove this field with ✕ and add it again to replace the command." } }
+                if text_read_only { p { class: "templates-hint templates-value-readonly", "This field contains characters this editor cannot show directly; they are shown as escapes. Remove this field with ✕ and add it again to replace its value." } }
                 if let Some(ref message)=refusal { p { class: "templates-error", "{message}" } }
             }
             button { class: "templates-remove", r#type: "button", disabled, aria_label: "remove {label}", "data-tooltip": "remove {label}: this template will leave it as is",
@@ -1673,6 +1690,81 @@ pub(super) fn TemplatesDialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// All single-line peer-text fields share the read-only boundary, so a
+    /// model or folder cannot conceal bytes that commands already protect.
+    /// Ordinary Unicode, absent values and resets must stay editable.
+    #[test]
+    fn unsafe_editor_values_require_read_only_escaped_display() {
+        for (raw, shown) in [
+            ("model\u{200b}", "model<U+200B>"),
+            ("/tmp/\u{202e}project", "/tmp/<U+202E>project"),
+            ("first\r\nsecond", "first<U+000D><U+000A>second"),
+        ] {
+            let fields = TemplateFields {
+                model: Some(Some(raw.into())),
+                destination: Some(TemplateDestination::Folder(raw.into())),
+                command: Some(raw.into()),
+                resume_command: Some(Some(raw.into())),
+                ..Default::default()
+            };
+            for field in [
+                Field::Model,
+                Field::Destination,
+                Field::Command,
+                Field::Resume,
+            ] {
+                assert_eq!(
+                    field.escaped_read_only_value(&fields).as_deref(),
+                    Some(shown)
+                );
+            }
+            let repository = TemplateFields {
+                destination: Some(TemplateDestination::Github(raw.into())),
+                ..Default::default()
+            };
+            assert_eq!(
+                Field::Destination
+                    .escaped_read_only_value(&repository)
+                    .as_deref(),
+                Some(shown)
+            );
+        }
+        for raw in ["", "ordinary model", "/tmp/项目", "literal<U+200B>"] {
+            let fields = TemplateFields {
+                model: Some(Some(raw.into())),
+                destination: Some(TemplateDestination::Folder(raw.into())),
+                command: Some(raw.into()),
+                resume_command: Some(Some(raw.into())),
+                ..Default::default()
+            };
+            for field in [
+                Field::Model,
+                Field::Destination,
+                Field::Command,
+                Field::Resume,
+            ] {
+                assert_eq!(field.escaped_read_only_value(&fields), None);
+            }
+        }
+        let reset = TemplateFields {
+            model: Some(None),
+            resume_command: Some(None),
+            ..Default::default()
+        };
+        for field in [
+            Field::Model,
+            Field::Destination,
+            Field::Command,
+            Field::Resume,
+        ] {
+            assert_eq!(
+                field.escaped_read_only_value(&TemplateFields::default()),
+                None
+            );
+            assert_eq!(field.escaped_read_only_value(&reset), None);
+        }
+    }
 
     /// Moving and renaming keys must preserve the helm's one-key-per-template
     /// contract, including a stale binding already naming the rename target.
