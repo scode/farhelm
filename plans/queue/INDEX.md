@@ -4,5 +4,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `settings-lockout-scope.md` — keep other hosts' Settings usable during a one-click Update; block it only while a setup or uninstall confirmation may open
 - [landing 42d8f4] `compact-rows-test.md` — update the compact-rows and OMP composer browser tests to the permission wording since the guarded mode
-- [in-flight 8b1d69] `goose-named-restart-test.md` — supervisor test that a named Goose restart clears the captured conversation in memory and a definitive failure restores it
+- [complete] `goose-named-restart-test.md` — supervisor test that a named Goose restart clears the captured conversation in memory and a definitive failure restores it
 - [in-flight 94b8cd] `click-to-open-paths.md` — Cmd-click a terminal file path in the desktop app to save and open it (.md, .txt, .html only), plus the redesigned file hover
