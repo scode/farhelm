@@ -80,3 +80,71 @@ Implementation and investigation stayed in the main session, as required. Privat
 `e81ebbb6-031d-4d50-93f6-ff1f857d5edb` retains review decisions, outcomes and raw external counters. Some events were
 recorded retrospectively; exact served-model attribution and native-reader/main-session usage are unavailable. No token
 totals or cost claims were inferred. The report receives its own native cold read before delivery.
+
+### Landing
+
+Landed as #2055, the round's only plan. Since its base, main had gained the two Settings fixes (#2054, #2053), which
+touch neither the launcher nor the permission defaults; the rebase was clean.
+
+#### Review
+
+An independent fresh-context review confirmed the security core. Every agent that offers Guarded now defaults to it for
+new launches, enforced by a test, while Pi, OpenCode and Goose stay YOLO and Cursor keeps its own setting. Stored
+launches keep their recorded meaning: an OMP launch stored without a permission still means YOLO for Restart, the row's
+shield, the YOLO confirmation and approval cards. Recents, templates and Clone prefill now read an omitted OMP
+permission as Guarded, which only ever makes a launch safer. There is no wire change: the helm fills in omitted
+permissions and supervisors receive only the compiled command, so mixing versions cannot turn a new omission into YOLO;
+the latest public release is protocol 47, before Guarded existed. The banner covers agent clicks, search, templates
+without a permission and cross-agent model picks, and never deliberate choices; its Undo is fenced by the notice, the
+launcher opening and the busy lock, and cannot revive a submitted launch. The change adds no per-harness branches in
+shared code.
+
+#### Fixes made while landing
+
+- Two existing browser tests still expected OMP to default to YOLO and would have failed: the remembered-permissions
+  check that YOLO defaults do not spill into the next agent (OMP removed from its list, as the PR had done for the
+  matching sidebar loop) and the OMP composer test (now expects Guarded; its comments distinguish stored launches, which
+  keep YOLO, from new ones).
+- The JS harness, which the executor did not run, lints the stylesheet and refused the banner's alternating highlight
+  because it set only `animation-name`; it now uses the full `animation` shorthand, and reduced motion still turns it
+  off.
+- `farhelm`'s `--permissions` help still said OMP defaults to YOLO; it now says agents that offer guarded default to it.
+  Three code comments said the same and were corrected.
+- The docs agent table's OMP tooltip said "YOLO by default"; the launcher page now mentions the red banner and its Undo;
+  "unless you chose or remembered another mode" now says the launcher remembers.
+- At phone width the launcher's padding is 16px, not 24px, so the banner would have stuck out sideways and been clipped
+  at the top; it now uses the narrower offsets there.
+- Clicking a recent replaces the whole draft but left an earlier banner in place, describing a switch that no longer
+  applied, with an Undo that would throw the recent away; a recent now clears it.
+- The reduced-motion test only checked the outline width, which holds either way; it now also checks that the highlight
+  animation is off. The stylesheet comment claiming nothing else sets `animation-play-state` was corrected, and two
+  sidebar test docstring and title leftovers were fixed.
+
+#### Left as is
+
+- Four launcher browser specs fail on both engines and appear to predate this plan: `composer-word-search`,
+  `cursor-composer`, `goose-pi-composer` and `grok-composer` count the permission picker's buttons or search for a
+  "Permissions: default" option, and the counts match the guarded and custom-flag buttons added by #1992 and #1995 and
+  the rename of "default" to "guarded" there. This plan does not change the picker. They were not run on main to
+  confirm. Fixing them is a test-only follow-up.
+- A template that resets the permission to default counts as a deliberate choice and shows no banner; only a template
+  that leaves the field out counts as automatic. A `harness:` search accepted from the Command tab changes the hidden
+  agent draft without a banner, because the mode was not on screen. Both defensible.
+- Nits: a test name still says "default-YOLO" for templates, and one Rust test lists the Guarded harnesses by hand.
+- Suspected, not seen in this run: a sticky banner could cover top controls in other specs that switch from a Guarded
+  agent to Pi, OpenCode, Goose or Cursor.
+
+#### Checks
+
+- Run now, on the rebased change with all fixes in:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (299 delays, none missing a
+    reason);
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the UI crate's clippy
+    with the desktop feature and `cargo check -p farhelm-desktop`;
+  - the protocol, helm and supervisor packages in full through the recorder with pinned tmux: 2361 passed, 2 skipped;
+  - the UI crate in full with the desktop feature, run `e96fdaaf-2f04-41b8-91e1-46a827b8735b`: 635 passed;
+  - the JS harness (248 passed) and the website build;
+  - twenty launcher, permission, template, clone, replace, sidebar and tooltip-coverage specs on Chromium and WebKit,
+    run `9fb35708-4387-4a36-8612-b6aef47c21a6`: 552 passed, 8 failed, the four pre-existing specs above on each engine.
+- An earlier run with the original change stopped at the JS harness failure described above.
+- Not run: the rest of the Rust workspace and other browser specs.
