@@ -13790,7 +13790,7 @@
   lib directory was removed skips the tmux cleanup and goes on to forget the host. The updated real-user-manager
   regression covers the stale-socket and missing-client combination without manual socket removal. Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/remote-uninstall-fixes.md`.
 
 ## claude-trust-tests-compare-lexical-temp-paths.md
 
@@ -13816,7 +13816,7 @@
   If more than canonicalizing fixture paths is needed, stop and return the item.
 - Completion criteria: both tests pass whether or not the temporary root is a symlink, and each states the canonical
   premise before the trust operation. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/rust-test-portability.md`.
 
 ## host-picker-folded-letter-cycling-misses-dotted-i.md
 
@@ -13839,7 +13839,7 @@
 - Completion criteria: two İ presses within a second move from the first İ-prefixed host to the next one, and ASCII
   repeat and multi-letter prefixes behave as before. A unit test covers İ, ASCII repetition and a mixed prefix. Remove
   the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/host-picker-dotted-i.md`.
 
 ## automatic-install-warning-omits-cause.md
 
@@ -13866,7 +13866,7 @@
 - Completion criteria: an install failure's hover names its cause (stage and error) in bounded text, and the fallback
   case says the installer finished without installing. Tests cover an erroring install and an install that leaves the
   installed record unchanged. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/update-failure-reporting.md`.
 
 ## host-picker-refusal-fixture-enters-version-mismatch.md
 
@@ -13888,7 +13888,7 @@
   cannot be used there, stop and return the item.
 - Completion criteria: the refusal reply carries the helm's stamp, the test asserts the absence of the mismatch notice,
   and the selected spec passes on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## paste-regression-loses-session-cleanup-ownership.md
 
@@ -13909,7 +13909,7 @@
   failed open, stop and return the item.
 - Completion criteria: a failure after creation inside the helper deletes that session before the error propagates, and
   the attachment spec passes on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## installation-guide-hides-update-failures.md
 
@@ -13933,7 +13933,7 @@
   spec edit, stop and return the item.
 - Completion criteria: the guide's update section agrees with SPEC.md on when failures are visible and how to check on
   demand, and `dprint check` passes. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/update-failure-reporting.md`.
 
 ## teststate-socket-probe-blocks-sweep.md
 
@@ -13961,7 +13961,7 @@
 - Completion criteria: a sweep over a directory whose socket has a full backlog completes within the existing budgets
   and preserves that directory. The new test is bounded and annotated per the test-sleep checker. Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/rust-test-portability.md`.
 
 ## git-discovery-fixtures-inherit-bare-git-config.md
 
@@ -13986,7 +13986,7 @@
   variables from the child `Command` only, never from the test process. If more is needed, stop and return the item.
 - Completion criteria: fixture Git children never inherit `GIT_CONFIG`, so the include fixture writes only to its own
   repository's config, and the existing discovery tests pass. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/rust-test-portability.md`.
 
 ## setup-advice-omits-environment-selected-state-directory.md
 
@@ -14016,7 +14016,7 @@
   directory with `--state-dir=`, and it parses back to the same path. The default-environment advice is unchanged. Add a
   unit regression in `setup.rs` with `xdg_state_home` set and no `--state-dir`. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/setup-advice-state-directory.md`.
 
 ## claude-trust-browser-fixtures-escape-cleanup.md
 
@@ -14045,7 +14045,7 @@
   deletes every created session and attempts every preference and setting restoration, and reports the failures. The
   test body's assertions are unchanged. Validate with this spec on Chromium and WebKit; a failure-injection check is
   optional. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## repository-selection-keeps-global-search-launch-block.md
 
@@ -14073,7 +14073,7 @@
   enabled once the preview is ready. An unselected or invalid gh: search still cannot launch. Add a regression covering
   the sequence (a UI unit test, or a targeted browser test if no unit seam exists). Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-fixes.md`.
 
 ## inline-checkout-setup-retains-stale-config-eligibility.md
 
@@ -14105,7 +14105,7 @@
   brings the inline setup field back without reopening the launcher. Title edits still do not restart a configured scan.
   Add a regression, preferably extending the existing `github-checkout-composer.spec.ts` inline-setup test or a UI unit
   seam. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-fixes.md`.
 
 ## copy-guidance-measures-stale-resize-position.md
 
@@ -14130,7 +14130,7 @@
   wrapped width (capped by the viewport) inside the window. Update the unit fixture so the measured size depends on
   position at measurement time; it must fail without the fix (the current constant-size fake cannot). Run `node --test`
   in `crates/farhelm-ui/js-tests`. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/copy-guidance-resize.md`.
 
 ## trash-fixture-cleanup-compares-lexical-root.md
 
@@ -14156,7 +14156,7 @@
 - Completion criteria: the cleanup selects and deletes this fixture's trash records whether or not the stack's `/tmp`
   path is a symlink, and the existing `removed` equality assertion still holds. Validate with the affected spec on
   Linux; a macOS run is a bonus. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## checkout-composer-test-skips-configuration-restoration.md
 
@@ -14178,7 +14178,7 @@
 - Completion criteria: a failure in any one cleanup step still attempts the others and surfaces the failure. Test
   behavior on success is unchanged. Validate with this spec on Chromium and WebKit. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## tab-retarget-fixture-escapes-cleanup.md
 
@@ -14202,7 +14202,7 @@
 - Completion criteria: a failure during the helper's setup, or during route registration, leaves no session from this
   test running. Successful runs are unchanged. Validate with the retarget test (and a couple of other helper callers) on
   Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## custom-permission-model-choice-erases-draft.md
 
@@ -14232,7 +14232,7 @@
   current-harness re-selection byte for byte. A real harness switch still clears them. Add a regression covering both
   arms, as a UI unit test if a seam exists, otherwise a targeted browser test. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-fixes.md`.
 
 ## browser-git-fixture-can-change-caller-repository.md
 
@@ -14258,7 +14258,7 @@
 - Completion criteria: with `GIT_DIR` pointing at another repository, the fixture's git commands act only on the
   temporary clone. The test still passes normally. A quick check with an inherited `GIT_DIR` is good evidence; otherwise
   run the spec. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## default-approval-reset-renews-retry-key.md
 
@@ -14294,7 +14294,7 @@
   unit test on the shared selection helper or a focused browser route fixture: a null-reset OMP or Goose template
   completes YOLO consent with one request key, and a null-reset guarded-default template keeps its key across an
   unchanged retry. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-fixes.md`.
 
 ## custom-permission-test-skips-template-cleanup.md
 
@@ -14320,7 +14320,7 @@
   visible without masking the body's own failure. A focused failure-injection check (one DELETE refused) is desirable
   but optional given the trivial shape; at least run both specs on Chromium and WebKit. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## uninstall-command-fixture-requires-gnu-stat.md
 
@@ -14348,7 +14348,7 @@
 - Completion criteria: the test no longer compiles on macOS (or its stop half is Linux-only), with a docstring saying
   why. On Linux it still runs and passes (`cargo nextest` on that one test through the recorder), and
   `cargo clippy --all-targets` stays clean. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/remote-uninstall-fixes.md`.
 
 ## single-trash-test-skips-configuration-restoration.md
 
@@ -14379,7 +14379,7 @@
 - Completion criteria: a failing session cleanup or preference reset no longer skips `fixture.close`. Cleanup errors
   remain visible without masking the body's failure. The two named tests (and any converted siblings) pass on Chromium
   and WebKit. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## confirmation-test-optout-survives-cleanup-failure.md
 
@@ -14407,7 +14407,7 @@
 - Completion criteria: a failed session or host cleanup no longer leaves `skip_session_confirmations` (or the host
   preference) changed, and setup failures between session creation and `try` no longer leak the session. Cleanup errors
   stay visible. Both specs pass on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## failed-feedback-cleanup-loses-evidence.md
 
@@ -14439,7 +14439,7 @@
   evidence a failed P1 still cleans up normally. Extend the lost-evidence regression to the failed and unavailable
   statuses; run `python3 releasing/mac-vm-test/test_brick_test.py` (the affected cases). Remove the feedback file and
   its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/brick-test-feedback-evidence.md`.
 
 ## paste-guide-overstates-control-byte-protection.md
 
@@ -14467,7 +14467,7 @@
   keystrokes, and the remaining text matches `sanitizePastedText`. The website build passes
   (`cd website && bun run build`) and `dprint check` is clean. No runtime tests. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/docs-accuracy-fixes.md`.
 
 ## pin-test-skips-owned-session-cleanup.md
 
@@ -14493,7 +14493,7 @@
   stays the primary failure, and cleanup failures are reported alongside it. The pin test still passes on Chromium and
   WebKit. A one-off local injection of an early cleanup failure (not committed) shows both session deletions still run.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## number-shortcut-test-skips-session-cleanup.md
 
@@ -14518,7 +14518,7 @@
 - Completion criteria: the source session is owned by cleanup from creation, and every owned cleanup is attempted
   independently. The tests still pass on Chromium and WebKit. A one-off local injection of a route-registration or
   early-cleanup failure shows the source is still deleted. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## live-sibling-test-returns-before-reap-completion.md
 
@@ -14546,7 +14546,7 @@
 - Completion criteria: both tests assert survival, or return, only after every close has released its lifecycle claim.
   Both pass in a focused recorded nextest run, and the sleep checker passes. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/rust-test-portability.md`.
 
 ## managed-checkout-row-hides-accessible-directory.md
 
@@ -14575,7 +14575,7 @@
   path/lifetime explanation, to assistive technology. Nothing visible changes. A browser test asserts the accessible
   description (or hidden text) for a full managed row, and existing tooltip-coverage tests still pass. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/managed-checkout-row-accessibility.md`.
 
 ## native-download-collision-exceeds-filename-limit.md
 
@@ -14601,7 +14601,7 @@
 - Completion criteria: a second save of a file with a 251-byte stem plus `.pdf` publishes as a truncated stem with
   ` (1).pdf` within 255 bytes. Ordinary names keep `name (n).ext` unchanged. Multi-byte names are never split inside a
   character. Unit tests cover these cases. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/download-long-name-copies.md`.
 
 ## listing-regression-fixtures-escape-cleanup.md
 
@@ -14624,7 +14624,7 @@
   stop and return the item to the maintainer.
 - Completion criteria: the source is owned by cleanup from creation, and a failing first cleanup does not skip the
   second. Both variants pass on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## template-regression-fixtures-arm-cleanup-too-late.md
 
@@ -14646,7 +14646,7 @@
   more is needed, stop and return the item to the maintainer.
 - Completion criteria: a failure after the template write still deletes it, and a failure before the write does not turn
   into a cleanup error. Both tests pass on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## save-template-composing-escape-discards-draft.md
 
@@ -14671,7 +14671,7 @@
   or stop and return the item to the maintainer.
 - Completion criteria: a composing Escape keydown leaves the panel open with its draft. A non-composing Escape still
   returns to the launcher (SPEC.md launcher Escape behavior). Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/save-template-ime-escape.md`.
 
 ## missing-ca-bundle-blocks-helm-start.md
 
@@ -14706,7 +14706,7 @@
   a download source reports the client-build error. `--payload-dir` and developer builds never attempt the build. Add a
   focused unit test that injects a failing client result and checks both the refusing source and the non-downloading
   arms. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/helm-start-without-ca-bundle.md`.
 
 ## resume-docs-promise-newest-conversation.md
 
@@ -14734,7 +14734,7 @@
 - Completion criteria: neither page promises that Restart never returns to the cleared conversation, and both agree with
   SPEC.md's tracking limits. `dprint check` and the website build pass. Name the pages in the report. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/docs-accuracy-fixes.md`.
 
 ## cached-launch-error-overrides-completed-stop.md
 
@@ -14768,7 +14768,7 @@
   an observer cached a launch or preparation error for that generation. A cached error still shows for Running,
   StopRequested, unannotated `Exited` and `Interrupted` outcomes. Add a unit test that seeds both the cache and an
   annotated outcome and checks the reply. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/stopped-session-launch-error.md`.
 
 ## checkout-settings-test-restores-before-save-settles.md
 
@@ -14792,7 +14792,7 @@
   needs a new shared helper, keep it in this file or stop and return the item to the maintainer.
 - Completion criteria: the restoration PUT is never sent while a PUT from the page is unsettled. The test still passes
   on Chromium and WebKit. `python -B scripts/check-test-sleeps.py` passes. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## docs-preview-does-not-watch-external-changelog.md
 
@@ -14821,7 +14821,7 @@
 - Completion criteria: with the preview running, saving `CHANGELOG.md`, or adding, editing or deleting a release
   screenshot JSON, updates the Release notes page on reload without restarting the server. `bun run build` and
   `dprint check` still pass. Remove the feedback file and its index entry (which also holds the screenshot-list scope).
-- Execution: pending.
+- Execution: planned in `plans/queue/docs-accuracy-fixes.md`.
 
 ## appearance-test-restoration-skips-session-cleanup.md
 
@@ -14843,7 +14843,7 @@
   cleanup utility seems needed, stop and return the item to the maintainer.
 - Completion criteria: a failure in any one cleanup step still runs the others. The test passes on Chromium and WebKit.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## download-regression-fixtures-arm-cleanup-too-late.md
 
@@ -14866,7 +14866,7 @@
 - Completion criteria: in every test in the file, no fallible await sits between a successful `createSession` and its
   cleanup scope. The file passes on Chromium and WebKit. Remove the feedback file and its index entry (which also holds
   the redraw/OSC-label scope).
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## header-regression-fixtures-escape-cleanup.md
 
@@ -14890,7 +14890,7 @@
 - Completion criteria: a readiness-wait failure leaves no session behind, and a source cleanup failure still attempts
   the replacement's cleanup. The affected specs pass on Chromium and WebKit. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## file-stat-test-compares-unresolved-temp-path.md
 
@@ -14914,7 +14914,7 @@
   expected-path spelling differs on macOS, stop and return the item to the maintainer.
 - Completion criteria: the test asserts the canonical path, passes on Linux, and does not depend on `/tmp` being
   unresolved. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/rust-test-portability.md`.
 
 ## uninstall-uutils-stat-rejects-missing-socket.md
 
@@ -14952,7 +14952,7 @@
   `stat`, and permission or I/O failures still refuse. New regression tests cover the uutils and BusyBox absence
   spellings and a uutils non-absence refusal; the existing uninstall test still passes. Remove TODO.md's "Remote
   uninstall and uutils stat" entry in the same change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/remote-uninstall-fixes.md`.
 
 ## trash-host-totals-exclude-unchecked-archives.md
 
@@ -14980,7 +14980,7 @@
 - Completion criteria: a host listing with unchecked entries never shows an unqualified count or a size without the
   partial mark; an issue-only host no longer reads as an exact zero. A unit test in `trash.rs` (beside the existing
   `target()` tests) covers issue-only and mixed listings. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/trash-totals-unchecked.md`.
 
 ## checkout-override-error-points-to-global-settings.md
 
@@ -15008,7 +15008,7 @@
   return the item to the maintainer.
 - Completion criteria: the unusable-folder error names both the Settings remedy and the command-line remedy for a host
   override; tests asserting the message are updated. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/checkout-override-error-wording.md`.
 
 ## link-click-tests-skip-preference-restoration.md
 
@@ -15039,7 +15039,7 @@
 - Completion criteria: in every test in this spec that changes `terminal_link_click`, a failure in session creation or
   cleanup still restores the preference, and cleanup errors are still reported. Run the changed spec on Chromium and
   WebKit through the recorder. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## repository-picker-selection-moves-offscreen.md
 
@@ -15068,7 +15068,7 @@
   overflowing list. A browser regression in `e2e/tests/github-checkout-composer.spec.ts` (or beside it) supplies enough
   suggestions to overflow, presses ArrowUp to wrap, and asserts the active option is within the list's visible area; run
   on Chromium and WebKit through the recorder. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-fixes.md`.
 
 ## sound-tests-skip-remaining-cleanup-and-preferences.md
 
@@ -15093,7 +15093,7 @@
 - Completion criteria: one failing cleanup no longer skips the other session's deletion or the preference reset, and the
   failure is still reported. Run `sounds.spec.ts` on Chromium and WebKit through the recorder. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/browser-test-cleanup.md`.
 
 ## token-rotation-test-invalid-apfs-name.md
 
@@ -15121,7 +15121,7 @@
   item.
 - Completion criteria: the test no longer compiles on macOS and still runs and passes on Linux with its existing
   assertions; run it through the recorder on Linux. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/rust-test-portability.md`.
 
 ## pending-folder-save-overwrites-newer-save.md
 

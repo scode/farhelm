@@ -9,3 +9,20 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 74ab98] `claude-trust-decimals.md` — Claude checkout trust edits keep unrelated numbers in Claude's settings exact
 - [pending] `ntfy-token-server-change.md` — Waiting alerts: changing the ntfy server's origin drops the saved token, and Settings says so
 - [pending] `codex-guide-hook-warning.md` — Codex docs page stops calling the hook warning harmless
+- [pending] `browser-test-cleanup.md` — Browser tests clean up their sessions, templates, preferences and fixtures even when an earlier step fails (20 triage outcomes, each gated)
+- [pending] `rust-test-portability.md` — Rust tests stop failing on macOS temp paths and APFS names, wait for real completion, keep Git config out of fixtures, and the test-state sweep cannot hang (6 outcomes, each gated)
+- [pending] `remote-uninstall-fixes.md` — Remote uninstall finishes on hosts with uutils coreutils and after an interrupted run, and its fixture test runs off GNU systems (3 outcomes, each gated)
+- [pending] `launcher-fixes.md` — New-session dialog fixes: retry key after a template resets permissions, Launch after a repository pick, the setup field after the folder is cleared, custom flags kept on a model choice, and the active repository suggestion kept visible (5 outcomes, each gated)
+- [pending] `update-failure-reporting.md` — The version hover names why an automatic update install failed, and the install guide stops saying failures are only logged (2 outcomes, each gated)
+- [pending] `docs-accuracy-fixes.md` — The paste guide and resume docs stop overpromising, and the docs preview refreshes release notes on edit (3 outcomes, each gated)
+- [pending] `host-picker-dotted-i.md` — Typing İ repeatedly in the host picker cycles through hosts whose names start with it (gated)
+- [pending] `setup-advice-state-directory.md` — Setup's sign-in advice names the state directory when it came from the environment (gated)
+- [pending] `copy-guidance-resize.md` — The "this drag did not copy" notice is measured at its origin so narrowing the window does not collapse it (gated)
+- [pending] `brick-test-feedback-evidence.md` — The release brick test keeps the final guest when failed feedback checks' exported evidence is missing (gated)
+- [pending] `managed-checkout-row-accessibility.md` — Full-size session rows for managed checkouts expose the working folder and trash note to screen readers (gated)
+- [pending] `download-long-name-copies.md` — A second desktop download of a file with a near-limit name shortens the stem so the numbered copy fits (gated)
+- [pending] `save-template-ime-escape.md` — Escape during input-method composition no longer closes the save-template panel and its draft (gated)
+- [pending] `helm-start-without-ca-bundle.md` — A Linux helm without CA certificates starts, with downloads refusing, instead of exiting at startup (gated)
+- [pending] `stopped-session-launch-error.md` — A cached launch error no longer overrides a session's recorded stopped status (gated)
+- [pending] `trash-totals-unchecked.md` — A host's trash totals are marked partial or unknown when unchecked entries exist, instead of showing 0 B (gated)
+- [pending] `checkout-override-error-wording.md` — A checkout failure caused by a per-host folder override names that override instead of pointing at Settings (gated)
