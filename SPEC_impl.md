@@ -1754,6 +1754,23 @@ destination path as JSON. Atomic no-clobber publication uses `report.pdf`, `repo
 final extension. Failure or cancellation cleans the staging directory without publishing a partial file. A standalone
 helm or an unavailable native Downloads directory refuses this save mode; there is no server flag or webview fallback.
 
+The desktop injects a separate file opener alongside its Downloads directory: macOS `open` receives the published path
+as one argument; Linux GIO dispatches its file URI without waiting for the default app to exit. Neither uses a shell or
+hardened `webbrowser`. An `open: true` download request must also request `save_to_downloads` and have that capability,
+otherwise it refuses before routing or transferring. After publication, one pure final-extension predicate admits only
+md and txt, ASCII case-insensitively. The opener sees only that new local save. JSON always reports the saved path after
+successful publication, with `opened` and, on refusal or dispatch failure, `open_error`; opening cannot turn a
+successful save into a failed download. Stat includes `can_open` only with the native opener, from that same predicate.
+This is an authenticated desktop-helm capability: any signed-in device of that helm can request it, just as it can
+request a native save, rather than an extra origin gate. The ordinary server helm supplies no capability. No quarantine
+flag is added.
+
+The hover splits the disclosed path for presentation into a file-type Nerd Font icon and name, then host:directory,
+without shortening either. All remote fragments still use textContent, peer isolation and visible format-character
+escapes. Decimal size (1000 bytes per KB) and exact byte thresholds set the left stripe and size color; refusals
+override size with red. Native mode alone advertises the platform modifier for `can_open` files. Both plain and OSC
+adapters forward their mouse event to the same transfer path; web modifiers always request a plain browser download.
+
 `terminal-files.js` supplies conservative token recognition and a terminal-owned xterm addon below the existing OSC 8
 and web providers. Public buffer cells map UTF-16 token offsets to wrapped coordinates, preserving wide/combined glyphs.
 Logical lines over 8192 characters or 128 rows are not linkified. Whitespace, quotes and brackets delimit ordinary
@@ -1771,9 +1788,10 @@ restored in a microtask, after xterm installs its decoration accessors, and only
 hovered. Teardown never writes cursor decorations: xterm's accessors target whichever link is current, which may already
 be unrelated. Plain links underline before lookup but gain a pointer only when ready. Click reopens the disclosed
 canonical path independently. Browser bodies become a bounded Blob only after successful EOF; an object URL is released
-after the save click. The desktop handoff secret identifies native mode, which requests `save_to_downloads` and never
-falls back to Blob. Tooltip and transfer outcomes use textContent, peer-value isolation and visible Unicode format
-escapes. The addon is disposed with its terminal, cancelling pending work; retained reconnect terminals retain it.
+after the save click. The desktop handoff secret identifies native mode, which requests `save_to_downloads` and adds
+`open` only for its platform modifier-click; it never falls back to Blob. Tooltip and transfer outcomes use textContent,
+peer-value isolation and visible Unicode format escapes. The addon is disposed with its terminal, cancelling pending
+work; retained reconnect terminals retain it.
 
 ## Supervisor internals
 

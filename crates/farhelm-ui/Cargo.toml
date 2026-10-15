@@ -68,6 +68,11 @@ gloo-timers.workspace = true
 # the close snapshot replacement atomic without deleting the prior record.
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Use the desktop's dispatch API, already present through GTK, rather than
+# waiting for xdg-open: its generic fallback can wait for the app to exit.
+gio = { version = "0.18", optional = true }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 # Native system-clipboard writes for the desktop shell (`desktop.rs`'s
@@ -134,7 +139,7 @@ tracing-subscriber.workspace = true
 [features]
 default = []
 web = ["dioxus/web"]
-desktop = ["dioxus/desktop", "dep:arboard", "dep:raw-window-handle", "dep:dirs", "dep:webbrowser"]
+desktop = ["dioxus/desktop", "dep:arboard", "dep:raw-window-handle", "dep:dirs", "dep:webbrowser", "dep:gio"]
 
 [dev-dependencies]
 farhelm-teststate.workspace = true

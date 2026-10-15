@@ -66,6 +66,11 @@ To bring a file back from the session's host, hover over its path in the termina
 Your browser downloads it under its filename; the desktop app saves
 it into Downloads, chooses a new name if needed, and tells you where it went. A failed transfer leaves no partial file.
 
+In the desktop app, **Cmd-click** on your Mac (**Ctrl-click** on Linux) also opens the saved copy in its default app.
+Only `.md` and `.txt` files open; other types are saved without opening. The hover shows when opening is
+available, and the message tells you if the file was saved but could not be opened. In a browser, modifier-click still
+only downloads. See the [security model](/docs/how-it-works/security-model/) before opening agent-provided files.
+
 Paths can start with `/` or `~/`, contain a slash, or end in a file extension, such as `report.pdf`. A relative path uses
 the directory the session started in; it can miss after a shell changes directory. Programs can also print file links
 under their own text. Directories and files over 100 MB cannot be downloaded. Check the host and path before clicking:

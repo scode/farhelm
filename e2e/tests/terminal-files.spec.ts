@@ -218,12 +218,62 @@ test('changed OSC display text starts a fresh hover at the same cells', async ({
     await waitForTermText(page, 'TARGET NEW-LABEL');
     expect((await cancelled).failure()).not.toBeNull();
     await expect.poll(() => statRequests).toBe(2);
-    await expect(tooltip).toContainText('17 bytes — click to download');
+    await expect(tooltip).toContainText('17 B · click to download');
     gate.release();
     await expect.poll(() => routeDone).toBe(true);
-    await expect(tooltip).toContainText('17 bytes — click to download');
+    await expect(tooltip).toContainText('17 B · click to download');
   } finally {
     gate.release();
+    await cleanupSession(request, session.id);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/** Real sparse files establish each exact size boundary without transferring
+ * them. The rendered stripe and text must agree with the host's byte answer,
+ * and the new layout must keep both host and full path visible.
+ */
+test('file hover shows decimal size tiers and a red cap refusal', async ({ page, request }, testInfo) => {
+  const directory = stackScratchDir('file-tiers-');
+  const cases = [
+    ['small.txt', 4800, '4.8 KB', 'small', '--ok'],
+    ['medium.pdf', 1000000, '1 MB', 'medium', '--info'],
+    ['large.bin', 10000000, '10 MB', 'large', '--warn'],
+    ['limit.txt', 100000000, '100 MB', 'large', '--warn'],
+    ['refused.txt', 100000001, '100 MB limit', 'danger', '--danger'],
+  ] as const;
+  for (const [name, size] of cases) {
+    const fd = fs.openSync(path.join(directory, name), 'w');
+    fs.ftruncateSync(fd, size); fs.closeSync(fd);
+    expect(fs.statSync(path.join(directory, name)).size).toBe(size);
+  }
+  const session = await createSession(request, { title: `file-tiers-${Date.now()}`, cwd: directory,
+    invocation: `sh -c 'read _gate; printf "${cases.map(([name]) => name).join('\\n')}\\n"; sleep 300'` });
+  try {
+    await page.goto('/');
+    await attachSession(page, session.id);
+    await page.keyboard.press('Enter');
+    await waitForTermText(page, 'refused.txt');
+    const tooltip = page.locator('#terminal .terminal-file-target');
+    for (const [name, , size, tier, token] of cases) {
+      await hoverPath(page, name);
+      await expect(tooltip).toHaveAttribute('data-tier', tier);
+      await expect(tooltip.locator('.terminal-file-name')).toContainText(name);
+      await expect(tooltip.locator('.terminal-file-directory')).toHaveText(`this machine:${fs.realpathSync(directory)}/`);
+      await expect(tooltip).toContainText(size);
+      const colors = await tooltip.evaluate((element, token) => {
+        const probe = document.createElement('span');
+        probe.style.color = `var(${token})`;
+        element.appendChild(probe);
+        const expected = getComputedStyle(probe).color;
+        probe.remove();
+        return { expected, actual: getComputedStyle(element).borderLeftColor };
+      }, token);
+      expect(colors.actual).toBe(colors.expected);
+      if (tier === 'danger') await expect(tooltip.locator('.terminal-file-refusal')).toContainText('too large to download');
+    }
+    await testInfo.attach('file-hover-cap-refusal', { body: await tooltip.screenshot(), contentType: 'image/png' });
+  } finally {
     await cleanupSession(request, session.id);
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -278,9 +328,12 @@ for (const kind of ['local', 'ssh']) {
       expect(received.size).toBe(Buffer.byteLength(content));
       expect(received.host).toBe(kind === 'local' ? 'this machine' : 'localhost');
       gate.release();
-      await expect(tooltip).toContainText(received.path);
-      await expect(tooltip).toContainText(received.host);
-      await expect(tooltip).toContainText(`${Buffer.byteLength(content)} bytes`);
+      await expect(tooltip.locator('.terminal-file-name')).toHaveText(`\uf1c1 ${basename}`);
+      await expect(tooltip.locator('.terminal-file-directory')).toHaveText(`${received.host}:${path.dirname(received.path)}/`);
+      await expect(tooltip.locator('.terminal-file-size')).toHaveText(`${Buffer.byteLength(content)} B · click to download`);
+      await expect(tooltip).toHaveAttribute('data-tier', 'small');
+      await expect(tooltip).toHaveCSS('border-left-width', '3px');
+      await expect(tooltip).not.toContainText('click to open');
       await expect(page.locator('#terminal .xterm-screen')).toHaveClass(/xterm-cursor-pointer/);
       const saved = page.waitForEvent('download');
       await page.mouse.click(point.x, point.y);
@@ -299,9 +352,15 @@ for (const kind of ['local', 'ssh']) {
       await expect.poll(() => statRequests).toBe(2);
       await expect(tooltip).toContainText('click to download');
       const linked = await hoverPath(page, 'DOTSEG-FILE');
-      await expect(tooltip).toContainText(fs.realpathSync(path.join(directory, 'target', basename)));
+      await expect(tooltip.locator('.terminal-file-name')).toContainText(basename);
+      await expect(tooltip.locator('.terminal-file-directory')).toHaveText(`${received.host}:${fs.realpathSync(path.join(directory, 'target'))}/`);
       const linkedSave = page.waitForEvent('download');
-      await page.mouse.click(linked.x, linked.y);
+      // A browser modifier must still make an ordinary download. Observe the
+      // actual request so a successful Blob alone cannot hide an open request.
+      const linkedRequest = page.waitForRequest(req => req.url().endsWith('/files/download'));
+      await page.keyboard.down('Meta');
+      try { await page.mouse.click(linked.x, linked.y); } finally { await page.keyboard.up('Meta'); }
+      expect((await linkedRequest).postDataJSON()).toMatchObject({ open: false, save_to_downloads: false });
       const linkedDownload = await linkedSave;
       expect(await linkedDownload.failure()).toBeNull();
       expect(fs.readFileSync((await linkedDownload.path())!, 'utf8')).toBe('symlink parent bytes');
@@ -416,7 +475,7 @@ test('leaving cancels lookup and the next hover checks again', async ({ page, re
     fs.writeFileSync(path.join(directory, 'fresh.txt'), 'new file');
     expect(fs.readFileSync(path.join(directory, 'fresh.txt'), 'utf8')).toBe('new file');
     await hoverPath(page, 'fresh.txt');
-    await expect(page.locator('#terminal .terminal-file-target')).toContainText('8 bytes');
+    await expect(page.locator('#terminal .terminal-file-target')).toContainText('8 B');
     await expect(page.locator('#terminal .xterm-screen')).toHaveClass(/xterm-cursor-pointer/);
   } finally {
     gate.release();

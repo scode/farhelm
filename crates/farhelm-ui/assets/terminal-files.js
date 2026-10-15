@@ -4,6 +4,37 @@
 (function () {
   const MAX_BYTES = 100000000;
 
+  /** Decimal units agree with the transfer cap. Rounding never renders a
+   * refused file as less than 100 MB; the refusal still names the exact limit.
+   */
+  function formatSize(bytes) {
+    if (bytes < 1000) return `${bytes} B`;
+    const unit = bytes < 1000000 ? 1000 : bytes < 1000000000 ? 1000000 : 1000000000;
+    const suffix = unit === 1000 ? 'KB' : unit === 1000000 ? 'MB' : 'GB';
+    return `${(bytes / unit).toFixed(1).replace(/\.0$/, '')} ${suffix}`;
+  }
+
+  /** Size controls the stripe, while a refusal always takes precedence.
+   * The 100 MB boundary itself is allowed, matching the host's byte limit.
+   */
+  function sizeTier(info) {
+    if (info.status !== 'ready') return 'danger';
+    return info.size < 1000000 ? 'small' : info.size < 10000000 ? 'medium' : 'large';
+  }
+
+  /** Bundled Nerd Font symbols distinguish broad file kinds, not opening
+   * permission. The helm alone supplies the native opening policy.
+   */
+  function fileIcon(path, status) {
+    if (status === 'folder') return '\uf07b';
+    const ext = path.split('/').pop().split('.').pop().toLowerCase();
+    if (['pdf'].includes(ext)) return '\uf1c1';
+    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'avif'].includes(ext)) return '\uf1c5';
+    if (['zip', 'gz', 'xz', 'bz2', 'tar', '7z', 'zst'].includes(ext)) return '\uf1c6';
+    if (['txt', 'md', 'rs', 'js', 'ts', 'py', 'html', 'css', 'json', 'toml', 'yaml', 'yml', 'sh', 'c', 'h'].includes(ext)) return '\uf15c';
+    return '\uf15b';
+  }
+
   /** Recognize conservative prose tokens without turning URL text into paths.
    * Quotes/brackets delimit tokens; spaces inside filenames need OSC 8. Source
    * diagnostic suffixes and sentence punctuation are outside the link range.
@@ -119,7 +150,7 @@
    * reopens the disclosed canonical path; that still is not a file snapshot.
    */
   class FileLinksAddon {
-    constructor({ endpoint, secret, native,
+    constructor({ endpoint, secret, native, isMac = false,
       // Browser timers require their global receiver. Wrappers keep the
       // defaults out of the addon's method-call context while allowing clocks.
       setTimeout: schedule = (callback, delay) => setTimeout(callback, delay),
@@ -127,6 +158,7 @@
       this.endpoint = endpoint;
       this.secret = secret;
       this.native = native;
+      this.isMac = isMac;
       this.hovered = null;
       this.transfers = new Set();
       this.schedule = schedule;
@@ -149,7 +181,7 @@
             decorations: { underline: true, pointerCursor: false },
             hover: (event) => this.hover(event, path, link, range),
             leave: () => this.leave(),
-            activate: () => this.download(path),
+            activate: event => this.download(path, event),
           };
           return link;
         })),
@@ -159,7 +191,7 @@
     /** A text-only disclosure stays inside its terminal; remote values cannot
      * become markup or reorder hidden format characters in the HTML tooltip.
      */
-    show(event, lines, checking = false) {
+    show(event, lines, checking = false, tier = 'neutral') {
       let display = this.term.element.querySelector(':scope > .terminal-file-target');
       if (!display) {
         display = document.createElement('div');
@@ -169,10 +201,26 @@
         this.term.element.appendChild(display);
       }
       display.hidden = false;
-      display.replaceChildren(...lines.map((text) => {
+      display.dataset.tier = tier;
+      display.replaceChildren(...lines.map((value) => {
+        const part = typeof value === 'string' ? { text: value } : value;
         const line = document.createElement('div');
-        line.className = 'peer-value';
-        line.textContent = window.farhelmTerminalLinks.visibleFormatCharacters(String(text));
+        line.className = `peer-value ${part.className || ''}`;
+        if (part.icon) {
+          const icon = document.createElement('span');
+          icon.textContent = part.icon + ' ';
+          icon.setAttribute('aria-hidden', 'true');
+          line.appendChild(icon);
+        }
+        const text = document.createElement('span');
+        text.textContent = window.farhelmTerminalLinks.visibleFormatCharacters(String(part.text));
+        line.appendChild(text);
+        if (part.suffix) {
+          const suffix = document.createElement('span');
+          suffix.className = 'terminal-file-hint';
+          suffix.textContent = part.suffix;
+          line.appendChild(suffix);
+        }
         return line;
       }));
       display.classList.toggle('terminal-file-checking', checking);
@@ -225,16 +273,26 @@
         // was pending. Its old cursor setter now targets a different link.
         if (state.link) state.link.decorations.pointerCursor = info.status === 'ready';
         const status = {
-          ready: `${info.size} bytes — click to download`,
+          ready: formatSize(info.size),
           not_found: 'not found',
           folder: 'folder: not downloadable',
-          too_large: `too large to download: ${info.size} bytes (100 MB limit)`,
+          too_large: `too large to download: ${formatSize(info.size)} (100 MB limit)`,
           not_readable: 'not readable',
           not_regular: 'not a regular file: not downloadable',
         }[info.status] || 'not downloadable';
-        this.show(event, [info.host, info.path, status]);
+        // Split only for presentation. Both pieces retain the full disclosed
+        // path, and each remote fragment still passes through visible escapes.
+        const split = info.path.lastIndexOf('/') + 1;
+        const hint = info.status === 'ready'
+          ? ' · click to download' + (this.native && info.can_open ? ` · ${this.isMac ? '⌘' : 'Ctrl'}-click to open` : '')
+          : '';
+        this.show(event, [
+          { text: info.path.slice(split), icon: fileIcon(info.path, info.status), className: 'terminal-file-name' },
+          { text: `${info.host}:${info.path.slice(0, split)}`, className: 'terminal-file-directory' },
+          { text: status, suffix: hint, className: info.status === 'ready' ? 'terminal-file-size' : 'terminal-file-refusal' },
+        ], false, sizeTier(info));
       } catch (error) {
-        if (this.hovered === state && !state.leaving && !state.controller.signal.aborted) this.show(event, [path, error.message]);
+        if (this.hovered === state && !state.leaving && !state.controller.signal.aborted) this.show(event, [path, error.message], false, 'danger');
       }
     }
 
@@ -270,11 +328,11 @@
     /** Paths travel as JSON data with the current device credential, never as
      * URL tickets. HTTP refusals remain in-page text rather than navigation.
      */
-    async request(operation, path, signal) {
+    async request(operation, path, signal, open = false) {
       const response = await fetch(`${this.endpoint}/${operation}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${this.secret()}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, save_to_downloads: operation === 'download' && this.native }),
+        body: JSON.stringify({ path, save_to_downloads: operation === 'download' && this.native, open }),
         signal,
       });
       if (!response.ok) throw new Error((await response.text()).slice(0, 4096).trim() || 'download refused');
@@ -330,18 +388,20 @@
     /** Only a successful current hover can start a transfer. Native mode is
      * explicit: its failure never falls back to a webview Blob save.
      */
-    async download(path) {
+    async download(path, event = {}) {
       const state = this.hovered;
       if (!state || state.leaving || state.path !== path || state.info?.status !== 'ready' || this.term.getSelection()) return;
       const controller = new AbortController();
       this.transfers.add(controller);
       this.message('downloading…');
       try {
-        const response = await this.request('download', state.info.path, controller.signal);
+        const open = this.native && Boolean(this.isMac ? event.metaKey : event.ctrlKey);
+        const response = await this.request('download', state.info.path, controller.signal, open);
         if (this.native) {
           const result = await response.json();
           if (controller.signal.aborted) return;
-          this.message(`saved to ${result.path}`, 'success');
+          const outcome = open ? result.opened ? ' · opened' : ` · not opened: ${result.open_error}` : '';
+          this.message(`saved to ${result.path}${outcome}`, 'success');
         } else {
           const blob = await boundedBlob(response);
           if (controller.signal.aborted) return;
@@ -381,7 +441,7 @@
     }
   }
 
-  const api = { pathTokens, oscTarget, bufferLinks, boundedBlob, FileLinksAddon, MAX_BYTES };
+  const api = { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, FileLinksAddon, MAX_BYTES };
   if (typeof window !== 'undefined') window.farhelmTerminalFiles = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

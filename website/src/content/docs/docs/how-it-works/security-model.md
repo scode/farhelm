@@ -22,7 +22,9 @@ files from get.farhelm.io, which hands them over from GitHub, feedback you choos
 service the project runs ([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks
 get.farhelm.io for new releases and downloads them, checking each one's signature, by itself unless you turn that off
 ([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). And downloading a file from a session's terminal:
-the helm can read any file the session's account can read on that host
+the helm can read any file the session's account can read on that host. In the desktop app, Cmd-click (Ctrl-click on
+Linux) also opens the saved copy in its default app, only for `.md` and `.txt` files. Plain clicks and browser clicks
+only download; check the disclosed host and path first
 ([Work in a session](/docs/using/work-in-a-session/#copy-paste-and-links)). And opening links: with your approval, or a
 host's link permission, an agent on that host can make your browser open a web address, and the local-network permission
 lets it reach addresses on your own machine and network without asking.

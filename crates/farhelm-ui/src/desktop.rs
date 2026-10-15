@@ -56,6 +56,39 @@ use window_state::{WINDOW_STATE_FILE, WindowTracker};
 
 const DESKTOP_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Dispatch a file the embedded helm has just published to its default app.
+/// This is separate from hardened webbrowser: local paths are admitted only
+/// by the download handler's extension policy, never by the HTTP(S) opener.
+#[cfg(target_os = "macos")]
+fn open_saved_file(path: &Path) -> Result<(), String> {
+    let status = Command::new("/usr/bin/open")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| format!("could not ask the default app to open the file: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("the default-app opener exited with {status}"))
+    }
+}
+
+/// Hand the published file to the desktop's default application without
+/// waiting for that application to exit. `xdg-open` may run a foreground
+/// application synchronously; waiting for it in the helm's blocking pool
+/// would leave the save response pending and could also block app shutdown.
+/// GIO reports dispatch failure instead of the launched application's exit.
+#[cfg(target_os = "linux")]
+fn open_saved_file(path: &Path) -> Result<(), String> {
+    use gio::prelude::FileExt;
+
+    let file = gio::File::for_path(path);
+    gio::AppInfo::launch_default_for_uri(file.uri().as_str(), gio::AppLaunchContext::NONE)
+        .map_err(|error| format!("could not ask the default app to open the file: {error}"))
+}
+
 /// The hidden argv-1 flag that prints resolved asset paths instead of
 /// launching (see [`print_assets`]).
 const PRINT_ASSETS_FLAG: &str = "--print-assets";
@@ -472,7 +505,10 @@ impl DesktopBootstrap {
                         })),
                         // Resolve on the native side. An unavailable Downloads
                         // folder refuses a save rather than using the webview.
-                        dirs::download_dir(),
+                        dirs::download_dir().map(|directory| farhelm_helm::NativeDownloads {
+                            directory,
+                            opener: std::sync::Arc::new(open_saved_file),
+                        }),
                         ready_tx,
                         shutdown_rx,
                     ))
@@ -1224,6 +1260,102 @@ mod tests {
 
     const PROXY_CHILD_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_CHILD";
     const PROXY_TARGET_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_TARGET";
+
+    /// Linux dispatch must finish while the opened application is still alive:
+    /// waiting for its exit would hold the save response and the helm runtime's
+    /// blocking-pool shutdown. A subprocess owns private MIME associations;
+    /// this never changes the test runner's environment or the user's defaults.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn native_file_dispatch_does_not_wait_for_the_opened_application() {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        const CHILD_PATH: &str = "FARHELM_NATIVE_OPEN_FIXTURE";
+        if let Some(path) = std::env::var_os(CHILD_PATH) {
+            open_saved_file(Path::new(&path)).expect("dispatch fixture application");
+            return;
+        }
+
+        let private = tempfile::tempdir().unwrap();
+        let applications = private.path().join("applications");
+        std::fs::create_dir(&applications).unwrap();
+        let file = private.path().join("notes with spaces.txt");
+        std::fs::write(&file, "saved document").unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let fixture = private.path().join("app.py");
+        // The socket is both readiness and ownership: the app reports the
+        // actual argv, answers a liveness probe, and exits on release or EOF.
+        // Its timeout also bounds cleanup if the test process itself dies.
+        std::fs::write(
+            &fixture,
+            "import json, socket, sys\n\
+             with socket.create_connection(('127.0.0.1', int(sys.argv[1])), timeout=15) as peer:\n\
+             \x20peer.sendall((json.dumps(sys.argv[2:]) + '\\n').encode())\n\
+             \x20while peer.recv(1) == b'?':\n\
+             \x20\x20peer.sendall(b'!')\n",
+        )
+        .unwrap();
+        std::fs::write(
+            applications.join("farhelm-fixture.desktop"),
+            format!(
+                "[Desktop Entry]\nType=Application\nName=fixture\nExec=/usr/bin/python3 {} {port} %f\nMimeType=text/plain;\nTerminal=false\n",
+                fixture.display()
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            private.path().join("mimeapps.list"),
+            "[Default Applications]\ntext/plain=farhelm-fixture.desktop;\n",
+        )
+        .unwrap();
+        let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "desktop::tests::native_file_dispatch_does_not_wait_for_the_opened_application",
+                "--nocapture",
+            ])
+            .env_clear()
+            .env("HOME", private.path())
+            .env("XDG_DATA_HOME", private.path())
+            .env("XDG_CONFIG_HOME", private.path())
+            .env("XDG_DATA_DIRS", private.path())
+            .env(CHILD_PATH, &file)
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let (peer, _) = tokio::time::timeout(Duration::from_secs(10), listener.accept())
+            .await
+            .expect("fixture app must connect after dispatch")
+            .unwrap();
+        let mut peer = BufReader::new(peer);
+        let mut argv = String::new();
+        tokio::time::timeout(Duration::from_secs(5), peer.read_line(&mut argv))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(serde_json::from_str::<Vec<PathBuf>>(&argv).unwrap(), [file]);
+        let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .expect("dispatch must finish before fixture app exits")
+            .unwrap();
+        assert!(status.success(), "dispatch subprocess failed: {status}");
+        peer.get_mut().write_all(b"?").await.unwrap();
+        let mut reply = [0];
+        tokio::time::timeout(Duration::from_secs(5), peer.read_exact(&mut reply))
+            .await
+            .expect("opened app must still be alive after dispatch returns")
+            .unwrap();
+        assert_eq!(reply, *b"!");
+        peer.get_mut().write_all(b".").await.unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), peer.read(&mut reply))
+                .await
+                .expect("released app must close its owned socket")
+                .unwrap(),
+            0
+        );
+    }
 
     /// Constructing the clipboard sink must be side-effect free: the
     /// `arboard` handle is created lazily on the first WRITE, so building

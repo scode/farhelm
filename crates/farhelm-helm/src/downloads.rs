@@ -1,7 +1,9 @@
 //! Authenticated file reads routed to the host that owns the session.
 //! Browser bodies stream through the helm; only the browser buffers a Blob.
 //! The embedded desktop helm instead stages in Downloads and publishes only
-//! after EOF. Neither a hover nor a previous successful read reserves a file.
+//! after EOF. An explicit open request may dispatch only that completed save,
+//! under one shared extension policy. Neither a hover nor a previous successful
+//! read reserves a file.
 
 use crate::sessions::route_session;
 use crate::{AppState, DownloadGuard, http_error};
@@ -14,6 +16,52 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Open only the completed save supplied by the helm, never a caller's path.
+/// The native shell owns platform dispatch; tests inject an observer instead.
+pub type FileOpener = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
+
+/// The desktop's save directory and local-file dispatch travel together.
+/// A server helm supplies neither, since its clients may be on other machines.
+pub struct NativeDownloads {
+    /// Publication and staging share this filesystem for atomic saves.
+    pub directory: PathBuf,
+    /// OS dispatch runs only after a successful save and extension admission.
+    pub opener: FileOpener,
+}
+
+/// The final saved extension is the entire opening policy. This intentionally
+/// excludes executable types and double extensions such as `notes.txt.command`;
+/// the same predicate supplies the hover hint and checks the published file.
+fn may_open(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["md", "txt"]
+                .iter()
+                .any(|allowed| extension.eq_ignore_ascii_case(allowed))
+        })
+}
+
+/// Whether two paths end in the same extension, ASCII case-insensitively.
+///
+/// Opening is decided on the saved file, but the user chose it from the
+/// hover's earlier disclosure of the requested path. The host resolves that
+/// path again when the transfer starts, so an agent can swap the checked file
+/// for a symlink to a file of another type between hover and click. Requiring
+/// the saved file to keep the requested file's type means a click only ever
+/// opens the kind of document the hover described, which keeps that true if
+/// the allowlist ever grows a type with different risks (HTML was dropped for
+/// running in the browser outside the link permissions).
+fn same_type(requested: &Path, saved: &Path) -> bool {
+    match (
+        requested.extension().and_then(|e| e.to_str()),
+        saved.extension().and_then(|e| e.to_str()),
+    ) {
+        (Some(requested), Some(saved)) => requested.eq_ignore_ascii_case(saved),
+        _ => false,
+    }
+}
+
 /// Agent-provided path text is data, never a shell expression. Save mode is
 /// an explicit request to the desktop capability; server helms refuse it.
 #[derive(Deserialize)]
@@ -21,6 +69,9 @@ pub(crate) struct FileRequest {
     path: String,
     #[serde(default)]
     save_to_downloads: bool,
+    #[serde(default)]
+    /// Opening is meaningful only with native save; it never names a local path.
+    open: bool,
 }
 
 /// Fresh host evidence with the host's display name for the hover disclosure.
@@ -28,6 +79,9 @@ pub(crate) struct FileRequest {
 #[derive(serde::Serialize)]
 struct FileStatBody {
     host: String,
+    /// Absent on server helms: only native saves can have a local open action.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    can_open: Option<bool>,
     #[serde(flatten)]
     info: DownloadFileInfo,
 }
@@ -55,7 +109,15 @@ pub(crate) async fn stat_file(
                 )
             })
             .unwrap_or_else(|| "host".into());
-        Ok::<_, anyhow::Error>(FileStatBody { host, info })
+        let can_open = state.file_opener.as_ref().map(|_| {
+            info.status == farhelm_proto::DownloadFileStatus::Ready
+                && may_open(Path::new(&info.path))
+        });
+        Ok::<_, anyhow::Error>(FileStatBody {
+            host,
+            can_open,
+            info,
+        })
     }
     .await;
     match result {
@@ -73,6 +135,13 @@ pub(crate) async fn download_file(
     AxPath(id): AxPath<String>,
     Json(request): Json<FileRequest>,
 ) -> axum::response::Response {
+    if request.open && (!request.save_to_downloads || state.file_opener.is_none()) {
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            "native file opening is unavailable\n",
+        )
+            .into_response();
+    }
     if request.save_to_downloads && state.downloads_dir.is_none() {
         return (
             axum::http::StatusCode::NOT_FOUND,
@@ -91,7 +160,28 @@ pub(crate) async fn download_file(
     };
     if request.save_to_downloads {
         return match save_download(download, state.downloads_dir.clone().unwrap()).await {
-            Ok(path) => Json(serde_json::json!({"path": path.to_string_lossy()})).into_response(),
+            Ok(path) => {
+                // Publication is already successful. An opener refusal or OS
+                // error must never tell the user that this saved file was lost.
+                let mut body = serde_json::json!({"path": path.to_string_lossy()});
+                if request.open {
+                    let result = if !may_open(&path) {
+                        Err("only .md and .txt files can be opened".into())
+                    } else if !same_type(Path::new(&request.path), &path) {
+                        Err("the file changed type after it was checked, so it was saved but not opened".into())
+                    } else {
+                        let opener = state.file_opener.clone().unwrap();
+                        tokio::task::spawn_blocking(move || opener(&path))
+                            .await
+                            .unwrap_or_else(|error| Err(format!("file opener failed: {error}")))
+                    };
+                    body["opened"] = serde_json::json!(result.is_ok());
+                    if let Err(reason) = result {
+                        body["open_error"] = serde_json::json!(reason);
+                    }
+                }
+                Json(body).into_response()
+            }
             Err(error) => http_error(error),
         };
     }
@@ -275,6 +365,18 @@ mod tests {
     /// Script one real download exchange. Waiting for credit proves the body
     /// reached its consumer before the terminal outcome, including failure.
     async fn reply_download(peer: &mut FakeSupervisor, failure: bool) {
+        reply_download_with_info(peer, failure, "out/report.pdf", info()).await;
+    }
+
+    /// A host's admitted basename, rather than the caller's spelling, controls
+    /// native publication. Vary it to exercise opening after name allocation.
+    /// `requested` is the path the helm must forward unchanged to the host.
+    async fn reply_download_with_info(
+        peer: &mut FakeSupervisor,
+        failure: bool,
+        requested: &str,
+        info: DownloadFileInfo,
+    ) {
         let ControlMsg::BeginDownload {
             req_id,
             session_id,
@@ -285,11 +387,11 @@ mod tests {
             panic!("expected session-host begin");
         };
         assert_eq!(session_id, "sess-1");
-        assert_eq!(path, "out/report.pdf");
+        assert_eq!(path, requested);
         peer.send(&ControlMsg::DownloadStarted {
             req_id,
             channel,
-            info: info(),
+            info,
         })
         .await;
         peer.send_frame(&Frame::data(channel, b"report-body".to_vec()))
@@ -434,6 +536,210 @@ mod tests {
             h.router().oneshot(missing).await.unwrap().status(),
             StatusCode::NOT_FOUND
         );
+    }
+
+    /// Local app dispatch is deliberately an allowlist of final extensions.
+    /// A suffix elsewhere, executable tail or extensionless name cannot widen
+    /// it; case alone does not change how the saved document is treated.
+    #[farhelm_testtrace::test]
+    fn only_final_document_extensions_may_open() {
+        for name in ["notes.md", "notes.TXT", "archive.tar.md"] {
+            assert!(may_open(Path::new(name)), "{name}");
+        }
+        for name in [
+            "notes",
+            ".md",
+            "notes.txt.command",
+            "notes.md.exe",
+            "md/report",
+            "notes.txt.",
+            "report.pdf",
+            "notes.htm",
+            "report.html",
+            "report.HtMl",
+        ] {
+            assert!(!may_open(Path::new(name)), "{name}");
+        }
+    }
+
+    /// Even a valid device cannot ask a server to open a local path. A missing
+    /// session makes the pre-dispatch error distinguishable from routing: no
+    /// lookup or transfer may precede this capability check.
+    #[farhelm_testtrace::test]
+    async fn open_is_refused_before_transfer_without_native_save_and_opener() {
+        let mut h = crate::rest_harness::idle_helm().await;
+        for save in [false, true] {
+            let response = h.router().oneshot(open_request(save)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            assert_eq!(
+                axum::body::to_bytes(response.into_body(), 4096)
+                    .await
+                    .unwrap(),
+                "native file opening is unavailable\n"
+            );
+        }
+        // An opener alone still cannot authorize opening without a native save.
+        Arc::get_mut(&mut h.state).unwrap().file_opener =
+            Some(Arc::new(|_| panic!("no saved file exists")));
+        let response = h.router().oneshot(open_request(false)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap(),
+            "native file opening is unavailable\n"
+        );
+    }
+
+    /// The API accepts only the remote path as input, never a local open path.
+    /// Keep construction separate so server and embedded tests exercise the
+    /// same extractor and authentication boundary as an actual modifier-click.
+    fn open_request(save: bool) -> Request<Body> {
+        open_request_for(save, "out/report.pdf")
+    }
+
+    /// The same request naming a specific requested path, so a test can make
+    /// the host's resolved file agree or disagree with what was checked.
+    fn open_request_for(save: bool, path: &str) -> Request<Body> {
+        let mut req = request("download", save);
+        *req.body_mut() = Body::from(
+            serde_json::json!({
+                "path": path, "save_to_downloads": save, "open": true
+            })
+            .to_string(),
+        );
+        req
+    }
+
+    /// Successful saves stay successful after an open refusal or OS failure.
+    /// The observer sees only the completed, uniquely named private save, which
+    /// proves neither request text nor the host's absolute path reaches it.
+    #[farhelm_testtrace::test]
+    async fn native_open_uses_only_published_allowlisted_save_and_preserves_failures() {
+        // The fourth case is a swap between hover and click: the user chose
+        // a text file, and the host now resolves it to a Markdown file. Both
+        // types are allowed, but it must be saved and not opened, because
+        // the user never saw the type it would open as. The fifth is HTML,
+        // which is saved but never opened.
+        for (requested, name, allowed, fail) in [
+            ("out/notes.TXT", "notes.TXT", true, false),
+            ("out/notes.md", "notes.md", true, true),
+            ("out/notes.txt.command", "notes.txt.command", false, false),
+            ("out/notes.txt", "payload.md", false, false),
+            ("out/report.html", "report.html", false, false),
+        ] {
+            let downloads = tempfile::tempdir().unwrap();
+            std::fs::write(downloads.path().join(name), b"existing").unwrap();
+            let (client, server) = tokio::io::duplex(65536);
+            let peer = tokio::spawn(async move {
+                let mut peer = FakeSupervisor::accept(server).await;
+                let mut answer = info();
+                answer.path = format!("/host-only/{name}");
+                reply_download_with_info(&mut peer, false, requested, answer).await;
+            });
+            let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let calls = observed.clone();
+            let directory = downloads.path().to_path_buf();
+            let mut h = spliced_helm_listing(client, vec![session("sess-1", 1)]).await;
+            let state = Arc::get_mut(&mut h.state).unwrap();
+            state.downloads_dir = Some(directory.clone());
+            state.file_opener = Some(Arc::new(move |saved| {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(saved.parent(), Some(directory.as_path()));
+                assert_eq!(std::fs::read(saved).unwrap(), b"report-body");
+                assert_eq!(
+                    std::fs::metadata(saved).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+                calls.lock().unwrap().push(saved.to_path_buf());
+                if fail {
+                    Err("opener sentinel".into())
+                } else {
+                    Ok(())
+                }
+            }));
+            let response = h
+                .router()
+                .oneshot(open_request_for(true, requested))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), 4096)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            let saved = Path::new(body["path"].as_str().unwrap());
+            assert_eq!(std::fs::read(saved).unwrap(), b"report-body");
+            assert_eq!(
+                std::fs::read(downloads.path().join(name)).unwrap(),
+                b"existing"
+            );
+            assert_ne!(saved, downloads.path().join(name));
+            assert_eq!(body["opened"], allowed && !fail);
+            let calls = observed.lock().unwrap().clone();
+            if allowed {
+                assert_eq!(&*calls, &[saved.to_path_buf()]);
+            } else {
+                assert!(calls.is_empty());
+                let reason = body["open_error"].as_str().unwrap();
+                if name == "payload.md" {
+                    assert!(reason.contains("changed type"), "{reason}");
+                } else {
+                    assert!(reason.contains("only .md and .txt"), "{reason}");
+                }
+            }
+            if fail {
+                assert_eq!(body["open_error"], "opener sentinel");
+            }
+            peer.await.unwrap();
+        }
+    }
+
+    /// The hover's capability answer uses the same extension rule as opening,
+    /// and is absent on servers. Only the desktop's own window can reach the
+    /// embedded helm, so a server helm's browsers never see an opening hint.
+    #[farhelm_testtrace::test]
+    async fn stat_exposes_open_hint_only_with_native_capability() {
+        for (native, name, expected) in [
+            (false, "notes.md", None),
+            (true, "notes.TXT", Some(true)),
+            (true, "notes.txt.command", Some(false)),
+        ] {
+            let (client, server) = tokio::io::duplex(65536);
+            let peer = tokio::spawn(async move {
+                let mut peer = FakeSupervisor::accept(server).await;
+                let ControlMsg::StatFile { req_id, .. } = peer.recv().await else {
+                    panic!("expected stat");
+                };
+                let mut answer = info();
+                answer.path = format!("/work/{name}");
+                peer.send(&ControlMsg::FileStat {
+                    req_id,
+                    info: answer,
+                })
+                .await;
+            });
+            let mut h = spliced_helm_listing(client, vec![session("sess-1", 1)]).await;
+            if native {
+                Arc::get_mut(&mut h.state).unwrap().file_opener =
+                    Some(Arc::new(|_| panic!("stat never opens")));
+            }
+            let response = h.router().oneshot(request("stat", false)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), 4096)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                body.get("can_open").and_then(|value| value.as_bool()),
+                expected
+            );
+            peer.await.unwrap();
+        }
     }
 
     /// Save twice without overwriting the earlier file, then fail after bytes
