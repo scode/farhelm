@@ -44,10 +44,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`long-launch-refusal-displaces-replace-warning.md`](long-launch-refusal-displaces-replace-warning.md) — After a long
   refusal, Replace can remain visible while its warning about killing the source session is below the viewport.
 
-- [`restart-drain-skips-newly-published-conversation.md`](restart-drain-skips-newly-published-conversation.md) — Restart
-  can resume the previous conversation after a conversation switch, then permanently discard the report identifying the
-  new conversation.
-
 - [`restart-withdrawal-discards-new-codex-selection.md`](restart-withdrawal-discards-new-codex-selection.md) — Restart
   can permanently lose the new conversation’s Resume target while refusing to resume an older, unavailable conversation.
 
