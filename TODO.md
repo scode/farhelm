@@ -120,6 +120,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   permission card), which addresses count as local, how long a tunnel lives, and what it means for a session on the
   local host are to be decided when the entry is planned.
 
+- **One-way observed YOLO shield.** The sidebar shield now reads the agent's status line (#2063): seeing a no-checks
+  mode turns the shield YOLO, and a later recognized non-YOLO mode restores the launch shield (SPEC.md, Session list,
+  the paragraph on reading the permission mode from the status line). The intent was that this reading only ever moves
+  the shield toward YOLO, for safety. Discuss the details first, including Claude's plan mode (which keeps the last
+  reading) and Cursor (which shows no label when its mode is off), then decide whether to make it one-way.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
