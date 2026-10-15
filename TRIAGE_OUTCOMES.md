@@ -13201,7 +13201,9 @@
   words there).
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-power-loss-spec.md`.
+- Execution: complete; covered by the power-loss decision in https://github.com/scode/farhelm/pull/2039/changes; jj
+  change `zsvzylvy`; bookmark `plan/triage-power-loss-spec/02-checkout-durability`;
+  https://github.com/scode/farhelm/pull/2043/changes.
 
 ## ssh-help-fish-command-quoting.md
 
