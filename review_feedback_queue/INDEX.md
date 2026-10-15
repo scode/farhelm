@@ -8,9 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`devbuild-git-environment-discards-caller-work.md`](devbuild-git-environment-discards-caller-work.md) — The Mac
-  development-build helper can reset and clean another working copy when Git selectors are inherited.
-
 - [`claude-trust-rewrites-unrelated-numbers.md`](claude-trust-rewrites-unrelated-numbers.md) — Trust edits can change
   unrelated numbers in Claude's settings; consequential real-world values remain unverified.
 

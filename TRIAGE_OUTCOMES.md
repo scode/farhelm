@@ -13653,7 +13653,9 @@
 - Decision: on 2026-10-15 the user agreed to discard it as harm confined to maintainer tooling under a deliberately set
   environment, rather than putting a dev script in the product spec.
 - Completion criteria: remove this feedback file and its index entry, without code, spec or filter changes.
-- Execution: planned in `plans/queue/triage-layout-filter-and-devbuild.md`.
+- Execution: complete in jj change `nrzquwuwzsvm`, bookmark
+  `plan/triage-layout-filter-and-devbuild/03-devbuild-finding`;
+  [PR #2081](https://github.com/scode/farhelm/pull/2081/changes); discarded as decided above.
 
 ## installation-identity-escape-collision.md
 
