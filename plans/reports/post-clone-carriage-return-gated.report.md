@@ -64,3 +64,41 @@ Implementation and investigation stayed in the main session. Private galaxy-brai
 `ca9caa6f-9f42-45cb-8728-45ea4905b4cd` retains the source-review decision, launch, outcome and raw terminal counters;
 some local/wording accounting events were not recorded at launch. Exact served-model attribution and native/main usage
 are unavailable. These gaps do not establish additional review or runtime coverage.
+
+### Landing
+
+Landed as #2053, after confirmations-save-error (#2054) in the same round; the two change different Settings fields and
+were tested together on top of main.
+
+#### Review
+
+An independent fresh-context review found nothing blocking and confirmed the change stays within the maintainer's
+trivial-complexity gate. The refusal is judged from the saved command, not the draft, so the field's own newline
+conversion cannot slip past it; clearing is always possible, and after a clear the field edits normally in the same open
+dialog. No other surface edits this command: the launcher and template editor do not, per-host overrides are
+command-line only, and the command line and API store the text unchanged.
+
+#### Fix made while landing
+
+The refusal said to change the command "through the command line" without saying how. It now names
+`farhelm helm checkout-config set-post-clone` on the helm's machine, matches the field's other lowercase error, and says
+plainly that the field would turn the carriage return into a newline; the browser test checks the new text. The
+changelog fragment names the same command, and a loop variable in the test's teardown no longer shadows the `request`
+fixture used right after it.
+
+#### Left as is
+
+- If the command line removes the carriage return while Settings is open, the field keeps refusing until Settings is
+  reopened. This fails safe.
+- SPEC.md does not mention the refusal; it is consistent with the existing rule that the field shows a refused value's
+  reason.
+- Suspected, not seen: after the clear, the test waits for the refetch at the network boundary rather than for the field
+  to apply it, a narrow window under several browser round trips.
+
+#### Checks
+
+- Run now, together with #2054 on top of main, with all fixes in: the format, lint, changelog and sleep checks, both
+  clippy runs, the UI crate in full (run `441aab8b-8554-4cf8-a41b-8c47b249ecb7`, 634 passed), the JS harness, and the
+  settings, session-confirmations, yolo-guard, ntfy-settings, notifications and tooltip-coverage specs on Chromium and
+  WebKit (run `9be5c0fa-2e23-4f0b-b256-5331d2ce290e`, 70 passed).
+- Not run: anything wider; only the post-clone command field changed.
