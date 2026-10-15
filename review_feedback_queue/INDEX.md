@@ -177,9 +177,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-screenshot-implies-deletion-needs-save.md`](template-screenshot-implies-deletion-needs-save.md) — A reader
   could delete a saved template and close the dialog believing the deletion was never committed.
 
-- [`git-discovery-fixtures-inherit-bare-git-config.md`](git-discovery-fixtures-inherit-bare-git-config.md) — Running
-  repository-discovery tests can still overwrite configuration belonging to another repository or the user.
-
 - [`browser-git-fixture-can-change-caller-repository.md`](browser-git-fixture-can-change-caller-repository.md) — Running
   the new browser test with an inherited Git repository selector can change a developer’s repository instead of its
   temporary fixture.

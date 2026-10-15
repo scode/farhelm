@@ -989,7 +989,10 @@ mod tests {
         command
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_COMMON_DIR");
+            .env_remove("GIT_COMMON_DIR")
+            // Bare GIT_CONFIG acts like git config --file, so it can redirect
+            // a fixture write even without any GIT_CONFIG_* overrides.
+            .env_remove("GIT_CONFIG");
         for (name, _) in std::env::vars_os()
             .filter(|(name, _)| name.to_string_lossy().starts_with("GIT_CONFIG_"))
         {
