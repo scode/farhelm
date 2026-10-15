@@ -172,3 +172,18 @@ A finding matches when all of these hold:
 
 It does not match when the user was not told that preparation failed, or when a checkout whose preparation completed is
 affected.
+
+### Dialog explanations out of view but reachable by scrolling
+
+Added 2026-10-15.
+
+A finding matches when both of these hold:
+
+- The trigger needs unusually large content (many hosts, a very long error or path) or an unusually small window.
+- The whole consequence is that part of a dialog's or confirmation's explanation is out of view while it remains
+  reachable by scrolling, and nothing is acted on without the user's own click.
+
+It does not match when the consequence includes any of the following:
+
+- content that cannot be reached at all, or that a keyboard-only or screen-reader user cannot reach;
+- an action that happens without the user's own click.

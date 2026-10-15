@@ -13573,7 +13573,9 @@
   not match when content cannot be reached at all, or when an action happens without a click.
 - Completion criteria: that filter exists in `review_feedback_queue/FILTER.md`; this feedback file and its index entry
   are removed under it.
-- Execution: planned in `plans/queue/triage-layout-filter-and-devbuild.md`.
+- Execution: complete in jj change `uyonpoztsmpp`, bookmark `plan/triage-layout-filter-and-devbuild/01-layout-filter`;
+  [PR #2076](https://github.com/scode/farhelm/pull/2076/changes); removed under FILTER.md's "Dialog explanations out of
+  view but reachable by scrolling" filter.
 
 ## long-launch-refusal-displaces-replace-warning.md
 
