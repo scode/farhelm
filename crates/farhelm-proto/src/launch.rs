@@ -208,22 +208,21 @@ impl LaunchHarness {
 
     /// The permission selected for a new request that omits its permission.
     ///
-    /// Pi, OpenCode, OMP, and Goose start in approval-free modes according to
-    /// their stock behavior, so Farhelm records an omitted choice as YOLO for
-    /// those harnesses. Other supported harnesses get explicit guarded flags;
+    /// Every harness that offers Guarded starts there unless another mode was
+    /// chosen. Pi, OpenCode and Goose retain their YOLO defaults;
     /// Cursor remains under its own configuration. This is an admission rule,
     /// not a way to reinterpret an older stored command: use
     /// [`Self::stored_permission`] for that.
     pub const fn omitted_permission(self) -> Option<LaunchPermission> {
         match self {
-            LaunchHarness::Pi
-            | LaunchHarness::OpenCode
-            | LaunchHarness::Omp
-            | LaunchHarness::Goose => Some(LaunchPermission::Yolo),
+            LaunchHarness::Pi | LaunchHarness::OpenCode | LaunchHarness::Goose => {
+                Some(LaunchPermission::Yolo)
+            }
             LaunchHarness::Cursor => None,
             LaunchHarness::Codex
             | LaunchHarness::Claude
             | LaunchHarness::Muse
+            | LaunchHarness::Omp
             | LaunchHarness::Grok => Some(LaunchPermission::Guarded),
         }
     }
@@ -637,9 +636,28 @@ mod tests {
         assert_eq!(LaunchHarness::Cursor.stored_permission(None), None);
         assert_eq!(
             LaunchHarness::Omp.request_permission(None),
+            Some(LaunchPermission::Guarded)
+        );
+        assert_eq!(
+            LaunchHarness::Omp.stored_permission(None),
             Some(LaunchPermission::Yolo)
         );
         assert!(!LaunchHarness::Goose.offers_permission(LaunchPermission::Guarded));
+    }
+
+    /// Adding Guarded to an agent must also make it the new-request default.
+    /// Stored launches are deliberately outside this rule: their argv already
+    /// records what ran, and a new default must not reclassify an old session.
+    #[test]
+    fn every_harness_offering_guarded_defaults_to_guarded() {
+        for harness in LaunchHarness::ALL {
+            if harness.offers_permission(LaunchPermission::Guarded) {
+                assert_eq!(
+                    harness.omitted_permission(),
+                    Some(LaunchPermission::Guarded)
+                );
+            }
+        }
     }
 
     /// Spec: `LaunchPermission::ALL` lists every variant exactly once.
@@ -719,7 +737,7 @@ mod tests {
             (Muse, true, true, Some(LaunchPermission::Guarded), false),
             (Goose, true, true, Some(LaunchPermission::Yolo), false),
             (Pi, true, true, Some(LaunchPermission::Yolo), true),
-            (Omp, true, true, Some(LaunchPermission::Yolo), false),
+            (Omp, true, true, Some(LaunchPermission::Guarded), false),
             (OpenCode, true, false, Some(LaunchPermission::Yolo), true),
             (Grok, false, false, Some(LaunchPermission::Guarded), false),
         ];

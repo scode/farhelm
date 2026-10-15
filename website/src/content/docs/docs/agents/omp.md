@@ -13,8 +13,9 @@ specific to OMP.
 - Guarded uses `--approval-mode write`, automatically approving workspace edits and asking before other actions. The
   separate approve choice asks before every tool action. Project rules and plugins can loosen either; see
   [Permission modes](/docs/agents/#permission-modes).
-- OMP runs without approval prompts by default, so an OMP launch with no permission choice counts as YOLO, and Farhelm
-  asks you to confirm it on hosts that ask before YOLO launches.
+- New OMP launches default to Guarded unless you chose another mode or the launcher remembered one. Farhelm does not
+  recognize OMP's approval prompts: a session waiting for your approval still shows as running or idle, with no waiting
+  alert.
 - After `/new`, the new conversation can be restarted right away, before OMP has replied to it.
 - OMP matches model names loosely: a typo or a retired model name can quietly start a different model instead of
   failing. If the exact model matters, check it in OMP itself after launch.

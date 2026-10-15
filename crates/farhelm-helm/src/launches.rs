@@ -303,7 +303,7 @@ pub(crate) fn catalog() -> &'static [CatalogModel] {
 /// remembered defaults, and retries record for it.
 ///
 /// New request omissions become explicit Guarded choices on supported
-/// harnesses, or YOLO for Pi, OpenCode, OMP and Goose. Shared by
+/// harnesses, or YOLO for Pi, OpenCode and Goose. Shared by
 /// [`compile`] and by acceptance paths that never compile (a fresh-checkout
 /// create reconciled after a lost reply), so the same request records the
 /// same selection whichever path accepts it. Pure: no catalog lookup, so a
@@ -1090,11 +1090,15 @@ mod tests {
             compile(selection(LaunchHarness::Muse)).unwrap().invocation,
             "muse --permission-profile :auto-review"
         );
+        assert_eq!(
+            compile(selection(LaunchHarness::Omp)).unwrap().invocation,
+            "omp --approval-mode write"
+        );
     }
 
     /// Guarded flags survive every supported resume selector, and cannot
-    /// silently become a vendor default on a fresh launch either. OMP keeps
-    /// its historical YOLO omission while offering guarded explicitly.
+    /// silently become a vendor default on a fresh launch either. OMP's old
+    /// stored omissions remain YOLO; new omissions compile Guarded explicitly.
     #[test]
     fn guarded_modes_pin_fresh_and_resume_argv() {
         for (harness, flags, selector) in [
@@ -1647,9 +1651,8 @@ mod tests {
 
     /// OMP compiles its own OpenRouter contract beside Pi's: the same
     /// provider-qualified model form, its own `--thinking` effort flag, and
-    /// its own `--approval-mode` pair — where an OMITTED permission stays
-    /// omitted (the harness default is a real choice, unlike Pi's rewritten
-    /// yolo) and both explicit modes carry their exact value.
+    /// its own `--approval-mode` pair. Omission compiles Guarded explicitly,
+    /// while an explicit approval choice carries its exact value.
     #[test]
     fn omp_compiles_its_native_openrouter_contract_with_an_explicit_approval_mode() {
         // Every optional flag at once, with the OMP-specific Approve mode.
@@ -1703,7 +1706,7 @@ mod tests {
             ]
         );
 
-        // An omitted OMP permission is Farhelm's explicit YOLO default.
+        // An omitted OMP permission is Farhelm's explicit Guarded default.
         let omitted = compile(LaunchSelection {
             permission_flags: None,
             harness: LaunchHarness::Omp,
@@ -1715,8 +1718,8 @@ mod tests {
         .expect("OMP default compiles");
         assert_eq!(
             omitted.selection.permissions,
-            Some(LaunchPermission::Yolo),
-            "an omitted OMP permission normalizes to YOLO"
+            Some(LaunchPermission::Guarded),
+            "an omitted OMP permission normalizes to Guarded"
         );
         assert_eq!(
             shell_words::split(&omitted.invocation).unwrap(),
@@ -1727,7 +1730,7 @@ mod tests {
                 "--model",
                 "z-ai/glm-5.3",
                 "--approval-mode",
-                "yolo"
+                "write"
             ]
         );
     }
@@ -1771,7 +1774,7 @@ mod tests {
                 "--model",
                 "release/candidate'42;$literal",
                 "--approval-mode",
-                "yolo"
+                "write"
             ]
         );
 
@@ -1779,7 +1782,7 @@ mod tests {
         assert_eq!(default.selection.model, None);
         assert_eq!(
             shell_words::split(&default.invocation).unwrap(),
-            ["omp", "--approval-mode", "yolo"]
+            ["omp", "--approval-mode", "write"]
         );
         // OMP's own effort vocabulary is OMP_EFFORTS: `ultra` (the shared
         // enum's extra level) is refused; every listed level compiles.
@@ -1839,7 +1842,7 @@ mod tests {
                 vec!["env", "GOOSE_MODE=auto", "goose", "session"],
             ),
             (LaunchHarness::Pi, vec!["pi"]),
-            (LaunchHarness::Omp, vec!["omp", "--approval-mode", "yolo"]),
+            (LaunchHarness::Omp, vec!["omp", "--approval-mode", "write"]),
         ] {
             let compiled = compile(selection(harness)).expect("model omission is valid");
             assert_eq!(compiled.selection.model, None);

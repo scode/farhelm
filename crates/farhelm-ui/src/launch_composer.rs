@@ -2720,8 +2720,9 @@ mod tests {
     }
 
     /// OMP's permission surface mirrors the helm boundary: an omitted choice
-    /// resolves to YOLO, while explicit YOLO and Approve survive
-    /// reconciliation. Goose-only labels clear with an explanation.
+    /// resolves to Guarded. Goose's default YOLO resets at an agent switch,
+    /// while its Approve choice survives. Other Goose-only labels clear with
+    /// an explanation of OMP's destination default.
     #[test]
     fn omp_permissions_keep_their_own_vocabulary() {
         for permissions in [
@@ -2744,7 +2745,11 @@ mod tests {
             );
             assert_eq!(
                 omp.permissions,
-                Some(permissions.unwrap_or(LaunchPermission::Yolo)),
+                Some(if permissions == Some(LaunchPermission::Approve) {
+                    LaunchPermission::Approve
+                } else {
+                    LaunchPermission::Guarded
+                }),
                 "OMP keeps the effective {permissions:?} mode"
             );
         }
@@ -2759,11 +2764,11 @@ mod tests {
             };
             let (omp, _) =
                 reconcile_harness_selection(goose.clone(), None, LaunchHarness::Omp, &[]);
-            assert_eq!(omp.permissions, Some(LaunchPermission::Yolo));
+            assert_eq!(omp.permissions, Some(LaunchPermission::Guarded));
             assert_eq!(
                 reconciliation_reset_reason(&goose, &omp).as_deref(),
                 Some(
-                    "the selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default"
+                    "the selected permission is unavailable for this harness, so it was replaced by guarded, this harness's default"
                 )
             );
             assert!(
@@ -2792,7 +2797,7 @@ mod tests {
             },
             &[],
         ));
-        // An OMP omission uses its effective YOLO default, as the helm does.
+        // An OMP omission uses its effective Guarded default, as the helm does.
         assert!(selection_is_compatible(
             &LaunchSelection {
                 permission_flags: None,
@@ -2805,7 +2810,7 @@ mod tests {
             &[],
         ));
         // The displayed permission is the effective selection: an omitted OMP
-        // permission reads as YOLO, matching the launch compiler.
+        // permission reads as Guarded, matching the launch compiler.
         let omitted = LaunchSelection {
             permission_flags: None,
             harness: LaunchHarness::Omp,
@@ -2814,8 +2819,8 @@ mod tests {
             permissions: None,
             workspace_trust: None,
         };
-        assert_eq!(selection_permission_value(&omitted), "yolo");
-        assert!(selection_summary(&omitted).ends_with("permissions: yolo"));
+        assert_eq!(selection_permission_value(&omitted), "guarded");
+        assert!(selection_summary(&omitted).ends_with("permissions: guarded"));
         let approve = LaunchSelection {
             permissions: Some(LaunchPermission::Approve),
             workspace_trust: None,
@@ -2872,7 +2877,6 @@ mod tests {
         for harness in [
             LaunchHarness::Pi,
             LaunchHarness::OpenCode,
-            LaunchHarness::Omp,
             LaunchHarness::Goose,
         ] {
             for permission in [None, Some(LaunchPermission::Yolo)] {
@@ -2912,7 +2916,7 @@ mod tests {
             github_repo: None,
             canonical_cwd: None,
             cwd: "/work/project".into(),
-            selection: selection(LaunchHarness::Omp, None, None),
+            selection: selection(LaunchHarness::Pi, None, None),
             created_at: 1,
             creation_seq: Some(1),
         };

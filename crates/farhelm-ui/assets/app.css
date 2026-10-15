@@ -5218,6 +5218,44 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   box-shadow: var(--shadow-dialog);
 }
 
+/* Permission escalation owns one visible recovery window. The constant
+   lifetime animation is its clock, including under reduced motion; CSS
+   pauses it for pointer/focus ownership and the existing inactive-window
+   rule. Initial styling is readable even when entrance starts paused. */
+.permission-escalation-banner {
+  position: sticky;
+  top: -24px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -24px -24px 16px;
+  padding: 16px 24px;
+  border-bottom: 3px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 20%, var(--bg-2));
+  color: var(--fg-0);
+  animation: permission-banner-slide 200ms ease-out, permission-banner-lifetime 8s linear;
+}
+.permission-escalation-banner > span { flex: 1 1 320px; font-weight: 600; }
+.permission-escalation-banner:hover,
+.permission-escalation-banner:focus-within { animation-play-state: paused; }
+@keyframes permission-banner-slide { from { transform: translateY(-12px); } to { transform: translateY(0); } }
+@keyframes permission-banner-lifetime { from { opacity: 1; } to { opacity: 1; } }
+.create-session-form[data-permission-escalation] .launch-composer-permissions-choice {
+  outline: 4px solid var(--danger);
+  outline-offset: 4px;
+  animation: permission-outline-odd 2.5s ease-out forwards;
+}
+/* Alternate names restart the highlight without remounting focused controls. */
+.create-session-form[data-permission-escalation="even"] .launch-composer-permissions-choice { animation: permission-outline-even 2.5s ease-out forwards; }
+@keyframes permission-outline-odd { from { outline-color: var(--danger); } to { outline-color: transparent; } }
+@keyframes permission-outline-even { from { outline-color: var(--danger); } to { outline-color: transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  .permission-escalation-banner { animation: permission-banner-lifetime 8s linear; }
+  .create-session-form[data-permission-escalation] .launch-composer-permissions-choice { animation: none; }
+}
+
 /* The eyebrow names this transient launcher without competing with its
    first action: small caps above the row, never a heading that pushes Launch
    down. */
@@ -6230,6 +6268,15 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
     padding: 16px;
   }
 
+  /* The banner bleeds to the dialog's edges by its padding, which is 16px
+     here rather than 24px; the wider offsets would scroll the dialog
+     sideways and clip the banner's top. */
+  .permission-escalation-banner {
+    top: -16px;
+    margin: -16px -16px 16px;
+    padding-inline: 16px;
+  }
+
   /* A phone's row is about 40ch wide: no room for four cells and a hint.
      The host is the cell to drop, because it is the same string in every
      row and the folder is what tells the rows apart. `display: none` keeps
@@ -7153,8 +7200,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 
    One universal rule rather than a list of selectors, so the next looping
    indicator cannot forget to pause (SPEC_impl.md, "GUI: Dioxus", looping
-   animations). Nothing else in this sheet sets `animation-play-state`, so
-   `!important` overrides nothing deliberate; it only wins over specificity.
+   animations). The only other `animation-play-state` in this sheet pauses
+   the permission-escalation banner's lifetime under hover and focus, and an
+   inactive window pausing it too is wanted, so `!important` overrides
+   nothing deliberate; it only wins over specificity.
    It also pauses xterm.js's own cursor blink, which only runs while the
    terminal has focus anyway. Reduced motion is separate and stronger: those
    overrides remove the animations outright, focused window or not.

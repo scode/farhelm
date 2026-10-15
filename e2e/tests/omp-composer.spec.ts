@@ -3,8 +3,9 @@ import { agentLaunchRow } from "./helpers/fleet";
 
 /**
  * OMP can use its configured model while keeping its own effort and permission
- * vocabularies. Its omitted permission means YOLO, while an explicit Approve
- * must survive without being overwritten by that default. The composer half pins
+ * vocabularies. A new launch defaults to Guarded (a stored launch that omitted
+ * its permission still means YOLO), while an explicit Approve must survive
+ * without being overwritten by that default. The composer half pins
  * the serialized POST selection; argv compilation belongs to the helm tests
  * and stored-selection decoding to the supervisor test, so a composer that
  * offered the right controls but serialized the wrong selection is what
@@ -63,13 +64,13 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
   await expect(efforts.getByRole("button", { name: "ultra", exact: true })).toHaveCount(0);
 
   // OMP offers guarded (its write mode), YOLO, custom flags and Approve;
-  // omission selects YOLO. Goose-only approval modes are not offered. The
+  // a new launch defaults to guarded. Goose-only approval modes are not offered. The
   // choices are named rather than counted, because the section also holds
   // the permission help button.
   for (const choice of ["guarded", "yolo", "custom", "approve"]) {
     await expect(permissions.getByRole("button", { name: choice, exact: true })).toBeVisible();
   }
-  await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(permissions.getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
   for (const absent of ["smart approve", "chat"]) {
     await expect(permissions.getByRole("button", { name: absent, exact: true })).toHaveCount(0);
   }
@@ -160,8 +161,9 @@ test("an OMP session row shows the OMP glyph and its actual permission", async (
   await expect(approveRow.locator(".permission-glyph").locator("..")).toHaveAttribute("data-tooltip", approveDescription);
   await expect(approveRow.locator(".session-agent .visually-hidden")).toHaveText(approveDescription);
 
-  // Old snapshots with no permission use the same YOLO default as a new
-  // structured OMP launch; explicit Approve above remains distinct.
+  // Old snapshots with no permission keep the YOLO meaning they were
+  // stored with, though a new OMP launch defaults to guarded; explicit
+  // Approve above remains distinct.
   const omittedRow = page.locator(".session-row", { hasText: "omp default row" });
   await expect(omittedRow.locator(".session-agent svg[data-glyph='omp']")).toBeVisible();
   await expect(omittedRow.locator(".session-agent svg.permission-glyph[data-glyph='yolo']")).toBeVisible();

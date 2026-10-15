@@ -266,7 +266,7 @@ after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or `ma
 visibly labelled YOLO mode; this describes the absence of Pi's built-in tool gate, not its project-resource `--approve`
 flag. Pi stores that mode as `yolo`; an older snapshot that omitted the formerly optional permission field reads and
 displays as YOLO too. OMP requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` thinking (OMP's `auto`
-level is not offered) and offers `yolo` (preselected, `--approval-mode yolo`), `guarded` (`--approval-mode write`,
+level is not offered) and offers `yolo` (`--approval-mode yolo`), `guarded` (preselected, `--approval-mode write`,
 workspace edits approved automatically and other actions asking), and `approve` (`--approval-mode always-ask`);
 `smart approve`/`chat` are refused. OMP gets no waiting-state recognition: an OMP approval prompt shows the generic
 running/idle status, a settled scope decision rather than a detection gap. Provider capabilities may clamp or reject a
@@ -561,20 +561,28 @@ agent choice is independent of that destination:
   plain Restart or Replace reuses the stored command. Changing agent type clears custom and its words; a later template
   setting another permission clears them. Custom never becomes the remembered default permission. Guarded means an agent
   can approve actions through a safety mechanism that can still refuse or escalate (a classifier, AI reviewer, sandbox
-  or asking the user), not that it asks about everything. YOLO means no such check. New omitted permissions on Claude,
-  Codex, Grok and Muse become explicit guarded choices: Claude and Grok use `--permission-mode auto`, Codex uses
-  `-a on-request -s workspace-write`, and Muse uses `--permission-profile :auto-review`. Every supported resume retains
-  those flags. Cursor's omission stays under its own setting; Pi, OpenCode, OMP and Goose omissions remain YOLO. Model
-  and effort omissions still leave their flags out. Model selection is optional for every harness; OpenCode, Cursor, and
-  Grok offer no effort choice, and Grok accepts no model choice. The helm owns the released model catalog and validates
-  every agent-launch choice, so the browser never turns a model identifier into an argv fragment. Typing a model never
-  changes a selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
+  or asking the user), not that it asks about everything. YOLO means no such check. For every agent type that supports
+  Guarded, Guarded is the default permission when none is chosen. This does not change when defaults apply or override a
+  remembered choice. Claude and Grok use `--permission-mode auto`, Codex uses `-a on-request -s workspace-write`, Muse
+  uses `--permission-profile :auto-review`, and OMP uses `--approval-mode write`. Every supported resume retains those
+  flags. Cursor's omission stays under its own setting; Pi, OpenCode and Goose omissions remain YOLO. Model and effort
+  omissions still leave their flags out. Model selection is optional for every harness; OpenCode, Cursor, and Grok offer
+  no effort choice, and Grok accepts no model choice. The helm owns the released model catalog and validates every
+  agent-launch choice, so the browser never turns a model identifier into an argv fragment. Typing a model never changes
+  a selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
   `opencode/<model>`), a model only other harnesses offer is refused with a message naming them, and choosing another
   harness's model from the full model list switches the harness on purpose. With no harness selected yet, a typed known
   model fills in its owning harness (a bare `gpt-6-luna` picks Codex); a custom model needs an explicit harness, and an
-  id several harnesses offer asks for one. Replacing a harness clears incompatible choices and a YOLO permission that
-  was the previous harness's default. An invalid combination cannot launch. New normally preselects no harness or model.
-  The permissions mode remembers the last successful agent launch, helm-wide across every client, except that a
+  id several harnesses offer asks for one. Replacing a harness clears incompatible choices and a permission equal to the
+  previous harness's default. When an agent switch automatically makes the shown permission more dangerous, a red banner
+  slides down across the top of the launcher, naming both modes and explaining that the new agent does not support the
+  previous mode. Undo restores the draft before the switch; dismiss closes the banner. The banner lasts about eight
+  seconds, paused while hovered or focused, and is announced to screen readers. The permission control gets a thick red
+  outline that fades after about two and a half seconds. Reduced motion replaces slide and fade with a static outline
+  while the banner is shown. Chat and approve are safest, then smart approve and Guarded, then YOLO, custom flags and
+  the agent's own setting; only a move to a later group triggers the banner. Choosing the first agent or choosing a
+  permission directly never triggers it. An invalid combination cannot launch. New normally preselects no harness or
+  model. The permissions mode remembers the last successful agent launch, helm-wide across every client, except that a
   harness's default or forced YOLO clears that memory instead of preselecting YOLO for another harness. Explicit YOLO on
   a harness with a non-YOLO default is remembered; an explicit workspace-trust choice on Codex, Muse, or Pi is
   remembered separately after a successful user launch. `trust:true` and `trust:false` are single search actions on

@@ -5698,8 +5698,10 @@ test("composer local-home reset takes over a remote clone destination", async ({
  * user-reachable path. That is the only browser seam that can advance
  * `ListView`'s generation signal while keeping this exact `CreateSessionForm`
  * node mounted. The first clone establishes a real compatibility notice; the
- * second must replace it along with every source field. Its held browse reply
- * also crosses A→B→A clone reseeding on that same node, so the generation
+ * second must replace it along with every source field. An escalation then
+ * establishes an Undo owned by the first generation; dispatching that old
+ * control immediately after the second clone must not restore the first draft.
+ * Its held browse reply also crosses A→B→A clone reseeding on that same node, so the generation
  * invalidation cannot be replaced by an ordinary host or folder edit.
  */
 test("composer mounted clone generation replaces the prior draft and notice", async ({ page, request }) => {
@@ -5770,6 +5772,15 @@ test("composer mounted clone generation replaces the prior draft and notice", as
     await formHandle!.evaluate((node) => node.setAttribute("data-mounted-generation", "owned"));
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
     await expect(form.getByRole("status"), "the old clone must establish a real compatibility notice").toContainText("not in this harness's Farhelm offering");
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Pi", exact: true }).click();
+    const escalation = form.locator(".permission-escalation-banner");
+    await expect(escalation, "the first opening must own a real escalation snapshot before clone B supersedes it").toContainText("Pi does not support Guarded");
+    const oldUndo = await escalation.getByRole("button", { name: "undo", exact: true }).elementHandle();
+    expect(oldUndo, "the stale-event probe must hold the original opening's actual Undo control").not.toBeNull();
+    // Prefill reseeding leaves conversation alone. If stale Undo restores its
+    // older empty value, the next effect cannot hide that unauthorized write.
+    await form.locator(".named-conversation").fill("new-opening-conversation");
     await form.getByRole("button", { name: "browse this path", exact: true }).click();
     await expect.poll(() => browseBodies.length, { message: "clone A's browse must be held before the same mounted form is reseeded" }).toBe(1);
     expect(browseBodies[0], "the held request must capture clone A's destination before clone B arrives").toMatchObject({ host: local, cwd: "/tmp" });
@@ -5783,10 +5794,16 @@ test("composer mounted clone generation replaces the prior draft and notice", as
     const secondClone = secondRow.locator(".session-row-clone");
     await expect(secondClone, "the synthetic menu handler must expose row B's real clone action").toHaveCount(1);
     await expect(form.getByRole("status"), "the old draft notice must survive until the next clone generation dispatches").toBeVisible();
-    await secondClone.evaluate((node) => {
+    await secondClone.evaluate((node, undo) => {
+      if (!undo?.isConnected) throw new Error("the original Undo must still be mounted at the stale-event boundary");
       node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+      // Same-task dispatch preserves the queued-handler boundary before the
+      // reseed effect can remove the first opening's notice and its controls.
+      undo!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    }, oldUndo);
 
+    await expect(escalation, "a new clone generation retires the prior opening's recovery").toHaveCount(0);
+    await expect(form.locator(".named-conversation"), "stale Undo must not restore a field that clone B's reseed leaves alone").toHaveValue("new-opening-conversation");
     await expect(form.getByLabel("folder", { exact: true }), "clone B must reseed the mounted form before clone A is restored").toHaveValue("/");
     await expect(form.getByLabel("name (optional)"), "the second clone must replace source A's title before A is restored").toHaveValue(second.title);
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -6629,10 +6646,10 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
 });
 
-/** Guarded is an ordinary request default for Claude, but an explicit OMP write
- * choice; Cursor's unforced mode is uncertain. Compact rows must preserve those
- * distinctions rather than hiding all guarded or all omitted permissions. */
-test("compact recents distinguish guarded defaults, OMP write and own-setting", async ({ page, request }) => {
+/** Guarded is the ordinary request default for both Claude and OMP; Cursor's
+ * unforced mode is uncertain. Compact rows must keep that distinction rather
+ * than treating every omitted permission as a default. */
+test("compact recents distinguish guarded defaults and own-setting", async ({ page, request }) => {
   const cwd = "/recent-permission-modes";
   await installComposerChoices(page, request, [
     { host: 1, canonical_cwd: cwd, cwd, selection: { harness: "claude", model: null, effort: null, permissions: "guarded" }, created_at: 3, creation_seq: 3 },
@@ -6646,7 +6663,7 @@ test("compact recents distinguish guarded defaults, OMP write and own-setting", 
   const rows = form.locator(".launch-composer-recent-slots").getByRole("button");
   await expect(rows.locator(".launch-composer-recent-harness")).toHaveText(["Claude", "OMP", "Cursor"]);
   await expect(rows.locator(".launch-composer-recent-selection")).toHaveText([
-    "defaults", "permissions: guarded", "permissions: agent's own setting",
+    "defaults", "defaults", "permissions: agent's own setting",
   ]);
   await expect(rows.nth(1)).toHaveAttribute("data-tooltip", /OMP.*permissions: guarded/);
 });
@@ -8302,7 +8319,7 @@ test("model picks discard another harness's default YOLO", async ({ page, reques
     { id: "goose-offered", harness: "goose", efforts: ["high"] },
   ]);
   await page.goto("/");
-  for (const label of ["Pi", "OpenCode", "OMP", "Goose"]) {
+  for (const label of ["Pi", "OpenCode", "Goose"]) {
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
     const harnesses = form.locator(".launch-composer-harness-choice");

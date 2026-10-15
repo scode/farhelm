@@ -49,9 +49,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`ntfy-token-follows-changed-server.md`](ntfy-token-follows-changed-server.md) — Changing the notification server can
   send the previous server's access token to the new one.
 
-- [`guarded-choice-becomes-omp-yolo.md`](guarded-choice-becomes-omp-yolo.md) — Switching the launcher to OMP can clear
-  an explicit guarded choice and select YOLO.
-
 - [`installation-identity-escape-collision.md`](installation-identity-escape-collision.md) — Distinct peer-chosen
   installation identities can display identically in an adoption prompt.
 
