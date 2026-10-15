@@ -19,7 +19,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `copy-guidance-resize.md` — The "this drag did not copy" notice is measured at its origin so narrowing the window does not collapse it (gated)
 - [complete] `brick-test-feedback-evidence.md` — The release brick test keeps the final guest when failed feedback checks' exported evidence is missing (gated)
 - [in-flight a6d39e] `managed-checkout-row-accessibility.md` — Full-size session rows for managed checkouts expose the working folder and trash note to screen readers (gated)
-- [pending] `download-long-name-copies.md` — A second desktop download of a file with a near-limit name shortens the stem so the numbered copy fits (gated)
+- [in-flight e0ad5d] `download-long-name-copies.md` — A second desktop download of a file with a near-limit name shortens the stem so the numbered copy fits (gated)
 - [pending] `save-template-ime-escape.md` — Escape during input-method composition no longer closes the save-template panel and its draft (gated)
 - [pending] `helm-start-without-ca-bundle.md` — A Linux helm without CA certificates starts, with downloads refusing, instead of exiting at startup (gated)
 - [pending] `stopped-session-launch-error.md` — A cached launch error no longer overrides a session's recorded stopped status (gated)
