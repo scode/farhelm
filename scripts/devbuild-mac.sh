@@ -24,7 +24,8 @@
 # their usual caches (cargo's registry under ~/.cargo, dx's and zig's own),
 # and the running app has its state: like any Farhelm desktop app it uses the default state
 # directory (or `FARHELM_DESKTOP_STATE_DIR`), so it sees the same hosts and the
-# same local supervisor as an installed app. Run one or the other, not both.
+# same local supervisor as an installed app. Run one or the other, not both;
+# the script refuses to launch while another Farhelm app is running.
 #
 # ## How remote Update works with this build
 #
@@ -41,15 +42,20 @@
 #
 # ## Requirements
 #
-# On the Mac: `dx` (the Dioxus CLI version the repo pins, 0.7.10), `cargo-zigbuild`
-# and `zig` for the Linux cross-builds (`cargo install --locked
-# cargo-zigbuild`, `brew install zig`), and the rustup targets
-# `x86_64-unknown-linux-musl` and/or `aarch64-unknown-linux-musl`. The script
-# checks for each and says what is missing before building anything.
+# On the Mac: Rust through rustup, the Xcode Command Line Tools, `dx` (the
+# Dioxus CLI version the repo pins, 0.7.10), the rustup target
+# `wasm32-unknown-unknown` for the web UI, `cargo-zigbuild` and `zig` for the
+# Linux cross-builds with the rustup targets `x86_64-unknown-linux-musl`
+# and/or `aarch64-unknown-linux-musl`, and, to run the result, tmux. The
+# script checks for each before building anything and prints the commands
+# that install whatever is missing.
 
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
+
+# Kept for the hint that tells the user how to rerun this exact command.
+invocation="$0${*:+ $*}"
 
 usage() {
   sed -n 's/^# \{0,1\}//; /^Usage:/,/^$/p' "$0" | sed '/^$/d'
@@ -94,13 +100,91 @@ if [ "${#arches[@]}" -eq 0 ]; then
   arches=(x86_64 aarch64)
 fi
 
+if [ "$(uname -s)" != Darwin ]; then
+  echo "devbuild-mac.sh builds and runs the macOS desktop app; run it on a Mac" >&2
+  exit 1
+fi
+
+# --- A Farhelm that is already running --------------------------------------
+#
+# This build shares the default state directory with an installed Farhelm:
+# the same hosts, the same local supervisor, the same databases. Started
+# beside a running app, this one finds that app's local supervisor answering
+# and uses it instead of starting the `farhelm` just built, so the change
+# under test would not even be running locally (and its embedded helm would
+# then be refused the state directory the running app's helm holds). So
+# refuse to start while another one is running. It is best effort by design: it looks for a
+# `farhelm-desktop` process of this user's, which covers the installed app
+# and an earlier run of this script, and it fails open when `pgrep` is
+# missing or cannot list processes. An explicit FARHELM_DESKTOP_STATE_DIR
+# means the caller chose separate state, and two apps on separate state
+# directories coexist, so the check stands down.
+#
+# It runs before the build, so the answer comes before minutes of compiling,
+# and again just before the launch, because the installed app may have been
+# started while the build ran. `--build-only` launches nothing and skips it.
+
+refuse_if_farhelm_running() {
+  [ -z "${FARHELM_DESKTOP_STATE_DIR:-}" ] || return 0
+  local pids
+  pids=$(pgrep -x -U "$(id -u)" farhelm-desktop 2>/dev/null) || return 0
+  cat >&2 <<EOF
+Farhelm is already running (farhelm-desktop, pid $(echo "$pids" | tr '\n' ' ' | sed 's/ $//')).
+This build uses the same state, hosts and local supervisor as an installed
+Farhelm, so quit that one first, then run this again. To run both side by
+side instead, give this one separate state:
+  FARHELM_DESKTOP_STATE_DIR=<empty directory> $invocation
+EOF
+  exit 1
+}
+
+# A build restages `target/devbuild/payloads` from scratch, and a dev app
+# started from this checkout earlier reads that directory whenever Update
+# runs. Rebuilding under it would make its Update push the new build's Linux
+# binaries to hosts it drives with the old build's helm, with nothing to
+# tell the two apart (both report the development version), or pull files
+# out from under an Update in progress. So every build refuses while a
+# `farhelm-desktop` from this checkout's `target/devbuild` is running, even
+# `--build-only`, and even with FARHELM_DESKTOP_STATE_DIR set, which turns off
+# only the shared-state check above. The comparison resolves symlinks on
+# both sides because macOS's /tmp is one.
+refuse_if_this_devbuild_running() {
+  local devbuild_real pid exe
+  devbuild_real=$(cd "$repo/target/devbuild" 2>/dev/null && pwd -P) || return 0
+  for pid in $(pgrep -x -U "$(id -u)" farhelm-desktop 2>/dev/null); do
+    exe=$(ps -o comm= -p "$pid" 2>/dev/null) || continue
+    if [ "$(cd "$(dirname "$exe")" 2>/dev/null && pwd -P)" = "$devbuild_real" ]; then
+      echo "a Farhelm built here earlier is still running (pid $pid); quit it before rebuilding, since it would pick up the new build's payloads" >&2
+      exit 1
+    fi
+  done
+}
+
+refuse_if_this_devbuild_running
+if [ "$build_only" -eq 0 ]; then
+  refuse_if_farhelm_running
+fi
+
 # --- Preflight ----------------------------------------------------------------
 #
 # Every missing tool is reported at once, before any build starts, because the
 # builds take minutes and finding the second missing tool only after the first
-# one is fixed and the web build has run is a waste of that time.
+# one is fixed and the web build has run is a waste of that time. Each entry
+# pairs what is missing with the command that installs it, and the commands
+# are printed together, in dependency order, so they can be pasted as a block.
+# Nothing in the block may stop to ask a question, because the lines pasted
+# after it would become the answer; hence rustup's `-y`. The Xcode Command
+# Line Tools are the exception: `xcode-select --install` only opens an
+# installer window and returns, and everything else needs them, so when they
+# are missing that is the only step printed.
 
-missing=()
+# An empty name adds an install step that is not a prerequisite of its own.
+missing_names=()
+missing_fixes=()
+need() {
+  missing_names+=("$1")
+  missing_fixes+=("$2")
+}
 
 # Cargo's bin directory goes first because both cargo-installed tools here
 # have namesakes: Homebrew's deno installs its own `dx`, and when Homebrew's
@@ -108,27 +192,76 @@ missing=()
 # Dioxus CLI. The version check still runs, so a `dx` from somewhere else, or
 # a Dioxus CLI other than the pinned one, is reported rather than used.
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+
+# The C compiler and linker every native build needs.
+have_clt=1
+xcode-select -p >/dev/null 2>&1 || {
+  have_clt=0
+  need "Xcode Command Line Tools" "xcode-select --install"
+}
+
+have_rust=1
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustup >/dev/null 2>&1; then
+  have_rust=0
+  # The second command puts cargo on the current shell's PATH, so the cargo
+  # installs printed after it work when the block is pasted in one go.
+  need "Rust, through rustup" "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+  # shellcheck disable=SC2016 # printed for the user's shell to expand
+  need "" '. "$HOME/.cargo/env"'
+fi
+
+# Without rustup there is no target list to read; every target is then
+# reported missing, which is true once rustup is installed.
+installed_targets=""
+if [ "$have_rust" -eq 1 ]; then
+  installed_targets=$(rustup target list --installed)
+fi
+# wasm32 for the web UI dx builds into the desktop app; one musl target per
+# Linux architecture whose payload is built.
+for target in wasm32-unknown-unknown "${arches[@]/%/-unknown-linux-musl}"; do
+  printf '%s\n' "$installed_targets" | grep -qx "$target" \
+    || need "rustup target $target" "rustup target add $target"
+done
+
 dx_version=0.7.10
 case "$(dx --version 2>/dev/null)" in
   "dioxus $dx_version"*) ;;
-  *) missing+=("dx $dx_version, the Dioxus CLI (cargo install --locked dioxus-cli --version $dx_version)") ;;
+  *) need "dx $dx_version, the Dioxus CLI" "cargo install --locked dioxus-cli --version $dx_version" ;;
 esac
-command -v zig >/dev/null 2>&1 || missing+=("zig (brew install zig)")
 # `cargo-zigbuild --version`, not `cargo zigbuild --version`: the subcommand
 # form rejects --version (seen with cargo-zigbuild 0.23.4).
-cargo-zigbuild --version >/dev/null 2>&1 || missing+=("cargo-zigbuild (cargo install --locked cargo-zigbuild)")
-command -v curl >/dev/null 2>&1 || missing+=("curl")
-installed_targets=$(rustup target list --installed)
-for arch in "${arches[@]}"; do
-  if ! printf '%s\n' "$installed_targets" | grep -qx "$arch-unknown-linux-musl"; then
-    missing+=("rustup target $arch-unknown-linux-musl (rustup target add $arch-unknown-linux-musl)")
-  fi
-done
-if [ "${#missing[@]}" -gt 0 ]; then
+cargo-zigbuild --version >/dev/null 2>&1 \
+  || need "cargo-zigbuild" "cargo install --locked cargo-zigbuild"
+command -v zig >/dev/null 2>&1 || need "zig" "brew install zig"
+
+# Not a build tool: the app's local supervisor runs sessions in tmux, and the
+# app refuses to start without one. Checked here so that a build is not
+# wasted on a machine that cannot run it. The directories are the ones the
+# app itself searches besides PATH (`MACOS_TMUX_PREFIXES`), since an app
+# started from Finder has no shell PATH.
+if ! command -v tmux >/dev/null 2>&1 \
+  && ! [ -x /opt/homebrew/bin/tmux ] && ! [ -x /usr/local/bin/tmux ] && ! [ -x /opt/local/bin/tmux ]; then
+  need "tmux" "brew install tmux"
+fi
+
+if [ "${#missing_names[@]}" -gt 0 ]; then
   echo "missing prerequisites:" >&2
-  for item in "${missing[@]}"; do
-    echo "  $item" >&2
+  for item in "${missing_names[@]}"; do
+    [ -z "$item" ] || echo "  - $item" >&2
   done
+  if [ "$have_clt" -eq 0 ]; then
+    echo "install the Xcode Command Line Tools first, with the window this opens:" >&2
+    echo "  xcode-select --install" >&2
+    echo "then run this script again for the commands that install the rest" >&2
+    exit 1
+  fi
+  echo "install them with:" >&2
+  for fix in "${missing_fixes[@]}"; do
+    echo "  $fix" >&2
+  done
+  if ! command -v brew >/dev/null 2>&1 && printf '%s\n' "${missing_fixes[@]}" | grep -q '^brew '; then
+    echo "(the brew commands need Homebrew: https://brew.sh)" >&2
+  fi
   exit 1
 fi
 
@@ -317,5 +450,6 @@ fi
 # In the foreground, so its log is this terminal and Ctrl-C quits it (taking the
 # supervisor it started with it). An ambient FARHELM_DESKTOP_FARHELM would point
 # the app at some other `farhelm` than the one just built, so it is removed.
+refuse_if_farhelm_running
 echo "== starting farhelm-desktop"
 exec env -u FARHELM_DESKTOP_FARHELM FARHELM_HELM_PAYLOAD_DIR="$payloads" "$devbuild/farhelm-desktop"
