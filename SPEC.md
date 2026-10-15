@@ -675,8 +675,9 @@ agent choice is independent of that destination:
   text may be arbitrary and other fields need no agent type. Incompatible fields stay visible and prevent saving until
   corrected or removed. Saving is explicit; leaving an unsaved draft asks save, discard, or keep editing. Template names
   are unique; duplicate opens an unsaved copy with a free name. Delete takes effect immediately and offers undo inside
-  the dialog for about ten seconds; undo refuses if its old name has been taken. Closing the dialog ends its undo
-  notice.
+  the dialog for about ten seconds; undo refuses if its old name has been taken. For a stored template that fails
+  current save rules, the control says "delete permanently" before deletion and no undo is offered. Closing the dialog
+  ends its undo notice.
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Cmd+P on macOS or Ctrl+Shift+P elsewhere
   starts it directly in the browser and desktop app, without showing the launcher on success. Applying it uses exactly
   New's defaults and ordinary launch path: the open session's host and directory, else this machine's home, with the

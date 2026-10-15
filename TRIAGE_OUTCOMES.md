@@ -13434,7 +13434,10 @@
 - Completion criteria: Undo restores such a template exactly as stored, or deletion says up front that it cannot be
   undone, through a change of no more than trivial complexity. If that is not possible, stop and record the item as
   discarded under the user's rule. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/legacy-template-edits-gated.md`.
+- Execution: implemented in jj change `lmpwttkkylkyvxlsnvnlvlumkxllkuyt`, bookmark
+  `plan/legacy-template-edits-gated/02-permanent-delete`. Complexity gate met: the existing shape check labels deletion
+  as permanent before the action and suppresses unusable Undo for the stored snapshot; no new restore path or state.
+  Feedback file and index entry removed. [PR #2052](https://github.com/scode/farhelm/pull/2052/changes).
 
 ## folder-history-replaces-highlighted-reset.md
 
