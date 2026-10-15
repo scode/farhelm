@@ -2858,6 +2858,12 @@ separate provisioning connection applies to every host: on an ordinary host it m
 provisioning starts with no provisioning connection open, which a user whose key needs a hardware touch or an agent
 confirmation per login sees as one more prompt.
 
+Confirmed 2026-10-14: for commands it offers for copying, Farhelm trusts the user's own configured host names, SSH
+destinations and helm state directory path (including the working directory a relative one resolves against) not to
+contain nonsensical characters that a shell or terminal interprets. Farhelm need not defend against such values in these
+commands, nor detect or refuse them. This trust covers only that user configuration, never text a remote host supplies;
+the escaping rule in [Local authority and trust between hosts](#local-authority-and-trust-between-hosts) still applies.
+
 Confirmed 2026-10-10: a configuration Farhelm does not support is refused with a clear message rather than left to
 undefined behavior, except where this section says otherwise (other login shells, unsupported tmux programs, filesystem
 aliasing, out-of-band manipulation of managed checkouts and the trash, including uncommon filesystems under them, and

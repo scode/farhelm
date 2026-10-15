@@ -8,9 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`ssh-help-fish-command-quoting.md`](ssh-help-fish-command-quoting.md) — A copied SSH help command can execute extra
-  commands in fish; runtime reproduction and the scope of the supported-shell rule remain open.
-
 - [`ssh-help-copies-hidden-terminal-controls.md`](ssh-help-copies-hidden-terminal-controls.md) — SSH help copies hidden
   terminal controls without warning; their execution effect depends on the receiving terminal.
 

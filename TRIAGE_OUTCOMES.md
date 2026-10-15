@@ -13218,7 +13218,11 @@
   not defend against them. The help commands also embed the host's state path; if the wording cannot cover that value
   without going beyond the user's principle, bring it back to the user. The spec change is made once, by whichever of
   the two items executes first. No code change. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-trusted-host-values-spec.md`.
+- Execution: `complete`; SPEC.md "Supported user environments" records the trust for the user's own configured host
+  names, SSH destinations and helm state directory path. On 2026-10-14 the user answered "Yes, cover it" when asked
+  whether the same trust covers the helm's state directory path. No code change. Feedback file and index entry removed.
+  Change `lnolkqzlpslzvumqlxxpmsvukoolutnz`, bookmark `plan/triage-trusted-host-values-spec/01-ssh-help-fish`,
+  [PR #2040](https://github.com/scode/farhelm/pull/2040/changes).
 
 ## ssh-help-copies-hidden-terminal-controls.md
 
