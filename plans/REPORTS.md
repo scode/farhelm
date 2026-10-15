@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`open-links-in-browser`](reports/open-links-in-browser.report.md) landed 2026-10-13 in #1944, #1948, #1950: let agents on remote hosts open links in the user's browser through BROWSER, an approval card, and two per-host "open links without asking" settings
 - [`link-click-intercept`](reports/link-click-intercept.report.md) landed 2026-10-14 in #1962: a click on a web link Farhelm recognizes opens it once: Farhelm opens it and withholds the click from the program, with a setting to pass clicks on
 - [`git-clone-commit-graph-workaround`](reports/git-clone-commit-graph-workaround.report.md) landed 2026-10-14 in #1968: Run the managed-checkout clone with commit-graph reading off, working around the git bug that fails it before git 2.55
 - [`ntfy-waiting-alerts`](reports/ntfy-waiting-alerts.report.md) landed 2026-10-14 in #1986: Send an ntfy alert from the helm when a session starts waiting, with server, topic, token and priority settings
