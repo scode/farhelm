@@ -10,7 +10,7 @@ Reviewed commit: 2e6fe8d09b747faec24382d95852bfb5d5688c90
 
 ## TLDR
 
-Repainting only part of a wrapped link can leave its previous click target active.
+Repainting only part of a wrapped link can leave its previous click target active, including for native file opening.
 
 ## Details
 
@@ -43,3 +43,20 @@ No Sol reports or new working-copy queue finding contents were read.
 
 Runtime evidence: None, as requested by default. Findings are static review conclusions. No checkout files were created,
 modified or deleted; no fetch, rebase or helper agents.
+
+## A stale target can now be opened locally
+
+Reviewed commit: 1dc0bde65dcb67aa2632fca8e755747263903e96
+
+Suggested bucket: `highest`. Confidence: likely for the file-link manifestation; actual partial wrapped-file redraw and
+harmful reliance remain unverified. Source: separate adversarial trailing-review agent, desktop and devbuild scope, with
+fresh independent deduplication review. Proposed drop: none.
+
+The bundled linkifier's invalidation predicate remains unchanged. Event forwarding at `terminal.js:3602–3610` and
+`terminal-files.js:391–404` adds default-app dispatch when the stale target has an admitted `.md`/`.txt` extension and
+the native modifier is held. Preserve that opening consequence in this finding. The tooltip may still disclose the old
+canonical target; this extension does not prove an undisclosed target, arbitrary execution, or exfiltration.
+
+The complete file-opening patch and relevant vendor excerpts were read. The mechanism persists at pinned tip
+`75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`. A fresh independent reviewer agreed to deduplication only with this added
+scope and its existing caveats preserved.
