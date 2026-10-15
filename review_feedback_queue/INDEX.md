@@ -222,9 +222,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`checkout-composer-test-skips-configuration-restoration.md`](checkout-composer-test-skips-configuration-restoration.md)
   — One cleanup failure can leave later browser tests using this test’s checkout folder and configuration.
 
-- [`pending-folder-save-overwrites-newer-save.md`](pending-folder-save-overwrites-newer-save.md) — The ordinary
-  successful-save race is fixed; the record now preserves that reassessment and the accepted unknown-outcome boundary.
-
 - [`listing-regression-fixtures-escape-cleanup.md`](listing-regression-fixtures-escape-cleanup.md) — A failed browser
   test can leave a fixture agent running and affect subsequent tests.
 
