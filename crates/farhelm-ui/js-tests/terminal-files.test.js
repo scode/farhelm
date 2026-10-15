@@ -4,7 +4,27 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { linkRangeText } = require('../assets/terminal-links.js');
-const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, MAX_BYTES } = require('../assets/terminal-files.js');
+const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, MAX_BYTES } = require('../assets/terminal-files.js');
+
+/** A noninteractive clipped disclosure is not inspectable. Both dimensions
+ * and actual visibility matter, including a resize after the lookup finished.
+ */
+test('only a visible fully fitting disclosure can authorize a transfer', () => {
+  const rect = { top: 10, left: 10, bottom: 70, right: 210 };
+  const viewport = { innerHeight: 100, innerWidth: 300 };
+  const fits = { hidden: false, clientHeight: 60, scrollHeight: 60, clientWidth: 200, scrollWidth: 200,
+    getBoundingClientRect: () => rect };
+  assert.equal(disclosureFits(fits, viewport), true);
+  for (const change of [{ hidden: true }, { clientHeight: 0 }, { clientWidth: 0 }, { scrollHeight: 61 }, { scrollWidth: 201 }]) {
+    assert.equal(disclosureFits({ ...fits, ...change }, viewport), false);
+  }
+  for (const edge of [{ top: -1 }, { left: -1 }, { bottom: 101 }, { right: 301 }]) {
+    assert.equal(disclosureFits({ ...fits, getBoundingClientRect: () => ({ ...rect, ...edge }) }, viewport), false,
+      'content can fit internally while its fixed position is outside the viewport');
+  }
+  assert.equal(disclosureFits(fits, { ...viewport, innerHeight: 69 }), false, 'a resize rechecks live viewport dimensions');
+  assert.equal(disclosureFits(null, viewport), false);
+});
 
 /** Decimal display and exact byte thresholds must agree with the host cap;
  * rounding a just-refused file below 100 MB would contradict its refusal.
@@ -399,12 +419,15 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
   const children = [];
   const listeners = new Map();
   const timers = new Map();
+  const disclosure = { hidden: false, clientHeight: 60, scrollHeight: 60, clientWidth: 200, scrollWidth: 200,
+    getBoundingClientRect: () => ({ top: 10, left: 10, bottom: 70, right: 210 }) };
   let timerId = 0;
   function element() {
     const classes = new Set();
     const attributes = new Map();
     return {
       textContent: '',
+      dataset: {},
       classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c) },
       setAttribute: (k, v) => attributes.set(k, v),
       getAttribute: k => attributes.get(k),
@@ -413,7 +436,8 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
   }
   const root = {
     appendChild: child => children.push(child),
-    querySelector: selector => children.find(child => child.className?.split(' ').includes(selector.replace(':scope > .', ''))),
+    querySelector: selector => selector === ':scope > .terminal-file-target' ? disclosure :
+      children.find(child => child.className?.split(' ').includes(selector.replace(':scope > .', ''))),
     addEventListener: (name, callback) => listeners.set(name, callback),
     removeEventListener: (name, callback) => { if (listeners.get(name) === callback) listeners.delete(name); },
   };
@@ -422,7 +446,7 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
     clearTimeout: id => timers.delete(id),
   };
   const context = vm.createContext({
-    window: { farhelmTerminalLinks: { visibleFormatCharacters: text => text, linkRangeText } },
+    window: { innerHeight: 100, innerWidth: 300, farhelmTerminalLinks: { visibleFormatCharacters: text => text, linkRangeText } },
     document: { createElement: element },
     AbortController, Blob,
     // A strict callable rejects an addon receiver just as browser timers do.
@@ -446,8 +470,48 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
   addon.activate(term);
   addon.hovered = { path: 'report.pdf', info: { status: 'ready', path: '/output/report.pdf' }, controller: new AbortController(),
     range: { start: { x: 1, y: 1 }, end: { x: 10, y: 1 } }, screenText: 'report.pdf' };
-  return { addon, timers, listeners, open: () => { term.element = root; }, notice: () => root.querySelector(':scope > .terminal-file-message') };
+  return { addon, timers, listeners, disclosure, open: () => { term.element = root; }, notice: () => root.querySelector(':scope > .terminal-file-message') };
 }
+
+/** A fitting stat is insufficient once the window clips its disclosure.
+ * Refusal must precede any transfer/open request, and its explanation must
+ * survive the activation click while still obeying notice teardown.
+ */
+test('clipping refuses transfer and shows failure after its own click', async () => {
+  for (const native of [false, true]) {
+    const fixture = noticeFixture(native, true, false, true);
+    fixture.disclosure.scrollHeight++;
+    let requests = 0;
+    fixture.addon.request = async () => { requests++; throw new Error('unexpected transfer'); };
+    await fixture.addon.download('report.pdf', { metaKey: true });
+    assert.equal(requests, 0);
+    assert.equal(fixture.notice(), undefined, 'mouseup has not shown a self-dismissing notice');
+    assert.equal(fixture.timers.size, 1);
+    const [id, task] = [...fixture.timers][0];
+    assert.equal(task.delay, 0);
+    fixture.listeners.get('click')?.();
+    fixture.timers.delete(id);
+    task.callback();
+    assert.match(fixture.notice().textContent, /full file details are not visible/);
+    assert.equal(fixture.notice().dataset.outcome, 'disclosure-refusal');
+    assert.equal(fixture.notice().classList.contains('showing'), true);
+    // A new hover or leaving lowers it to the failure layer, keeping its text.
+    fixture.addon.clearHover();
+    assert.equal(fixture.notice().dataset.outcome, 'failure');
+    assert.match(fixture.notice().textContent, /full file details are not visible/);
+    assert.equal(fixture.notice().classList.contains('showing'), true);
+    fixture.listeners.get('click')();
+    assert.equal(fixture.notice().classList.contains('showing'), false);
+    fixture.addon.message('downloading…');
+    assert.equal(fixture.notice().dataset.outcome, 'progress', 'a later notice cannot inherit refusal stacking');
+    const pending = noticeFixture(native, true, false, true);
+    pending.disclosure.scrollHeight++;
+    await pending.addon.download('report.pdf', { metaKey: true });
+    assert.equal(pending.timers.size, 1);
+    pending.addon.dispose();
+    assert.equal(pending.timers.size, 0, 'disposal cancels a pending explanation');
+  }
+});
 
 /** A cached link can survive repaint of only its continuation. The actual
  * shipped admission path must reject the changed cells before requesting
@@ -463,7 +527,7 @@ test('partial wrapped redraw invalidates file transfer evidence', async () => {
       translateToString: (_trim, start, end) => rows[y].slice(start, end),
     };
     const range = { start: { x: 1, y: 1 }, end: { x: 4, y: 2 } };
-    fixture.addon.show = () => {};
+    fixture.addon.show = () => { fixture.disclosure.hidden = false; };
     const requests = [];
     fixture.addon.request = async (operation, _path, _signal, open) => {
       requests.push({ operation, open });
@@ -502,7 +566,7 @@ test('a wrapped printed path cannot grow beyond its cached endpoint', async () =
     const [{ path, range }] = bufferLinks(fixture.addon.term, 1);
     assert.equal(path, 'long/report.txt');
     assert.deepEqual(range.end, { x: 5, y: 2 });
-    fixture.addon.show = () => {};
+    fixture.addon.show = () => { fixture.disclosure.hidden = false; };
     const requests = [];
     fixture.addon.request = async (operation, _path, _signal, open) => {
       requests.push({ operation, open });

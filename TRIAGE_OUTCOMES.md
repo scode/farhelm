@@ -13560,7 +13560,8 @@
 - Completion criteria: a click on a file link whose hover does not fit transfers and opens nothing and tells the user
   why; a hover that fits behaves as before. If the fix turns out large or very complex, stop and return the item to the
   user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-link-safety.md`.
+- Execution: jj change `vwzqnxkttqplrxzkulxyuprtksqutkyk`, bookmark `plan/terminal-link-safety/03-disclosure-fit`,
+  [PR #2092](https://github.com/scode/farhelm/pull/2092/changes).
 
 ## trash-confirmation-scroll-hides-deletion-context.md
 

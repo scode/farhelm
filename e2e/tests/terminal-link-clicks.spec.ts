@@ -97,6 +97,83 @@ test("mouse-reporting drags never open web or file links", async ({ page, reques
   }
 });
 
+/** Render a real clipped hover rather than inferring fit from path length.
+ * A later resize must restore normal admission, proving that refusal follows
+ * current disclosure geometry rather than a permanent flag from the lookup.
+ */
+test("a clipped file disclosure refuses a click until the window fits", async ({ page, request }) => {
+  await page.setViewportSize({ width: 900, height: 350 });
+  const session = await createSession(request, { title: `file-fit-${Date.now()}`, cwd: "/tmp", invocation });
+  let transfers = 0;
+  await page.route(`**/api/sessions/${session.id}/files/stat`, route => route.fulfill({
+    json: { status: "ready", host: "fixture", path: "/" + "directory/".repeat(300) + "report.txt", size: 8, can_open: true },
+  }));
+  await page.route(`**/api/sessions/${session.id}/files/download`, route => {
+    transfers++;
+    return route.fulfill({ status: 403, body: "fixture transfer observed" });
+  });
+  try {
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await cue(page, "links");
+    const point = await cell(page, "relative/report.txt");
+    const disclosure = page.locator("#terminal .terminal-file-target");
+    await expect(disclosure).toContainText("8 B");
+    await expect.poll(() => disclosure.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    await page.mouse.click(point.x, point.y);
+    const notice = page.locator("#terminal .terminal-file-message.showing");
+    await expect(notice).toContainText("full file details are not visible");
+    await expect(notice).toBeVisible();
+    // Repaint the link row without moving the pointer. xterm re-enters links
+    // on redraw, so hiding a hover once cannot establish readable refusal.
+    await page.evaluate(async ({ x, y }) => {
+      const term = (window as any).__farhelmTerm;
+      const box = term.element.querySelector('.xterm-screen').getBoundingClientRect();
+      const row = Math.floor((y - box.y) * term.rows / box.height) + 1;
+      const column = Math.floor((x - box.x) * term.cols / box.width) + 20;
+      await new Promise<void>(resolve => term.write(`\x1b7\x1b[${row};${column}HX\x1b8`, resolve));
+    }, point);
+    await expect(disclosure).toBeVisible();
+    await expect.poll(() => notice.evaluate((el) => {
+      const hover = el.parentElement!.querySelector('.terminal-file-target')!;
+      return Number(getComputedStyle(el).zIndex) > Number(getComputedStyle(hover).zIndex);
+    })).toBe(true);
+    expect(transfers).toBe(0);
+    await page.keyboard.press("Control+Shift+k");
+    const switcher = page.getByRole("dialog", { name: "quick switcher" });
+    await expect(switcher).toBeVisible();
+    await expect.poll(() => notice.evaluate(el => !!el.closest('[inert]'))).toBe(true);
+    await expect.poll(() => notice.evaluate(el => Number(getComputedStyle(el).zIndex))).toBe(12);
+    await expect.poll(() => page.locator('.quick-switcher-backdrop').evaluate(el => Number(getComputedStyle(el).zIndex))).toBe(40);
+    await page.keyboard.press("Escape");
+    await expect(switcher).toBeHidden();
+    await expect.poll(() => notice.evaluate(el => !!el.closest('[inert]'))).toBe(false);
+    // Whether the dialog ended the hover depends on the engine: Chromium ends
+    // it (the refusal then stays on the ordinary failure layer), WebKit keeps
+    // it. Either way the refusal keeps its text and is never under a visible
+    // hover.
+    await expect(notice).toContainText("full file details are not visible");
+    await expect.poll(() => notice.evaluate((el) => {
+      const hover = el.parentElement!.querySelector('.terminal-file-target') as HTMLElement;
+      return hover.hidden || Number(getComputedStyle(el).zIndex) > Number(getComputedStyle(hover).zIndex);
+    })).toBe(true);
+    const shortRows = await page.evaluate(() => (window as any).__farhelmTerm.rows);
+    await page.setViewportSize({ width: 1280, height: 1200 });
+    // Viewport sizing returns before WebKit delivers ResizeObserver. Wait
+    // for the real fit before deriving cells from the enlarged screen box.
+    await expect.poll(() => page.evaluate(() => (window as any).__farhelmTerm.rows)).toBeGreaterThan(shortRows);
+    await cue(page, "links");
+    const fitting = await cell(page, "relative/report.txt");
+    await expect(disclosure).toContainText("8 B");
+    await expect.poll(() => disclosure.evaluate(el => el.scrollHeight <= el.clientHeight)).toBe(true);
+    await page.mouse.click(fitting.x, fitting.y);
+    await expect.poll(() => transfers).toBe(1);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
 /** Focus the actual terminal input before sending a program cue. */
 async function cue(page: Page, word: string, element = "terminal") {
   // Link redraws repeat the same visible URLs. A fresh sequence prevents a

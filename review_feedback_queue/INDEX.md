@@ -17,9 +17,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 
-- [`file-disclosure-cannot-scroll-oversized-path.md`](file-disclosure-cannot-scroll-oversized-path.md) — A long path can
-  conceal required directory and size information before transfer or native opening; the new layout puts the leaf first.
-
 - [`file-disclosure-misses-invisible-path-characters.md`](file-disclosure-misses-invisible-path-characters.md) —
   Different agent-controlled filenames can look identical in the disclosure meant to authorize transfer or native
   opening.

@@ -1637,20 +1637,21 @@ whatever the agent renders is what you see. There is no composer, no message abs
   checks afresh; a redraw beneath a pointer resting on the same path text and target at the same position is not a new
   hover. Leaving cancels it. Only a successful check over link text unchanged since that hover admits a click (OSC
   hyperlinks may show a pointer earlier). A partial redraw that changes the link text withdraws transfer and opening
-  permission even if the terminal library retains its old target. Files must be readable regular files no larger than
-  100 MB, including while transferring; directories are refused. A browser saves a complete file by basename. The
-  desktop app saves into Downloads under a unique name and shows where it went, with no partial file after failure or
-  interruption. Status appears at the top of that terminal: success fades after a few seconds, while a failure stays
-  until the next click or download there. Plain click only downloads. In the desktop app, Cmd-click on macOS (Ctrl-click
-  elsewhere) also opens the completed save with the default app, only when its final extension is .md or .txt,
-  case-insensitively. Other types are saved without opening; an opening failure leaves the save successful and says why
-  it was not opened. A browser modifier-click only downloads. The hover uses a file icon and bright name, the host and
-  full directory on a second line, and decimal size with the action hints on a third. A left stripe and size color show
-  under 1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals are red and checking has a
-  neutral stripe. Only an eligible desktop file has the opening hint. Any file the session's account can read is in
-  reach, within the existing shell authority; hover discloses the agent-provided target before an explicit click. Only
-  the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to http, https and file;
-  every other scheme is ignored.
+  permission even if the terminal library retains its old target. A click cannot transfer or open a file while the full
+  hover disclosure does not fit in the window; it is refused with an explanation to enlarge the window and hover again.
+  Files must be readable regular files no larger than 100 MB, including while transferring; directories are refused. A
+  browser saves a complete file by basename. The desktop app saves into Downloads under a unique name and shows where it
+  went, with no partial file after failure or interruption. Status appears at the top of that terminal: success fades
+  after a few seconds, while a failure stays until the next click or download there. Plain click only downloads. In the
+  desktop app, Cmd-click on macOS (Ctrl-click elsewhere) also opens the completed save with the default app, only when
+  its final extension is .md or .txt, case-insensitively. Other types are saved without opening; an opening failure
+  leaves the save successful and says why it was not opened. A browser modifier-click only downloads. The hover uses a
+  file icon and bright name, the host and full directory on a second line, and decimal size with the action hints on a
+  third. A left stripe and size color show under 1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber;
+  refusals are red and checking has a neutral stripe. Only an eligible desktop file has the opening hint. Any file the
+  session's account can read is in reach, within the existing shell authority; hover discloses the agent-provided target
+  before an explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly
+  limited to http, https and file; every other scheme is ignored.
 
 ## Attachments
 
