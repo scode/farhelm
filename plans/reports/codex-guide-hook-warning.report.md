@@ -35,3 +35,29 @@ None required for this plan.
 The required fresh-context gpt-6.1-sol reviewer at high effort found no issues. Its findings were read and accepted; the
 executing session separately inspected the diff, formatting evidence and final build. A valid fresh wording cold read
 also passed. An earlier wording read opened the diff too soon and was replaced; it is not counted as evidence.
+
+### Landing
+
+Landed as #2091, the last of the round's four plans, tested stacked with the other three on top of main.
+
+#### Review
+
+An independent fresh-context review confirmed the new sentence is accurate: Codex launches with Farhelm's conversation
+hook carry `--dangerously-bypass-hook-trust`, so untrusted hooks in the Codex configuration home run, and a trusted
+workspace's hooks run without Codex's per-hook review. The text neither overstates nor understates that, and both links
+resolve.
+
+#### Fix made while landing
+
+The paragraph described the hook only as "the commands that tell it which conversation you are in" and had dropped what
+the user gets. It now says where the warning appears, that the hook is what lets restart resume the conversation you
+were in, and that turning it off means those Codex sessions can't be restarted.
+
+#### Left as is
+
+Follow-up: the hook-injection page's "what the warning means" note covers only hooks in the configuration home, not a
+trusted workspace's hooks; the plan left that page alone.
+
+#### Checks
+
+The website build passed with the four plans stacked on main (see claude-trust-decimals); only Markdown changed here.

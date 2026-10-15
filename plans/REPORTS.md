@@ -9,3 +9,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`claude-trust-decimals`](reports/claude-trust-decimals.report.md) landed 2026-10-15 in #2089: Claude checkout trust edits keep unrelated numbers in Claude's settings exact
 - [`checkout-recovery-host-binding`](reports/checkout-recovery-host-binding.report.md) landed 2026-10-15 in #2086: Agent creates into managed checkouts: retry replay bound to the asking host
 - [`template-editor-unsafe-values`](reports/template-editor-unsafe-values.report.md) landed 2026-10-15 in #2087: Template editor shows hidden characters in model and folder, read-only like commands
+- [`codex-guide-hook-warning`](reports/codex-guide-hook-warning.report.md) landed 2026-10-15 in #2091: Codex docs page stops calling the hook warning harmless
