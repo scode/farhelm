@@ -1010,6 +1010,23 @@ their observations are never retroactively relabeled as P0 coverage.
         if any(self.verdict(priority_entry(self.selected(key), 'P0')) != 'pass' for key in preceding):
             raise Refused('complete P0 fixtures in order before later checks')
 
+    def result_evidence_retained(self, result):
+        """Recheck accepted bytes independently of the observation's status.
+
+A failed or unavailable P1 observation still needs its exported evidence before
+cleanup can delete the guests. Keep the same artifact limits as verdict checks,
+including the larger bound for the guest-native event stream.
+"""
+        try:
+            for ref, digest in result['sha256'].items():
+                raw = (artifact(self.directory, ref, limit=96 * 1024 * 1024)
+                       if ref == result.get('native', {}).get('events') else artifact(self.directory, ref))
+                if hashlib.sha256(raw).hexdigest() != digest:
+                    return False
+        except (OSError, ValueError, RuntimeError, KeyError, tarfile.TarError):
+            return False
+        return True
+
     def verdict(self, entry):
         """Missing, invalidated or skipped checks cannot become a release pass."""
         results = entry['results']
@@ -1035,12 +1052,9 @@ their observations are never retroactively relabeled as P0 coverage.
         for check_id, result in results.items():
             if result['status'] != 'pass':
                 return 'could not run'
+            if not self.result_evidence_retained(result):
+                return 'could not run'
             try:
-                for ref, digest in result['sha256'].items():
-                    raw = (artifact(self.directory, ref, limit=96 * 1024 * 1024)
-                           if ref == result.get('native', {}).get('events') else artifact(self.directory, ref))
-                    if hashlib.sha256(raw).hexdigest() != digest:
-                        return 'could not run'
                 if 'continuity' in result:
                     continuity_chain(self.directory, entry, check_id)
             except (OSError, ValueError, RuntimeError, KeyError, tarfile.TarError):
@@ -1164,15 +1178,16 @@ discard approval as before; none of these paths delete retained evidence.
             successful = self.verdict(priority_entry(entry, 'P0')) == 'pass'
             observed = set(p1['results']) == set(p1['required'])
             retained = self.verdict(p1) == 'pass' or all(
-                result['status'] != 'pass' for result in p1['results'].values())
+                result['status'] != 'pass' and self.result_evidence_retained(result)
+                for result in p1['results'].values())
             # A P0-only stop needs no P1 result, but once any P1 result is
             # recorded (a full run narrowed to P0 late, say) the retention
             # check below still applies: a scope edit must not let cleanup
-            # delete the guests behind a successful P1 whose export was lost.
+            # delete the guests behind a P1 observation whose export was lost.
             finished = ((self.data.get('scope') == 'p0-only' and not p1['results'])
                         or (observed and retained))
             # P1 failed sends need evidence retention, not a live disposable
-            # pair. A recorded success whose export was lost is different:
+            # pair. Any recorded observation whose export was lost is different:
             # keep the guests so its evidence can still be recovered.
             complete = successful and finished
         else:

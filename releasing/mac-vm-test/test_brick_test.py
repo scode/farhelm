@@ -808,20 +808,24 @@ The two preceding pairs have already passed their evidence and cleanup gates.
                 self.run.prepare('fresh', [])
         self.assertTrue(all(child.poll() == 0 for child in children))
 
-    def test_lost_p1_success_evidence_preserves_guests_until_recovered(self):
-        """The nonblocking-failure exception cannot delete the source of a lost successful GUI observation.
+    def test_lost_p1_evidence_preserves_guests_until_recovered(self):
+        """Every P1 status retains its source guests until its exported evidence is recovered.
 
 A late stop after P0 (the scope narrowed once P1 is already recorded) must not
 lift that protection either: the scope fences future work, not evidence.
 """
-        for damage, narrowed in (('changed', False), ('missing', False), ('missing', True)):
-            with self.subTest(damage=damage, narrowed=narrowed):
+        cases = ((status, damage, narrowed)
+                 for status in ('pass', 'fail', 'could-not-run')
+                 for damage, narrowed in (('changed', False), ('missing', False), ('missing', True)))
+        for status, damage, narrowed in cases:
+            with self.subTest(status=status, damage=damage, narrowed=narrowed):
                 children = self.ready_for_p1()
-                image = self.evidence_file('p1-success-only.png', PNG)
+                image = self.evidence_file('p1-only.png', PNG)
+                expected = 'could not run' if status == 'could-not-run' else status
                 with self.run.locked():
-                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', 'pass', [image],
+                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image],
                                     'Synthetic P1 image independent of every P0 artifact.')
-                    self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
+                    self.assertEqual(self.run.report()['p1']['verdict'], expected)
                     if narrowed:
                         self.run.limit_to_p0()
                     path = self.run.directory / image
@@ -831,7 +835,7 @@ lift that protection either: the scope fences future work, not evidence.
                         path.unlink()
                     report = self.run.report()
                     self.assertEqual(report['p0']['verdict'], 'pass')
-                    self.assertEqual(report['p1']['verdict'], 'could not run')
+                    self.assertEqual(report['p1']['verdict'], 'fail' if status == 'fail' else 'could not run')
                     calls = len(self.model.calls)
                     with self.assertRaisesRegex(Refused, 'incomplete or failed'):
                         self.run.cleanup('p0-updater-upgrade')
@@ -840,7 +844,7 @@ lift that protection either: the scope fences future work, not evidence.
                     # Restoring the exact accepted bytes makes cleanup possible;
                     # a blanket P1 cleanup refusal would fail this half.
                     path.write_bytes(PNG)
-                    self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
+                    self.assertEqual(self.run.report()['p1']['verdict'], expected)
                     self.run.cleanup('p0-updater-upgrade')
                 self.assertTrue(all(child.poll() == 0 for child in children))
 
