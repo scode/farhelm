@@ -101,7 +101,11 @@ pub(super) fn inspect_app(
     validate_dir(versions, uid, classifier)?;
 
     let record = contents.join(FLAT_RECORD);
-    let fields = match read_record(&record, 2, uid, true, classifier) {
+    // Two fields as older installers write it, or five as installers since
+    // the race-free installer write it (an installation id, a generation and
+    // a state appended; farhelm_supervisor::installation). Only the first two
+    // matter to this uninstaller.
+    let fields = match read_record(&record, &[2, 5], uid, true, classifier) {
         Ok(fields) => fields,
         Err(error)
             if error
@@ -546,6 +550,27 @@ pub(crate) mod tests {
                 .to_string()
                 .contains("rerun the installer")
         );
+    }
+
+    /// The record installers write since the race-free installer (an
+    /// installation id, a generation and a state appended) is accepted, so
+    /// an app installed by this release can be uninstalled by it; a record
+    /// with any other number of fields still refuses.
+    #[test]
+    fn the_extended_record_is_accepted() {
+        let fixture = AppFixture::new();
+        let record = fixture.app.join("Contents").join(FLAT_RECORD);
+        let mut bytes = b"farhelm-app-v2\0".to_vec();
+        bytes.extend_from_slice(fixture.link.as_os_str().as_bytes());
+        bytes.push(0);
+        let two = bytes.clone();
+        bytes.extend_from_slice(b"0123456789abcdef0123456789abcdef\x002\0complete\0");
+        fs::write(&record, &bytes).unwrap();
+        inspect(&fixture.inputs()).expect("the five-field record is this layout's");
+        let mut three = two.clone();
+        three.extend_from_slice(b"0123\0");
+        fs::write(&record, &three).unwrap();
+        assert!(inspect(&fixture.inputs()).is_err(), "three fields refuse");
     }
 
     /// Anything the installer never writes refuses, at every level, so a
