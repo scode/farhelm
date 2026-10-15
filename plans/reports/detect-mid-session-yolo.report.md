@@ -65,3 +65,61 @@ also reviewed the rename-preservation and declared-command regressions. The vali
 understood the intended display/permission boundary and found the claims consistent with the change. The first wording
 reader's blind phase was contaminated and was discarded. Native review token usage was unavailable; private execution
 evidence records that gap.
+
+### Landing
+
+Landed as #2063, the round's only plan. Since its base, main had gained the planning batch that scheduled it, a TODO
+entry and changes to the Mac development-build scripts; while it landed, two other plans delivered their reports. None
+of these touch the supervisor's screen reading, the session list or the sidebar shield.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. Per-agent reading lives where the harness map says, in
+exhaustive matches; no admission, inheritance, approval or YOLO-guard path reads the new field, and a false reading can
+only add a YOLO alarm or fall back to the launch shield. The field is additive and omitted when false, which needs no
+protocol bump; cached rows keep their last value and a restart or reload resets it. The captured screens contain no
+usernames, home paths, hostnames, emails or keys. No existing browser test pins a shield tooltip for an agent this
+reads.
+
+#### Fixes made while landing
+
+- Claude's plan mode was read as a definite non-YOLO mode, but the captured screen itself shows Claude saying that a
+  session started with bypass permissions keeps bypassing in plan mode. Plan mode now keeps the last reading.
+- SPEC.md and the agents page said any definite return to a non-YOLO mode restores the launch shield, but only some of
+  those footers were captured and some are not recognized at all. They now say a recognized mode restores it and an
+  unrecognized one keeps the YOLO shield.
+- A red YOLO shield's hover and screen-reader text began by describing the safer launch mode. The observation now comes
+  first, followed by "Launched as:" and the launch description; SPEC_impl.md says the same.
+- The agents and Cursor pages used "supervisor" without introducing or linking it, and described a restart by its
+  mechanism; both now follow the editorial rules.
+- The captured-screen test now reads the same trimmed tail the sampler reads, and puts the mode words on each of the
+  lines just above the footer instead of at the top of the screen, where any reader anchored at the bottom would pass.
+
+#### Left as is
+
+- The two Claude captures include what looks like the capturing account's own Claude status line (a working-directory
+  name, a model name and a context bar). Nothing personal, but unlike a default Claude screen; worth replacing at the
+  next capture.
+- Several recognized "asks first" modes, including Claude's auto mode, which is what Guarded launches use, come from
+  planning notes rather than captures. If the guess is wrong, the YOLO shield stays after a switch back, which fails
+  safe. Capturing an auto-mode footer would settle it.
+- Nits: test struct literals set the new field where a base already supplies it; a stray line ending in "Run Everything"
+  just above Cursor's footer gives a false YOLO that lasts until restart; an agent running without checks could redraw a
+  non-YOLO footer itself, which at worst returns the launch shield.
+
+#### Checks
+
+- Run now, on the rebased change with all fixes in:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (299 delays, none missing a
+    reason);
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the UI crate's clippy
+    with the desktop feature and `cargo check -p farhelm-desktop`;
+  - the changed reader and shield tests first, run `c798b6ca-ebce-4c82-bca8-74864d7d52e9`: 3 passed;
+  - the protocol, helm and supervisor packages in full through the recorder with pinned tmux, run
+    `7a9238a4-6ac1-4329-8910-1811cd06f138`: 2365 passed, 2 skipped;
+  - the UI crate in full with the desktop feature, run `f8e66bca-649d-4dbd-8bb3-8d3b333cf807`: 636 passed;
+  - the JS harness (248 passed) and the website build;
+  - the sidebar, OMP composer, approval layout, YOLO guard, guarded, custom and remembered permission, and
+    tooltip-coverage specs on Chromium and WebKit, run `8f35815f-1765-4bfa-b6f6-630632ceafe4`: 290 passed.
+- Not run: the rest of the Rust workspace, whose changed files only gain the new field in struct literals and compile
+  under clippy, and other browser specs.

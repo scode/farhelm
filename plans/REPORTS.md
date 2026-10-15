@@ -15,3 +15,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`confirmations-save-error`](reports/confirmations-save-error.report.md) landed 2026-10-15 in #2054: Settings shows an error when turning session confirmations back on fails to save
 - [`post-clone-carriage-return-gated`](reports/post-clone-carriage-return-gated.report.md) landed 2026-10-15 in #2053: Post-clone command: no silent carriage-return changes on edit, only if trivially fixable
 - [`guarded-default-and-escalation-banner`](reports/guarded-default-and-escalation-banner.report.md) landed 2026-10-15 in #2055: Guarded is the default for every agent that supports it (OMP changes), and a banner when an agent switch escalates the permission mode
+- [`detect-mid-session-yolo`](reports/detect-mid-session-yolo.report.md) landed 2026-10-15 in #2063: The shield turns YOLO when an agent's status line shows its no-checks mode (Claude, Grok, Muse, Cursor), best effort
