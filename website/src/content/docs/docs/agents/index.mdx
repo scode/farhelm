@@ -135,6 +135,16 @@ agent, always-allow answers, managed settings, plugins and switching modes insid
 allowed, and the agent may change between versions. Check its own mode when that matters. A green shield describes
 the launch choice, not a live audit of its actions.
 
+For Claude, Grok, Muse and Cursor, Farhelm also tries to notice a no-checks mode on the agent's status line and changes
+the shield to YOLO when it sees one. Hover says which mode was seen. This is best effort: detection can be missed or
+late, and it still cannot see allow rules, hooks or managed settings. Returning to a mode Farhelm recognizes as
+asking first restores the launch shield; an obscured status line, or a mode it does not recognize, keeps the YOLO
+shield. Cursor shows only its enabled **Run Everything** label, so once noticed, its YOLO shield stays until the agent
+restarts or the host's [supervisor](/docs/how-it-works/the-pieces/) restarts. After a supervisor restart, the shield
+shows the launch choice until Farhelm sees the status line again. The shield never promises more protection than the
+launch choice. This changes only the display; Farhelm's confirmations and permission choices for new sessions still
+follow the launch.
+
 Cursor's **agent's own setting** has a grey dashed shield. Hosts that ask before YOLO launches treat it as YOLO,
 because Farhelm cannot promise a safety check. The same applies to older Claude, Codex, Grok and Muse sessions started without permission flags:
 restart, plain Replace and copies keep their old command. Use **Clone**, **Replace with** or **Restart with** to build

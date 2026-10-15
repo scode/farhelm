@@ -333,6 +333,10 @@ impl SessionAgentKind {
 /// internals — the browser speaks JSON, not frames.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct Session {
+    /// Display-only status-line evidence. Absence from an older helm means no
+    /// observed bypass; the stored launch remains permission authority.
+    #[serde(default)]
+    pub screen_yolo: bool,
     pub id: String,
     pub title: String,
     pub cwd: String,
@@ -2684,6 +2688,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn effective_activity_falls_back_to_creation_time_only_when_unknown() {
         let at = |last_activity_at: i64, created_at: i64| Session {
+            screen_yolo: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             cwd: "/tmp".to_string(),
@@ -2749,6 +2754,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn has_unseen_output_reads_absence_staleness_and_the_equal_boundary() {
         let at = |seen_activity_at: Option<Option<i64>>, last_activity_at: i64| Session {
+            screen_yolo: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             cwd: "/tmp".to_string(),

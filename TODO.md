@@ -73,15 +73,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   cargo-dist release build jobs honor the pin: they install Rust only when it is missing and otherwise use the runner's
   own. Once pinned, drop the newest-stable clippy step from `.agents/run-all-tests.md`.
 
-- **Notice a session switched into YOLO partway through.** Claude, Grok, Cursor and Muse print their current permission
-  mode in their status line, and each can be switched into a no-checks mode inside a running session (Grok's
-  `/always-approve`, Cursor's `/run-everything`, Muse's `/permissions`, Claude's bypass mode when the user's settings
-  allow it), after which Farhelm's shield still shows the guarded mode the session was launched in. Read the mode from
-  the status line where an agent shows it and change the shield to YOLO, with hover text saying it was seen on screen.
-  Screen reading is a heuristic, so this is advisory, and it cannot see allow rules or hooks. Planning for the
-  guarded-mode work recorded each agent's status-line wording (2026-10-13). Plan:
-  `plans/queue/detect-mid-session-yolo.md`.
-
 - **Make the Mac installer race-free.** Updating, automatically updating and uninstalling Farhelm.app can race with each
   other and with a running Farhelm. An install can delete the version a starting Farhelm or a session's `farhelm`
   command is about to use. An automatic update can put back an older version over a newer manual install, or reinstall

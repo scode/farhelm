@@ -2715,6 +2715,7 @@ mod tests {
 
     fn session_info(id: &str, status: SessionStatus) -> SessionInfo {
         SessionInfo {
+            screen_yolo: false,
             // Matches the `claude` invocation below, as a supervisor's
             // basename recognition would have recorded it.
             agent_kind: farhelm_proto::AgentKind::Claude,

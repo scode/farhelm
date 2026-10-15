@@ -1,0 +1,42 @@
+
+ ▐▛███▛█   Claude Code v2.1.300
+▝▜██████▀  Opus 5.5 with high effort · API Usage Billing
+ ▝▝   ▝▝   /work/claude-mode
+
+
+● Session was started with bypass permissions, so plan mode won't ask before most edits or commands. Start a new session
+  without bypass permissions for prompts in plan mode.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Permissions  Recently denied   Allow   Ask   Deny   Auto mode   Workspace
+
+   Claude Code won't ask before using allowed tools.
+   ╭───────────────────────────────────────────────╮
+   │ ⌕ Search…                                     │
+   ╰───────────────────────────────────────────────╯
+
+     1.  Add a new rule…
+
+
+
+
+
+
+
+
+
+
+   ←/→ to switch · ↓ to select · Esc to cancel

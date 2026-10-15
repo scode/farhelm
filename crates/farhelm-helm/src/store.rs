@@ -7481,6 +7481,7 @@ mod tests {
     /// other's full field coverage.
     fn session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
+            screen_yolo: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: id.to_string(),
@@ -9287,6 +9288,7 @@ mod tests {
                     host,
                     "identity-a",
                     &SessionInfo {
+                        screen_yolo: false,
                         creation_seq: None,
                         ..session("b100", 10)
                     }
@@ -15680,14 +15682,17 @@ mod tests {
                 "poison-identity",
                 vec![
                     SessionInfo {
+                        screen_yolo: false,
                         title: "keeper".to_string(),
                         ..session("good-1", 500)
                     },
                     SessionInfo {
+                        screen_yolo: false,
                         title: "keeper".to_string(),
                         ..session("undecodable", 400)
                     },
                     SessionInfo {
+                        screen_yolo: false,
                         title: "keeper".to_string(),
                         ..session("mislabelled", 300)
                     },

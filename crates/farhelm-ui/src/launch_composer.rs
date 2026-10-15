@@ -12,6 +12,24 @@
 use crate::api::{LaunchCatalogModel, LaunchHistory, LaunchHistoryEntry};
 use crate::{HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
+/// Vendor wording for a definite bypass-footer reading, shared by hover and a11y.
+/// Unsupported harnesses have no status-line reader; command-output mode reports
+/// are intentionally outside this advisory feature.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub(crate) fn screen_yolo_mode(harness: LaunchHarness) -> Option<&'static str> {
+    match harness {
+        LaunchHarness::Claude => Some("bypass permissions on"),
+        LaunchHarness::Grok => Some("always-approve"),
+        LaunchHarness::Muse => Some("YOLO"),
+        LaunchHarness::Cursor => Some("Run Everything"),
+        LaunchHarness::Codex
+        | LaunchHarness::Goose
+        | LaunchHarness::Pi
+        | LaunchHarness::Omp
+        | LaunchHarness::OpenCode => None,
+    }
+}
+
 /// Name the one-time selector in the vocabulary the selected agent accepts.
 ///
 /// Pi and OMP need a literal session-file path. The other agents take their

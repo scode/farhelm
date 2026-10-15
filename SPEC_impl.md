@@ -2009,6 +2009,16 @@ file is introduced.
   installed agents (`docs/agent-screen-fixtures.md`). The earlier Codex-only masking of its composer out of change
   comparison is gone: whenever it applied, the Codex reader now recognizes the composer and answers from content, so the
   comparison no longer decides anything there.
+- Permission-footer evidence: the same sampling pass calls the exhaustive launch-harness reader in
+  `agent_kind::screen_reader`, independently of the activity kind (Muse and Cursor use generic activity). Its optional
+  bool updates `ActivitySample::screen_yolo` only on a definite reading and hints connected helms when it changes.
+  Rename shares this run cell; restart replaces it. After a supervisor restart it is false until the next definite
+  sample. The shared `entry_info` builder publishes it as an additive bool omitted when false; helm cache merges take
+  that incoming value as given, including a restart's false. The sidebar escalates the drawn launch glyph and puts the
+  vendor wording ahead of its existing hover/accessibility description. No admission or inheritance path reads this
+  field. Captured grids live separately under `tests/fixtures/status-lines/`, with vendor version and capture date,
+  because these permission screens do not satisfy the activity-fixture contract. Cursor has no definite non-YOLO label,
+  so absence cannot clear its reading. Unrecognized modes and covered footers retain the previous answer.
 - Last-activity timestamp: the same ticker that samples for status also DATES the work it sees, into a
   `last_activity_at` column on the session row and onto the wire. It drives the row's displayed age and the helm's
   seen/unseen comparison, seeded to the session's creation time so one that has never produced output has an honest age,

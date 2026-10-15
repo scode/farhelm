@@ -409,6 +409,14 @@ pub(crate) fn entry_info(
     known: &KnownTmuxNames,
 ) -> SessionInfo {
     let mut info = entry.info.clone();
+    // List and rename replies read the same run cell; the immutable entry was
+    // built before any footer was sampled and must not freeze that first value.
+    info.screen_yolo = entry
+        .run
+        .activity
+        .lock()
+        .expect("activity mutex poisoned")
+        .screen_yolo;
     info.restart_offer = session_restart_offer(entry);
     // The entry's `info` froze this at build time (creation, reload, or
     // restart); the sampler has been advancing the cell beside it ever

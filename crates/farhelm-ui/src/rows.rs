@@ -664,6 +664,7 @@ mod tests {
     /// helpers below.
     fn session(id: &str, title: &str) -> Session {
         Session {
+            screen_yolo: false,
             id: id.into(),
             title: title.into(),
             cwd: "/tmp".into(),
@@ -778,10 +779,12 @@ mod tests {
     /// reach the rendered `Session` itself rather than only the one span
     /// the row happens to print, and it must leave every other row and
     /// every other field alone (a rename changes nothing but the title,
-    /// and the poll's status is fresher than anything this view holds).
+    /// and the poll's status and observed permission mode are fresher than
+    /// anything this view holds).
     #[farhelm_testtrace::test]
     fn optimistic_renames_replace_only_the_renamed_row_s_title() {
-        let listing = vec![session("a", "old-a"), session("b", "b")];
+        let mut listing = vec![session("a", "old-a"), session("b", "b")];
+        listing[0].screen_yolo = true;
         let renamed: HashMap<String, (String, u64)> = [("a".to_string(), ("new-a".to_string(), 7))]
             .into_iter()
             .collect();
@@ -789,6 +792,10 @@ mod tests {
         let rendered = apply_optimistic_renames(&listing, &renamed);
         assert_eq!(rendered[0].title, "new-a");
         assert_eq!(rendered[0].cwd, listing[0].cwd, "only the title is ours");
+        assert!(
+            rendered[0].screen_yolo,
+            "renaming must not clear observed bypass evidence"
+        );
         assert_eq!(rendered[1], listing[1], "an untouched row stays identical");
 
         let unknown: HashMap<String, (String, u64)> =
@@ -998,6 +1005,7 @@ mod tests {
         );
         let stale_above = vec![
             Session {
+                screen_yolo: false,
                 stale: true,
                 ..session("a", "a")
             },

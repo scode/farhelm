@@ -1,0 +1,42 @@
+
+  Muse Code 1.4.7
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Permissions
+
+  Selections are saved as your default for new sessions and exec runs.
+
+  1. Read only              Reads files only.
+  2. Ask me                 Edits workspace and temporary files; requires approval for protected writes, new network targets, and
+                            other restricted actions.
+⟩ 3. Auto-review (current)  Same access as Ask me; AI reviews eligible actions; trusted permission hooks may decide approval
+                            requests first.
+  4. Unrestricted           No filesystem sandbox or approval prompts; local commands have direct network access; project trust
+                            is unchanged.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

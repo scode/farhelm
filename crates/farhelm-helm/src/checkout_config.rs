@@ -1385,6 +1385,7 @@ mod tests {
     /// persisted cache JSON rather than only its ordering columns.
     fn migration_session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
+            screen_yolo: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             id: id.into(),
             parent: None,
