@@ -808,9 +808,13 @@ fn install(
         report,
         "loginctl enable-linger \"$USER\"   # start at boot and survive logout"
     );
-    // A chosen directory must survive into the advice; a bare token show
-    // can read or create credentials for an unrelated default helm.
-    let show_command = if opts.state_dir.is_some() {
+    // A chosen directory must survive into the advice, whether selected by a
+    // flag or setup's shell environment. A later bare token show can read or
+    // create credentials for an unrelated default helm after that environment
+    // is gone. Keep the familiar bare command only for the ordinary default.
+    let show_command = if opts.state_dir.is_some()
+        || state_dir != farhelm_supervisor::default_state_dir_for(None, &ctx.home)
+    {
         let state_dir_text = state_dir
             .to_str()
             .context("the setup state directory is not valid UTF-8")?;
@@ -2013,6 +2017,40 @@ mod tests {
             .expect("sign-in advice");
         let words = shell_words::split(advice.split("   #").next().unwrap()).unwrap();
         let pinned = fixture.cwd().join("state with 'quote");
+        assert_eq!(
+            words,
+            [
+                "farhelm",
+                "helm",
+                "token",
+                "show",
+                &format!("--state-dir={}", pinned.display())
+            ]
+        );
+        let parsed = crate::Cli::try_parse_from(words).expect("the printed command must parse");
+        assert!(
+            matches!(parsed.command, crate::Cmd::Helm { command: crate::HelmCmd::Token { command: crate::TokenCmd::Show { state_dir } } } if state_dir.as_deref() == Some(pinned.as_path()))
+        );
+    }
+
+    /// An environment-only state choice must survive copying the sign-in command
+    /// into another shell. Otherwise the advice can read or create another helm's
+    /// token. Spaces and apostrophes must remain one parsed --state-dir value.
+    #[farhelm_testtrace::test]
+    fn environment_state_sign_in_advice_keeps_the_resolved_directory() {
+        let fixture = Fixture::new();
+        let mut ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let selected = fixture.home().join("xdg state with 'quote");
+        let pinned = selected.join("farhelm");
+        ctx.xdg_state_home = Some(selected.into_os_string());
+        assert_ne!(pinned, fixture.home().join(".local/state/farhelm"));
+        let (output, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
+        assert!(error.is_empty(), "{error}");
+        let advice = output
+            .lines()
+            .find(|line| line.starts_with("farhelm helm token show"))
+            .expect("sign-in advice");
+        let words = shell_words::split(advice.split("   #").next().unwrap()).unwrap();
         assert_eq!(
             words,
             [
