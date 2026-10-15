@@ -44,10 +44,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Pin sessions to the top of the sidebar.** Support pinning sessions to the top of the sidebar. Details TBD.
+- **Pin sessions to the top of the sidebar.** Support pinning sessions to the top of the sidebar. Details TBD. Plan:
+  `plans/queue/pin-sessions.md`.
 
 - **Investigate suppressing Claude Code’s Project Trust prompt.** Determine whether a supported CLI argument exists;
-  consider whether Farhelm could update the user’s configuration on their behalf. Approach/details TBD.
+  consider whether Farhelm could update the user’s configuration on their behalf. Approach/details TBD. Plan:
+  `plans/queue/claude-trust-prompt.md`.
 
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
@@ -77,7 +79,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   allow it), after which Farhelm's shield still shows the guarded mode the session was launched in. Read the mode from
   the status line where an agent shows it and change the shield to YOLO, with hover text saying it was seen on screen.
   Screen reading is a heuristic, so this is advisory, and it cannot see allow rules or hooks. Planning for the
-  guarded-mode work recorded each agent's status-line wording (2026-10-13).
+  guarded-mode work recorded each agent's status-line wording (2026-10-13). Plan:
+  `plans/queue/detect-mid-session-yolo.md`.
 
 - **Make the Mac installer race-free.** Updating, automatically updating and uninstalling Farhelm.app can race with each
   other and with a running Farhelm. An install can delete the version a starting Farhelm or a session's `farhelm`
@@ -132,7 +135,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `pending-command-save-overwrites-newer-save.md` (a slow post-clone command save can land after a newer one and win).
   Consider sending one GUI's requests over an ordered channel, so that a save is applied before anything the user
   started after it. Nothing needs saves and later actions to be unordered; it is just what independent HTTP requests
-  give.
+  give. Plan: `plans/queue/ordered-gui-helm-requests.md`.
 
 - **Tunnel and open a localhost link.** When a session's terminal shows a link to localhost (a dev server the agent just
   started, say), offer "tunnel and open in browser": forward a port from the user's machine to that port on the
@@ -463,6 +466,18 @@ are large mostly because of their tests.
   changelog docstring and the cross-protocol test pruning that shared this entry are done.
 
 ## Maybe later
+
+- **Reconsider an ordered WebSocket channel between the GUI and the helm.** On 2026-10-15 the maintainer chose ordering
+  in the GUI instead (a request waits only for this GUI's unanswered saves; plan `ordered-gui-helm-requests`), after a
+  planning deep dive. The deep dive found that the helm could replay WebSocket frames into its existing routes
+  unchanged, but estimated about 5,000 to 8,000 lines over 7 to 10 PRs. The largest single cost is migrating the browser
+  tests, which intercept API calls over HTTP in 461 places that would not see WebSocket frames. It also leaves lasting
+  complexity: plain HTTP must stay for tabs left open across a helm upgrade, every new route needs an ordered-or-not
+  decision, middleware must be kept in step across two ways into the helm, requests disappear from browser devtools as
+  separate entries, and one stalled socket stalls every request. Its one gain over GUI-side ordering is fewer
+  connections over a high-latency tunnel. Large transfers (attachments, downloads), terminals and the event feed would
+  stay off the channel. Revisit if remote browser use over slow links becomes common, or if GUI-side ordering proves
+  insufficient.
 
 - **Further harden the release and update trust chain.** The chain is already hardened: installs and updates come from
   get.farhelm.io with signed checksums, and CI no longer signs. Further steps would raise the bar: a Vercel user that
