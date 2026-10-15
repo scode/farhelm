@@ -3,7 +3,7 @@
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [in-flight 7018db] `triage-conversation-tracking-spec.md` — Spec: Restart may resume the previous conversation in the cases the maintainer accepted (six triage outcomes)
-- [complete] `triage-power-loss-spec.md` — Spec: downloads and new checkouts need not survive a power loss (two triage outcomes)
+- [landing 52a1c3] `triage-power-loss-spec.md` — Spec: downloads and new checkouts need not survive a power loss (two triage outcomes)
 - [complete] `triage-trusted-host-values-spec.md` — Spec: the user's own host names and paths are trusted in copied SSH help commands (two triage outcomes)
 - [complete] `triage-hand-edited-units-spec.md` — Spec: a hand-edited Farhelm service voids setup and uninstall guarantees (two triage outcomes)
 - [in-flight edb852] `triage-highest-discards.md` — Remove seven discarded review findings from the queue
