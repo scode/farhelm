@@ -63,3 +63,63 @@ the exact final fix/fixture delta and found no new actionable issue. It reviewed
 repository test-authoring checklist. The separate wording cold read understood the title and found no contradiction or
 convention issue. Implementation stayed local under the plan's no-workhorse requirement. Private execution evidence
 retains review usage; native wording-reader and orchestrator token counters were unavailable.
+
+### Landing
+
+Landed as #2064, the first of the round's two plans; ordered-gui-helm-requests (#2062) landed after it, and both were
+tested stacked on top of main. Main had gained mid-session YOLO detection (#2063), which rewrote the same SPEC.md row
+paragraph; the conflict was resolved keeping both the pin sentence and the observed-mode text.
+
+#### Review
+
+An independent fresh-context review found the helm side sound: the schema 52 migration is idempotent and matches a fresh
+database; the pin route is authenticated, refuses a missing field or unknown session without notifying, and notifies
+only on a real change; delete and Replace clear or copy the pin only after the supervisor confirms, with the documented
+failure outcomes; pins are partitioned only in the sidebar's own copy of the list, before the hold, and the quick
+switcher's order is unchanged. Older releases refusing schema 52 needs no changelog entry under the release rules.
+
+#### Fixes made while landing
+
+- The new menu item sits between rename and clone in every row menu, which broke six existing browser tests that walk
+  the menu by keyboard or count its items (in the sidebar, clone and replace specs); they now include it. It also had no
+  hover text, which the tooltip-coverage sweep requires; it now explains pinning and unpinning.
+- The row menu is one item taller. Measured in both engines, the full menu is now 368.6px, while the space kept free
+  below it was 380px, sized with about 38px of slack for font differences; the slack was down to 11px. The reserve is
+  now 407px, and the tests that depend on it say so.
+- The pins spec now resets the shared sort preference it changes, so later specs do not inherit title order. Its comment
+  claimed to prove the pointer hold; a diagnostic showed that closing the last row's menu leaves the pointer below the
+  list, so the hold is already released there. The comment now says what the test proves and points to sort.spec.ts,
+  whose tests cover the hold.
+- The store test now checks what copying a pin returns, which Replace uses to decide whether to notify other clients;
+  the two new warnings name their session; the docs give pins their own section with links, and the docs and changelog
+  say pins are shared by every browser and the desktop app on the same helm.
+
+#### Left as is
+
+- The labels "Pin to top" and "Unpin" are capitalized, while every other row-menu label is lowercase. The plan specified
+  them that way, so they were kept; a one-word decision for the maintainer.
+- Test fixtures that rewind the helm database to older schemas do not drop the new table, as with earlier tables; they
+  pass because the migration tolerates it.
+- Suspected: pinning from the keyboard moves the focused row straight to the top, which may drop focus to the page, as
+  re-sorting by activity already can.
+
+#### Checks
+
+- Run on both plans stacked on main:
+  - format, lint, changelog and sleep checks; `cargo clippy --all-targets -- -D warnings` and the other clippy
+    configurations; `cargo check -p farhelm-desktop`;
+  - the helm package in full through the recorder with pinned tmux, run `90aa4784-5c92-44bc-a321-bd3ccedf81b1`: 1103
+    passed;
+  - the JS harness and the website build;
+  - the pins, sidebar, quick-launch, templates, settings, session-confirmations, ntfy-settings, github-checkouts,
+    replace, auth, feed, terminal-reconnect and tooltip-coverage specs on Chromium and WebKit, run
+    `99fa749b-2ba2-41cb-b452-7efdf838832b`: 521 passed, 5 failed, the failures being the pins and menu-reserve problems
+    fixed above plus one session-confirmations timeout described below.
+- After the fixes: the UI crate in full with the desktop feature, run `e482a9d7-033c-4e99-9b34-ce99c43a0bee`: 648
+  passed; the pins, sidebar, sort, clone, replace, quick-launch, settings, session-confirmations and tooltip-coverage
+  specs on both engines, run `969a625e-943d-45d9-8695-6d72c0327f0a`: 409 passed, 1 failed.
+- The session-confirmations test "skip session confirmations walks row header interrupted card and tab actions" timed
+  out once in each long run, on Chromium in the first and WebKit in the second, with no unfinished browser call in its
+  trace. Run alone three times on both engines it passed every time (runs `ea56e8d3-aa60-44e1-b912-8deb5710f44d`,
+  `23ded877-59ac-4e96-a6c7-bfcbffc896cb`, `b8ab5064-47c7-4392-bcd4-98a9f6b5a411`). Nothing in either plan touches what
+  it exercises; it appears load- or order-dependent and is not logged as a flake on these observations.
