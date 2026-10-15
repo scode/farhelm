@@ -113,10 +113,16 @@ main() {
     mv "$dir.clone.$$" "$dir"
   fi
   # The `.git` test keeps `git -C` from answering for some enclosing
-  # repository when the directory itself is not one.
+  # repository when the directory itself is not one. Symlinks are refused,
+  # at the destination and at its `.git`, because the checkout and clean
+  # below discard work: a link to a real clone of the repository would pass
+  # every other test and lose that clone's edits and untracked files.
   # It reads the configured URL rather than `git remote get-url`, which
   # applies `url.<base>.insteadOf` rewrites and would report a rewritten URL
   # for the very clone made above.
+  if [ -L "$dir" ] || [ -L "$dir/.git" ]; then
+    die "$dir or its .git is a symlink; this script only resets a checkout it owns, so move it away and run this again"
+  fi
   local origin=""
   if [ -d "$dir/.git" ]; then
     origin=$(git -C "$dir" config --get remote.origin.url 2>/dev/null) || origin=""

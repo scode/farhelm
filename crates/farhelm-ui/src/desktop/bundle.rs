@@ -25,8 +25,9 @@ pub(super) fn desktop_state_dir() -> anyhow::Result<PathBuf> {
 /// the installer, and the managed supervisor is spawned without it, so it
 /// is opt-in per launch and stays inside this process.
 ///
-/// An empty value counts as unset, as clap treats it for the standalone
-/// helm, rather than selecting the app's working directory.
+/// An empty value counts as unset rather than selecting the app's working
+/// directory. The standalone helm differs here: its argument parser rejects
+/// an empty value outright.
 pub(super) fn helm_payload_dir() -> Option<PathBuf> {
     std::env::var_os("FARHELM_HELM_PAYLOAD_DIR")
         .filter(|value| !value.is_empty())

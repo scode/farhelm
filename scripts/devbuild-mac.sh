@@ -445,9 +445,12 @@ for arch in "${arches[@]}"; do
       x86_64) machine="x86-64" ;;
       aarch64) machine="ARM aarch64" ;;
     esac
+    # Static PIE is as good as a plain static executable here, and
+    # check-static-elf.sh accepts it too; `file` words it differently.
     description=$(file -b "$binary")
     case "$description" in
       "ELF 64-bit LSB executable, $machine,"*"statically linked"*) ;;
+      "ELF 64-bit LSB pie executable, $machine,"*"static-pie linked"*) ;;
       *)
         echo "$binary is not a static $arch Linux executable: $description" >&2
         exit 1
