@@ -40,10 +40,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`file-disclosure-misses-invisible-path-characters.md`](file-disclosure-misses-invisible-path-characters.md) —
   Different agent-controlled filenames can look identical in the disclosure meant to authorize their download.
 
-- [`post-clone-editor-normalizes-literal-carriage-returns.md`](post-clone-editor-normalizes-literal-carriage-returns.md)
-  — Editing and saving an existing command can change its executable contents beyond the user's edit, affecting future
-  checkouts.
-
 - [`checkout-recovery-requester-not-bound-to-host.md`](checkout-recovery-requester-not-bound-to-host.md) — Checkout
   recovery can accept another host's claimed requester and recover its approved attempt without approval for the sender.
 
