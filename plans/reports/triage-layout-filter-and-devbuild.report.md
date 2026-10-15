@@ -49,3 +49,35 @@ unavailable; private orchestration evidence retains that accounting gap and iden
 were recorded retrospectively. Main advanced only through plan claims and another delivery report while this stack was
 prepared; the full incoming diff had no interaction with it, so no rebase or additional runtime validation was needed
 for delivery.
+
+### Landing
+
+Landed as #2076, #2079 and #2081, bottom-up, after trash-unchecked-wording (#2080) in the same round. Both plans removed
+neighbouring entries from the review feedback index, and main had gained a batch of 50 triage decisions (#2082); every
+index conflict was a pair of removals, and all were kept.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. The filter follows the existing filters' shape, states the
+agreed generalization without widening it, and does not override the independent check required before dropping a
+highest-severity finding; its header still says filters never make behavior acceptable. Each PR removes only its own
+finding and index entry and replaces only its own Execution field; nothing else in the repository referred to the three
+removed findings.
+
+#### Fix made while landing
+
+Whether hidden text is "reachable by scrolling" was judged only for users who can scroll it. The trash confirmation puts
+focus on its submit button under a pinned header, so a keyboard-only user can leave the scrolling area without scrolling
+it. The filter's first exclusion now reads "content that cannot be reached at all, or that a keyboard-only or
+screen-reader user cannot reach", which only narrows the filter.
+
+#### Left as is
+
+"Nothing is acted on without the user's own click" leaves keyboard confirmation (Enter on a focused button) outside the
+filter, which errs on the safe side and keeps the maintainer's word.
+
+#### Checks
+
+- Run now: `dprint check` on the filter after the fix and on the index after each conflict resolution; no conflict
+  markers on main after landing.
+- Not run: anything else; only Markdown changed.
