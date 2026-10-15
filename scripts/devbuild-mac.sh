@@ -8,7 +8,13 @@
 # trying a change on the Mac and on real remote hosts without waiting for a
 # release workflow.
 #
-# Usage: scripts/devbuild-mac.sh [--arch x86_64|aarch64]... [--build-only]
+# Usage: scripts/devbuild-mac.sh [--arch x86_64|aarch64]... [--build-only | --run-only]
+#
+# With no mode it builds, then runs the app. `--build-only` stops after the
+# build and prints the command that starts the result; `--run-only` is that
+# command, and starts what an earlier build staged without building anything.
+# `scripts/devbuild-github.sh` uses the pair to hand a built PR or branch to
+# the maintainer.
 #
 # `--arch` picks which Linux host architectures to build payloads for. It may
 # be given more than once, and defaults to both. A host whose architecture was
@@ -65,6 +71,7 @@ usage() {
 
 arches=()
 build_only=0
+run_only=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --arch)
@@ -85,6 +92,10 @@ while [ "$#" -gt 0 ]; do
       build_only=1
       shift
       ;;
+    --run-only)
+      run_only=1
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
@@ -96,6 +107,16 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+if [ "$build_only" -eq 1 ] && [ "$run_only" -eq 1 ]; then
+  echo "--build-only and --run-only exclude each other" >&2
+  exit 2
+fi
+# Payloads are staged by a build, so an architecture choice at run time could
+# only be silently ignored.
+if [ "$run_only" -eq 1 ] && [ "${#arches[@]}" -gt 0 ]; then
+  echo "--arch has no effect with --run-only; the payloads come from the last build" >&2
+  exit 2
+fi
 if [ "${#arches[@]}" -eq 0 ]; then
   arches=(x86_64 aarch64)
 fi
@@ -160,9 +181,72 @@ refuse_if_this_devbuild_running() {
   done
 }
 
-refuse_if_this_devbuild_running
+# The state directory is recorded with the build and spelled out in the start
+# command, which may run from anywhere, so a relative one would name a
+# different directory then. An empty one is unset here because this script
+# already treats it as unset, and the app would not.
+if [ -n "${FARHELM_DESKTOP_STATE_DIR+set}" ] && [ -z "$FARHELM_DESKTOP_STATE_DIR" ]; then
+  unset FARHELM_DESKTOP_STATE_DIR
+fi
+case "${FARHELM_DESKTOP_STATE_DIR:-/}" in
+  /*) ;;
+  *)
+    echo "FARHELM_DESKTOP_STATE_DIR must be an absolute path, got '$FARHELM_DESKTOP_STATE_DIR'" >&2
+    exit 2
+    ;;
+esac
+
+devbuild="$repo/target/devbuild"
+payloads="$devbuild/payloads"
+# Written last by a build that staged everything, removed first by the next
+# one, so its presence means `target/devbuild` holds one complete build. Its
+# first line names the commit that build came from, which `--run-only`
+# repeats, since the checkout may have moved on since (devbuild-github.sh
+# moves it). Its second line is the FARHELM_DESKTOP_STATE_DIR the build ran
+# with, usually empty.
+stamp="$devbuild/STAGED"
+
+# A build made with a separate state directory, typically to keep a schema
+# migration away from the real state, must not be started on the real state
+# just because the start command was run without the variable. So when
+# `--run-only` gets no FARHELM_DESKTOP_STATE_DIR, it takes the build's. An
+# explicit one still wins: separate state is never less safe.
+if [ "$run_only" -eq 1 ] && [ -z "${FARHELM_DESKTOP_STATE_DIR:-}" ] && [ -f "$stamp" ]; then
+  recorded_state=$(sed -n 2p "$stamp")
+  if [ -n "$recorded_state" ]; then
+    export FARHELM_DESKTOP_STATE_DIR="$recorded_state"
+    echo "== using the state directory this build was made with: $recorded_state"
+  fi
+fi
+
+# Starting a second copy of a build does not restage anything, so only the
+# building modes need this one.
+if [ "$run_only" -eq 0 ]; then
+  refuse_if_this_devbuild_running
+fi
 if [ "$build_only" -eq 0 ]; then
   refuse_if_farhelm_running
+fi
+
+# --- Run ------------------------------------------------------------------------
+#
+# In the foreground, so its log is this terminal and Ctrl-C quits it (taking the
+# supervisor it started with it). An ambient FARHELM_DESKTOP_FARHELM would point
+# the app at some other `farhelm` than the one just built, so it is removed.
+launch() {
+  refuse_if_farhelm_running
+  echo "== starting farhelm-desktop built from $(sed -n 1p "$stamp")"
+  exec env -u FARHELM_DESKTOP_FARHELM FARHELM_HELM_PAYLOAD_DIR="$payloads" "$devbuild/farhelm-desktop"
+}
+
+# `--run-only` needs none of the build tools checked below, so it leaves
+# before they are.
+if [ "$run_only" -eq 1 ]; then
+  if ! [ -f "$stamp" ]; then
+    echo "no complete build is staged in $devbuild; build it first with $0 --build-only" >&2
+    exit 1
+  fi
+  launch
 fi
 
 # --- Preflight ----------------------------------------------------------------
@@ -276,8 +360,13 @@ fi
 # nothing outside the checkout, and `build-desktop-binary.sh` reads dx's output
 # from `$repo/target` regardless of CARGO_TARGET_DIR.
 export CARGO_TARGET_DIR="$repo/target"
-devbuild="$CARGO_TARGET_DIR/devbuild"
 mkdir -p "$devbuild"
+rm -f "$stamp"
+# Taken before building, so it describes the source the build read.
+built_from=$(git -C "$repo" log -1 --format='%h %s' 2>/dev/null) || built_from="an unknown commit"
+if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then
+  built_from="$built_from, with uncommitted changes"
+fi
 
 # --- The web UI and the desktop app -------------------------------------------
 #
@@ -336,7 +425,6 @@ install_atomically "$CARGO_TARGET_DIR/release/farhelm" "$devbuild/farhelm"
 # The payload directory is rebuilt from scratch each run. Leaving an earlier
 # run's archive for an architecture not built this time would let Update push
 # that older build to such a host without any sign that it was stale.
-payloads="$devbuild/payloads"
 rm -rf "$payloads"
 mkdir -p "$payloads"
 
@@ -437,19 +525,24 @@ for arch in "${arches[@]}"; do
   chmod 0755 "$payloads/$name"
 done
 
-echo "== staged in $devbuild"
+printf '%s\n%s\n' "$built_from" "${FARHELM_DESKTOP_STATE_DIR:-}" >"$stamp"
+echo "== staged in $devbuild, built from $built_from"
 echo "   payloads for: ${arches[*]}"
 
+# The start command is an absolute path, so it works from any directory, and
+# it is the last thing printed, so it is what a reader of a long build log
+# finds at the bottom. A separate state directory is spelled out in it, even
+# though `--run-only` would take it from the stamp anyway, so that the
+# command shows which state the app will use.
 if [ "$build_only" -eq 1 ]; then
-  echo "   run it with: FARHELM_HELM_PAYLOAD_DIR=$payloads $devbuild/farhelm-desktop"
+  echo
+  echo "Run this to start farhelm:"
+  if [ -n "${FARHELM_DESKTOP_STATE_DIR:-}" ]; then
+    printf '  FARHELM_DESKTOP_STATE_DIR=%q %q --run-only\n' "$FARHELM_DESKTOP_STATE_DIR" "$repo/scripts/devbuild-mac.sh"
+  else
+    printf '  %q --run-only\n' "$repo/scripts/devbuild-mac.sh"
+  fi
   exit 0
 fi
 
-# --- Run ------------------------------------------------------------------------
-#
-# In the foreground, so its log is this terminal and Ctrl-C quits it (taking the
-# supervisor it started with it). An ambient FARHELM_DESKTOP_FARHELM would point
-# the app at some other `farhelm` than the one just built, so it is removed.
-refuse_if_farhelm_running
-echo "== starting farhelm-desktop"
-exec env -u FARHELM_DESKTOP_FARHELM FARHELM_HELM_PAYLOAD_DIR="$payloads" "$devbuild/farhelm-desktop"
+launch
