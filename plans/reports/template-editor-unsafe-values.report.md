@@ -59,3 +59,34 @@ public-repo hygiene. No unresolved source findings remain.
 
 Private orchestration evidence retains the external review's reported usage. Native reader and orchestrator counters
 were unavailable; no cost or model-attributed token total is inferred from them.
+
+### Landing
+
+Landed as #2087, the third of the round's four plans, tested stacked with the other three on top of main (see
+claude-trust-decimals for the shared runs).
+
+#### Review
+
+An independent fresh-context review found nothing blocking. The change replaces the earlier command-only read-only check
+(#2051) with one shared check covering launch and resume commands, model and destination, with one hint and the same
+"remove this field with ✕ and add it again" advice. The inputs show escaped text read-only and every handler respects
+that, so the escaped spelling never reaches the draft; an unchanged template saves its raw values as before. Model
+suggestions are escaped but still set the raw id. The browser test confirms the stored bytes are unchanged after saving
+another field.
+
+#### Fix made while landing
+
+The changelog fragment said values were preserved "when another field is saved", which was already true before, and did
+not say which fields or how to change one. It now names the template editor, the model, folder or repository and the
+launch and resume commands, shows what the codes look like, says why it matters, and says how to replace such a field.
+
+#### Left as is
+
+- The hint mentions only removing and re-adding the field; clicking a model suggestion also replaces a read-only model.
+- Possible follow-up, outside this outcome: a session name copied from a cloned remote session into "save as template"
+  is shown raw in the editor.
+
+#### Checks
+
+See claude-trust-decimals: the UI crate (651 passed) and the templates, quick-launch and tooltip-coverage specs on both
+engines (128 passed).
