@@ -13251,7 +13251,10 @@
   guarantees about how setup, Update and uninstall treat it, including attributing it to the wrong installation. The
   spec change is made once, by whichever of the two items executes first. No code change. Remove this feedback file and
   its index entry.
-- Execution: planned in `plans/queue/triage-hand-edited-units-spec.md`.
+- Execution: implemented in jj change `nxsnzktkpzkrnqpoumzxxrmwmrttvntq`, bookmark
+  `plan/triage-hand-edited-units-spec/01-unit-ownership`; SPEC.md records that hand-edited units are outside service
+  ownership and refusal guarantees. Feedback file and index entry removed.
+  [PR #2041](https://github.com/scode/farhelm/pull/2041/changes).
 
 ## continued-unit-line-bypasses-service-type-guard.md
 
