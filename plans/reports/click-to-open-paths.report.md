@@ -95,3 +95,68 @@ Implementation stayed in the main session under the no-workhorse requirement. So
 through codex exec; wording used native gpt-6.1-sol medium readers. Review evidence is retained in the private
 galaxy-brain session record. External per-turn counters are available; exact reported model attribution, native reader
 usage and main-session usage are unavailable. The delivery report also receives its required native cold read.
+
+### Landing
+
+Landed as #2034, the round's only plan. While it landed, main gained plan bookkeeping and triage documents, Mac
+development-build scripts, and a change letting the desktop app's embedded helm take a staged payload directory for host
+updates; that last one edits the same desktop startup code as this plan, rebased cleanly, and compiles together with it.
+None of them touches terminal files or downloads.
+
+#### Changed while landing, at the maintainer's direction: no HTML
+
+Cmd-click (Ctrl-click on Linux) now opens only `.md` and `.txt` files; `.html` is saved without opening, like any other
+type. The review raised that an opened HTML file runs from the remote host in the default browser and can load or
+redirect to any address, including the user's own machine and local network, without the link permissions that govern
+every other way an agent can open a web page. The maintainer chose to disallow HTML for now. The helm's allowlist, its
+refusal text and tests, both specs, the changelog fragment and the two docs pages that named the types all changed with
+it; SPEC.md now records why HTML is excluded.
+
+#### Fixes made while landing
+
+- A file swapped between hover and click no longer opens. The hover checks one file, but the host resolves the path
+  again when the click's transfer starts, so an agent could replace the checked file with a symlink to another one in
+  between; with HTML still allowed, that turned a click on a text file into an HTML page in the browser. The helm now
+  saves the file but refuses to open it when the saved file's type differs from the requested one, and says why. HTML is
+  gone, so today this only stops a `.txt` from opening as `.md` or the reverse, but it keeps the hover's promise if the
+  allowlist ever grows. A test covers the swap.
+- One refusal case in the "no native save" test checked only the 404 status, which a missing session also returns; it
+  now checks the refusal body.
+- A test docstring said a web client attached to the desktop's embedded helm could see the opening hint; the embedded
+  helm accepts only the desktop window's own credentials, and the docstring now says so.
+
+#### Review
+
+An independent fresh-context review found nothing blocking beyond the swap above. It confirmed that only the new local
+save is ever opened (never a path from the request), that macOS `open` and Linux GIO get one absolute path or `file://`
+URI with no shell, that the server helm refuses before any transfer, that browser modifier-clicks only download, and
+that remote text in the hover and notices is shown as text.
+
+Suspected and not verified, left as is:
+
+- On Linux, GIO can fall back to sniffing file contents when an extension match is uncertain; unusual capitalizations of
+  `.md` and `.txt` were not checked against the shared MIME database.
+- macOS `open` runs without a time limit; if it hung, that save's response would hang too.
+- The reviewer's concern that an opened page could read sibling files in Downloads applied to HTML and no longer arises.
+
+#### Checks
+
+- Run now, on the tree with every change above, before the final rebase:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (299 delays, none missing a
+    reason);
+  - `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the UI crate's clippy
+    with the desktop feature, `cargo check -p farhelm-desktop` and the desktop asset parity check;
+  - the helm package in full through the recorder with pinned tmux, run `e8380505-b8c5-41a3-88d3-f3effdf7f8eb`: 1098
+    passed;
+  - the UI crate in full with the desktop feature, run `1ab8a233-ff1a-4c58-b432-5f5bd5e807f0`: 634 passed;
+  - the JS harness (248 passed) and the website build;
+  - the terminal-files, terminal-links and tooltip-coverage specs on Chromium and WebKit, run
+    `372aa67e-04b6-499a-88e6-f0dfbaa06a94`: 56 passed.
+- An earlier run of the helm package, `f3a8f4b0-7811-407d-951f-bb60b4e1d506`, timed out in the native-open test as
+  extended while landing: the test's stand-in host accepted only one fixed requested path, so the new swap cases
+  panicked inside it and the test waited for an answer that never came. It now checks each case's own path; the run
+  above includes the fix.
+- After the final rebase, which brought in a change to how the desktop app starts its embedded helm,
+  `cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-desktop` passed. Nothing else that landed
+  touches terminal files or downloads.
+- Not run: the Rust workspace beyond the helm and UI crates and other browser specs; nothing else changed.

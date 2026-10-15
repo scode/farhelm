@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 12d6b1] `click-to-open-paths.md` — Cmd-click a terminal file path in the desktop app to save and open it (.md, .txt, .html only), plus the redesigned file hover
 - [in-flight 7018db] `triage-conversation-tracking-spec.md` — Spec: Restart may resume the previous conversation in the cases the maintainer accepted (six triage outcomes)
 - [complete] `triage-power-loss-spec.md` — Spec: downloads and new checkouts need not survive a power loss (two triage outcomes)
 - [complete] `triage-trusted-host-values-spec.md` — Spec: the user's own host names and paths are trusted in copied SSH help commands (two triage outcomes)
