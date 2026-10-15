@@ -20,4 +20,8 @@ back over a newer version installed from Terminal); installing an older release 
 (`FARHELM_VERSION=...`) hands it to that release's own installer, checked against its checksums; the app's updater
 pausing (with a warning on the version number) when an install or uninstall was interrupted, quietly retrying when
 another install or uninstall is running, and the app reopening itself once when its version was replaced while it was
-starting. Uninstall starts honoring the locks in a later PR of the same release.
+starting; uninstall refusing while any program still runs a version of Farhelm (naming the version and the `lsof`
+command that shows which program), recording an interrupted uninstall so a rerun finishes it, and refusing on volumes
+that cannot lock. Old-release caveat for the notes: an uninstall typed in a session still on a release before this one
+refuses the new record; quit Farhelm and run `~/.local/bin/farhelm uninstall` from a terminal outside Farhelm (or
+`env -u FARHELM_SUPERVISOR_SOCK ...`), after finishing an interrupted upgrade with the installer.

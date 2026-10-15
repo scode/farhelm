@@ -37,6 +37,154 @@ impl RemovalFs for NativeFs {
     }
 }
 
+/// Removal through the app's folders, opened once and never by path inside
+/// the app (design, section 6, "through the held folder"): a path under the
+/// app's root is removed relative to its parent folder, reached from the
+/// root through opened folders that never follow a link. Paths outside the
+/// app (the Running records, the Terminal link, the app's own name in its
+/// parent) are public names and keep today's path-based removal.
+pub(crate) struct HeldFs {
+    root: PathBuf,
+    root_fd: std::os::fd::OwnedFd,
+}
+
+impl HeldFs {
+    /// Hold the app folder at `root`, refusing a link there.
+    pub(crate) fn open(root: &Path) -> io::Result<Self> {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let folder = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(root)?;
+        Ok(Self {
+            root: root.to_path_buf(),
+            root_fd: folder.into(),
+        })
+    }
+
+    /// Whether the folder held is the one at `path` now (same device and
+    /// inode, the path not followed if it is a link): what makes the
+    /// re-check, which reads by path, a check of the held folder.
+    pub(crate) fn is_at(&self, path: &Path) -> bool {
+        use std::os::unix::fs::MetadataExt as _;
+        let Ok(fd) = self.root_fd.try_clone() else {
+            return false;
+        };
+        match (fs::File::from(fd).metadata(), fs::symlink_metadata(path)) {
+            (Ok(held), Ok(now)) => held.dev() == now.dev() && held.ino() == now.ino(),
+            _ => false,
+        }
+    }
+
+    /// Open the regular file at `path` (inside the app) through the held
+    /// folders, never following a link. `None` when it is absent.
+    pub(crate) fn open_file(&self, path: &Path) -> io::Result<Option<fs::File>> {
+        use std::os::fd::AsFd as _;
+        let Some((folder, name)) = self.locate(path)? else {
+            return Err(io::Error::other(format!(
+                "{} is not inside the app",
+                path.display()
+            )));
+        };
+        farhelm_supervisor::installation::dirs::open_file(folder.as_fd(), &name)
+    }
+
+    /// The held folder and name `path` is removed through, or `None` for a
+    /// path outside the app (or the app's root itself).
+    fn locate(&self, path: &Path) -> io::Result<Option<(std::os::fd::OwnedFd, String)>> {
+        use farhelm_supervisor::installation::dirs;
+        use std::os::fd::AsFd as _;
+        let Ok(relative) = path.strip_prefix(&self.root) else {
+            return Ok(None);
+        };
+        let parts: Vec<String> = relative
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        let Some((name, folders)) = parts.split_last() else {
+            return Ok(None);
+        };
+        let mut current = self.root_fd.try_clone()?;
+        for folder in folders {
+            current = dirs::open_folder(current.as_fd(), folder)?
+                .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+        }
+        Ok(Some((current, name.clone())))
+    }
+
+    /// Flush the app's folders the early removals changed, and the folder
+    /// beside the app where leftover trash went, so those removals are on
+    /// disk before the retry command's own pieces go. A folder already gone
+    /// needs nothing.
+    pub(crate) fn flush_early(
+        &self,
+        applications: Option<std::os::fd::BorrowedFd<'_>>,
+    ) -> io::Result<()> {
+        use farhelm_supervisor::installation::{dirs, full_sync};
+        use std::os::fd::AsFd as _;
+        if let Some(contents) = dirs::open_folder(self.root_fd.as_fd(), "Contents")? {
+            for name in ["Versions", "MacOS", "Resources"] {
+                if let Some(folder) = dirs::open_folder(contents.as_fd(), name)? {
+                    full_sync(folder.as_fd())?;
+                }
+            }
+            full_sync(contents.as_fd())?;
+        }
+        if let Some(applications) = applications {
+            full_sync(applications)?;
+        }
+        Ok(())
+    }
+
+    /// The held `Contents/` folder, if there is one.
+    pub(crate) fn contents(&self) -> io::Result<Option<std::os::fd::OwnedFd>> {
+        use std::os::fd::AsFd as _;
+        farhelm_supervisor::installation::dirs::open_folder(self.root_fd.as_fd(), "Contents")
+    }
+}
+
+impl RemovalFs for HeldFs {
+    fn remove_file(&mut self, path: &Path) -> io::Result<()> {
+        use std::os::fd::AsFd as _;
+        match self.locate(path)? {
+            Some((folder, name)) => {
+                farhelm_supervisor::installation::dirs::remove_entry(folder.as_fd(), &name, false)
+            }
+            None => fs::remove_file(path),
+        }
+    }
+
+    fn remove_dir(&mut self, path: &Path) -> io::Result<()> {
+        use std::os::fd::AsFd as _;
+        match self.locate(path)? {
+            Some((folder, name)) => {
+                farhelm_supervisor::installation::dirs::remove_entry(folder.as_fd(), &name, true)
+            }
+            None => fs::remove_dir(path),
+        }
+    }
+}
+
+/// Remove the app through its held folders: the Running records, the
+/// leftover trash a killed install left beside the app, the early removals,
+/// a flush of what they changed, then the rest, and the Terminal link last.
+pub(crate) fn remove_app_held(
+    plan: &AppPlan,
+    held: &mut HeldFs,
+    applications: Option<std::os::fd::BorrowedFd<'_>>,
+    running_records: &[PathBuf],
+    report: &mut String,
+) -> Result<()> {
+    if let Some(applications) = applications {
+        farhelm_supervisor::installation::install::remove_leftovers(applications)
+            .map_err(|error| anyhow::anyhow!("{}: {}", error.what, error.error))?;
+    }
+    remove_app_with_flush(plan, running_records, held, report, &mut |held: &HeldFs| {
+        held.flush_early(applications)
+            .context("flushing the app's folders before removing the rest")
+    })
+}
+
 /// Apply the verified plan. `running_records` are the Running records
 /// (`running-version`) of the state directories uninstall checked, removed
 /// first on macOS, so that a retry reaches the Installed version, which the
@@ -88,13 +236,28 @@ fn remove_app(
     filesystem: &mut impl RemovalFs,
     report: &mut String,
 ) -> Result<()> {
+    remove_app_with_flush(plan, running_records, filesystem, report, &mut |_| Ok(()))
+}
+
+/// [`remove_app`], calling `after_early` between the early removals and the
+/// retry command's own pieces.
+fn remove_app_with_flush<F: RemovalFs>(
+    plan: &AppPlan,
+    running_records: &[PathBuf],
+    filesystem: &mut F,
+    report: &mut String,
+    after_early: &mut dyn FnMut(&F) -> Result<()>,
+) -> Result<()> {
     // First: with them gone, the forwarder sends a retry to the Installed
     // version from any context, including a session that outlived its
     // supervisor, and that version is kept for the late steps.
     for record in running_records {
         remove_one(filesystem, record, false, report)?;
     }
-    for removal in &plan.removals {
+    for (index, removal) in plan.removals.iter().enumerate() {
+        if index == plan.early {
+            after_early(filesystem)?;
+        }
         remove_one(filesystem, &removal.path, removal.directory, report)?;
     }
     match &plan.link {
