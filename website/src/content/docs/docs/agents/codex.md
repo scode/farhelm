@@ -13,8 +13,11 @@ specific to Codex.
 - Guarded passes `-a on-request -s workspace-write`, so Codex works within its workspace sandbox and requests approval
   to step outside it. Your configured reviewer can decide those requests, and your sandbox settings or later mode
   switches can loosen the mode. See [Permission modes](/docs/agents/#permission-modes).
-- Codex prints a warning about a hook at the start of every session Farhelm launches. That hook is how Farhelm learns
-  which conversation you are in, and the warning is harmless.
+- Codex shows `⚠ --dangerously-bypass-hook-trust is enabled` above its composer in sessions Farhelm launches with its
+  conversation hook, the hook that lets **restart** resume the conversation you were in. The same bypass also lets your
+  own Codex hooks, including a trusted workspace's, run without Codex's review. Turning it off means those Codex
+  sessions can't be restarted. Read [what the warning means](/docs/how-it-works/agent-hook-injection/#what-you-will-see)
+  and [how to turn it off](/docs/how-it-works/agent-hook-injection/#turning-it-off).
 - **restart** becomes available only after you submit your first prompt. A Codex session you never prompted cannot be
   restarted; replace it instead.
 - Workspace trust in the session launcher applies to that one launch only: **true** trusts the session's directory and
