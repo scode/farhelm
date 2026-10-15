@@ -79,9 +79,14 @@ A `farhelm` in `~/.local/bin` that the installer did not put there, such as a wr
 a visible name like `farhelm.replaced-20260928T221500Z` in the same directory, and the installer's closing message names
 it. Delete the kept copy once you no longer need it. A `farhelm-desktop` of your own in `~/.local/bin` is left alone.
 
-Only one installer run changes `Farhelm.app` at a time. A run that finds `~/Applications/.farhelm-app.lock`, held by
-another run or left behind by an interrupted one, exits with an error before changing anything. Re-run the installer; if
-the error persists and no installer is running, remove that lock by hand.
+Only one installer run (or uninstall) changes `Farhelm.app` at a time. Each takes a lock on `~/Applications` that the
+system releases when the run ends, however it ends, so an interrupted run never leaves it behind: a run that finds it
+held waits a few seconds and then exits with an error before changing anything; re-run once the other run is done. Older
+installers use a lock folder instead, `~/Applications/.farhelm-app.lock`; the installer takes that too, so the two never
+run together. If an older installer was interrupted and left that folder behind, the installer says so and changes
+nothing; once no installer is running, remove the folder by hand. An installer interrupted part way leaves an app that
+still starts, records that the install is unfinished, and is finished by running the installer again; on a volume where
+files cannot be locked the installer refuses and leaves the installed version as it is.
 
 Releases that cannot be updated while running (from before this layout) and releases without the Mac app resources are
 refused before anything changes. Leave `FARHELM_VERSION` unset for the latest stable release.
@@ -93,9 +98,9 @@ Installation does not start Farhelm or register services. The desktop app manage
 The installer writes a hidden record inside the app that names the installation it created. Uninstall uses it to
 recognize its own artifacts before deleting them. It records no running processes or sessions.
 
-| Record file                                                 | Contents, in field order                                                                                                                                       |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `~/Applications/Farhelm.app/Contents/.farhelm-installation` | The identifier `farhelm-app-v2`; the absolute path of the Terminal link this installation owns (`~/.local/bin/farhelm`, with symlinks in the folder resolved). |
+| Record file                                                 | Contents, in field order                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `~/Applications/Farhelm.app/Contents/.farhelm-installation` | The identifier `farhelm-app-v2`; the absolute path of the Terminal link this installation owns (`~/.local/bin/farhelm`, with symlinks in the folder resolved); a random installation id; a generation number; and a state, `complete`, `installing` or `removing`. Records written by older installers have only the first two fields, which means complete with no id. |
 
 The record is NUL-separated, with a final NUL; it is not a line-oriented text file. The installer creates it with
 owner-only read/write permissions (`0600`). Uninstall requires it to belong to the invoking user and refuses a record

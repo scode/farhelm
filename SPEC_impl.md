@@ -3623,13 +3623,13 @@ replaces a program a running Farhelm still starts. The layout, with `<v>` a rele
 - `Contents/MacOS/farhelm`, the forwarder: a short `sh` script that runs one of the versioned programs.
 
 Two records decide which version runs. Installed belongs to the installer, which may change it while an older Farhelm is
-running; this record, the version folders and the forwarder are all written by `install.sh`. Running belongs to Farhelm:
-a supervisor whose own program is `…/Contents/Versions/<v>/farhelm` writes `<v>` to `running-version` in its state
-directory, beside `supervisor.sock`: one line holding `<v>`, written to a temporary file and renamed into place, once it
-holds the right to serve and before it binds its socket. The version comes from the program's path rather than from the
-version compiled into it, because the path is what the forwarder and the installer's cleanup can see. A supervisor that
-serves from anywhere else (a development build, a Linux install) removes a `running-version` it finds, since it is not
-the version that record would name. Recognizing the layout is by path alone
+running; this record, the version folders and the forwarder are all written by the installer. Running belongs to
+Farhelm: a supervisor whose own program is `…/Contents/Versions/<v>/farhelm` writes `<v>` to `running-version` in its
+state directory, beside `supervisor.sock`: one line holding `<v>`, written to a temporary file and renamed into place,
+once it holds the right to serve and before it binds its socket. The version comes from the program's path rather than
+from the version compiled into it, because the path is what the forwarder and the installer's cleanup can see. A
+supervisor that serves from anywhere else (a development build, a Linux install) removes a `running-version` it finds,
+since it is not the version that record would name. Recognizing the layout is by path alone
 (`crates/farhelm-supervisor/src/app_bundle.rs`) and works the same on every platform; only the Mac installer ever builds
 the shape, so elsewhere nothing changes.
 
@@ -3641,16 +3641,64 @@ this layout ran from `Contents/MacOS/farhelm`, so sessions they started already 
 forwarder exactly there is what keeps them working without migration; it must never move. Outside the layout the
 supervisor uses its own program for all of these, as it always has.
 
-An update in place, as `install.sh` performs it: the new version's folder is staged privately and renamed into
-`Versions/`, then a complete copy of the new `farhelm-desktop` is renamed over the old one, then the icon, the forwarder
-(only when its text changed), `Versions/installed` and `Info.plist` the same way, each copied beside its destination
-first so the rename is atomic. Stopping after any step leaves an app that launches the old version or the new one, and
-the next run finishes the job. Nothing is re-signed (re-signing could rewrite the running program's file in place), and
-nothing is quarantined. The bundle is then touched and re-registered with `lsregister -f`, because Spotlight and Launch
-Services otherwise keep showing the old version. Version folders other than the new one, the one it replaced, and the
-one named by the Running record in the default state directory or in the one the installer's shell's absolute
-`XDG_STATE_HOME` names are removed; a Farhelm running with an overridden state directory is protected by the "replaced"
-rule for one update only.
+An install's locked work is done by the release's own `farhelm`, which `install.sh` runs as `farhelm internal install`
+once it has downloaded, checked and staged the release (its two programs, the icon, and the forwarder and `Info.plist`
+texts the script writes); the script writes nothing inside the app and reads the outcome from an `install-result` or
+`install-failure` file the command leaves in its staging folder
+(`crates/farhelm-supervisor/src/installation/install.rs`). That command takes the installation lock: an exclusive
+`flock` on `~/Applications` itself (created first if missing), held for exactly as long as it works and dropped by the
+kernel when it exits or is killed, with a fixed lock file in `~/Applications` that is never deleted standing in where a
+folder cannot be locked, and a refusal saying the installation stays usable on its current version where neither can be.
+A busy lock refuses after a five-second wait; nothing ever says to delete it. It then takes the lock folder older
+installers use, `~/Applications/.farhelm-app.lock`: created under a temporary name, marked with an extended attribute,
+renamed into place only if nothing is there (`RENAME_NOREPLACE`), and removed by renaming it away before deleting it, so
+it stays an empty folder older tools' "remove it by hand" advice still applies to. A marked leftover is removed (the
+kernel lock proves no newer tool holds it); an unmarked one is an older tool's and refuses as before.
+
+Under the lock it opens `~/Applications`, the app and its folders without following links and reaches everything inside
+the app through those open folders, so if Finder moves the app on the same disk meanwhile the work follows the app it
+checked. An update writes the ownership record's next "installing" generation, durably, before anything else; repairs
+what a killed earlier run left (a missing `MacOS/` or `Resources/`, regular `.farhelm-new.*` files, and its own staging
+and trash folders beside the app); stages the new version's folder beside the app and renames it into `Versions/` (an
+existing folder that already has its `farhelm` is reused, never rewritten, because its users hold locks on that file);
+then renames a complete copy of `farhelm-desktop`, the icon and the forwarder (only when its text changed) over the old
+ones, flushes `MacOS/`, then the Installed record, then `Info.plist`, flushes the folders whose names changed, and
+writes the record's "complete" generation. Every file is written as a `.farhelm-new.*` file beside its destination and
+flushed before the rename; folders are flushed at each point a later step depends on (`F_FULLFSYNC` on a Mac, `fsync`
+where that is unsupported). The flush of `MacOS/` before the Installed record is what an older app's updater depends on:
+it judges success by that record, so the app program must be on disk before the record names the new version. Stopping
+after any step leaves an app that launches the old version or the new one, the record saying the install is unfinished
+until it is, and the next run finishes the job. Nothing is re-signed (re-signing could rewrite the running program's
+file in place), and nothing is quarantined. Pruning keeps the new version, the one it replaced, the one named by the
+Running record in the default state directory or in the one the installer's shell's absolute `XDG_STATE_HOME` names, and
+any version whose lock someone holds (an exclusive no-wait attempt fails); every other version folder is renamed, while
+that exclusive lock is held, into a trash folder beside the app, which is flushed and then deleted. A trash or staging
+folder an interrupted run left is deleted only after the folders its moves touched (the app's `Versions/`,
+`~/Applications` and the leftover itself) are flushed, since the run may have died before its own flush. A Farhelm
+running with an overridden state directory is protected by its version lock for as long as it runs. The Terminal link is
+placed last, with the same checks as before for files the installer did not put there, and its folder flushed. The
+script then touches the bundle and re-registers it with `lsregister -f`, because Spotlight and Launch Services otherwise
+keep showing the old version.
+
+An app at the usual place without `Versions/`, or no app at all, is instead built whole under a temporary name beside
+its place, flushed, and renamed into place (moving any existing app aside first, and putting it back if the rename
+fails); `~/Applications` is flushed after. An existing installation's id carries over; otherwise a new one is minted.
+The script decides beforehand whether an app without this layout's record is one an older installer built (its old
+record, or the recordless shape), which is the only foreign-looking app that is replaced. Because that check runs before
+the lock, its approval names the folder it checked by inode (`ls -di`, read before and after the check), and the locked
+work replaces only a folder with that inode: an app Finder puts at the place in the meantime is refused, and a file
+there never counts as an older app.
+
+The ownership record, `Contents/.farhelm-installation` (mode 0600), keeps the format name and the first two
+NUL-terminated fields older installers read (`farhelm-app-v2`, then the Terminal link) and appends three: a random
+installation id (32 hex digits), a generation, and a state, `complete`, `installing` or `removing`. The generation is
+odd exactly while an install or uninstall is running or was interrupted. A two-field record, as every older installer
+writes, means complete with no id; an install gives it an id when it first advances it. Older installers recognize the
+extended record by its first two fields and rewrite it in the two-field form when they finish; older uninstallers, which
+require exactly two fields, refuse it with their own "rerun the installer" advice. A run started by an older app's
+updater, recognized by the checksum file it passes (`FARHELM_INSTALL_SUMS_FILE`), only updates: it refuses when the app
+is missing, when the record says an uninstall was interrupted, or when the Installed version is newer than its target,
+and it finishes an interrupted install, because an older app cannot show a notice telling its user to run the installer.
 
 Version locks keep a version from being deleted while anything uses it
 (`crates/farhelm-supervisor/src/version_lock.rs`). Every `farhelm` that runs from `Contents/Versions/<v>/farhelm` holds

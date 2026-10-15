@@ -28,6 +28,38 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 INSTALL_SH="$REPO_ROOT/scripts/install.sh"
 
+# This tree's real `farhelm`, required: install.sh hands everything it does
+# under the installation lock to the downloaded release's own farhelm
+# (`farhelm internal install`), so a fake release whose farhelm could not do
+# that work would test nothing past the download. Every fake release's
+# farhelm is a wrapper around it (see write_binary). It must run on the host
+# the harness runs on: a glibc build for an ordinary Linux host, a static
+# musl build for the Alpine/BusyBox run. A required argument rather than an
+# environment variable, so a run cannot silently lose the real-binary cases
+# (and the test-run recorder scrubs FARHELM_* variables anyway).
+REAL_FARHELM=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --farhelm)
+      REAL_FARHELM=${2:-}
+      shift 2 || { echo "--farhelm needs a path" >&2; exit 2; }
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+if [ -z "$REAL_FARHELM" ] || [ ! -x "$REAL_FARHELM" ] || [ -d "$REAL_FARHELM" ]; then
+  echo "usage: $0 --farhelm PATH (this tree's farhelm, e.g. target/debug/farhelm)" >&2
+  exit 2
+fi
+REAL_FARHELM=$(cd -- "$(dirname -- "$REAL_FARHELM")" && pwd)/$(basename -- "$REAL_FARHELM")
+if ! "$REAL_FARHELM" --version >/dev/null 2>&1; then
+  echo "$REAL_FARHELM does not run on this host" >&2
+  exit 2
+fi
+
 # The tmux floor the installer has to advise, read from the release pins rather
 # than spelled out in this file. install.sh cannot read the pins itself (it
 # runs from `curl | sh` with nothing beside it), so its floor is a literal, and
@@ -117,10 +149,26 @@ not_contains() { [[ "$1" != *"$2"* ]]; }
 # ---------------------------------------------------------------------------
 
 # write_binary DIR MEMBER_NAME CONTENT_LINE
+# Every member prints CONTENT_LINE. A `farhelm` member is also a working
+# farhelm: a wrapper that answers `--version` with CONTENT_LINE (install.sh's
+# version check), declines the forwarder's version claim the way a farhelm
+# from before version locks does (exit 2, so the forwarder starts it without a
+# lock; the claim itself is proven with the real binary in
+# crates/farhelm/tests/version_lock_forwarder.rs), and runs this tree's real
+# farhelm for everything else, the locked install work included. The real
+# binary runs from outside any app, so no version-lock identity check applies
+# to it, and the locked work installs the staged wrapper, never itself.
 write_binary() {
   local dir=$1 member=$2 content=$3
   mkdir -p "$dir"
-  printf '#!/bin/sh\necho "%s"\n' "$content" >"$dir/$member"
+  if [ "$member" = farhelm ]; then
+    local quoted=${REAL_FARHELM//\'/\'\\\'\'}
+    # shellcheck disable=SC2016 # The wrapper's own $1, $2 and $@ are meant literally.
+    printf '#!/bin/sh\ncase "${1:-} ${2:-}" in\n  "--version "*) echo "%s"; exit 0 ;;\n  "internal version-lock") exit 2 ;;\nesac\nexec '"'"'%s'"'"' "$@"\n' \
+      "$content" "$quoted" >"$dir/$member"
+  else
+    printf '#!/bin/sh\necho "%s"\n' "$content" >"$dir/$member"
+  fi
   chmod 755 "$dir/$member"
 }
 
@@ -617,9 +665,11 @@ check "Linux refusal matches the approved text" [ "$ERR" = "$LINUX_REFUSAL" ]
 # ===========================================================================
 MAC_TOOLS="$TOOLCHAIN_FULL"
 
-# assert_current_record HOME -- the app's ownership record is exactly
-# "farhelm-app-v2", NUL, the canonical path of HOME's Terminal link, NUL.
-# Python computes the expected bytes independently of the installer's shell.
+# assert_current_record HOME -- the app's ownership record starts with what
+# older installers read ("farhelm-app-v2", NUL, the canonical path of HOME's
+# Terminal link, NUL) and then says the installation is complete: a 32-digit
+# installation id, an even generation and "complete", each NUL-terminated.
+# Python computes the expected bytes independently of the installer.
 assert_current_record() {
   python3 - "$1" <<'PY'
 import os
@@ -627,10 +677,24 @@ import sys
 
 home = sys.argv[1]
 link = os.fsencode(os.path.realpath(os.path.join(home, ".local", "bin"))) + b"/farhelm"
-expected = b"farhelm-app-v2\0" + link + b"\0"
 record = os.path.join(home, "Applications", "Farhelm.app", "Contents", ".farhelm-installation")
 with open(record, "rb") as source:
-    raise SystemExit(0 if source.read() == expected else 1)
+    data = source.read()
+# The first two fields are what older installers read; the installation id,
+# an even generation and "complete" follow (an install that finished).
+fields = data.split(b"\0")
+ok = (
+    data.endswith(b"\0")
+    and len(fields) == 6
+    and fields[0] == b"farhelm-app-v2"
+    and fields[1] == link
+    and len(fields[2]) == 32
+    and all(c in b"0123456789abcdef" for c in fields[2])
+    and fields[3].isdigit()
+    and int(fields[3]) % 2 == 0
+    and fields[4] == b"complete"
+)
+raise SystemExit(0 if ok else 1)
 PY
 }
 
@@ -906,68 +970,76 @@ check "cleanup (odd names): a folder with a version on one line of its name is u
 1.2.3/readme")" = mine ]
 
 # ===========================================================================
-# Scenario: an update stopped at any step leaves a working app. Why: an
-# update can be killed at any instant (SIGKILL, power loss), and the step
-# order is what guarantees the app then launches the old version or the new
-# one. An `mv` double performs each real rename and then SIGKILLs the
-# installer right after the one named by KILL_AFTER, so every intermediate
-# state the order allows is inspected. A rerun after removing the lock the
-# killed run left (which the next run's refusal asks for) finishes the job.
+# Scenario: an update stopped part way is finished by the next run, from
+# Terminal or from an older app's updater. Why: an update can be killed at
+# any instant (SIGKILL, power loss). The locked work runs inside the real
+# farhelm, whose write order is stopped after every step by its own module
+# tests (crates/farhelm-supervisor/src/installation/install/tests.rs); what
+# only the whole installer can show is that each state such a stop leaves
+# is finished by install.sh again, including a run the way an older app's
+# updater starts it (the release pinned and FARHELM_INSTALL_SUMS_FILE set),
+# which must finish an interrupted install rather than refuse it, because
+# an older app cannot tell its user to run the installer. Each state is
+# seeded on disk: the record saying "installing", the new app program in
+# place with the Installed record still old, and the Installed record
+# already new.
 # ===========================================================================
 echo
-echo "== update: interrupted after each step =="
-INTERRUPT_TOOLS="$WORKDIR/toolchain-interrupt"
-mkdir -p "$INTERRUPT_TOOLS"
-cp -a "$MAC_TOOLS"/. "$INTERRUPT_TOOLS/"
-rm -f "$INTERRUPT_TOOLS/mv"
-cat >"$INTERRUPT_TOOLS/mv" <<'MVEOF'
-#!/bin/sh
-# Test double: the real mv, then a SIGKILL of the installer (this process's
-# parent shell) right after the rename whose destination ends in KILL_AFTER.
-eval "last=\${$#}"
-/bin/mv "$@" || exit
-case "$last" in
-  *"$KILL_AFTER") kill -9 "$PPID" ;;
-esac
-MVEOF
-chmod 755 "$INTERRUPT_TOOLS/mv"
-# What each record must still say right after the kill, which is what pins
-# the order: the Installed record and Info.plist switch only after the new
-# version's folder and main program are in place, and Info.plist last.
-interrupt_expect() {
-  case "$1" in
-    Versions/1.2.4 | MacOS/farhelm-desktop | Resources/Farhelm.icns) echo "1.2.3 1.2.3" ;;
-    Versions/installed) echo "1.2.4 1.2.3" ;;
-    *) echo "1.2.4 1.2.4" ;;
-  esac
+echo "== update: an interrupted update is finished =="
+# seed_installing APP: rewrite APP's ownership record as an interrupted
+# install (the next odd generation, state "installing"), keeping its link
+# and id. The record is NUL-separated, so it is read field by field.
+seed_installing() {
+  local record="$1/Contents/.farhelm-installation" link id generation
+  link=$(tr '\000' '\n' <"$record" | sed -n 2p)
+  id=$(tr '\000' '\n' <"$record" | sed -n 3p)
+  generation=$(tr '\000' '\n' <"$record" | sed -n 4p)
+  printf 'farhelm-app-v2\000%s\000%s\000%s\000installing\000' "$link" "$id" "$((generation + 1))" >"$record"
 }
+record_state() { tr '\000' '\n' <"$1/Contents/.farhelm-installation" | sed -n 5p; }
 plist_version() {
   sed -n '/CFBundleVersion/{n;s/.*<string>\(.*\)<\/string>.*/\1/p;}' "$1/Contents/Info.plist"
 }
-for step in Versions/1.2.4 MacOS/farhelm-desktop Resources/Farhelm.icns Versions/installed Contents/Info.plist Contents/.farhelm-installation; do
-  label=${step//\//-}
-  home="$WORKDIR/home-interrupt-$label"
-  app="$home/Applications/Farhelm.app"
-  mkdir -p "$home"
-  run_install "$MAC_TOOLS" "$home" "$BASE/good" 1.2.3
-  check "interrupt after $step: setup install exits 0" [ "$RC" -eq 0 ]
-  run_install "$INTERRUPT_TOOLS" "$home" "$BASE/good-v2" 1.2.4 KILL_AFTER="$step"
-  check "interrupt after $step: the installer was killed" [ "$RC" -eq 137 ]
-  check "interrupt after $step: the app is launchable" app_launchable "$app"
-  check "interrupt after $step: the Installed record and Info.plist are at the expected step" \
-    [ "$(cat "$app/Contents/Versions/installed") $(plist_version "$app")" = "$(interrupt_expect "$step")" ]
-  check "interrupt after $step: the Terminal link still works" \
-    contains "$(forward "$home/.local/bin/farhelm" --version)" "farhelm 1.2."
-  check "interrupt after $step: the lock is left behind" [ -d "$home/Applications/.farhelm-app.lock" ]
-  run_install "$MAC_TOOLS" "$home" "$BASE/good-v2" 1.2.4
-  check "interrupt after $step: a rerun refuses on the left-behind lock" \
-    contains "$ERR" "$home/Applications/.farhelm-app.lock"
-  rmdir "$home/Applications/.farhelm-app.lock"
-  run_install "$MAC_TOOLS" "$home" "$BASE/good-v2" 1.2.4
-  check "interrupt after $step: a rerun finishes the update" [ "$RC" -eq 0 ]
-  check "interrupt after $step: the finished update installed 1.2.4" \
-    [ "$(cat "$app/Contents/Versions/installed")" = 1.2.4 ]
-  check "interrupt after $step: the finished update leaves the app launchable" app_launchable "$app"
+cp "$WWW/good-v2/SHA256SUMS" "$WORKDIR/good-v2-sums"
+for seeded in installing program-new installed-new; do
+  for runner in terminal updater; do
+    home="$WORKDIR/home-interrupted-$seeded-$runner"
+    app="$home/Applications/Farhelm.app"
+    mkdir -p "$home"
+    run_install "$MAC_TOOLS" "$home" "$BASE/good" 1.2.3
+    check "interrupted ($seeded, $runner): setup install exits 0" [ "$RC" -eq 0 ]
+    case $seeded in
+      program-new)
+        mkdir -p "$app/Contents/Versions/1.2.4"
+        tar -xzf "$WWW/good-v2/farhelm-aarch64-apple-darwin.tar.gz" -O >"$app/Contents/Versions/1.2.4/farhelm"
+        chmod 755 "$app/Contents/Versions/1.2.4/farhelm"
+        tar -xzf "$WWW/good-v2/farhelm-desktop-aarch64-apple-darwin.tar.gz" -O \
+          farhelm-desktop-aarch64-apple-darwin/farhelm-desktop >"$app/Contents/MacOS/farhelm-desktop"
+        ;;
+      installed-new)
+        mkdir -p "$app/Contents/Versions/1.2.4"
+        tar -xzf "$WWW/good-v2/farhelm-aarch64-apple-darwin.tar.gz" -O >"$app/Contents/Versions/1.2.4/farhelm"
+        chmod 755 "$app/Contents/Versions/1.2.4/farhelm"
+        tar -xzf "$WWW/good-v2/farhelm-desktop-aarch64-apple-darwin.tar.gz" -O \
+          farhelm-desktop-aarch64-apple-darwin/farhelm-desktop >"$app/Contents/MacOS/farhelm-desktop"
+        printf '1.2.4\n' >"$app/Contents/Versions/installed"
+        ;;
+    esac
+    seed_installing "$app"
+    check "interrupted ($seeded, $runner): the seeded record says installing" [ "$(record_state "$app")" = installing ]
+    if [ "$runner" = updater ]; then
+      run_install "$MAC_TOOLS" "$home" "$BASE/good-v2" 1.2.4 FARHELM_INSTALL_SUMS_FILE="$WORKDIR/good-v2-sums"
+    else
+      run_install "$MAC_TOOLS" "$home" "$BASE/good-v2" 1.2.4
+    fi
+    check "interrupted ($seeded, $runner): the rerun exits 0" [ "$RC" -eq 0 ]
+    check "interrupted ($seeded, $runner): the record says complete" [ "$(record_state "$app")" = complete ]
+    check "interrupted ($seeded, $runner): 1.2.4 is Installed with its Info.plist" \
+      [ "$(cat "$app/Contents/Versions/installed") $(plist_version "$app")" = "1.2.4 1.2.4" ]
+    check "interrupted ($seeded, $runner): the app is launchable" app_launchable "$app"
+    check "interrupted ($seeded, $runner): nothing is left beside the app" \
+      [ "$(find "$home/Applications" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]
+  done
 done
 
 # ===========================================================================
@@ -2638,11 +2710,19 @@ printf '%s  install.sh\n' "$(printf 'x' | sha256sum | awk '{print $1}')" >>"$WOR
 # would fail, so success proves the given file was the one used.
 corrupt_checksum "$WWW/sums-file" farhelm-aarch64-apple-darwin.tar.gz
 corrupt_checksum "$WWW/sums-file" farhelm-desktop-aarch64-apple-darwin.tar.gz
+# A checksum file is what an older app's updater passes, so such a run only
+# updates (design, section 7): it never creates a missing app.
 HOME_G5="$WORKDIR/home-g5"
 mkdir -p "$HOME_G5"
+run_install "$MAC_TOOLS" "$HOME_G5" "$BASE/sums-file" 1.2.3 FARHELM_INSTALL_SUMS_FILE="$WORKDIR/given-sums"
+check "G5: an update with a checksum file does not create a missing app" [ "$RC" -ne 0 ]
+check "G5: the refusal says Farhelm is not installed" contains "$ERR" "not installed"
+check "G5: no app was created" [ ! -e "$HOME_G5/Applications/Farhelm.app" ]
+run_install "$MAC_TOOLS" "$HOME_G5" "$BASE/good" 1.2.3
+check "G5 premise: an ordinary install exits 0" [ "$RC" -eq 0 ]
 before=$(server_request_count)
 run_install "$MAC_TOOLS" "$HOME_G5" "$BASE/sums-file" 1.2.3 FARHELM_INSTALL_SUMS_FILE="$WORKDIR/given-sums"
-check "G5: install with a given checksum file exits 0" [ "$RC" -eq 0 ]
+check "G5: an update with a given checksum file exits 0" [ "$RC" -eq 0 ]
 check "G5: no SHA256SUMS request was made" \
   [ "$(tail -n "+$((before + 1))" "$SERVER_LOG" | grep -c SHA256SUMS)" -eq 0 ]
 check "G5 premise: the archives were downloaded from the origin" \

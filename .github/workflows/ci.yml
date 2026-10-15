@@ -78,6 +78,17 @@ jobs:
             --runner nextest --kind development --selection 'macOS uninstall unit tests' --concurrency '4 nextest slots; retries 0' \
             --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'
+          # Version locks, the installation lock and the session keeper rest on
+          # macOS behavior Linux only approximates (flock on an APFS folder,
+          # extended attributes, RENAME_EXCL, F_FULLFSYNC, kqueue NOTE_EXIT).
+          python3 scripts/record-test-run.py \
+            --runner nextest --kind development --selection 'macOS version and installation lock tests' --concurrency '4 nextest slots; retries 0' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/installation::|version_lock::|session_hold::/)'
+          python3 scripts/record-test-run.py \
+            --runner nextest --kind development --selection 'macOS version-lock process tests' --concurrency '4 nextest slots; retries 0' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo nextest run -p farhelm --test session_hold --test version_lock_forwarder
           python3 scripts/record-test-run.py \
             --kind development --selection 'macOS installed uninstall acceptance' --concurrency 'one fixture at a time' \
             --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
@@ -261,6 +272,11 @@ jobs:
   # replacement (including a forced-failure rollback), and the exact
   # closing-message contract, all without touching this runner's real
   # $HOME or $PATH.
+  #
+  # install.sh hands everything under the installation lock to the release's
+  # own farhelm (`farhelm internal install`), so the harness needs this
+  # tree's real binary. It is built static (musl) because the Alpine rerun
+  # below cannot run a glibc binary, and one build then serves both runs.
   install-script:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -268,11 +284,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # python3 backs test-install-sh.sh's fixture HTTP server (stdlib
-      # only, no pip install needed).
-      - run: sudo apt-get install -y shellcheck python3
+      # only, no pip install needed); musl-tools builds rusqlite's bundled
+      # SQLite for the static farhelm.
+      - run: sudo apt-get install -y shellcheck python3 musl-tools
       - run: sh -n scripts/install.sh
       - run: shellcheck scripts/install.sh scripts/test-install-sh.sh
-      - run: bash scripts/test-install-sh.sh
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ github.job }}-v1-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          cache: false
+          rustflags: ""
+          build-warnings: ""
+          target: x86_64-unknown-linux-musl
+      - run: cargo build -p farhelm --target x86_64-unknown-linux-musl --locked
+      - run: bash scripts/test-install-sh.sh --farhelm target/x86_64-unknown-linux-musl/debug/farhelm
       # The steps above run install.sh under Ubuntu's GNU userland (glibc
       # tar/sed/awk/grep/sha256sum). A distro-decorated GNU option or output
       # format the script accidentally depended on would pass every one of
@@ -294,7 +325,7 @@ jobs:
             set -e
             apk add --no-cache curl bash python3 perl-utils openssl
             sh -n scripts/install.sh
-            bash scripts/test-install-sh.sh
+            bash scripts/test-install-sh.sh --farhelm target/x86_64-unknown-linux-musl/debug/farhelm
           '
 
   # The docs website (website/, Astro + Starlight) builds here so a page with

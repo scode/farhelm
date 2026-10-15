@@ -196,20 +196,28 @@ that its required systemd or SSH substrate ran.
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
   POSIX `sh` (it is never piped into a stranger's shell, so nothing forces the same portability constraint), which is
   why only `install.sh` goes through `sh -n`.
-- `bash scripts/test-install-sh.sh` — drives the macOS-only installer as a real child against a fixture HTTP server,
-  using a Darwin/arm64 `uname` shim on Linux and BusyBox. Covers fresh install, updates side by side and stopped at each
-  step, the forwarder, 404, checksums, malformed archives, version normalization, missing prerequisites, exact closing
-  messages and tmux advice, terminal styling/progress and plain redirected output, app layout and ownership/recovery.
-  Linux refuses before downloading or writing; old releases (without app resources, or from before the side-by-side
-  layout) refuse before anything changes. Nothing outside `~/.local/bin` and `~/Applications/Farhelm.app` changes, and
-  no service manager runs. Every invocation uses `env -i` with an explicit environment, never the harness process's own.
+- `cargo build -p farhelm && bash scripts/test-install-sh.sh --farhelm target/debug/farhelm` — drives the macOS-only
+  installer as a real child against a fixture HTTP server, using a Darwin/arm64 `uname` shim on Linux and BusyBox. The
+  installer hands its locked work to the release's own `farhelm`, so every fake release's `farhelm` is a wrapper that
+  runs this tree's real binary (required; CI builds it static with musl so the Alpine/BusyBox run can use it too).
+  Covers fresh install, updates side by side and interrupted updates finished by a Terminal run or an older app's
+  updater (the write order stopped after each step is covered by the Rust module tests of
+  `farhelm_supervisor::installation::install`), the forwarder, 404, checksums, malformed archives, version
+  normalization, missing prerequisites, exact closing messages and tmux advice, terminal styling/progress and plain
+  redirected output, app layout and ownership/recovery. Linux refuses before downloading or writing; old releases
+  (without app resources, or from before the side-by-side layout) refuse before anything changes. Nothing outside
+  `~/.local/bin` and `~/Applications/Farhelm.app` changes, and no service manager runs. Every invocation uses `env -i`
+  with an explicit environment, never the harness process's own.
 - `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' --tmux none -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
   — macOS-only, after building the CLI: runs the actual installer and installed uninstaller against private fixture
   homes and release archives. Covers updates, confirmation, dry-run preservation, foreign files and native bundles.
   Other platforms report a skip; Linux no longer has end-to-end coverage of installer-made installations because the
   installer refuses Linux. The focused macOS CI job and release gate also run
-  `cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'` through the recorder with four slots and
-  `--tmux none`.
+  `cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'`, the version-lock, installation-lock and session
+  keeper tests
+  (`cargo nextest run -p farhelm-supervisor --lib -E 'test(/installation::|version_lock::|session_hold::/)'` and
+  `cargo nextest run -p farhelm --test session_hold --test version_lock_forwarder`), each through the recorder with four
+  slots and `--tmux none`.
 - `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
   own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,
