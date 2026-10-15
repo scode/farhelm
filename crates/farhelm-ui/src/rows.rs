@@ -175,6 +175,8 @@ pub(crate) fn retire_vanished_renames(
 /// (`detail_lines_shown`, false in compact mode, which has none). What is
 /// compared is how many rows above carry the line, not which ones: rows
 /// above trading places with each other leave the open row where it was.
+/// A pin separator appearing or disappearing above it also changes height,
+/// even when a hold keeps every session's index unchanged.
 /// SPEC_impl.md's row-menu rule is that the menu closes on any layout
 /// change that could have moved its row. The per-row refusal line
 /// (`action-error`) is the other in-place height change, and it is not
@@ -204,6 +206,15 @@ pub(crate) fn menu_row_reordered(
     let Some(index) = current_index else {
         return false;
     };
+    // A pin boundary adds height even while a hold keeps every row's index
+    // fixed. If it appears/disappears above the anchor, the popup is detached.
+    let separator_above = |rows: &[Session]| {
+        pin_separator_after(rows)
+            .is_some_and(|boundary| rows[..index].iter().any(|s| s.id == boundary))
+    };
+    if separator_above(previous) != separator_above(current) {
+        return true;
+    }
     let detail_lines_above =
         |rows: &[Session]| rows[..index].iter().filter(|s| has_detail_line(s)).count();
     detail_lines_shown && detail_lines_above(previous) != detail_lines_above(current)
@@ -250,7 +261,7 @@ pub(crate) fn has_detail_line(session: &Session) -> bool {
 
 /// The order the session list DISPLAYS while its order is held under the
 /// pointer: `held` is the id order captured when the hold began, `served` is
-/// the helm's current listing.
+/// the current listing after the sidebar's shared-pin partition.
 ///
 /// The hold exists so a row does not move out from under the pointer on its
 /// way to a click. So every session still in `held` keeps its held position
@@ -282,6 +293,21 @@ pub(crate) fn held_display_order(held: &[String], served: &[Session]) -> Vec<Ses
                 .cloned(),
         )
         .collect()
+}
+
+/// Put shared pins first without changing either group's selected sort.
+/// This is sidebar presentation only: the quick switcher keeps helm order.
+pub(crate) fn pinned_first(sessions: &mut [Session]) {
+    sessions.sort_by_key(|session| !session.pinned);
+}
+
+/// The last row of the displayed leading pin block, only when an unpinned
+/// row follows it. During a hold pins can appear anywhere; a later isolated
+/// pin must not move the separator away from the leading block.
+pub(crate) fn pin_separator_after(sessions: &[Session]) -> Option<&str> {
+    let leading = sessions.iter().take_while(|session| session.pinned).count();
+    (leading > 0 && sessions[leading..].iter().any(|session| !session.pinned))
+        .then(|| sessions[leading - 1].id.as_str())
 }
 
 /// Remove `removed` from `sessions` (this client's own optimistic delete)
@@ -636,6 +662,69 @@ mod tests {
         sessions.iter().map(|session| session.id.as_str()).collect()
     }
 
+    /// Pinning must preserve the chosen sort within both groups, including
+    /// stale pins ahead of live work. The hold then keeps displayed positions
+    /// while pin data changes; only its leading pin run earns a separator.
+    #[farhelm_testtrace::test]
+    fn pins_partition_stably_and_separator_follows_the_held_display() {
+        let mut served = vec![
+            session("a", "a"),
+            session("b", "b"),
+            session("c", "c"),
+            session("d", "d"),
+        ];
+        served[1].pinned = true;
+        served[1].stale = true;
+        served[3].pinned = true;
+        pinned_first(&mut served);
+        assert_eq!(ids(&served), ["b", "d", "a", "c"]);
+        assert_eq!(pin_separator_after(&served), Some("d"));
+        let held = ["a", "b", "c"].map(str::to_string);
+        let displayed = held_display_order(&held, &served);
+        assert_eq!(ids(&displayed), ["a", "b", "c", "d"]);
+        assert_eq!(
+            pin_separator_after(&displayed),
+            None,
+            "isolated pins do not form a leading block"
+        );
+        let held = ["b", "a", "d", "c"].map(str::to_string);
+        assert_eq!(
+            pin_separator_after(&held_display_order(&held, &served)),
+            Some("b")
+        );
+        served[0].pinned = false;
+        assert_eq!(
+            pin_separator_after(&held_display_order(&held, &served)),
+            None,
+            "an unpin inside a held block shortens it immediately"
+        );
+        for item in &mut served {
+            item.pinned = true;
+        }
+        assert_eq!(
+            pin_separator_after(&served),
+            None,
+            "all pinned has no boundary"
+        );
+        assert_eq!(pin_separator_after(&[]), None);
+        for item in &mut served {
+            item.pinned = false;
+        }
+        assert_eq!(pin_separator_after(&served), None);
+    }
+
+    /// An external pin edit can move a menu anchor without changing row
+    /// order. Only a boundary above the open row changes its position.
+    #[farhelm_testtrace::test]
+    fn pin_boundary_above_the_open_menu_counts_as_a_layout_change() {
+        let before = vec![session("a", "a"), session("b", "b"), session("c", "c")];
+        let mut after = before.clone();
+        after[0].pinned = true;
+        assert!(menu_row_reordered(Some(&before), &after, "b", false));
+        assert!(!menu_row_reordered(Some(&before), &after, "a", false));
+        assert!(menu_row_reordered(Some(&after), &before, "b", true));
+    }
+
     /// Holding the list's order under the pointer must never let a row move
     /// under it, never keep a deleted session clickable, and never hide a new
     /// one. Specifies: a reorder in the served list is ignored in favor of the
@@ -685,6 +774,7 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at: None,
+            pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
         }

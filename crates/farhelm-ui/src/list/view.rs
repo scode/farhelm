@@ -1270,7 +1270,7 @@ pub(crate) fn ListView(
     let mut commit_listing = move |generation: u64,
                                    requested: SessionFilter,
                                    ordered_by: ListSort,
-                                   fetched: Result<SessionListing, String>,
+                                   mut fetched: Result<SessionListing, String>,
                                    index: u64,
                                    authoritative: bool| {
         // Superseded reads, and reads answering a question nobody is asking
@@ -1285,6 +1285,11 @@ pub(crate) fn ListView(
         );
         if !accepted {
             return;
+        }
+        // Partition only this sidebar's copy, before any hold reconciliation.
+        // The helm order and quick switcher's independent read stay intact.
+        if let Ok(listing) = &mut fetched {
+            rows::pinned_first(&mut listing.sessions);
         }
         // A second handle on the SAME `listing` signal, under a name that
         // survives the shadowing two lines down (`if let Ok(listing) =
@@ -3150,6 +3155,32 @@ pub(crate) fn ListView(
             }
         });
     });
+    let pin_base = base.clone();
+    let pin_refresh = request_listing.clone();
+    // A manual metadata edit reports failure on its row and reads success
+    // back from the helm. It closes the menu at acceptance like Mark read;
+    // the pointer hold still decides when that new membership may move it.
+    let on_pin = use_callback(move |(id, pinned): (String, bool)| {
+        menu_open.set(None);
+        let base = pin_base.clone();
+        let refresh = pin_refresh.clone();
+        spawn(async move {
+            let result = api::set_pin(&base, &id, pinned).await;
+            let Ok(mut errors) = errors.try_write() else {
+                return;
+            };
+            match result {
+                Ok(()) => {
+                    errors.remove(&id);
+                    drop(errors);
+                    refresh(Trigger::Explicit);
+                }
+                Err(error) => {
+                    errors.insert(id, format!("pin: {error}"));
+                }
+            }
+        });
+    });
     let mark_seen_base = base.clone();
     // The row's read/unread toggle — the menu item and the dot both funnel
     // here (SPEC.md, Status). Routed through `queue_seen_write` rather than
@@ -3273,6 +3304,13 @@ pub(crate) fn ListView(
     // ids `rows::held_display_order` keeps in place. Read (not peeked) so a
     // hold starting or ending re-renders the rows.
     let held_order: Vec<String> = order_hold.read().clone().unwrap_or_default();
+    let displayed = listing
+        .read()
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .map(|listing| rows::held_display_order(&held_order, &listing.sessions))
+        .unwrap_or_default();
+    let pin_separator = rows::pin_separator_after(&displayed).map(str::to_string);
     // Every session whose menu an outside click may have to dismiss: the one
     // whose menu is open, plus any row still holding a delete or replace
     // confirmation. Sorted so the relays render in a stable order.
@@ -4059,6 +4097,7 @@ pub(crate) fn ListView(
                             SessionRow {
                                 key: "{session.id}",
                                 compact,
+                                pin_separator: pin_separator.as_deref() == Some(session.id.as_str()),
                                 state: RowState {
                                     error: errors.read().get(&session.id).cloned(),
                                     // The shared token counts as busy for
@@ -4112,6 +4151,7 @@ pub(crate) fn ListView(
                                 on_clone,
                                 on_replace_with,
                                 on_mark_seen,
+                                on_pin,
                                 on_replace,
                                 on_confirm_replace: confirm_replace,
                                 on_cancel_replace: cancel_replace,

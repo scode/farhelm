@@ -7,9 +7,9 @@
 //!
 //! ## Routing is the interesting half
 //!
-//! A helm holds no authoritative session state, so every operation on a
-//! session has to find the host that owns it and reach that host's LIVE
-//! connection. `resolve_owner` answers the first question from the two
+//! A helm holds shared viewer metadata (pins and read marks), but process
+//! state belongs to the supervisor. Host-backed operations must find the
+//! owner and reach its LIVE connection. `resolve_owner` answers the first question from the two
 //! places a session can be known (helm.db's cache, and the manager's
 //! in-memory list for a connected host with no identity to cache under);
 //! `route_session` and `host_client` answer the second, and both take the
@@ -2391,6 +2391,10 @@ pub(crate) async fn get_session(
         Ok(map) => map.get(&id).copied(),
         Err(e) => return http_error(e),
     };
+    let pinned = match state.store.pinned_sessions(std::slice::from_ref(&id)).await {
+        Ok(pins) => pins.contains(&id),
+        Err(e) => return http_error(e),
+    };
     // And the notification marks, for the same reason.
     let marks = match state
         .store
@@ -2418,6 +2422,7 @@ pub(crate) async fn get_session(
                     host_identity,
                     host_name,
                     seen_activity_at,
+                    pinned,
                     notifications_read_through,
                     stale: true,
                 })
@@ -2445,6 +2450,7 @@ pub(crate) async fn get_session(
                         host_identity,
                         host_name,
                         seen_activity_at,
+                        pinned,
                         notifications_read_through,
                         stale: false,
                     })
@@ -2761,6 +2767,13 @@ pub(crate) async fn delete_session(
             .await
         {
             Ok(outcome) => {
+                if let Err(error) = state.store.set_pinned(&id, false).await {
+                    warn!(
+                        session_id = manager::peer_text(&id).as_str(),
+                        error = %error,
+                        "could not clear the deleted session's pin; a stray row may remain"
+                    );
+                }
                 if let Err(error) = state.store.clear_seen(&id).await {
                     warn!(
                         session_id = manager::peer_text(&id).as_str(),
@@ -2863,6 +2876,37 @@ pub(crate) async fn mark_seen(
             None => state.store.clear_seen(&id).await,
         };
         match changed {
+            Ok(changed) => {
+                if changed {
+                    state.manager.events().bump();
+                }
+                axum::Json(serde_json::json!({})).into_response()
+            }
+            Err(e) => http_error(e),
+        }
+    })
+    .await
+}
+
+/// Required pin value: a missing key is a malformed request, never an
+/// implicit unpin that could erase a user's choice.
+#[derive(Deserialize)]
+pub(crate) struct SetPinReq {
+    pinned: bool,
+}
+
+/// Set helm-owned pin metadata even while the owning host is unreachable.
+/// The revision only advances on a real change, as for read/unread marks.
+pub(crate) async fn set_pin(
+    State(state): State<Arc<AppState>>,
+    AxPath(id): AxPath<String>,
+    axum::Json(req): axum::Json<SetPinReq>,
+) -> impl IntoResponse {
+    crate::run_owned(async move {
+        if let Err(e) = resolve_owner(&state, &id).await {
+            return http_error(e);
+        }
+        match state.store.set_pinned(&id, req.pinned).await {
             Ok(changed) => {
                 if changed {
                     state.manager.events().bump();
@@ -3413,6 +3457,13 @@ async fn finish_replacement(
     // user, or on their way to a card, would otherwise hold the delete behind
     // their request fence. Held until the delete answers.
     let _deleting = state.approvals.deny_session(id);
+    // Preserve the user's pin before the destructive half of Replace. A
+    // storage failure must not delete the only session that still has it.
+    if state.store.inherit_pin(id, &created.id).await.with_context(|| {
+        format!("created replacement session {} but could not copy the original's pin; the original {id} was not removed", created.id)
+    })? {
+        state.manager.events().bump();
+    }
     let delete_notice = match client.delete_session_with(id, guard).await {
         Ok(outcome) => outcome.notice,
         Err(delete_error) => {
@@ -3470,6 +3521,13 @@ async fn finish_replacement(
             session_id = manager::peer_text(id).as_str(),
             error = %error,
             "could not clear the replaced session's seen state; a stray row may remain"
+        );
+    }
+    if let Err(error) = state.store.set_pinned(id, false).await {
+        warn!(
+            session_id = manager::peer_text(id).as_str(),
+            error = %error,
+            "could not clear the replaced session's pin; a stray row may remain"
         );
     }
     if let Err(error) = state.store.clear_notification_marks(id).await {

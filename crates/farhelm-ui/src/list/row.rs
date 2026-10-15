@@ -79,6 +79,8 @@ enum MenuAction {
     /// actions, so grouping them ahead of Stop/Delete keeps that
     /// distinction visible in the menu's own order.
     MarkSeen,
+    /// Helm-owned metadata, offered even on ended or unreachable rows.
+    TogglePin,
     Clone,
     /// "Replace with": clone's editable form, seeded from this row, with
     /// replace's create-then-delete-the-source action on launch — the third
@@ -111,9 +113,10 @@ enum MenuAction {
 /// first" (ReplaceWith) to "swap this one out, unedited" (Replace) —
 /// putting them beside each other is what lets a user compare the three
 /// without hunting across the menu.
-const MENU_ACTIONS: [MenuAction; 7] = [
+const MENU_ACTIONS: [MenuAction; 8] = [
     MenuAction::Rename,
     MenuAction::MarkSeen,
+    MenuAction::TogglePin,
     MenuAction::Clone,
     MenuAction::ReplaceWith,
     MenuAction::Replace,
@@ -141,6 +144,7 @@ fn session_menu_order(controls: RowControlVisibility) -> MenuOrder {
     MenuOrder::pack(MENU_ACTIONS, |action| match action {
         MenuAction::Rename => controls.rename,
         MenuAction::MarkSeen => controls.mark_seen,
+        MenuAction::TogglePin => true,
         MenuAction::Clone => true,
         MenuAction::ReplaceWith => true,
         MenuAction::Replace => true,
@@ -281,6 +285,7 @@ fn MenuActionIcon(action: MenuAction) -> Element {
                     path { d: "M1.5 7 C3.5 3.5 10.5 3.5 12.5 7 C10.5 10.5 3.5 10.5 1.5 7 Z" }
                     circle { cx: "7", cy: "7", r: "1.6", fill: "currentColor", stroke: "none" }
                 },
+                MenuAction::TogglePin => rsx! { path { d: "M5 2h4l-.5 4 2 2H7.5v4L6 10V8H3.5l2-2z" } },
                 MenuAction::Clone => rsx! {
                     rect { x: "2", y: "4.5", width: "7", height: "7", rx: "1" }
                     path { d: "M5 4.5 V2.5 H11.5 V9 H9" }
@@ -909,6 +914,11 @@ pub(super) fn SessionRow(
     /// value here (where the current unseen predicate is already in scope)
     /// keeps `ListView` from having to re-derive it.
     on_mark_seen: EventHandler<(String, Option<i64>)>,
+    /// Explicit shared pin target. The list owns the request and refresh.
+    on_pin: EventHandler<(String, bool)>,
+    /// A boundary computed from the held display, not the served ordering.
+    #[props(default)]
+    pin_separator: bool,
     on_rename_start: EventHandler<(String, String)>,
     on_menu_toggle: EventHandler<String>,
     /// The notification bell's click (SPEC.md, Status): the session id, its
@@ -1113,6 +1123,9 @@ pub(super) fn SessionRow(
     let toggle_key_id = session.id.clone();
     let rename_key_id = session.id.clone();
     let mark_seen_key_id = session.id.clone();
+    let pin_key_id = session.id.clone();
+    let pin_target = (session.id.clone(), !session.pinned);
+    let pin_label = pin_menu_label(session.pinned);
     let clone_key_id = session.id.clone();
     let replace_with_key_id = session.id.clone();
     let replace_key_id = session.id.clone();
@@ -1484,6 +1497,7 @@ pub(super) fn SessionRow(
             class: row_class,
             "data-session-id": "{session.id}",
             "data-session-stale": "{session.stale}",
+            "data-session-pinned": "{session.pinned}",
             "data-session-selected": "{selected}",
             // The browser suite's hook for the locality glyph, the same
             // role `data-host-kind` plays on a host panel row: a stable
@@ -1642,6 +1656,9 @@ pub(super) fn SessionRow(
                                     span { class: "delete-spinner", "aria-hidden": "true" }
                                     "{delete_progress}"
                                 }
+                            }
+                            if session.pinned {
+                                span { class: "session-pin", role: "img", aria_label: "pinned", "data-tooltip": "pinned", "\u{f08d}" }
                             }
                             PeerTitle {
                                 class: title_class,
@@ -2248,9 +2265,29 @@ pub(super) fn SessionRow(
                                         span { class: "session-row-menu-label", "{mark_seen_label}" }
                                     }
                                 }
-                                if controls.rename || controls.mark_seen {
-                                    div { class: "session-row-menu-separator", role: "separator" }
+                                button {
+                                    r#type: "button",
+                                    class: "btn session-row-menu-item session-row-pin",
+                                    role: "menuitem",
+                                    aria_label: "{pin_label}",
+                                    "data-tooltip": if session.pinned {
+                                        "unpin: sort this session with the others again"
+                                    } else {
+                                        "pin to top: keep this session above unpinned ones, in the same sort order"
+                                    },
+                                    aria_disabled: if busy { "true" },
+                                    tabindex: if menu_tab_stop == Some(MenuAction::TogglePin) { "0" } else { "-1" },
+                                    onmounted: move |element| remember_menu_item(menu_wiring, MenuAction::TogglePin, element.data()),
+                                    onfocusin: move |_| menu_focus.set(menu_order.position(MenuAction::TogglePin)),
+                                    onfocusout: move |_| menu_focus.set(None),
+                                    onkeydown: move |evt| handle_menu_key(&evt, menu_order.position(MenuAction::TogglePin), menu_wiring, &pin_key_id),
+                                    onclick: move |_| {
+                                        if !busy { on_pin.call(pin_target.clone()); }
+                                    },
+                                    MenuActionIcon { action: MenuAction::TogglePin }
+                                    span { class: "session-row-menu-label", "{pin_label}" }
                                 }
+                                div { class: "session-row-menu-separator", role: "separator" }
                                 // Offered on every row, unconditionally —
                                 // see `RowControlVisibility`'s own doc for
                                 // why clone has no visibility field to gate
@@ -2520,7 +2557,15 @@ pub(super) fn SessionRow(
                 }
             }
         }
+        if pin_separator {
+            div { class: "session-pin-separator", role: "separator", aria_label: "pinned sessions" }
+        }
     }
+}
+
+/// Label the pin action from current helm membership, never pin time.
+fn pin_menu_label(pinned: bool) -> &'static str {
+    if pinned { "Unpin" } else { "Pin to top" }
 }
 
 /// One session as the row render tests below need it: real enough for
@@ -2553,6 +2598,7 @@ pub(super) fn row_specimen(id: &str) -> Session {
         // must keep seeing no toggle and the pre-plan colours unless a test
         // overrides it via `..row_specimen(id)`.
         seen_activity_at: None,
+        pinned: false,
         notifications: Vec::new(),
         notifications_read_through: 0,
     }
@@ -2606,6 +2652,16 @@ mod tests {
     }
 
     use super::*;
+
+    /// The label describes the next action, and pins remain available when
+    /// read/unread is absent (ended sessions and older peers).
+    #[farhelm_testtrace::test]
+    fn pin_menu_label_tracks_shared_membership() {
+        assert_eq!(pin_menu_label(false), "Pin to top");
+        assert_eq!(pin_menu_label(true), "Unpin");
+        let menu = session_menu_order(row_control_visibility(false));
+        assert_eq!(menu.get(1), Some(MenuAction::TogglePin));
+    }
     use crate::peer::detail_text;
 
     /// The header must report stored structured choices, not infer them from
@@ -2646,12 +2702,12 @@ mod tests {
     #[farhelm_testtrace::test]
     fn mark_seen_sits_right_after_rename_when_offered() {
         let offered = session_menu_order(row_control_visibility(true));
-        assert_eq!(offered.len(), 7);
+        assert_eq!(offered.len(), 8);
         assert_eq!(offered.get(0), Some(MenuAction::Rename));
         assert_eq!(offered.get(1), Some(MenuAction::MarkSeen));
-        assert_eq!(offered.get(2), Some(MenuAction::Clone));
-        assert_eq!(offered.get(3), Some(MenuAction::ReplaceWith));
-        assert_eq!(offered.get(4), Some(MenuAction::Replace));
+        assert_eq!(offered.get(2), Some(MenuAction::TogglePin));
+        assert_eq!(offered.get(3), Some(MenuAction::Clone));
+        assert_eq!(offered.get(4), Some(MenuAction::ReplaceWith));
         assert_eq!(offered.position(MenuAction::MarkSeen), Some(1));
 
         let withdrawn = session_menu_order(row_control_visibility(false));
@@ -2703,6 +2759,7 @@ mod tests {
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
+            let on_pin = use_callback(|_: (String, bool)| {});
             let on_replace = use_callback(|_: Session| {});
             let on_confirm_replace = use_callback(|_: Session| {});
             let on_cancel_replace = use_callback(|_: String| {});
@@ -2747,6 +2804,7 @@ mod tests {
                     on_clone,
                     on_replace_with,
                     on_mark_seen,
+                    on_pin,
                     on_replace,
                     on_confirm_replace,
                     on_cancel_replace,
@@ -2886,6 +2944,7 @@ mod tests {
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
+            let on_pin = use_callback(|_: (String, bool)| {});
             let on_replace = use_callback(|_: Session| {});
             let on_confirm_replace = use_callback(|_: Session| {});
             let on_cancel_replace = use_callback(|_: String| {});
@@ -2924,6 +2983,7 @@ mod tests {
                     on_clone,
                     on_replace_with,
                     on_mark_seen,
+                    on_pin,
                     on_replace,
                     on_confirm_replace,
                     on_cancel_replace,
@@ -2981,6 +3041,7 @@ mod tests {
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
             let on_mark_seen = use_callback(|_: (String, Option<i64>)| {});
+            let on_pin = use_callback(|_: (String, bool)| {});
             let on_replace = use_callback(|_: Session| {});
             let on_confirm_replace = use_callback(|_: Session| {});
             let on_cancel_replace = use_callback(|_: String| {});
@@ -3021,6 +3082,7 @@ mod tests {
                         on_clone,
                         on_replace_with,
                         on_mark_seen,
+                        on_pin,
                         on_replace,
                         on_confirm_replace,
                         on_cancel_replace,
@@ -3105,6 +3167,7 @@ mod tests {
                     on_clone: |_: Session| {},
                     on_replace_with: |_: Session| {},
                     on_mark_seen: |_: (String, Option<i64>)| {},
+                    on_pin: |_: (String, bool)| {},
                     on_replace: |_: Session| {},
                     on_confirm_replace: |_: Session| {},
                     on_cancel_replace: |_: String| {},

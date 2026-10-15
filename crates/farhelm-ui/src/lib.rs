@@ -519,6 +519,10 @@ pub struct Session {
     /// renderer should read instead of this field directly.
     #[serde(default, deserialize_with = "double_option")]
     pub seen_activity_at: Option<Option<i64>>,
+    /// Shared helm pin membership; old peers and bare supervisor replies
+    /// omit it and decode unpinned. Only the sidebar uses it for ordering.
+    #[serde(default)]
+    pub pinned: bool,
     /// The session's notifications that no client of this helm has cleared,
     /// newest first and at most 10 (SPEC.md, Status): what the row's bell
     /// lists. The helm has already dropped cleared ones, so an empty list
@@ -2709,6 +2713,7 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at: None,
+            pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
         };
@@ -2775,6 +2780,7 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at,
+            pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
         };

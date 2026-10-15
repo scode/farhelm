@@ -68,6 +68,7 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     );
     assert_eq!(row.host_name.as_deref(), Some("buildbox"));
     assert!(row.stale);
+    assert!(row.pinned);
     assert_eq!(row.seen_activity_at, Some(Some(1_700_000_090)));
     assert_eq!(
         row.notifications,

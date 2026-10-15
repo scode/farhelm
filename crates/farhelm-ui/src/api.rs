@@ -2699,6 +2699,22 @@ pub(crate) async fn mark_seen(
     Ok(())
 }
 
+/// Persist the menu's explicit pin target. Success is read back through the
+/// listing, so clients never keep a private pin order or optimistic pin.
+pub(crate) async fn set_pin(base: &str, id: &str, pinned: bool) -> Result<(), String> {
+    let url = format!("{base}/api/sessions/{}/pin", encode_path_segment(id));
+    let resp = send(
+        client()
+            .put(&url)
+            .json(&serde_json::json!({ "pinned": pinned })),
+    )
+    .await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("PUT", &url, resp).await);
+    }
+    Ok(())
+}
+
 /// `PUT /api/sessions/{id}/notifications/read` (or `/cleared` when `clear`
 /// is set): mark the session's notifications read, or cleared, through
 /// sequence number `through` (SPEC.md, Status).

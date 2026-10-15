@@ -216,6 +216,9 @@ pub(crate) struct SessionRow {
     /// what they lose is only the toggle and the possibility of the blue
     /// variant, never a distinct legacy colour.
     pub(crate) seen_activity_at: Option<i64>,
+    /// Shared helm pin membership. The sidebar partitions on this flag;
+    /// the served sort stays intact for clients such as the quick switcher.
+    pub(crate) pinned: bool,
     /// How far through this session's notifications every client of this
     /// helm has read (`store::HelmStore::notification_marks`): a
     /// notification whose sequence number is above it is unread, which
@@ -308,6 +311,7 @@ fn row_of(
     identity: Option<&str>,
     mut info: SessionInfo,
     seen_activity_at: Option<i64>,
+    pinned: bool,
     marks: NotificationMarks,
 ) -> SessionRow {
     let notifications_read_through = apply_notification_marks(&mut info, marks);
@@ -322,6 +326,7 @@ fn row_of(
             host.alias.as_deref(),
         ),
         seen_activity_at,
+        pinned,
         stale: !host.state.is_connected(),
     }
 }
@@ -564,6 +569,7 @@ async fn session_list_staged(
         }
     }
     let seen_activity = store.seen_activity(&seen_ids).await?;
+    let pins = store.pinned_sessions(&seen_ids).await?;
     // The notification marks, joined the same way and for the same reason.
     let notification_marks = store.notification_marks(&seen_ids).await?;
     for cached in slice.rows {
@@ -573,6 +579,7 @@ async fn session_list_staged(
             continue;
         };
         let seen = seen_activity.get(&cached.info.id).copied();
+        let pinned = pins.contains(&cached.info.id);
         let marks = notification_marks
             .get(&cached.info.id)
             .copied()
@@ -582,6 +589,7 @@ async fn session_list_staged(
             identities.get(&cached.host).and_then(Option::as_deref),
             cached.info,
             seen,
+            pinned,
             marks,
         ));
     }
@@ -632,7 +640,14 @@ async fn session_list_staged(
                 .get(&info.id)
                 .copied()
                 .unwrap_or_default();
-            view.push(row_of(snapshot, identity, info.clone(), seen, marks));
+            view.push(row_of(
+                snapshot,
+                identity,
+                info.clone(),
+                seen,
+                pins.contains(&info.id),
+                marks,
+            ));
         }
     }
     Ok(assemble(view, filter, sort, hosts_truncated))
@@ -673,6 +688,7 @@ mod tests {
             host_identity: None,
             host_name: "this machine".to_string(),
             seen_activity_at: None,
+            pinned: false,
             notifications_read_through: 0,
             stale: false,
         }
@@ -1504,6 +1520,59 @@ mod tests {
             info.notifications.is_empty(),
             "clearing through the newest leaves nothing, so the row shows no bell"
         );
+    }
+
+    /// Pin membership must join both listing sources without changing the
+    /// served sort: otherwise one class of host loses pins, or quick-switcher
+    /// order silently follows a sidebar-only preference.
+    #[farhelm_testtrace::test]
+    async fn pins_join_cached_and_identityless_rows_without_changing_sort() {
+        use crate::rest_harness;
+        let builder = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                identity: None,
+                sessions: vec![rest_harness::session("live-pin", 100)],
+                ..rest_harness::HostScript::default()
+            })
+            .await;
+        let (builder, cached) = builder
+            .ssh(
+                "user@pin-cache",
+                rest_harness::HostScript {
+                    identity: Some("pin-cache".into()),
+                    sessions: vec![rest_harness::session("cached-pin", 200)],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        let live = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(live).await;
+        harness.await_refreshed(cached).await;
+        harness.store.set_pinned("live-pin", true).await.unwrap();
+        let list = session_list(
+            &harness.manager,
+            &harness.store,
+            &store::SessionFilter::default(),
+            store::ListSort::Created,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ids(&list.sessions), ["cached-pin", "live-pin"]);
+        assert!(!list.sessions[0].pinned);
+        assert!(list.sessions[1].pinned);
+        harness.store.set_pinned("cached-pin", true).await.unwrap();
+        let filtered = session_list(
+            &harness.manager,
+            &harness.store,
+            &store::SessionFilter::default().host(cached),
+            store::ListSort::Created,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ids(&filtered.sessions), ["cached-pin"]);
+        assert!(filtered.sessions[0].pinned);
     }
 
     /// `SessionRow::seen_activity_at`'s listing join (SPEC.md, Status): a

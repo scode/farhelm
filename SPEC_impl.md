@@ -3245,6 +3245,17 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   ANOTHER helm, or dropped from a cache because its host was removed here, can leave a row behind, which is accepted as
   garbage bounded by the number of sessions that ever existed, at a few dozen bytes each.
 
+- Shared pins live in the presence-only `session_pins (session_id TEXT NOT NULL PRIMARY KEY) STRICT` table (helm schema
+  52). Like `session_seen`, it has no foreign key, survives retarget/adoption, is cleared explicitly on deletion, and
+  accepts bounded stray rows from other deletion paths without a reaper. `PUT /api/sessions/{id}/pin` requires a
+  `{pinned: bool}` body, verifies helm-local ownership even for an unreachable host, and bumps the event revision only
+  when membership changes. Listing and detail rows carry `pinned: bool`; the list reads membership in one batch for both
+  cached and identity-less live rows. The helm sort stays unchanged for the quick switcher. The sidebar stably
+  partitions accepted replies before applying its reorder hold, and computes the separator from the resulting display.
+  Replace copies a source pin to the new id before requesting the source's deletion, so a pin write failure leaves the
+  source intact; if deletion fails both surviving sessions can be pinned. Confirmed deletion clears the old pin best
+  effort, like the other viewer metadata.
+
 ## Ntfy waiting alerts
 
 The helm observes fresh accepted session listings inside each host connection's refresh loop. Its connection-local

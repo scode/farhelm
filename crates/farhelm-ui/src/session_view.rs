@@ -3828,6 +3828,7 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at: None,
+            pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
         }
@@ -4318,6 +4319,7 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 seen_activity_at: None,
+                pinned: false,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
             }
@@ -4372,6 +4374,7 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 seen_activity_at: None,
+                pinned: false,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
             }
@@ -4466,6 +4469,7 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at: None,
+            pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
         };
@@ -4536,6 +4540,7 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 seen_activity_at: Some(None),
+                pinned: false,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
             }
@@ -4564,6 +4569,7 @@ mod tests {
             !seen_effect_eligible(&Session {
                 screen_yolo: false,
                 seen_activity_at: None,
+                pinned: false,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
                 ..base()
@@ -4602,6 +4608,7 @@ mod tests {
             github_repo: None,
             working_copy: None,
             seen_activity_at: Some(Some(1_700_000_000)),
+            pinned: false,
             notifications: Vec::new(),
             notifications_read_through: 0,
         };

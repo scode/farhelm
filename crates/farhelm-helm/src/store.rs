@@ -320,7 +320,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 51;
+const SCHEMA_VERSION: i64 = 52;
 
 /// One helm-wide configuration row, kept apart from replayed preferences:
 /// explicit saves validate these values, and reads must never return the token.
@@ -398,6 +398,14 @@ const LAUNCH_TEMPLATES_SCHEMA: &str = "CREATE TABLE launch_templates (
 const SESSION_SEEN_SCHEMA: &str = "CREATE TABLE session_seen (
                  session_id       TEXT NOT NULL PRIMARY KEY,
                  seen_activity_at INTEGER NOT NULL
+             ) STRICT;";
+
+/// Shared pin membership, separate from the supervisor-owned cache so a
+/// refresh cannot overwrite it. Like seen stamps, pins follow session ids
+/// across host adoption/retargeting and have no host foreign key. This helm
+/// removes them on deletion; other deletion paths may leave bounded strays.
+const SESSION_PINS_SCHEMA: &str = "CREATE TABLE session_pins (
+                 session_id TEXT NOT NULL PRIMARY KEY
              ) STRICT;";
 
 /// Which of a session's two notification marks a write raises: the read
@@ -1912,6 +1920,7 @@ pub struct HelmStore {
 ///   the bindings that name the deleted template.
 /// - 51: nullable `welcome_seen` on the preferences row; unset means the welcome card
 ///   has not been seen, including on helms upgraded from an older schema.
+/// - 52: `session_pins`, shared pin membership, initially empty.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2210,6 +2219,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  PRIMARY KEY (host_id, host_identity)
              ) STRICT;
               {SESSION_SEEN_SCHEMA}
+              {SESSION_PINS_SCHEMA}
               {CHECKOUT_CONFIG_SCHEMA}
               {LAUNCH_TEMPLATES_SCHEMA}
               {SESSION_NOTIFICATION_MARKS_SCHEMA}
@@ -2217,7 +2227,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 51;",
+              PRAGMA user_version = 52;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3339,6 +3349,16 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("PRAGMA user_version = 51;")
             .context("migrating helm.db to schema version 51")?;
         version = 51;
+    }
+    if version == 51 {
+        // Some migration fixtures rewind only user_version. Use the same
+        // DDL as fresh creation without replacing existing pin membership.
+        tx.execute_batch(&format!(
+            "{} PRAGMA user_version = 52;",
+            SESSION_PINS_SCHEMA.replacen("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1)
+        ))
+        .context("migrating helm.db to schema version 52")?;
+        version = 52;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -4525,6 +4545,64 @@ impl HelmStore {
                 },
             )
             .await
+    }
+
+    /// Read pin membership for the listing's ids in one bounded query.
+    /// Missing ids are unpinned, including sessions unknown to this table.
+    pub async fn pinned_sessions(
+        &self,
+        ids: &[String],
+    ) -> anyhow::Result<std::collections::HashSet<String>> {
+        if ids.is_empty() {
+            return Ok(std::collections::HashSet::new());
+        }
+        let ids = ids.to_vec();
+        self.conn
+            .call("pin read task panicked", move |conn: &mut Connection| {
+                let placeholders = (1..=ids.len())
+                    .map(|n| format!("?{n}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT session_id FROM session_pins WHERE session_id IN ({placeholders})"
+                ))?;
+                Ok(stmt
+                    .query_map(rusqlite::params_from_iter(&ids), |row| row.get(0))?
+                    .collect::<Result<_, _>>()?)
+            })
+            .await
+    }
+
+    /// Set shared pin membership, reporting only a real change so retrying
+    /// a PUT does not wake every client for a pin that already matched.
+    pub async fn set_pinned(&self, id: &str, pinned: bool) -> anyhow::Result<bool> {
+        let id = id.to_string();
+        self.conn
+            .call("pin write task panicked", move |conn: &mut Connection| {
+                let sql = if pinned {
+                    "INSERT OR IGNORE INTO session_pins (session_id) VALUES (?1)"
+                } else {
+                    "DELETE FROM session_pins WHERE session_id = ?1"
+                };
+                Ok(conn.execute(sql, [&id]).context("writing session pin")? > 0)
+            })
+            .await
+    }
+
+    /// Give a replacement its source's pin before destroying the source.
+    /// A failed delete can leave both sessions, so this copies membership;
+    /// the caller clears the old id only after the supervisor confirms it.
+    /// Returns whether the replacement gained a pin, for event publication.
+    pub async fn inherit_pin(&self, source: &str, replacement: &str) -> anyhow::Result<bool> {
+        let source = source.to_string();
+        let replacement = replacement.to_string();
+        self.conn.call("replacement pin task panicked", move |conn: &mut Connection| {
+            let changed = conn.execute(
+                "INSERT OR IGNORE INTO session_pins (session_id) SELECT ?2 FROM session_pins WHERE session_id = ?1",
+                [&source, &replacement],
+            ).context("copying replacement pin")?;
+            Ok(changed > 0)
+        }).await
     }
 
     /// The notification marks (read through, cleared through) of each of
@@ -10512,6 +10590,79 @@ mod tests {
 
         store.clear_notification_marks("s-1").await.unwrap();
         assert_eq!(marks(&store).await, None);
+    }
+
+    /// Pins persist independently of refreshable session cache, copy to a
+    /// replacement, and report no change on retries. Bounded reads must not
+    /// pull stray metadata for sessions the caller did not ask about.
+    #[farhelm_testtrace::test]
+    async fn session_pins_round_trip_and_replacement_inheritance() {
+        let (dir, store) = fresh_store().await;
+        let ids = ["source".to_string(), "new".to_string()];
+        assert!(store.pinned_sessions(&ids).await.unwrap().is_empty());
+        assert!(store.set_pinned("source", true).await.unwrap());
+        assert!(!store.set_pinned("source", true).await.unwrap());
+        // Replace notifies other clients only when this reports a copy.
+        assert!(store.inherit_pin("source", "new").await.unwrap());
+        assert_eq!(store.pinned_sessions(&ids).await.unwrap().len(), 2);
+        assert!(store.set_pinned("source", false).await.unwrap());
+        assert!(!store.set_pinned("source", false).await.unwrap());
+        assert!(!store.inherit_pin("absent", "not-pinned").await.unwrap());
+        assert!(
+            store
+                .pinned_sessions(&["not-pinned".into()])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(store.pinned_sessions(&[]).await.unwrap().is_empty());
+        drop(store);
+        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(
+            store.pinned_sessions(&ids).await.unwrap(),
+            std::collections::HashSet::from(["new".to_string()])
+        );
+    }
+
+    /// A real pre-pin schema has no table. Upgrading must introduce empty
+    /// membership while preserving existing viewer data, not just advance a
+    /// version number on a fixture that already has the current tables.
+    #[farhelm_testtrace::test]
+    async fn schema_52_adds_empty_session_pins() {
+        let (dir, store) = fresh_store().await;
+        store.mark_seen("kept", 123).await.unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("DROP TABLE session_pins; PRAGMA user_version = 51;")
+            .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'session_pins'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        assert!(
+            store
+                .pinned_sessions(&["kept".into()])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .seen_activity(&["kept".into()])
+                .await
+                .unwrap()
+                .get("kept"),
+            Some(&123)
+        );
+        assert!(store.set_pinned("kept", true).await.unwrap());
     }
 
     // ---- Schema and the version mechanism ----------------------------

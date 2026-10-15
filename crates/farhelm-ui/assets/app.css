@@ -3614,6 +3614,18 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   flex-wrap: nowrap;
 }
 
+/* The pin belongs to the title, in the muted foreground and the same font. Keep
+   the leading pin block distinct without adding a second section heading. */
+.session-pin {
+  flex: 0 0 auto;
+  color: var(--fg-1);
+}
+
+.session-pin-separator {
+  border-top: 2px solid var(--border-row);
+  margin-bottom: 6px;
+}
+
 .session-identity-copy.compact .session-title {
   flex: 1 1 auto;
   min-width: 0;
