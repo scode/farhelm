@@ -12,10 +12,12 @@ details of how it works, and what is and is not supported, may change.
 
 :::
 
-Farhelm uses conversation reporters for Claude, Codex, Goose, Pi, OMP, and Grok so a restart resumes the conversation
-you were actually in after a `/clear` or `/new`, instead of the one you threw away. Claude, Codex, Goose, Pi, and OMP
-get their reporter from the launch Farhelm builds. Grok requires three user-installed hook entries because its supported
-hook surface is configuration-based. Farhelm never edits that configuration for you.
+Farhelm uses conversation reporters to learn which conversation you are in from Claude, Codex, Goose, Pi, OMP, and Grok,
+so **restart** can resume the last conversation it learned of. Restarting after `/clear` or `/new`, before Farhelm has
+learned of the new conversation, can bring back the earlier one; for some agents that happens only at your next prompt
+or reply. Claude, Codex, Goose, Pi, and OMP get their reporter from the launch Farhelm builds. Grok requires three
+user-installed hook entries because its supported hook surface is configuration-based. Farhelm never edits that
+configuration for you.
 
 For Claude and Codex, the injected flags ride on one command line and die with the process. On a Codex launch that gets
 the flags, Codex prints one warning line about hook trust, and with that bypass in place any hook of your own in that

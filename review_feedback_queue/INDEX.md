@@ -61,9 +61,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`pin-test-skips-owned-session-cleanup.md`](pin-test-skips-owned-session-cleanup.md) — A failed pin browser test can
   skip its owned session cleanup and leave agents running for later tests.
 
-- [`resume-docs-promise-newest-conversation.md`](resume-docs-promise-newest-conversation.md) — Resume documentation
-  promises the new conversation after clearing, beyond the accepted tracking guarantee.
-
 - [`claude-trust-settings-misses-invalidation.md`](claude-trust-settings-misses-invalidation.md) — Already-open Settings
   can retain old trust choices after a shared change; the multi-GUI qualifier needs triage.
 
