@@ -165,9 +165,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`native-download-quit-leaves-partial-files.md`](native-download-quit-leaves-partial-files.md) — Desktop Quit leaves
   hidden partial downloads with no recovery owner.
 
-- [`file-stat-test-compares-unresolved-temp-path.md`](file-stat-test-compares-unresolved-temp-path.md) — The new
-  file-stat unit test compares a canonical result against a lexical `/tmp` path and fails on macOS.
-
 - [`token-rotation-test-invalid-apfs-name.md`](token-rotation-test-invalid-apfs-name.md) — The new token-rotation unit
   test requires an invalid-byte directory name that APFS refuses.
 

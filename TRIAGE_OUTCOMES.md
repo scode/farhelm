@@ -14949,7 +14949,8 @@
   expected-path spelling differs on macOS, stop and return the item to the maintainer.
 - Completion criteria: the test asserts the canonical path, passes on Linux, and does not depend on `/tmp` being
   unresolved. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/rust-test-portability.md`.
+- Execution: complete in jj change `tmsrrlqtovto`, bookmark `plan/rust-test-portability/02-file-stat-path`,
+  [PR #2094](https://github.com/scode/farhelm/pull/2094/changes).
 
 ## uninstall-uutils-stat-rejects-missing-socket.md
 
