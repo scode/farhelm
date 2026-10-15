@@ -13599,7 +13599,10 @@
 - Completion criteria: the unchecked-entry paragraph says that any of those entries Farhelm can verify when cleanup runs
   is deleted, with work never committed or pushed lost permanently, and that the rest stay in place and may be forgotten
   from the trash. Tests asserting the old text are updated. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/trash-unchecked-wording.md`.
+- Execution: `complete`; the unchecked-entry confirmation now warns that cleanup deletes any entry it can verify when it
+  runs, permanently losing work never committed or pushed; the rest stay in place and may be forgotten. Nearby comments
+  describe the same recheck. Change `rwpknzxq`, bookmark `plan/trash-unchecked-wording/01-unchecked-warning`,
+  [PR #2080](https://github.com/scode/farhelm/pull/2080/changes).
 
 ## os-trusted-proxy-can-read-feedback.md
 

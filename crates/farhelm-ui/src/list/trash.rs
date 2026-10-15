@@ -34,8 +34,9 @@ struct HostTrash {
 }
 
 /// A deletion set never grows with a subsequent listing or a new archive.
-/// Bulk selections include diagnostic IDs so unusable ownership can be forgotten;
-/// immediate entry deletion selects only a displayed checkout.
+/// Bulk selections include diagnostic IDs: cleanup rechecks them and may delete
+/// a now-verifiable archive or forget an unusable record without touching its
+/// folder. Immediate entry deletion selects only a displayed checkout.
 #[derive(Clone, PartialEq)]
 struct Target {
     host: HostId,
@@ -210,8 +211,8 @@ fn Issue(issue: CheckoutTrashIssue) -> Element {
 }
 
 /// Confirm the frozen visible set in place, including unverified entries.
-/// Those may be forgotten without deleting their folders, a distinction the
-/// user needs before choosing permanent cleanup.
+/// An unchecked entry can become verifiable after listing, so the same warning
+/// must cover permanent deletion as well as record-only cleanup.
 #[component]
 fn ConfirmBand(
     confirm: Confirmation,
@@ -249,7 +250,7 @@ fn ConfirmBand(
         // pinned header; the warning remains available by scrolling upwards.
         onmounted: move |_| { document::eval("requestAnimationFrame(() => { const target = document.querySelector('.checkout-trash-confirm .trash-confirm-submit:enabled') ?? document.querySelector('.checkout-trash-confirm .trash-confirm-cancel:enabled'); target?.focus({preventScroll:true}); target?.closest('.checkout-trash-actions')?.scrollIntoView({block:'nearest'}); })"); },
         if count > 0 { p { "Delete {count} archived {checkouts(count)} ({space(bytes, partial)}) on " span { class: "peer-value", dir: "ltr", "{names}" } "? Work in them that was never committed or pushed is lost permanently." } }
-        if unchecked > 0 { p { "Attempt cleanup of {unchecked} unchecked {unchecked_noun} on {unchecked_names}. Folders Farhelm cannot verify stay in place; unusable entries may be forgotten from the trash." } }
+        if unchecked > 0 { p { "Attempt cleanup of {unchecked} unchecked {unchecked_noun} on {unchecked_names}. Farhelm deletes any of these it can verify when cleanup runs; work in them that was never committed or pushed is lost permanently. The rest stay in place and may be forgotten from the trash." } }
         div { class: "checkout-trash-actions",
             button { class: "btn btn-neutral trash-confirm-cancel", disabled: busy, onclick: move |_| oncancel.call(()), "cancel" }
             button { class: "btn btn-danger trash-confirm-submit", disabled: submit_disabled, onkeydown: crate::guard_confirmation_enter, onclick: move |_| onsubmit.call(()), "delete permanently" }

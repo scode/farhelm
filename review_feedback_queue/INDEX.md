@@ -36,10 +36,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`long-launch-refusal-displaces-replace-warning.md`](long-launch-refusal-displaces-replace-warning.md) — After a long
   refusal, Replace can remain visible while its warning about killing the source session is below the viewport.
 
-- [`unchecked-trash-selection-omits-deletion-warning.md`](unchecked-trash-selection-omits-deletion-warning.md) — Cleanup
-  can permanently delete archived work after showing a confirmation that only describes unchecked entries and possible
-  forgetting.
-
 - [`file-disclosure-cannot-scroll-oversized-path.md`](file-disclosure-cannot-scroll-oversized-path.md) — A long path can
   conceal required directory and size information before transfer or native opening; the new layout puts the leaf first.
 
