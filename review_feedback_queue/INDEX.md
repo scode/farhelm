@@ -122,9 +122,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`continued-unit-line-bypasses-service-type-guard.md`](continued-unit-line-bypasses-service-type-guard.md) — Continued
   unit text can bypass the non-simple-service refusal and misclassify a service spanning installations.
 
-- [`first-use-checkout-root-missing-durability-barriers.md`](first-use-checkout-root-missing-durability-barriers.md) —
-  Newly created checkout ancestors lack parent durability barriers before allocation is committed.
-
 - [`codex-guide-calls-trust-bypass-warning-harmless.md`](codex-guide-calls-trust-bypass-warning-harmless.md) — The Codex
   guide calls a hook-trust bypass warning harmless without disclosing its configured-hook consequence.
 
