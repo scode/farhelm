@@ -29,7 +29,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await page.setViewportSize({ width, height: 560 });
     await gear.click();
     await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
-    await expect(dialog.getByRole("checkbox")).toHaveCount(8);
+    await expect(dialog.getByRole("checkbox")).toHaveCount(10);
     await page.evaluate(() => document.fonts.ready);
     expect(await body.locator(":scope > section > h3").allTextContents()).toEqual([
       "sessions", "hosts", "terminal links", "managed checkouts", "sounds", "ntfy alerts",
@@ -77,9 +77,9 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
   }
   // The explicit ntfy fields add a full section; this leg deliberately gives
   // every section enough height, independently of the phone overflow proof.
-  await page.setViewportSize({ width: 1280, height: 2800 });
+  await page.setViewportSize({ width: 1280, height: 4000 });
   await gear.click();
-  await expect(dialog.getByRole("checkbox")).toHaveCount(8);
+  await expect(dialog.getByRole("checkbox")).toHaveCount(10);
   const tall = await body.evaluate((el) => ({ content: el.scrollHeight, height: el.clientHeight }));
   expect(tall.height).toBeGreaterThan(0);
   expect(tall.content, "a tall window must fit the settings without scrolling").toBeLessThanOrEqual(tall.height);
@@ -631,7 +631,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     await expect(dialog).toBeVisible();
     await expect(page.locator('[role="menu"]')).toHaveCount(0);
-    await expect(dialog.getByRole("checkbox")).toHaveCount(8);
+    await expect(dialog.getByRole("checkbox")).toHaveCount(10);
     const setup = dialog.getByRole("checkbox", { name: "set up new hosts without asking", exact: true });
     await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
     await expect(setup).not.toBeChecked();
@@ -661,7 +661,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
           appearance: getComputedStyle(input).appearance,
         };
       }));
-      expect(rows).toHaveLength(8);
+      expect(rows).toHaveLength(10);
       for (const row of rows) {
         expect(row.textRight).toBeLessThan(row.controlLeft);
         expect(row.controlTop).toBeLessThan(row.textBottom);

@@ -2668,6 +2668,35 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .welcome-item strong { color: var(--fg-0); }
 .welcome-item a,
 .welcome-feedback { color: var(--accent); }
+
+/* A flow row above the terminal, so Claude's question remains fully visible.
+   Its appearance changes the available terminal height, which the existing
+   resize observer fits without replacing the terminal island. */
+.claude-trust-band {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--accent-edge);
+  background: var(--accent-fill);
+  color: var(--fg-bright);
+  box-shadow: inset 3px 0 var(--info);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.claude-trust-band-copy strong { color: var(--info); }
+.claude-trust-band-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.claude-trust-band-actions button { padding: 4px 8px; }
+.checkout-claude-trust { margin-top: 18px; }
+.claude-trust-caution {
+  background: var(--warn-bg-dim);
+  border: 1px solid var(--warn-border);
+  border-left: 3px solid var(--warn);
+  padding: 12px;
+  margin: 12px 0;
+  color: var(--warn-bright);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.claude-trust-caution p { margin: 8px 0 0; }
 .welcome-feedback { display: inline; border: 0; padding: 0; background: transparent; font: inherit; cursor: pointer; }
 .welcome-item a:hover,
 .welcome-feedback:hover { text-decoration: underline; }

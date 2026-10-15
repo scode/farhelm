@@ -1267,6 +1267,7 @@ pub(crate) fn ListView(
             .as_ref()
             .is_some_and(|(filter, sort)| filter == requested && *sort == ordered_by)
     };
+    let occurrences = use_context::<crate::claude_trust::OccurrenceDismissals>();
     let mut commit_listing = move |generation: u64,
                                    requested: SessionFilter,
                                    ordered_by: ListSort,
@@ -1301,6 +1302,9 @@ pub(crate) fn ListView(
         // the one `ListView` owns.
         let listing_signal = listing;
         if let Ok(listing) = &fetched {
+            for session in &listing.sessions {
+                occurrences.observe(session);
+            }
             // Only a successful fetch is evidence about titles: an error
             // carries none at all, so it can neither confirm nor contradict
             // an optimistic rename.

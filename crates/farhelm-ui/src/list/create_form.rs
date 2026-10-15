@@ -6938,6 +6938,7 @@ mod tests {
             quick_launch_template: None,
             template_shortcuts: Default::default(),
             welcome_seen: None,
+            claude_trust_hint_dismissed: None,
         };
         assert_eq!(
             super::initial_structured_permissions(&with(Some("yolo"))),

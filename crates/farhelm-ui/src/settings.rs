@@ -61,7 +61,10 @@ fn restore_automatic_checkbox(in_force: bool) {
 /// Only the grouped body scrolls; both dismissal paths stay outside it and
 /// share the caller's close callback and focus-return lifecycle.
 #[component]
-pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
+pub(crate) fn SettingsDialog(
+    on_close: EventHandler<()>,
+    #[props(default)] focus_claude_trust: bool,
+) -> Element {
     let base = use_context::<ApiBase>().0;
     let setup_base = base.clone();
     let session_base = base.clone();
@@ -92,11 +95,19 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                 aria_modal: "true",
                 aria_label: "settings",
                 tabindex: "-1",
-                onmounted: move |_| install_dialog_with_selector(
-                    DIALOG_SELECTOR,
-                    "input",
-                    Some(".app-settings-close"),
-                ),
+                onmounted: move |_| {
+                    install_dialog_with_selector(
+                        DIALOG_SELECTOR,
+                        if focus_claude_trust { "#checkout-claude-trust" } else { "input" },
+                        Some(".app-settings-close"),
+                    );
+                    if focus_claude_trust {
+                        // The shared dialog focus helper deliberately prevents
+                        // scrolling. This entry point promises the caveats, so
+                        // bring their section into the dialog's scroll viewport.
+                        document::eval("requestAnimationFrame(() => document.querySelector('#checkout-claude-trust')?.scrollIntoView({block: 'start'}))");
+                    }
+                },
                 onkeydown: move |event: KeyboardEvent| {
                     if event.key() == Key::Escape && !event.is_composing() {
                         on_close.call(());
@@ -249,6 +260,7 @@ pub(crate) fn SettingsDialog(on_close: EventHandler<()>) -> Element {
                             on_saved: move |_| {},
                         }
                         crate::checkout_post_clone::CheckoutPostCloneField {}
+                        crate::claude_trust::ClaudeTrustSettings {}
                     }
                     crate::sounds::SoundSettings {}
                     crate::ntfy_settings::NtfySettings {}

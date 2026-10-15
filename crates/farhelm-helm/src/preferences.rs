@@ -94,6 +94,7 @@ pub(crate) async fn put_preferences(
     State(state): State<Arc<AppState>>,
     axum::Json(patch): axum::Json<PreferencePatch>,
 ) -> impl IntoResponse {
+    let trust_hint_changed = patch.claude_trust_hint_dismissed.is_some();
     if let Some(Some(bindings)) = &patch.template_shortcuts {
         let mut names = std::collections::BTreeSet::new();
         // A whole-map replacement has ten possible entries, each naming a
@@ -193,7 +194,12 @@ pub(crate) async fn put_preferences(
         }));
     }
     match state.store.update_preferences(patch).await {
-        Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            if trust_hint_changed {
+                state.manager.events().bump();
+            }
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
         Err(error) => http_error(error),
     }
 }
@@ -204,6 +210,59 @@ mod tests {
     use crate::store::Preferences;
     use axum::http::StatusCode;
     use tower::ServiceExt;
+
+    /// A shared hint dismissal obeys the sparse patch contract: unrelated
+    /// writes retain it, invalid types refuse atomically, and null restores it.
+    #[farhelm_testtrace::test]
+    async fn claude_trust_hint_sparse_patch_contract() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read(&harness).await.claude_trust_hint_dismissed, None);
+        for value in [true, false, true] {
+            let response = harness
+                .router()
+                .oneshot(put(
+                    serde_json::json!({"claude_trust_hint_dismissed":value}),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            assert_eq!(
+                read(&harness).await.claude_trust_hint_dismissed,
+                Some(value)
+            );
+        }
+        assert_eq!(
+            harness
+                .router()
+                .oneshot(put(serde_json::json!({"compact":true})))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(read(&harness).await.claude_trust_hint_dismissed, Some(true));
+        for value in [serde_json::json!("false"), serde_json::json!(0)] {
+            let response = harness
+                .router()
+                .oneshot(put(
+                    serde_json::json!({"claude_trust_hint_dismissed":value,"compact":false}),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(read(&harness).await.compact, Some(true));
+        }
+        assert_eq!(
+            harness
+                .router()
+                .oneshot(put(serde_json::json!({"claude_trust_hint_dismissed":null})))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(read(&harness).await.claude_trust_hint_dismissed, None);
+    }
 
     /// A protected preference read through the same router clients use.
     fn get() -> axum::http::Request<axum::body::Body> {
@@ -641,6 +700,7 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                claude_trust_hint_dismissed: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -748,6 +808,7 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                claude_trust_hint_dismissed: None,
             },
             "an explicit null clears the field it names and only that one"
         );

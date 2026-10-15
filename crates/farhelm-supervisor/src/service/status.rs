@@ -411,12 +411,10 @@ pub(crate) fn entry_info(
     let mut info = entry.info.clone();
     // List and rename replies read the same run cell; the immutable entry was
     // built before any footer was sampled and must not freeze that first value.
-    info.screen_yolo = entry
-        .run
-        .activity
-        .lock()
-        .expect("activity mutex poisoned")
-        .screen_yolo;
+    let activity = entry.run.activity.lock().expect("activity mutex poisoned");
+    info.screen_yolo = activity.screen_yolo;
+    info.claude_trust_prompt = activity.claude_trust_prompt;
+    drop(activity);
     info.restart_offer = session_restart_offer(entry);
     // The entry's `info` froze this at build time (creation, reload, or
     // restart); the sampler has been advancing the cell beside it ever
@@ -483,6 +481,9 @@ pub(crate) fn entry_info(
         info.status = status;
         info.annotation = annotation;
     }
+    // A dead pane can retain its last rendered question. It is no longer a
+    // live opportunity to answer, so do not advertise the checkout setting.
+    info.claude_trust_prompt &= info.status.is_live();
     info
 }
 

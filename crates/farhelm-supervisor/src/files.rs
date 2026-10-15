@@ -11,6 +11,11 @@
 //! the tiers below; SQLite's own durability is SQLite's, and is out of
 //! scope here.
 //!
+//! Claude's opt-in trust edit is a vendor-owned exception, implemented in
+//! `agent_kind::claude::trust`: it uses the same durable replacement sequence,
+//! but shares Claude's lock and preserves the existing mode instead of forcing
+//! the private-file mode used for Farhelm-owned state here.
+//!
 //! # Tiers
 //!
 //! **Durability-bearing** ([`write_durable_sync`]). Full sequence: write a

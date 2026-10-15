@@ -474,6 +474,7 @@ mod tests {
         harness.fleet.edit(local, |script| {
             script.sessions = vec![farhelm_proto::SessionInfo {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 status: farhelm_proto::SessionStatus::Waiting,
                 ..rest_harness::session("sess-1", 1_700_000_000)
             }];

@@ -995,6 +995,8 @@ export async function hideSeenState(page: Page): Promise<void> {
 export interface Preferences {
   /** First-open welcome dismissal, shared across all clients of this helm. */
   welcome_seen?: boolean;
+  /** Shared opt-out for the managed-checkout Claude trust hint. */
+  claude_trust_hint_dismissed?: boolean;
   list_sort?: string;
   last_selected?: string;
   compact?: boolean;
@@ -1076,6 +1078,7 @@ export async function patchPreferences(
 export async function resetPreferences(request: APIRequestContext): Promise<void> {
   await patchPreferences(request, {
     welcome_seen: true,
+    claude_trust_hint_dismissed: null,
     list_sort: null,
     last_selected: null,
     compact: null,

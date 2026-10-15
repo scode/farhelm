@@ -21,10 +21,11 @@
 //!   so a host override of `""` disables a hook that the global setting
 //!   would otherwise provide — distinguishable from NULL, which would
 //!   inherit it.
-//! - Every ACTUAL change to a stored value (global or override) increments
+//! - Every ACTUAL change to a stored root or hook (global or override) increments
 //!   the global `revision`, in the same transaction as the change. Writing
 //!   the value that is already there bumps nothing, so the revision is a
 //!   cheap changed-only signal for future readers.
+//!   The separate Claude trust opt-in changes no path and leaves previews valid.
 //! - Overrides are config for the REGISTRY ROW: a retarget or adoption of
 //!   that row leaves them in place (they say nothing about the machine that
 //!   used to be behind it), while removing the host cascades them away.
@@ -33,6 +34,199 @@ use crate::store::{HelmStore, HostId, HostRow};
 use anyhow::Context;
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
+
+/// Explicit boolean opt-in; a missing or unknown field is a refused write.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ClaudeTrustBody {
+    enabled: bool,
+}
+
+/// The band needs the persisted opt-out even when another client changed it.
+#[derive(serde::Serialize)]
+struct ClaudeTrustState {
+    enabled: bool,
+    hint_dismissed: bool,
+}
+
+/// Read the all-hosts trust choice independently of executable hook text.
+pub(crate) async fn get_claude_trust(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match state.store.checkout_config_snapshot(None).await {
+        Ok(snapshot) => match state.store.preferences().await {
+            Ok(preferences) => axum::Json(ClaudeTrustState {
+                enabled: snapshot.claude_trust,
+                hint_dismissed: preferences.claude_trust_hint_dismissed == Some(true),
+            })
+            .into_response(),
+            Err(error) => crate::http_error(error),
+        },
+        Err(error) => crate::http_error(error),
+    }
+}
+
+/// Save the opt-in without changing the path-preview revision. It affects no
+/// directory selection, and accepted creates already carry their own snapshot.
+pub(crate) async fn put_claude_trust(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+    axum::Json(body): axum::Json<ClaudeTrustBody>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match state.store.set_claude_trust(body.enabled).await {
+        Ok(()) => {
+            state.manager.events().bump();
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => crate::http_error(error),
+    }
+}
+
+#[cfg(test)]
+mod claude_trust_tests {
+    use crate::{rest_harness, store::HelmStore};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    /// Exercise the protected route's boolean grammar; an omitted opt-in
+    /// must never become an accepted no-op or implicit enable.
+    fn request(method: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri("/api/checkout-claude-trust")
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// The setting is global and typed, while the preview's path revision
+    /// stays fixed. A shared dismissal reaches the band's read independently.
+    #[farhelm_testtrace::test]
+    async fn claude_trust_http_setting_and_shared_hint_contract() {
+        let harness = rest_harness::idle_helm().await;
+        let revision = harness
+            .store
+            .checkout_config_snapshot(None)
+            .await
+            .unwrap()
+            .revision;
+        for enabled in [false, true, false] {
+            let response = harness
+                .router()
+                .oneshot(request("PUT", serde_json::json!({"enabled": enabled})))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            let snapshot = harness.store.checkout_config_snapshot(None).await.unwrap();
+            assert_eq!(snapshot.claude_trust, enabled);
+            assert_eq!(snapshot.revision, revision);
+        }
+        for invalid in [
+            serde_json::json!({}),
+            serde_json::json!({"enabled": null}),
+            serde_json::json!({"enabled":"true"}),
+            serde_json::json!({"enabled":true,"host":1}),
+        ] {
+            let response = harness
+                .router()
+                .oneshot(request("PUT", invalid))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            assert!(
+                !harness
+                    .store
+                    .resolve_checkout_config(None)
+                    .await
+                    .unwrap()
+                    .claude_trust
+            );
+        }
+        harness
+            .store
+            .update_preferences(crate::store::PreferencePatch {
+                claude_trust_hint_dismissed: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let response = harness
+            .router()
+            .oneshot(request("GET", serde_json::json!(null)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            serde_json::json!({"enabled":false,"hint_dismissed":true})
+        );
+    }
+
+    /// Real schema-52 files have neither column. Upgrading must preserve
+    /// existing preferences, start off, and persist both new choices on reopen.
+    #[farhelm_testtrace::test]
+    async fn claude_trust_schema_upgrade_and_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        store
+            .update_preferences(crate::store::PreferencePatch {
+                compact: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        drop(store);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("ALTER TABLE checkout_config DROP COLUMN claude_trust; ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed; PRAGMA user_version = 52;").unwrap();
+        assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('checkout_config') WHERE name = 'claude_trust'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        assert!(
+            !store
+                .resolve_checkout_config(None)
+                .await
+                .unwrap()
+                .claude_trust
+        );
+        let preferences = store.preferences().await.unwrap();
+        assert_eq!(preferences.compact, Some(true));
+        assert_eq!(preferences.claude_trust_hint_dismissed, None);
+        store.set_claude_trust(true).await.unwrap();
+        store
+            .update_preferences(crate::store::PreferencePatch {
+                claude_trust_hint_dismissed: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        drop(store);
+        let store = HelmStore::open(&path).await.unwrap();
+        assert!(
+            store
+                .resolve_checkout_config(None)
+                .await
+                .unwrap()
+                .claude_trust
+        );
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .claude_trust_hint_dismissed,
+            Some(true)
+        );
+    }
+}
 
 /// The folder route's configuration surface, deliberately narrower than
 /// [`CheckoutConfigSnapshot`]. A missing field is not a request to clear it;
@@ -199,6 +393,8 @@ pub const MAX_POST_CLONE_BYTES: usize = 16 * 1024;
 /// empty-string normalization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCheckoutConfig {
+    /// Global opt-in, frozen on create without invalidating path previews.
+    pub claude_trust: bool,
     /// Where fresh checkouts are created. Stored unexpanded — `~` and
     /// `~/...` are expanded by the target supervisor, never here.
     pub root: Option<String>,
@@ -208,7 +404,7 @@ pub struct ResolvedCheckoutConfig {
     /// the distinction matters.
     pub post_clone: Option<String>,
     /// The global revision at the moment of this snapshot: bumped on every
-    /// actual stored change, stable across no-op writes.
+    /// actual root or hook change, stable across no-op and trust-choice writes.
     pub config_revision: i64,
 }
 
@@ -217,6 +413,7 @@ pub struct ResolvedCheckoutConfig {
 /// [`ResolvedCheckoutConfig`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckoutConfigSnapshot {
+    pub claude_trust: bool,
     pub global_root: Option<String>,
     pub global_post_clone: Option<String>,
     pub revision: i64,
@@ -251,6 +448,20 @@ impl Field {
 }
 
 impl HelmStore {
+    /// This opt-in does not change the preview's destination or ownership.
+    /// Keeping its write outside revision bumps preserves open path previews.
+    pub async fn set_claude_trust(&self, enabled: bool) -> anyhow::Result<()> {
+        let conn = self.conn();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            conn.lock().execute(
+                "UPDATE checkout_config SET claude_trust = ?1 WHERE singleton = 1",
+                [enabled],
+            )?;
+            Ok(())
+        })
+        .await
+        .context("Claude trust setting write task panicked")?
+    }
     /// Read everything stored for one scope in one database snapshot. No
     /// caching: every call re-reads, so a value is never served stale
     /// against a write another connection just committed.
@@ -466,15 +677,15 @@ fn read_snapshot(
     let _tx = conn
         .unchecked_transaction()
         .context("opening the checkout config snapshot transaction")?;
-    let (global_root, global_post_clone, revision): (Option<String>, Option<String>, i64) = conn
+    let (global_root, global_post_clone, revision, claude_trust): (Option<String>, Option<String>, i64, bool) = conn
         .query_row(
-            "SELECT root, post_clone, revision FROM checkout_config WHERE singleton = 1",
+            "SELECT root, post_clone, revision, claude_trust FROM checkout_config WHERE singleton = 1",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()
         .context("reading the global checkout config")?
-        .unwrap_or((None, None, 0));
+        .unwrap_or((None, None, 0, false));
     let host_override = match host {
         Some(host) => conn
             .query_row(
@@ -492,6 +703,7 @@ fn read_snapshot(
         None => None,
     };
     Ok(CheckoutConfigSnapshot {
+        claude_trust,
         global_root,
         global_post_clone,
         revision,
@@ -509,6 +721,7 @@ fn resolve_snapshot(snapshot: &CheckoutConfigSnapshot) -> ResolvedCheckoutConfig
         .and_then(|o| o.post_clone.clone())
         .or_else(|| snapshot.global_post_clone.clone());
     ResolvedCheckoutConfig {
+        claude_trust: snapshot.claude_trust,
         root: snapshot
             .host_override
             .as_ref()
@@ -1386,6 +1599,7 @@ mod tests {
     fn migration_session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             id: id.into(),
             parent: None,
@@ -1418,6 +1632,7 @@ mod tests {
         assert_eq!(
             store.resolve_checkout_config(None).await.unwrap(),
             ResolvedCheckoutConfig {
+                claude_trust: false,
                 root: None,
                 post_clone: None,
                 config_revision: 0
@@ -1987,6 +2202,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;

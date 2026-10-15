@@ -1855,6 +1855,48 @@ once publication may have started, missing or ambiguous evidence refuses automat
 create may recover an unstarted preparation. Ready restart validates the recorded identity and skips clone and hook. The
 agent's kind and launch metadata remain its actual values, rather than identifying the preparation wrapper.
 
+Protocol 51 carries a frozen `claude_trust` bool beside `post_clone` in `ResolvedGithubCheckout` and
+`CheckoutPreparation`; older stored specs default it to false. Its effect on supervisor behavior requires the ordinary
+version-skew hello refusal. Helm schema 53 adds `checkout_config.claude_trust` (false by default) and nullable
+`preferences.claude_trust_hint_dismissed`. The protected `GET /api/checkout-claude-trust` returns `enabled` and
+`hint_dismissed`; PUT requires only an `enabled` bool. This setting changes no destination, so it does not bump the
+checkout preview revision. Its write and the sparse dismissal patch publish ordinary invalidation hints. UI saves use
+the configuration ordering funnel; dismissal uses the per-field preference queue and overlays unacknowledged intent on
+fresh reads.
+
+Claude-specific file work lives in `agent_kind/claude/trust.rs`. After recording Ready, while still holding the
+preparation flock, the launch process resolves the canonical clone root and Claude's config from its login-shell
+environment. Claude 2.1.300 selects `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json`, with a nonempty legacy
+`<config-dir>/.config.json` taking precedence (`<config-dir>` defaults to `~/.claude`). An empty unwritable legacy file
+also wins when the modern file is absent. Nonempty custom OAuth selects `.claude-custom-oauth.json`. An absent vendor
+file is left absent.
+
+The removal record stores the canonical file, selected lock alias, and canonical project key in the existing preparation
+record, durably before the edit. Claude 2.1.300 explicitly uses `<selected-config-path>.lock` even for a symlink, so the
+integration shares that mkdir lock while replacing the canonical target and preserving the symlink. It retries
+contention for twelve seconds without stealing any lock, reads at most 16 MiB from a regular file under the lock,
+requires object-shaped configuration/projects/project, and changes only `hasTrustDialogAccepted`. A missing
+projects/project object is created for the opt-in. Removal deletes only that key, preserving even empty objects. A
+same-directory temporary file receives the original mode, is written and fsynced, renamed atomically, and followed by
+directory fsync. Publication refuses a replaced target/lock or a lock held for four seconds, leaving margin before
+Claude's ten-second stale-lock threshold. Temporary files and owned locks are cleaned on error. Claude's unlocked
+exit-save race and vendor format changes remain explicit limits; none of these checks proves compatibility forever.
+
+Confirmed archive or missing-source retirement schedules removal off the Delete reply path. The worker retains directory
+admission until it settles, preventing reuse while an old remover can still touch that path's key; terminal I/O and
+listing use neither this guard nor the vendor lock. No-record checkouts retain ordinary metadata cleanup.
+Refused/released archives retain trust. Successful removal clears the record before private metadata cleanup, while
+failure is logged and retains evidence. Exclusive startup retries retired records only when the original path is absent
+and no active registry row claims it, and removes trust after successful pending-archive reconciliation. It never
+retries an old removal against a reused path.
+
+`ClaudeReader::trust_prompt` refines only the captured question, its answer labels and dialog footer, excluding an
+ordinary input box. A run-scoped sample bool is false after reload/replacement or failed capture, is shared by renames,
+and publishes a sessions-changed hint on transitions. `SessionInfo.claude_trust_prompt` defaults false and omits false;
+listing and rename read the same sample cell. The UI visibility predicate also requires managed membership, the agent
+tab, a successfully read disabled setting, and neither dismissal. The band stays mounted while hidden so a local × lasts
+until the question actually leaves the screen; its flow row lets the existing terminal resize observer fit it.
+
 Each host caches repository objects at `<state_dir>/repo-cache/<owner>/<name>.git`, derived from the validated,
 lowercased repository pair. The supervisor passes that absolute path in the preparation's `repo_cache_path`; it is not
 request input and does not change the frozen fingerprints. Old launch specs deserialize with an empty path, then refuse

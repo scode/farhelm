@@ -4431,7 +4431,7 @@ pub struct Supervisor {
     /// process holds it. See [`StateDirOwnership`]: without a claim this
     /// supervisor may not migrate the schema, may not write any
     /// reconciliation, and may not serve.
-    ownership: Option<Arc<StateDirOwnership>>,
+    pub(super) ownership: Option<Arc<StateDirOwnership>>,
     /// Whether this supervisor may record what it observes.
     ///
     /// Two independent conditions have to hold, and both can be false for
@@ -5577,6 +5577,22 @@ impl Supervisor {
         Ok(supervisor)
     }
 
+    /// Keep startup's state-directory claim inside the filesystem worker.
+    /// Cancelling construction cannot let a successor reuse a checkout path
+    /// while a surviving blocking remover still acts on the old trust record.
+    async fn remove_startup_preparation_trust(state_dir: &Path, id: &str) -> anyhow::Result<()> {
+        let (ownership, _) = StateDirOwnership::claim(state_dir)?
+            .context("Claude trust recovery requires state-directory ownership")?;
+        let state_dir = state_dir.to_owned();
+        let id = id.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let _ownership = ownership;
+            crate::launch::remove_preparation_trust_sync(&state_dir, &id)
+        })
+        .await
+        .context("startup Claude trust cleanup worker panicked")?
+    }
+
     /// Rebuild the in-memory session map from SQLite plus one bulk tmux
     /// probe: rows with a live pane become normal live `SessionEntry`s,
     /// rows whose pane tmux no longer knows become the restart-gap's
@@ -5679,7 +5695,8 @@ impl Supervisor {
         // Gated on `may_write`: a claimless or non-owning constructor
         // must not rename a pending checkout concurrently with the
         // legitimate owner's own recovery.
-        for row in store.working_copy_rows().await? {
+        let checkout_rows = store.working_copy_rows().await?;
+        for row in &checkout_rows {
             if !may_write {
                 info!(
                     id = %row.id,
@@ -5687,16 +5704,39 @@ impl Supervisor {
                 );
                 continue;
             }
+            if row.allocation_state == crate::working_copies::AllocationState::Retired {
+                // A crash may have lost the off-reply cleanup worker after
+                // retirement committed. Retry only while the old path is free;
+                // an existing or newly recorded owner must not lose its trust.
+                let reused = checkout_rows.iter().any(|other| {
+                    other.id != row.id
+                        && other.allocation_state != crate::working_copies::AllocationState::Retired
+                        && other.canonical_path == row.canonical_path
+                });
+                let absent = row.canonical_path.as_ref().is_some_and(|path| {
+                    std::fs::symlink_metadata(path)
+                        .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+                });
+                if absent
+                    && !reused
+                    && let Err(error) =
+                        Self::remove_startup_preparation_trust(state_dir, &row.id).await
+                {
+                    warn!(working_copy = %row.id, error = %error, "retired checkout Claude trust cleanup failed at startup");
+                }
+                continue;
+            }
             if row.allocation_state != crate::working_copies::AllocationState::ArchivePending {
                 continue;
             }
-            match store
+            let reconciled = store
                 .reconcile_working_copy_archive(
                     &row.id,
                     seams.faults.archive_parent_sync().cloned(),
                 )
-                .await
-            {
+                .await;
+            let archived = reconciled.is_ok();
+            match reconciled {
                 Ok(crate::working_copies::ReconcileOutcome::Moved { destination }) => {
                     info!(
                         working_copy = %row.id, destination = %destination,
@@ -5727,6 +5767,11 @@ impl Supervisor {
                          checkout stays blocked until Delete is retried"
                     );
                 }
+            }
+            if archived
+                && let Err(error) = Self::remove_startup_preparation_trust(state_dir, &row.id).await
+            {
+                warn!(working_copy = %row.id, error = %error, "reconciled checkout Claude trust cleanup failed at startup");
             }
         }
         let stored_boot = store.boot_id().await?;
@@ -6267,6 +6312,7 @@ impl Supervisor {
                 Arc::new(SessionEntry {
                     info: SessionInfo {
                         screen_yolo: false,
+                        claude_trust_prompt: false,
                         parent: row.parent,
                         id: row.id,
                         title: row.title,
@@ -8528,6 +8574,7 @@ impl Supervisor {
                 let snapshot = IntegrationSnapshot::of(&row.launch);
                 let info = SessionInfo {
                     screen_yolo: false,
+                    claude_trust_prompt: false,
                     parent: row.parent,
                     restart_offer: snapshot.restart_offer(
                         row.captured_conversation.as_deref(),
@@ -9440,6 +9487,7 @@ impl Supervisor {
                     directory_device: accepted.identity.0,
                     directory_inode: accepted.identity.1,
                     post_clone: resolved.post_clone.clone(),
+                    claude_trust: resolved.claude_trust,
                     // The supervisor's own resolved shell; the hook runs
                     // under it with the checkout as its working directory.
                     shell: shell.clone(),
@@ -9463,6 +9511,7 @@ impl Supervisor {
         );
         let info = SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             parent,
             id: id.clone(),
             title,
@@ -11755,6 +11804,7 @@ impl Supervisor {
         };
         let info = SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             parent: entry.info.parent.clone(),
             id: entry.info.id.clone(),
             title: entry.info.title.clone(),
@@ -14095,6 +14145,7 @@ impl Supervisor {
         let snapshot = IntegrationSnapshot::of(&row.launch);
         let info = SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             parent: row.parent.clone(),
             id: row.id.clone(),
             title: row.title.clone(),
@@ -15203,6 +15254,102 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    /// Cancelling startup does not cancel an already scheduled blocking edit.
+    /// A successor must still be refused the OS lock until that edit finishes,
+    /// even after the constructor and its async cleanup waiter have disappeared.
+    #[farhelm_testtrace::test]
+    async fn startup_trust_worker_retains_ownership_after_cancellation() {
+        use std::future::Future;
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let ownership = sup.ownership.as_ref().unwrap().clone();
+        let id = uuid::Uuid::new_v4().to_string();
+        let config = state.path().join(".claude.json");
+        std::fs::write(&config, "{}").unwrap();
+        let trust = crate::agent_kind::claude::trust::resolve(
+            &crate::agent_kind::claude::trust::Environment {
+                home: state.path().to_owned(),
+                config_dir: None,
+                custom_oauth: false,
+            },
+            state.path(),
+        )
+        .unwrap()
+        .unwrap();
+        crate::agent_kind::claude::trust::edit(Some(&trust), true).unwrap();
+        let path = crate::launch::preparation_state_path(state.path(), &id);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        crate::launch::write_preparation_state(
+            &path,
+            &id,
+            &crate::launch::PreparationState::Ready,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        let mut record = crate::launch::read_preparation_state(&path, &id)
+            .unwrap()
+            .unwrap();
+        record.claude_trust = Some(trust.clone());
+        crate::files::write_durable_sync(
+            &path,
+            &serde_json::to_vec(&record).unwrap(),
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        std::fs::create_dir(&trust.lock_path).unwrap();
+        assert!(
+            trust.lock_path.is_dir(),
+            "the fixture holds vendor contention"
+        );
+        let mut removal = Box::pin(Supervisor::remove_startup_preparation_trust(
+            state.path(),
+            &id,
+        ));
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(removal.as_mut().poll(&mut context).is_pending());
+        drop(removal);
+        drop(sup);
+        drop(ownership);
+        let contender = std::fs::OpenOptions::new()
+            .write(true)
+            .open(state.path().join("supervisor.lock"))
+            .unwrap();
+        assert!(
+            matches!(contender.try_lock(), Err(std::fs::TryLockError::WouldBlock)),
+            "the blocking worker retains cross-process ownership after cancellation"
+        );
+        std::fs::remove_dir(&trust.lock_path).unwrap();
+        // Weak claim expiration can precede Drop closing the flock file.
+        // Observe the successor's actual OS admission, not the Arc lifetime.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match contender.try_lock() {
+                    Ok(()) => break,
+                    Err(std::fs::TryLockError::WouldBlock) => tokio::task::yield_now().await,
+                    Err(error) => panic!("successor ownership probe failed: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("the worker must finish and release ownership after contention ends");
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+        assert!(
+            value["projects"][&trust.project_path]
+                .get("hasTrustDialogAccepted")
+                .is_none()
+        );
+        assert!(
+            crate::launch::read_preparation_state(&path, &id)
+                .unwrap()
+                .unwrap()
+                .claude_trust
+                .is_none()
+        );
+    }
+
     /// A valid ordinary agent launch for admission tests that never spawn.
     /// Its program is deliberately synthetic: these tests inspect durable
     /// request/argv boundaries without executing an installed vendor agent.
@@ -17806,6 +17953,7 @@ pub(crate) mod tests {
         SessionEntry {
             info: SessionInfo {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
@@ -30596,6 +30744,7 @@ exit 0
             },
             root: canonical_root.to_string_lossy().into_owned(),
             post_clone: None,
+            claude_trust: false,
             preview: farhelm_proto::CheckoutPreviewBinding {
                 canonical_root: canonical_root.to_string_lossy().into_owned(),
                 basename: "bar-1".to_string(),
