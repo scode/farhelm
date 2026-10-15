@@ -13182,7 +13182,9 @@
   `restart-drain-skips-newly-published-conversation.md`; the recorded-conversation-stops-updating case.
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-conversation-tracking-spec.md`.
+- Execution: complete; jj change `zzrmyyxuztywyvkwnsstmytwmpxtvntw`; bookmark
+  `plan/triage-conversation-tracking-spec/06-transcript-error`; https://github.com/scode/farhelm/pull/2048/changes.
+  Covered by the conversation-tracking specification in #2038.
 
 ## native-download-publication-lacks-directory-durability.md
 
