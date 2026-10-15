@@ -8,6 +8,19 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
+- [`custom-permission-model-choice-erases-draft.md`](custom-permission-model-choice-erases-draft.md) — Choosing a model
+  or re-selecting the same agent can erase unfinished custom permission flags.
+
+- [`failed-feedback-cleanup-loses-evidence.md`](failed-feedback-cleanup-loses-evidence.md) — Cleanup can delete the
+  final test guest after failed feedback checks even when its exported evidence is missing; live evidence loss remains
+  conditional.
+
+- [`ssh-help-fish-command-quoting.md`](ssh-help-fish-command-quoting.md) — A copied SSH help command can execute extra
+  commands in fish; runtime reproduction and the scope of the supported-shell rule remain open.
+
+- [`ssh-help-copies-hidden-terminal-controls.md`](ssh-help-copies-hidden-terminal-controls.md) — SSH help copies hidden
+  terminal controls without warning; their execution effect depends on the receiving terminal.
+
 - [`interrupted-checkout-retains-evictable-cache-dependency.md`](interrupted-checkout-retains-evictable-cache-dependency.md)
   — After a hard interruption, a partially cloned repository can still depend on the cache. If the user resumes work
   there, later cache cleanup can make that repository incomplete.
@@ -36,18 +49,19 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   turning confirmations back on fails to save, reloading can silently restore first-click destructive actions.
 
 - [`quick-launch-template-identity-follows-successor.md`](quick-launch-template-identity-follows-successor.md) — A
-  pending quick launch may execute on a replacement installation behind the same host entry.
+  pending quick launch or number shortcut may execute on a replacement installation behind the same host entry.
 
 - [`template-undo-refuses-legacy-session-names.md`](template-undo-refuses-legacy-session-names.md) — Deleting an older
   template containing joined emoji or hidden characters offers Undo, but Undo always fails and the retained copy
   expires.
 
 - [`quick-launch-host-removal-falls-back-silently.md`](quick-launch-host-removal-falls-back-silently.md) — A quick
-  launch intended for a remote host can create its checkout and start its agent on the default host without showing the
-  changed destination.
+  launch or number shortcut intended for a remote host can create its checkout and start its agent on the default host
+  without showing the changed destination.
 
 - [`quick-launch-acknowledgment-revives-previous-mark.md`](quick-launch-acknowledgment-revives-previous-mark.md) — After
-  marking template B, quick launch can execute template A instead, including A’s command and destination.
+  marking template B or assigning it a number key, a shortcut can execute template A instead, including A’s command and
+  destination.
 
 - [`reboot-discards-pending-new-conversation.md`](reboot-discards-pending-new-conversation.md) — If the host reboots
   before a newly reported conversation is recorded, Restart can return to the session’s previous conversation even after
@@ -130,7 +144,7 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   send the previous server's access token to the new one.
 
 - [`quick-launch-changes-inherited-destination.md`](quick-launch-changes-inherited-destination.md) — Quick launch can
-  inherit another session's host and folder while its template is loading.
+  inherit another session's host and folder while its template is loading; number shortcuts use the same path.
 
 - [`guarded-choice-becomes-omp-yolo.md`](guarded-choice-becomes-omp-yolo.md) — Switching the launcher to OMP can clear
   an explicit guarded choice and select YOLO.
@@ -199,6 +213,12 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   templates repeatedly renew launch keys, defeating confirmation and unanswered retries; pre-existing.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
+
+- [`custom-permission-test-skips-template-cleanup.md`](custom-permission-test-skips-template-cleanup.md) — One failed
+  template deletion skips the remaining custom-permission browser-test fixtures.
+
+- [`number-shortcut-test-skips-session-cleanup.md`](number-shortcut-test-skips-session-cleanup.md) — A failed expanded
+  shortcut test can leave its agent sessions running for subsequent tests.
 
 - [`cached-launch-error-overrides-completed-stop.md`](cached-launch-error-overrides-completed-stop.md) — A session
   stopped during checkout preparation can continue showing a launch error instead of its recorded stopped status, even
