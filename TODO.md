@@ -126,6 +126,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a tag is never deleted or reused. Work out what GitHub rulesets, bypass lists or a separate agent identity can enforce
   without blocking the PR flow.
 
+- **Narrow when a host's Settings is unavailable.** Since the UI layout and escaping fixes (#1932), a host's Settings
+  menu item is disabled on every host while any host has setup work being planned, which includes the whole run of a
+  one-click Update. The triaged decision was narrower: wait only while an uninstall confirmation is being prepared,
+  because opening Settings for another host then could stack two dialogs and lock the page. Narrow the condition to the
+  pending confirmations that can actually open a dialog, so Settings stays usable during an ordinary Update on another
+  host, and keep the lockout case covered. The gap was noted when #1932 landed.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
