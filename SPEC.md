@@ -2451,6 +2451,17 @@ Confirmed 2026-10-11: for a malicious or arbitrarily broken host, the denial-of-
 availability guarantee. The protections against corrupting the helm's state or affecting other hosts' security or data
 still apply.
 
+### Power-loss durability of terminal file downloads and checkouts
+
+Confirmed 2026-10-14: files saved by downloading a file path from a session's terminal (see
+[Terminal experience](#terminal-experience)) and managed checkouts are not required to survive a power loss or system
+crash, including immediately after an operation reports success. Only critical state, such as the installation the
+installer writes and the helm's and supervisors' own SQLite databases, may be held to such a requirement, under its
+existing contracts; this decision adds no new durability requirement for that state. This decision exempts only those
+downloads and managed checkouts: release and provisioning downloads are not covered, and attachments keep their own
+best-effort rule under [Attachments](#attachments). It does not weaken the existing prohibitions on database corruption,
+bricking an installation or similar lasting damage.
+
 ### Waiting between operations on one host
 
 Confirmed 2026-09-28: session-management operations on the same host (create, restart, delete, and agent-requested
