@@ -13418,7 +13418,10 @@
 - Completion criteria: editing such a command either keeps it exactly or refuses visibly, through a change of no more
   than trivial complexity. If that is not possible, stop and record the item as discarded under the user's rule rather
   than building more. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/legacy-template-edits-gated.md`.
+- Execution: implemented in jj change `tnvzlpwwktxrwkqywonmxlnvsqltkrwz`, bookmark
+  `plan/legacy-template-edits-gated/01-command-edit`. Complexity gate met: the existing unsafe-character check makes the
+  affected command read-only, preserves save refusal and explains recreation; no new API or editing mode. Feedback file
+  and index entry removed. [PR #2051](https://github.com/scode/farhelm/pull/2051/changes).
 
 ## template-undo-refuses-legacy-session-names.md
 

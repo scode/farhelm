@@ -790,6 +790,8 @@ fn Choice(
 /// Changes only update the draft; they never clear another field to make it fit.
 /// Text fields keep literal commands, paths, model IDs and chosen names:
 /// browser correction and remembered form values must not rewrite them.
+/// Older commands rejected by today's shape check stay read-only: a text
+/// input can strip their newlines before an edit reaches save validation.
 #[component]
 fn FieldEditor(
     field: Field,
@@ -799,6 +801,16 @@ fn FieldEditor(
     disabled: bool,
 ) -> Element {
     let current = draft().fields;
+    let command_read_only = match field {
+        Field::Command => current.command.as_deref(),
+        Field::Resume => current.resume_command.as_ref().and_then(|v| v.as_deref()),
+        _ => None,
+    }
+    .is_some_and(|command| {
+        command
+            .chars()
+            .any(farhelm_proto::text::is_presentation_unsafe)
+    });
     let flags_seed = current
         .permission_flags
         .as_ref()
@@ -894,9 +906,9 @@ fn FieldEditor(
         Field::Command => rsx! {
             label { class: "templates-field",
                 span { "command" }
-                input { class: "templates-command templates-code", value: current.command.unwrap_or_default(), disabled, placeholder: "agent-tool {{farhelm_args}}",
+                input { class: "templates-command templates-code", value: current.command.unwrap_or_default(), disabled, readonly: command_read_only, placeholder: "agent-tool {{farhelm_args}}",
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "command: the command this template puts in the launcher", oninput: move |e| draft.with_mut(|d| d.fields.command = Some(e.value())),
+                    "data-tooltip": "command: the command this template puts in the launcher", oninput: move |e| { if !command_read_only { draft.with_mut(|d| d.fields.command = Some(e.value())); } },
                 }
             }
             span { class: "templates-hint", "Placeholders: {{cwd}} for the folder and {{farhelm_args}} for Farhelm's integration arguments; each must be a whole argument." }
@@ -904,9 +916,9 @@ fn FieldEditor(
         Field::Resume => rsx! {
             label { class: "templates-field",
                 span { "resume command" }
-                input { class: "templates-resume templates-code", value: current.resume_command.flatten().unwrap_or_default(), disabled, placeholder: "default, or agent-tool --resume {{conversation}} {{farhelm_args}}",
+                input { class: "templates-resume templates-code", value: current.resume_command.flatten().unwrap_or_default(), disabled, readonly: command_read_only, placeholder: "default, or agent-tool --resume {{conversation}} {{farhelm_args}}",
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "resume command: an empty input resets it to the default", oninput: move |e| draft.with_mut(|d| d.fields.resume_command = Some((!e.value().is_empty()).then(|| e.value()))),
+                    "data-tooltip": "resume command: an empty input resets it to the default", oninput: move |e| { if !command_read_only { draft.with_mut(|d| d.fields.resume_command = Some((!e.value().is_empty()).then(|| e.value()))); } },
                 }
             }
             span { class: "templates-hint", "An empty input sets the default. Placeholders: {{cwd}}, {{farhelm_args}}, {{conversation}}; each must be a whole argument." }
@@ -967,6 +979,7 @@ fn FieldEditor(
     rsx! {
         div { class: if refusal.is_some() { "templates-set-field templates-incompatible" } else { "templates-set-field" }, "data-field": field.key(),
             div { class: "templates-field-controls", {controls}
+                if command_read_only { p { class: "templates-hint templates-command-readonly", "This command contains a control or invisible character this editor cannot preserve. Remove this field with ✕ and add it again to replace the command." } }
                 if let Some(ref message)=refusal { p { class: "templates-error", "{message}" } }
             }
             button { class: "templates-remove", r#type: "button", disabled, aria_label: "remove {label}", "data-tooltip": "remove {label}: this template will leave it as is",
