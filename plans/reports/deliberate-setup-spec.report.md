@@ -53,3 +53,43 @@ triage ledger.
 Each PR passed its own fresh-context gpt-6.1-sol review at high effort, through the required external harness. Both
 reported no findings after reading the full plan, relevant triage decisions, changes and surrounding specification.
 Commit messages and PR wording passed fresh-context cold reads. No scope departure or unresolved review finding.
+
+### Landing
+
+Landed as #2075 and #2077, bottom-up, the round's only plan. Since the stack's base, main had gained plan claims, a
+triage record and the planning batch that queued it; none touches the specification sections this edits.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. The principle matches the agreed decision, including the
+"reasonable user would hit the trigger by accident" test, and keeps all four earlier file examples. Both limits match
+the code: feedback goes through the operating system's certificate store and proxy settings with no pinning, and trash
+deletion compares only the recorded path and the path resolved at launch, so a symlink retargeted later is not seen. No
+other SPEC.md or SPEC_impl.md sentence contradicts the change, and each PR removes only its own finding and changes only
+its own Execution field.
+
+#### Fixes made while landing
+
+- The principle said deliberately reshaped files are not Farhelm's job, which a later triage could read as overriding
+  protections the specification keeps for exactly such cases, or the rule that lasting damage is never accepted. It now
+  closes by saying it never relaxes the remote-host boundary, removes a protection stated for a specific case (the
+  foreign-replacement guard, the installer keeping a user's file, uninstall refusing unknown app-bundle entries), or
+  accepts database corruption, a bricked installation or similar lasting damage.
+- "A proxy the operating system trusts" was imprecise: an ordinary forwarding proxy cannot read HTTPS. Both places now
+  say an intercepting proxy whose certificate the OS trusts, and the feedback limit follows the HTTPS sentence it
+  qualifies.
+- The retargeted-symlink example could be read as retargeting the symlink to a place outside the checkout root; it now
+  describes a session launched through a symlink outside the root that the user later points at an archived checkout.
+  The trash section's clause now speaks of a working folder reached through such a symlink.
+
+#### Left as is
+
+The docs' Send feedback page calls feedback private ("goes privately to the maintainer", filed "where only the
+maintainer can read it"), in the same sense as SPEC.md's own unchanged wording. If the docs should mention the
+intercepting-proxy limit, its HTTPS paragraph is the place; the plan left the docs untouched.
+
+#### Checks
+
+- Run now: `dprint check` on SPEC.md after the fixes and the conflict resolution between the two PRs; the combined diff
+  was read in full.
+- Not run: anything else; only Markdown changed.
