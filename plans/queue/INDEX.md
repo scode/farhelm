@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing 64a1b2] `template-editor-unsafe-values.md` — Template editor shows hidden characters in model and folder, read-only like commands
 - [landing 64c3d4] `checkout-recovery-host-binding.md` — Agent creates into managed checkouts: retry replay bound to the asking host
 - [landing 64e5f6] `claude-trust-decimals.md` — Claude checkout trust edits keep unrelated numbers in Claude's settings exact
-- [in-flight 5a86d6] `ntfy-token-server-change.md` — Waiting alerts: changing the ntfy server's origin drops the saved token, and Settings says so
+- [complete] `ntfy-token-server-change.md` — Waiting alerts: changing the ntfy server's origin drops the saved token, and Settings says so
 - [landing 64a7b8] `codex-guide-hook-warning.md` — Codex docs page stops calling the hook warning harmless
 - [pending] `browser-test-cleanup.md` — Browser tests clean up their sessions, templates, preferences and fixtures even when an earlier step fails (20 triage outcomes, each gated)
 - [in-flight 42f6c8] `rust-test-portability.md` — Rust tests stop failing on macOS temp paths and APFS names, wait for real completion, keep Git config out of fixtures, and the test-state sweep cannot hang (6 outcomes, each gated)
