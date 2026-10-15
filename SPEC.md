@@ -937,8 +937,9 @@ moved: the row's dashed outline flies into the trash, which then wiggles briefly
 A trash delete, whether an immediate single-checkout delete or a confirmed bulk delete, is the permanent-cleanup
 exception: it removes only recorded archived checkouts whose opened root and directory still match their ownership
 evidence. It does not follow symlinks or cross mounts, and refuses an archive containing a retained session's working
-folder. Missing or mismatched records can be discarded without touching a replacement folder; other failures are
-reported and remain available for retry.
+folder; this protection does not cover a working folder reached through a symlink the user retargets after launch.
+Missing or mismatched records can be discarded without touching a replacement folder; other failures are reported and
+remain available for retry.
 
 Confirmed 2026-09-28: archiving a checkout never blocks deleting its session. When the checkout cannot be archived
 safely, for any reason (its folder or root no longer matching what was recorded, the move failing, or the outcome of an
@@ -2669,9 +2670,11 @@ Farhelm's job. For example, an intercepting proxy whose certificate the OS trust
 This line between deliberate and accidental interference applies to files too: a hand-made imitation of an installation
 record, a symlink whose target path contains a newline, a symlink planted at a path Farhelm reserves for its own marker
 files, or every name the installer would use to keep a user's file already being taken. The accidental guards need not
-handle those states. This never relaxes the remote-host boundary, removes a protection this specification states for a
-specific case (such as the foreign-replacement guard, the installer keeping a user's file, or uninstall refusing unknown
-app-bundle entries), or accepts database corruption, a bricked installation or similar lasting damage.
+handle those states. Likewise, when a session was launched through a symlink outside the checkout root and the user
+later points that symlink at an archived checkout, a new terminal tab can open inside that archive, and deleting it from
+the trash is not refused. This never relaxes the remote-host boundary, removes a protection this specification states
+for a specific case (such as the foreign-replacement guard, the installer keeping a user's file, or uninstall refusing
+unknown app-bundle entries), or accepts database corruption, a bricked installation or similar lasting damage.
 
 A supervisor trusts its attached helm to administer it, launch processes, and forward user input. That trust is
 directional: the helm and GUI must treat remote supervisor messages and agent-controlled output as untrusted. A remote

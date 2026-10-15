@@ -13633,7 +13633,8 @@
 - Decision: on 2026-10-15, covered by the principle recorded under `os-trusted-proxy-can-read-feedback.md`.
 - Completion criteria: the same SPEC.md change, naming this as an example of deliberate setup the guards need not
   handle. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/deliberate-setup-spec.md`.
+- Execution: complete in change `sptrpkxkoyrtonrlvqmynrvpsrnwstzm`, bookmark
+  `plan/deliberate-setup-spec/02-retargeted-symlink`; PR https://github.com/scode/farhelm/pull/2077/changes.
 
 ## devbuild-git-environment-discards-caller-work.md
 
