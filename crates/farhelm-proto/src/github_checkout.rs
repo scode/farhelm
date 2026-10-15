@@ -448,6 +448,14 @@ pub struct ResolvedGithubCheckout {
     /// Carried by the helm (the only holder of configuration); the
     /// supervisor never derives it itself.
     pub post_clone: Option<String>,
+    /// Opt-in vendor trust for every new managed checkout. Frozen alongside
+    /// the hook so a create retry cannot pick up a later settings change.
+    ///
+    /// Omitted when off: supervisors compare create fingerprints that embed
+    /// this struct as exact strings, so an always-present key would turn every
+    /// managed-checkout retry crossing the upgrade into a refused key reuse.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub claude_trust: bool,
     /// The preview binding this resolution came from.
     pub preview: CheckoutPreviewBinding,
 }
@@ -886,12 +894,43 @@ mod tests {
             repo: repo.clone(),
             root: "/srv/checkouts".to_string(),
             post_clone: Some("npm install".to_string()),
+            claude_trust: false,
             preview: binding.clone(),
         };
         let decoded: ResolvedGithubCheckout =
             serde_json::from_value(serde_json::to_value(&resolved).expect("serialize"))
                 .expect("decode");
         assert_eq!(decoded, resolved);
+
+        // Off encodes exactly as before the field existed, which keeps
+        // stored create fingerprints matching across the upgrade.
+        assert!(
+            !serde_json::to_value(&resolved)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("claude_trust")
+        );
+        // Stored launch snapshots from before the opt-in remain off, while
+        // new snapshots must carry true through a retry unchanged.
+        let mut old = serde_json::to_value(&resolved).unwrap();
+        old.as_object_mut().unwrap().remove("claude_trust");
+        assert!(
+            !serde_json::from_value::<ResolvedGithubCheckout>(old)
+                .unwrap()
+                .claude_trust
+        );
+        let opted_in = ResolvedGithubCheckout {
+            claude_trust: true,
+            ..resolved.clone()
+        };
+        assert!(
+            serde_json::from_value::<ResolvedGithubCheckout>(
+                serde_json::to_value(opted_in).unwrap()
+            )
+            .unwrap()
+            .claude_trust
+        );
 
         let info = WorkingCopyInfo {
             id: "wc-1".to_string(),

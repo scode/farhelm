@@ -240,6 +240,10 @@ pub struct CheckoutPreparation {
     /// the working directory; the shim deliberately does not shell-expand
     /// the repo identifier or cwd into it.
     pub post_clone: Option<String>,
+    /// Frozen opt-in for this new managed checkout, independent of the agent
+    /// initially launched there. Existing launch specs remain off.
+    #[serde(default)]
+    pub claude_trust: bool,
     /// The resolved shell the hook runs under.
     pub shell: String,
     /// Supervisor-generated path of this preparation's persistent state
@@ -1172,7 +1176,14 @@ pub struct PreparationRecord {
     /// Informational (crash forensics), not a readiness oracle — the
     /// state's MEANING is what the restart rules act on.
     pub updated_at_unix_seconds: u64,
+    /// Exact vendor file/key to undo when this checkout is archived. Published
+    /// before the best-effort edit so a crash cannot lose cleanup authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_trust: Option<ClaudeTrustRecord>,
 }
+
+/// Public on-disk removal evidence; vendor mutation remains behind the Claude seam.
+pub use crate::agent_kind::claude::trust::TrustRecord as ClaudeTrustRecord;
 
 /// The schema version this build writes and accepts for
 /// [`PreparationRecord`].
@@ -1198,6 +1209,7 @@ pub fn write_preparation_state(
         state: state.clone(),
         // A pre-epoch clock reads as 0 either way.
         updated_at_unix_seconds: crate::store::now_unix().max(0) as u64,
+        claude_trust: None,
     };
     let bytes = serde_json::to_vec(&record)
         .map_err(|e| std::io::Error::other(format!("serializing preparation state: {e}")))?;
@@ -1252,6 +1264,32 @@ pub fn read_preparation_state(
         );
     }
     Ok(Some(record))
+}
+
+/// Blocking cleanup for a worker that owns admission and state-directory
+/// ownership itself. Async cancellation must not release either while the
+/// vendor filesystem mutation can still run.
+/// Clearing the record after removal prevents a later retry from removing
+/// a newer trust choice at the same path.
+pub(crate) fn remove_preparation_trust_sync(
+    state_dir: &Path,
+    working_copy_id: &str,
+) -> anyhow::Result<()> {
+    let state_path = preparation_state_path(state_dir, working_copy_id);
+    let Some(mut record) = read_preparation_state(&state_path, working_copy_id)? else {
+        return Ok(());
+    };
+    if record.claude_trust.is_none() {
+        return Ok(());
+    }
+    crate::agent_kind::claude::trust::edit(record.claude_trust.as_ref(), false)?;
+    record.claude_trust = None;
+    crate::files::write_durable_sync(
+        &state_path,
+        &serde_json::to_vec(&record)?,
+        &crate::files::RealFs,
+    )?;
+    Ok(())
 }
 
 /// Where one working copy's preparation state lives:
@@ -1538,6 +1576,32 @@ fn run_checkout_preparation(
             format!("could not durably record Ready: {stage_detail}"),
             false,
         );
+    }
+
+    // Setup is already Ready. Trust is deliberately outside its success
+    // contract: any vendor/config failure leaves the agent free to ask its
+    // ordinary question, and never turns a successful checkout into an error.
+    if preparation.claude_trust {
+        let result = (|| -> anyhow::Result<()> {
+            use crate::agent_kind::claude::trust;
+            let environment = trust::Environment::current()?;
+            let Some(trust_record) = trust::resolve(&environment, cwd)? else {
+                return Ok(());
+            };
+            let mut record =
+                read_preparation_state(&preparation.state_path, &preparation.working_copy_id)?
+                    .context("ready preparation record is absent")?;
+            record.claude_trust = Some(trust_record);
+            crate::files::write_durable_sync(
+                &preparation.state_path,
+                &serde_json::to_vec(&record)?,
+                seam,
+            )?;
+            trust::edit(record.claude_trust.as_ref(), true)
+        })();
+        if let Err(error) = result {
+            eprintln!("Farhelm could not mark this folder trusted; Claude may ask. ({error:#})");
+        }
     }
 
     // Released before the agent exec (the lock file is closed here), and
@@ -2976,6 +3040,7 @@ exec sleep 60
                 directory_device: cwd_metadata.dev(),
                 directory_inode: cwd_metadata.ino(),
                 post_clone,
+                claude_trust: false,
                 shell: shell.to_string(),
                 state_path,
             };
@@ -3487,6 +3552,58 @@ printf 'AGENT-RAN\n'
             ),
         );
         fixture
+    }
+
+    /// The opt-in runs in the real launch child after successful setup, using
+    /// only that child's config environment. Invalid vendor state remains
+    /// untouched and cannot prevent the agent from starting.
+    #[farhelm_testtrace::test]
+    fn claude_trust_launch_is_opt_in_and_best_effort_after_ready() {
+        for (enabled, content) in [(false, "{}"), (true, "{}"), (true, "[]")] {
+            let mut fixture = build_d1_fixture(Some("true".into()));
+            fixture.preparation.claude_trust = enabled;
+            let config_dir = fixture.tmp.path().join("vendor-config");
+            std::fs::create_dir(&config_dir).unwrap();
+            let config = config_dir.join(".claude.json");
+            std::fs::write(&config, content).unwrap();
+            let (report, terminal, status) = fixture.run_shim_in_child_with(
+                None,
+                &[
+                    ("CLAUDE_CONFIG_DIR", config_dir.as_os_str()),
+                    ("HOME", fixture.tmp.path().as_os_str()),
+                ],
+                &["CLAUDE_CODE_CUSTOM_OAUTH_URL"],
+            );
+            assert!(
+                status.success() && report.is_empty(),
+                "status={status:?} report={report} terminal={terminal}"
+            );
+            assert!(
+                terminal.contains("AGENT-RAN"),
+                "the agent must run after setup: {terminal}"
+            );
+            let record = read_preparation_state(&fixture.preparation.state_path, "wc-1")
+                .unwrap()
+                .unwrap();
+            assert_eq!(record.state, PreparationState::Ready);
+            if enabled && content == "{}" {
+                let document: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+                let path = std::fs::canonicalize(&fixture.preparation.cwd).unwrap();
+                assert_eq!(
+                    document["projects"][path.to_str().unwrap()]["hasTrustDialogAccepted"],
+                    true
+                );
+                assert_eq!(record.claude_trust.unwrap().config_path, config);
+            } else {
+                assert_eq!(std::fs::read_to_string(&config).unwrap(), content);
+                if enabled {
+                    assert!(terminal.contains("Claude may ask"));
+                } else {
+                    assert!(record.claude_trust.is_none());
+                }
+            }
+        }
     }
 
     /// Nothing the shim starts sees the private tmux server's `TMUX` or

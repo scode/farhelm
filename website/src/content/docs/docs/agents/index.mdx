@@ -37,8 +37,8 @@ export const basic = 'Basic: Farhelm only sees whether the screen is changing, s
 export const agents = [
   { name: 'Codex', href: '/docs/agents/codex/', tier: 0, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'y', waiting: 'y', resume: 'y', warn: 'y', farhelm: 'y' },
     tip: { effort: 'Low, medium, or high; some models take only high.', resume: 'Available once you submit your first prompt.' } },
-  { name: 'Claude', href: '/docs/agents/claude/', tier: 0, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'n', status: 'y', waiting: 'y', resume: 'y', warn: 'y', farhelm: 'y' },
-    tip: { trust: 'Claude may ask whether to trust a new directory, and the launcher cannot answer that for you.', effort: 'Low to max.', resume: 'Available a few seconds after it starts.' } },
+  { name: 'Claude', href: '/docs/agents/claude/', tier: 0, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'p', status: 'y', waiting: 'y', resume: 'y', warn: 'y', farhelm: 'y' },
+    tip: { trust: 'For new managed checkouts only, an off-by-default setting can answer the question by editing Claude’s own settings file. Best effort, with caveats explained in Settings.', effort: 'Low to max.', resume: 'Available a few seconds after it starts.' } },
   { name: 'Goose', href: '/docs/agents/goose/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'y', warn: 'y', farhelm: 'y' },
     tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO by default; also approve, smart approve, and chat.', status: basic, resume: 'Available as soon as it starts.' } },
   { name: 'OMP', href: '/docs/agents/omp/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'y', warn: 'p', farhelm: 'y' },

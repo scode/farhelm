@@ -368,6 +368,9 @@ impl ListSort {
 /// gets everywhere else in this codebase.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
 pub(crate) struct Preferences {
+    /// Shared dismissal of the managed-checkout Claude trust hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) claude_trust_hint_dismissed: Option<bool>,
     /// Shared first-open dismissal; unset and false both mean unseen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) welcome_seen: Option<bool>,
@@ -596,6 +599,54 @@ pub(crate) fn save_checkout_post_clone(
     }
 }
 
+/// Current shared trust setting and hint opt-out, including local dirty intent.
+#[derive(Clone, Deserialize)]
+pub(crate) struct ClaudeTrustState {
+    pub enabled: bool,
+    pub hint_dismissed: bool,
+}
+
+/// Re-read on invalidation, overlaying an unacknowledged local dismissal so
+/// an older GET cannot undo the user's click while its sparse PUT is queued.
+pub(crate) async fn fetch_claude_trust(base: &str) -> Result<ClaudeTrustState, String> {
+    let url = format!("{base}/api/checkout-claude-trust");
+    let resp = send(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    let mut state = resp
+        .json::<ClaudeTrustState>()
+        .await
+        .map_err(|error| error.to_string())?;
+    if let Some(PreferenceValue::ClaudeTrustHintDismissed(value)) =
+        preference_writes().dirty(PreferenceField::ClaudeTrustHintDismissed)
+    {
+        state.hint_dismissed = value;
+    }
+    Ok(state)
+}
+
+/// Configuration saves register before spawn, like the checkout text fields.
+/// A refused opt-in remains visible to the caller instead of silently sticking.
+pub(crate) fn save_claude_trust(
+    base: &str,
+    enabled: bool,
+) -> impl Future<Output = Result<(), String>> + use<> {
+    let url = format!("{base}/api/checkout-claude-trust");
+    let sending = send_save(
+        client()
+            .put(&url)
+            .json(&serde_json::json!({"enabled": enabled})),
+    );
+    async move {
+        let resp = sending.await?;
+        if !resp.status().is_success() {
+            return Err(refusal_text("PUT", &url, resp).await);
+        }
+        Ok(())
+    }
+}
+
 /// Which field of the shared preference a writer owns.
 ///
 /// The write queue below serializes writes PER FIELD: each field is
@@ -605,6 +656,7 @@ pub(crate) fn save_checkout_post_clone(
 /// them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PreferenceField {
+    ClaudeTrustHintDismissed,
     WelcomeSeen,
     Sort,
     Selected,
@@ -629,6 +681,7 @@ impl PreferenceField {
     fn key(self) -> &'static str {
         match self {
             PreferenceField::WelcomeSeen => "welcome_seen",
+            PreferenceField::ClaudeTrustHintDismissed => "claude_trust_hint_dismissed",
             PreferenceField::Sort => "list_sort",
             PreferenceField::Selected => "last_selected",
             PreferenceField::Compact => "compact",
@@ -651,6 +704,7 @@ impl PreferenceField {
 /// helm route's typed-validation concern.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PreferenceValue {
+    ClaudeTrustHintDismissed(bool),
     /// Dismissing the first-open card is a best-effort shared preference write.
     WelcomeSeen(bool),
     Sort(String),
@@ -683,6 +737,7 @@ impl PreferenceValue {
     fn field(&self) -> PreferenceField {
         match self {
             Self::WelcomeSeen(_) => PreferenceField::WelcomeSeen,
+            Self::ClaudeTrustHintDismissed(_) => PreferenceField::ClaudeTrustHintDismissed,
             Self::Sort(_) => PreferenceField::Sort,
             Self::Selected(_) => PreferenceField::Selected,
             Self::Compact(_) => PreferenceField::Compact,
@@ -706,6 +761,7 @@ impl PreferenceValue {
             Self::TerminalLinkClick(value) => serde_json::json!(value.key()),
             Self::TemplateShortcuts(value) => serde_json::json!(value),
             Self::WelcomeSeen(value)
+            | Self::ClaudeTrustHintDismissed(value)
             | Self::Compact(value)
             | Self::HostRemoveConfirmation(value)
             | Self::SessionConfirmations(value)
@@ -717,6 +773,9 @@ impl PreferenceValue {
     fn overlay(&self, seed: &mut Preferences) {
         match self {
             Self::WelcomeSeen(value) => seed.welcome_seen = Some(*value),
+            Self::ClaudeTrustHintDismissed(value) => {
+                seed.claude_trust_hint_dismissed = Some(*value)
+            }
             Self::Sort(value) => seed.list_sort = Some(value.clone()),
             Self::Selected(value) => seed.last_selected = Some(value.clone()),
             Self::Compact(value) => seed.compact = Some(*value),
@@ -800,6 +859,7 @@ struct PreferenceCompletion {
 /// OUTSIDE every remounted subtree.
 #[derive(Default)]
 struct PreferenceWrites {
+    claude_trust_hint_dismissed: FieldWrite,
     saves: save_order::Saves,
     welcome_seen: FieldWrite,
     sort: FieldWrite,
@@ -818,6 +878,7 @@ impl PreferenceWrites {
     fn field(&mut self, field: PreferenceField) -> &mut FieldWrite {
         match field {
             PreferenceField::WelcomeSeen => &mut self.welcome_seen,
+            PreferenceField::ClaudeTrustHintDismissed => &mut self.claude_trust_hint_dismissed,
             PreferenceField::Sort => &mut self.sort,
             PreferenceField::Selected => &mut self.selected,
             PreferenceField::Compact => &mut self.compact,
@@ -967,6 +1028,7 @@ impl PreferenceWrites {
     fn dirty(&self, field: PreferenceField) -> Option<PreferenceValue> {
         let slot = match field {
             PreferenceField::WelcomeSeen => &self.welcome_seen,
+            PreferenceField::ClaudeTrustHintDismissed => &self.claude_trust_hint_dismissed,
             PreferenceField::Sort => &self.sort,
             PreferenceField::Selected => &self.selected,
             PreferenceField::Compact => &self.compact,
@@ -1071,6 +1133,7 @@ pub(crate) fn store_preference(base: &str, value: PreferenceValue) {
 pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Preferences {
     for field in [
         PreferenceField::WelcomeSeen,
+        PreferenceField::ClaudeTrustHintDismissed,
         PreferenceField::Sort,
         PreferenceField::Selected,
         PreferenceField::Compact,

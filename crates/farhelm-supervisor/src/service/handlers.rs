@@ -6026,6 +6026,7 @@ mod tests {
                     repo: repo.clone(),
                     root: "/tmp/checkouts".to_string(),
                     post_clone: None,
+                    claude_trust: false,
                     preview: CheckoutPreviewBinding {
                         canonical_root: "/tmp/checkouts".to_string(),
                         basename: "bar".to_string(),
@@ -6147,6 +6148,7 @@ mod tests {
                     repo: repo.clone(),
                     root: missing_root.to_string_lossy().into_owned(),
                     post_clone: None,
+                    claude_trust: false,
                     preview: CheckoutPreviewBinding {
                         canonical_root: missing_root.to_string_lossy().into_owned(),
                         basename: "bar".to_string(),
@@ -7593,6 +7595,7 @@ mod tests {
             repo: farhelm_proto::parse_github_repo("acme/bar").unwrap(),
             root: "/checkouts".into(),
             post_clone: None,
+            claude_trust: false,
             preview: farhelm_proto::CheckoutPreviewBinding {
                 canonical_root: "/checkouts".into(),
                 basename: "bar-1".into(),
@@ -8115,6 +8118,7 @@ mod tests {
             Arc::new(SessionEntry {
                 info: SessionInfo {
                     screen_yolo: false,
+                    claude_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "s1".to_string(),
@@ -8305,6 +8309,7 @@ mod tests {
         Arc::new(SessionEntry {
             info: SessionInfo {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: id.to_string(),
@@ -8512,6 +8517,7 @@ mod tests {
             Arc::new(SessionEntry {
                 info: SessionInfo {
                     screen_yolo: false,
+                    claude_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "s1".to_string(),

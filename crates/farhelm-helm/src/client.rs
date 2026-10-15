@@ -4064,6 +4064,7 @@ mod tests {
     fn session(id: &str) -> SessionInfo {
         SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: id.into(),

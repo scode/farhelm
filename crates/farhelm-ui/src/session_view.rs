@@ -882,6 +882,7 @@ pub(crate) fn SessionView(
     // `Result`: an error commits nothing at all, so the caller drops it
     // before this closure is ever reached and the failure arm here would be
     // one nobody could take.
+    let occurrences = use_context::<crate::claude_trust::OccurrenceDismissals>();
     let mut commit_detail =
         move |generation: u64, fetched: Option<Session>, started_at: u32, index: u64| {
             match admit_detail(
@@ -927,6 +928,7 @@ pub(crate) fn SessionView(
                         !live.contains(id.as_str()) && index < *observed_from
                     });
                     closed_tabs.write().retain(|id| live.contains(id.as_str()));
+                    occurrences.observe(&fresh);
                     current.set(fresh);
                     true
                 }
@@ -2082,7 +2084,7 @@ pub(crate) fn SessionView(
         matches!(shown.launch, Some(crate::SessionLaunch::Legacy { .. }));
     let card_replace_with_session = shown.clone();
     rsx! {
-        div { class: "layout",
+        div { class: "layout", "data-claude-trust-prompt": "{shown.claude_trust_prompt}",
             // The one header row. Identity on the left, status in the
             // middle, actions pinned right — see this component's docs for
             // why everything that used to be its own band lives here.
@@ -2957,6 +2959,12 @@ pub(crate) fn SessionView(
                         span { class: "peer-value", dir: "ltr", "{display_peer(&err)}" }
                     }
                 }
+                if shown.working_copy.is_some() {
+                    crate::claude_trust::ClaudeTrustBand {
+                        session: current,
+                        agent_visible: active_tab.is_none(),
+                    }
+                }
                 // Fatal to the terminals, not to the view: the metadata, the
                 // restart affordance, and the tab strip all still work, and
                 // saying so beats rendering empty panes with no explanation.
@@ -3808,6 +3816,7 @@ mod tests {
     fn live_session() -> Session {
         Session {
             screen_yolo: false,
+            claude_trust_prompt: false,
             id: "sess".to_string(),
             title: "sess".to_string(),
             cwd: "/tmp".to_string(),
@@ -4299,6 +4308,7 @@ mod tests {
         fn titled(id: &str, title: &str) -> Session {
             Session {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 id: id.to_string(),
                 title: title.to_string(),
                 cwd: "/tmp".to_string(),
@@ -4354,6 +4364,7 @@ mod tests {
         fn session(status: SessionStatus, stale: bool) -> Session {
             Session {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 id: "sess".to_string(),
                 title: "sess".to_string(),
                 cwd: "/tmp".to_string(),
@@ -4449,6 +4460,7 @@ mod tests {
 
         let unknown = Session {
             screen_yolo: false,
+            claude_trust_prompt: false,
             id: "sess".to_string(),
             title: "sess".to_string(),
             cwd: "/tmp".to_string(),
@@ -4520,6 +4532,7 @@ mod tests {
         fn base() -> Session {
             Session {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 id: "sess".to_string(),
                 title: "t".to_string(),
                 cwd: "/tmp".to_string(),
@@ -4552,6 +4565,7 @@ mod tests {
         assert!(
             !seen_effect_eligible(&Session {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 stale: true,
                 ..base()
             }),
@@ -4560,6 +4574,7 @@ mod tests {
         assert!(
             !seen_effect_eligible(&Session {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 status: crate::SessionStatus::Exited { exit_code: Some(0) },
                 ..base()
             }),
@@ -4568,6 +4583,7 @@ mod tests {
         assert!(
             !seen_effect_eligible(&Session {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 seen_activity_at: None,
                 pinned: false,
                 notifications: Vec::new(),
@@ -4588,6 +4604,7 @@ mod tests {
     fn an_eligible_but_already_seen_session_has_nothing_to_write() {
         let already_seen = Session {
             screen_yolo: false,
+            claude_trust_prompt: false,
             id: "sess".to_string(),
             title: "t".to_string(),
             cwd: "/tmp".to_string(),

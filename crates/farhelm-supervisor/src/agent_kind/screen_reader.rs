@@ -266,6 +266,11 @@ pub(crate) struct Screen<'a> {
 /// Every method has the generic behavior as its default, so a harness
 /// with no dedicated reader is simply one that overrides nothing.
 pub(crate) trait ScreenReader: Sync {
+    /// A current workspace-trust question, never transcript text or a draft.
+    /// Only Claude advertises the corresponding managed-checkout setting.
+    fn trust_prompt(&self, _text: &str) -> bool {
+        false
+    }
     /// Whether the sampler should fetch the pane title for this reader. A
     /// separate tmux call per sample, so only readers that use it ask.
     fn wants_title(&self) -> bool {
@@ -394,6 +399,24 @@ const CLAUDE_FOOTER_LINES: usize = 2;
 const CLAUDE_SPINNER_LINES_ABOVE_BOX: usize = 6;
 
 impl ScreenReader for ClaudeReader {
+    fn trust_prompt(&self, text: &str) -> bool {
+        let lines = content_lines(text);
+        // capture-pane preserves physical wraps. The same dialog must be
+        // recognized when its question or choices span several terminal rows.
+        let joined = lines
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        claude_input_box_rule(&lines).is_none()
+            && any_contains(last_lines(&lines, CLAUDE_FOOTER_LINES), "enter to confirm")
+            && any_contains(last_lines(&lines, CLAUDE_FOOTER_LINES), "esc to cancel")
+            && joined.contains("is this a project you created or one you trust?")
+            && joined.contains("yes, i trust this folder")
+            && joined.contains("no, exit")
+    }
+
     fn has_screen_rules(&self) -> bool {
         true
     }
@@ -675,6 +698,34 @@ fn codex_has_composer(lines: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Real trust dialogs have a specific question, two answers and footer.
+    /// Ordinary permission dialogs and quoted transcript text must not advertise
+    /// the managed-checkout setting merely because they contain a trust phrase.
+    #[test]
+    fn claude_trust_prompt_matches_captured_dialogs_only() {
+        let reader = reader_for(AgentKind::Claude);
+        for trust in [
+            include_str!("../../tests/fixtures/screens/claude/2.1.285/waiting-trust.txt"),
+            include_str!("../../tests/fixtures/screens/claude/2.1.296/waiting-trust.txt"),
+        ] {
+            assert!(reader.trust_prompt(trust));
+            let wrapped = trust
+                .replace("project you created", "project you\ncreated")
+                .replace("trust this folder", "trust this\nfolder");
+            assert!(reader.trust_prompt(&wrapped));
+            assert!(!reader_for(AgentKind::Codex).trust_prompt(trust));
+            assert!(!reader_for(AgentKind::Generic).trust_prompt(trust));
+            assert!(!reader.trust_prompt(&format!(
+                "{trust}\n─────\n❯ quoted trust dialog\n─────\n? for shortcuts"
+            )));
+        }
+        assert!(
+            !reader.trust_prompt(
+                "Do you want to proceed?\n❯ Yes\nNo\nEnter to confirm · Esc to cancel"
+            )
+        );
+    }
 
     fn counts(samples: u64, unchanged_streak: u64) -> SampleCounts {
         SampleCounts {

@@ -365,6 +365,9 @@ pub(crate) struct ActivitySample {
     /// retains it; replacement/reload resets it, so a prior agent cannot lend its
     /// mode to a new process. It never participates in admission or inheritance.
     pub(crate) screen_yolo: bool,
+    /// Current trust question, cleared on failed capture as well as when the
+    /// dialog leaves the screen. A rename shares this run's sample cell.
+    pub(crate) claude_trust_prompt: bool,
     /// A reloaded pane has no process-local screen history yet. While this
     /// is true, the list reply leaves its status provisional so the helm
     /// can keep the last cached answer until this process sees real evidence.
@@ -705,6 +708,7 @@ impl ActivitySample {
     /// self-corrects on the next sample, the other is a durable ordering
     /// key that does not.
     pub(crate) fn forget_tail(&mut self) {
+        self.claude_trust_prompt = false;
         self.comparison = None;
         self.reading = generic_reading(self.counts());
         self.transition_ready = false;
@@ -1197,13 +1201,13 @@ async fn tick(
 /// failures would otherwise leave that change to the helm's backstop poll.
 fn forget_tail_hinted(sup: &Supervisor, entry: &SessionEntry) {
     let status_before = super::status::live_status(entry);
-    entry
-        .run
-        .activity
-        .lock()
-        .expect("activity mutex poisoned")
-        .forget_tail();
-    if super::status::live_status(entry) != status_before {
+    let trust_changed = {
+        let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
+        let was_trust = activity.claude_trust_prompt;
+        activity.forget_tail();
+        was_trust
+    };
+    if trust_changed || super::status::live_status(entry) != status_before {
         sup.hint_sessions_changed();
     }
 }
@@ -1598,8 +1602,11 @@ async fn sample_pass(
         let status_before = super::status::live_status(entry);
         let (observation, report_fallback, permission_changed) = {
             let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
+            let trust_prompt = reader.trust_prompt(&tail);
+            let trust_changed = activity.claude_trust_prompt != trust_prompt;
+            activity.claude_trust_prompt = trust_prompt;
             let permission_changed =
-                activity.observe_permission(entry.info.launch.agent_type(), &tail);
+                trust_changed | activity.observe_permission(entry.info.launch.agent_type(), &tail);
             let observation = activity.observe_screen(reader, &tail, &title);
             let report = activity.note_fallback(&observation, reader.has_screen_rules());
             (observation, report, permission_changed)

@@ -589,30 +589,30 @@ agent choice is independent of that destination:
   those harnesses. Codex true and false set that launch's exact working directory to `trusted` and `untrusted` through
   its per-run project configuration; a managed checkout's path is filled only after the supervisor has resolved it. Muse
   true uses `--trust-workspace`; Pi true and false use `--approve` and `--no-approve` respectively. Each setting applies
-  to one launch and never writes vendor trust state; Muse false adds no flag and cannot revoke trust from YOLO or vendor
-  settings. Without a choice, the harness retains its own trust behavior; Codex, Muse, Claude, and Cursor may still ask
-  for directory trust (Cursor even with `--force`). Farhelm does not silently answer their prompts. Claude, Goose, OMP,
-  and Cursor have no supported interactive workspace-trust switch. "reset choices" returns both segments to their
-  remembered values rather than to harness defaults, and a recent-setup row's own saved choice overrides it when used.
-  The launch-composer search matches harnesses, launch templates (`tl:name`), models scoped by the chosen harness,
-  effort words offered by that harness and model, `yolo` plus the `perms:yolo`, `perms:guarded`, `perms:custom` and
-  `perms:own` permission actions, supported trust actions, host and name actions, folders and recent setups. Permission
-  actions are offered only when the selected harness can represent them; own setting is offered only on Cursor.
-  `name:foo` applies the entire value as the session name. `host:foo` filters host choices, and `host:local` selects the
-  helm-local host even if it has an alias. The default local host label in the GUI is `local (this machine)`. Accepting
-  a result applies it and clears the box while keeping focus there, except custom moves focus to its flags editor. Enter
-  on an empty box launches only a complete, valid selection through the ordinary Launch path; an incomplete attempt says
-  why beside Launch, as does a refused Launch press, and the greyed-out button's hover names what is missing. Request
-  refusals appear there too, within the initial dialog viewport. Enter on a non-empty query with no result never
-  launches, and Escape closes the result list without clearing the query, so Enter after Escape does nothing until the
-  box is emptied. Enter on a choice button (launch-kind tab, harness, effort, permissions, or workspace trust) applies
-  that choice and then launches through the ordinary Launch path, or shows its refusal beside Launch; custom instead
-  selects the mode and focuses its required flags editor. Enter on the closed host picker or the agent-type dropdown,
-  YOLO radios, or Resume checkbox launches with the values shown, without changing them; those native controls retain
-  their Space and arrow behavior. Action buttons keep their normal press. The search box, model field, YOLO
-  confirmation, and save-as-template panel keep their own Enter rules. In the editable folder field, Enter chooses an
-  arrow-highlighted dropdown entry without launching; with no highlighted entry it launches as before. A held Enter
-  never launches.
+  to one launch and never writes vendor trust state; the separate opt-in for Claude managed checkouts below is the one
+  exception. Muse false adds no flag and cannot revoke trust from YOLO or vendor settings. Without a choice, the harness
+  retains its own trust behavior; Codex, Muse, Claude, and Cursor may still ask for directory trust (Cursor even with
+  `--force`). Farhelm does not send answers to their terminal prompts. Claude, Goose, OMP, and Cursor have no supported
+  interactive workspace-trust switch. "reset choices" returns both segments to their remembered values rather than to
+  harness defaults, and a recent-setup row's own saved choice overrides it when used. The launch-composer search matches
+  harnesses, launch templates (`tl:name`), models scoped by the chosen harness, effort words offered by that harness and
+  model, `yolo` plus the `perms:yolo`, `perms:guarded`, `perms:custom` and `perms:own` permission actions, supported
+  trust actions, host and name actions, folders and recent setups. Permission actions are offered only when the selected
+  harness can represent them; own setting is offered only on Cursor. `name:foo` applies the entire value as the session
+  name. `host:foo` filters host choices, and `host:local` selects the helm-local host even if it has an alias. The
+  default local host label in the GUI is `local (this machine)`. Accepting a result applies it and clears the box while
+  keeping focus there, except custom moves focus to its flags editor. Enter on an empty box launches only a complete,
+  valid selection through the ordinary Launch path; an incomplete attempt says why beside Launch, as does a refused
+  Launch press, and the greyed-out button's hover names what is missing. Request refusals appear there too, within the
+  initial dialog viewport. Enter on a non-empty query with no result never launches, and Escape closes the result list
+  without clearing the query, so Enter after Escape does nothing until the box is emptied. Enter on a choice button
+  (launch-kind tab, harness, effort, permissions, or workspace trust) applies that choice and then launches through the
+  ordinary Launch path, or shows its refusal beside Launch; custom instead selects the mode and focuses its required
+  flags editor. Enter on the closed host picker or the agent-type dropdown, YOLO radios, or Resume checkbox launches
+  with the values shown, without changing them; those native controls retain their Space and arrow behavior. Action
+  buttons keep their normal press. The search box, model field, YOLO confirmation, and save-as-template panel keep their
+  own Enter rules. In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without launching;
+  with no highlighted entry it launches as before. A held Enter never launches.
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector for every agent launch. Claude,
   Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP session file.
   Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or the session's
@@ -813,6 +813,27 @@ discovery and preview create nothing. Existing symlink ancestors resolve to thei
 refused. `~` expands there, using the supervisor's captured home. Clearing an override restores inheritance; an empty
 hook override disables the inherited hook. Configuration changes affect new attempts, not an already accepted attempt or
 its retries.
+
+Settings also offers an off-by-default, all-hosts choice to answer Claude's "trust this folder?" for new managed
+checkouts, including agent-requested checkouts and checkouts initially started with another agent. It never applies to a
+directory the user selects themselves. After clone and the post-clone command succeed, immediately before the agent
+starts, Farhelm marks that checkout trusted in Claude's own configuration on that host. Turning it on affects future
+checkouts only, and changing it does not invalidate an already displayed path preview.
+
+The help leads with the mechanism: Claude has no supported switch, so Farhelm edits its settings file (normally
+`~/.claude.json`), which also holds sign-in, settings and per-directory state. It changes only that directory's trust
+key, with an atomic replacement, and makes a best-effort removal when the checkout is archived or retired as missing. An
+archive refusal leaves the directory and trust in place. A launch or Delete never fails because this edit failed. The
+caution explains that Claude's unlocked exit save can lose either writer's update, future Claude versions may change the
+file or locking without notice, and Farhelm cannot promise continued safety. Trust allows repository hooks and commands
+just as answering Yes does. The mechanism is explicitly opt-in and best effort.
+
+While Claude's trust question is visible in the agent terminal of a managed checkout, the setting is off, and the hint
+has not been dismissed, an informational band appears above the terminal, below its tabs. It takes layout space rather
+than covering the question, is announced without taking focus, and explains that answering automatically would require
+editing Claude's own settings with caveats. Settings and caveats opens Settings at the switch; Don't show again stores a
+shared dismissal, reversible beside the switch. × hides only the current occurrence, until the question leaves the
+screen. Other clients observe saved changes through the normal invalidation feed.
 
 When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
 explicit-save field, explaining that it sets the folder for every host and can be changed later in Settings. Refusal
@@ -1789,22 +1810,23 @@ cannot be relied upon, such as correlating the vendor's files on disk with a lau
 match resumes, and appends to, a conversation that is not the session's own. Checking the exact file a report names is
 verification of that report, not identification. A launch whose harness cannot report, or whose report never arrived,
 has no captured identity and cannot be restarted: Restart says why, and Replace starts the session over. What capture
-never does is write to the agent's own configuration or record directories. A hook passed on the command line for one
-launch is allowed because it writes nothing the vendor owns — no configuration file, no conversation record, no trust
-state — and cannot outlive the launch that carried it. It is not invisible in the absolute: the report it delivers is
-written to a file in farhelm's own state directory and from there lands in farhelm's own database, and every run leaves
-a line in farhelm's own hook log. Vendor-owned state is the boundary the no-agent-configuration rule from Status is
-protecting, and that rule's own example — hooks written into the agent's configuration — still stands. Grok is the
-documented opt-in exception: the user installs its hook entries, and Farhelm itself never writes, edits, or removes
-them. Every integrated agent type identifies conversations only through accepted reports; Farhelm never selects a
-conversation by scanning vendor state. Historical stored identities remain usable under the same per-type Resume rules,
-regardless of their source. A reporting credential alone does not establish which Codex conversation is in the
-foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi loads
-a private static extension from Farhelm's state directory on every launch. A Pi report without a session file withdraws
-the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without following
-symlinks and requires its session ID to match. A failed check withdraws the durable resume offer, which makes Restart
-unavailable, and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that
-request.
+never does is write to the agent's own configuration or record directories. The opt-in managed-checkout Claude trust
+edit is a separate, narrowly scoped exception to the no-agent-configuration rule; it does not participate in capture. A
+hook passed on the command line for one launch is allowed because it writes nothing the vendor owns — no configuration
+file, no conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
+absolute: the report it delivers is written to a file in farhelm's own state directory and from there lands in farhelm's
+own database, and every run leaves a line in farhelm's own hook log. Vendor-owned state is the boundary the
+no-agent-configuration rule from Status is protecting, and that rule's own example — hooks written into the agent's
+configuration — still stands. Grok is the documented opt-in exception: the user installs its hook entries, and Farhelm
+itself never writes, edits, or removes them. Every integrated agent type identifies conversations only through accepted
+reports; Farhelm never selects a conversation by scanning vendor state. Historical stored identities remain usable under
+the same per-type Resume rules, regardless of their source. A reporting credential alone does not establish which Codex
+conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses
+it on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
+session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
+file without following symlinks and requires its session ID to match. A failed check withdraws the durable resume offer,
+which makes Restart unavailable, and rejects the stale Resume request so the user can refresh; it never silently
+launches fresh under that request.
 
 Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's owned pane.
 Later reports must come from that process, not a Codex process below it that inherited its credential. Resident

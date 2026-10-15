@@ -137,6 +137,7 @@ mod attachments;
 mod auth;
 mod checkout_post_clone;
 mod checkout_root;
+mod claude_trust;
 #[cfg(native_desktop)]
 pub mod desktop;
 mod feed;
@@ -337,6 +338,9 @@ pub struct Session {
     /// observed bypass; the stored launch remains permission authority.
     #[serde(default)]
     pub screen_yolo: bool,
+    /// Current sampled trust question; never admission or permission evidence.
+    #[serde(default)]
+    pub claude_trust_prompt: bool,
     pub id: String,
     pub title: String,
     pub cwd: String,
@@ -1540,6 +1544,9 @@ fn AppBody() -> Element {
         }
     });
     let mut current = use_signal(|| None::<Session>);
+    use_context_provider(|| {
+        claude_trust::OccurrenceDismissals(Signal::new(std::collections::HashSet::new()))
+    });
     // Authentication recovery remounts PreferencesGate, but must not decide
     // whether to introduce the app a second time in the same page load.
     use_context_provider(|| welcome::WelcomeDecided(Signal::new(false)));
@@ -2693,6 +2700,7 @@ mod tests {
     fn effective_activity_falls_back_to_creation_time_only_when_unknown() {
         let at = |last_activity_at: i64, created_at: i64| Session {
             screen_yolo: false,
+            claude_trust_prompt: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             cwd: "/tmp".to_string(),
@@ -2760,6 +2768,7 @@ mod tests {
     fn has_unseen_output_reads_absence_staleness_and_the_equal_boundary() {
         let at = |seen_activity_at: Option<Option<i64>>, last_activity_at: i64| Session {
             screen_yolo: false,
+            claude_trust_prompt: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             cwd: "/tmp".to_string(),

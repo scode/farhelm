@@ -2171,6 +2171,7 @@ mod tests {
             req_id,
             sessions: vec![SessionInfo {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
@@ -2236,6 +2237,7 @@ mod tests {
             req_id: 7,
             session: SessionInfo {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
@@ -2275,6 +2277,7 @@ mod tests {
             req_id: 9,
             session: SessionInfo {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),

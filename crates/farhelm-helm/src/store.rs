@@ -320,7 +320,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 52;
+const SCHEMA_VERSION: i64 = 53;
 
 /// One helm-wide configuration row, kept apart from replayed preferences:
 /// explicit saves validate these values, and reads must never return the token.
@@ -464,7 +464,8 @@ const CHECKOUT_CONFIG_SCHEMA: &str = "\
                  singleton  INTEGER PRIMARY KEY CHECK (singleton = 1),
                  root       TEXT,
                  post_clone TEXT,
-                 revision   INTEGER NOT NULL
+                 revision   INTEGER NOT NULL,
+                 claude_trust INTEGER NOT NULL DEFAULT 0 CHECK (claude_trust IN (0, 1))
              ) STRICT;
              INSERT INTO checkout_config (singleton, root, post_clone, revision)
                  VALUES (1, NULL, NULL, 0);
@@ -980,6 +981,9 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
+    /// Shared opt-out for the managed-checkout Claude trust hint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_trust_hint_dismissed: Option<bool>,
     /// Dismissal shared by every client of this helm. Unset means unseen,
     /// including existing helms upgraded from before the welcome card.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1043,6 +1047,13 @@ pub struct Preferences {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreferencePatch {
+    /// Null restores the hint; omission preserves another client's choice.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub claude_trust_hint_dismissed: Option<Option<bool>>,
     /// Null restores unseen; omission preserves another client's dismissal.
     #[serde(
         default,
@@ -1921,6 +1932,7 @@ pub struct HelmStore {
 /// - 51: nullable `welcome_seen` on the preferences row; unset means the welcome card
 ///   has not been seen, including on helms upgraded from an older schema.
 /// - 52: `session_pins`, shared pin membership, initially empty.
+/// - 53: off-by-default managed-checkout Claude trust and shared hint dismissal.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2136,7 +2148,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  skip_session_confirmations INTEGER CHECK (skip_session_confirmations IN (0, 1)),
                  quick_launch_template TEXT,
                  template_shortcuts TEXT NOT NULL DEFAULT '{{}}',
-                 welcome_seen INTEGER CHECK (welcome_seen IN (0, 1))
+                 welcome_seen INTEGER CHECK (welcome_seen IN (0, 1)),
+                 claude_trust_hint_dismissed INTEGER CHECK (claude_trust_hint_dismissed IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2227,7 +2240,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 52;",
+              PRAGMA user_version = 53;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3360,6 +3373,36 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 52")?;
         version = 52;
     }
+    if version == 52 {
+        // Historical migration fixtures sometimes rewind only user_version;
+        // add each column only when absent, without resetting stored choices.
+        for (table, column, declaration) in [
+            (
+                "checkout_config",
+                "claude_trust",
+                "INTEGER NOT NULL DEFAULT 0 CHECK (claude_trust IN (0, 1))",
+            ),
+            (
+                "preferences",
+                "claude_trust_hint_dismissed",
+                "INTEGER CHECK (claude_trust_hint_dismissed IN (0, 1))",
+            ),
+        ] {
+            let present: bool = tx.query_row(
+                "SELECT count(*) != 0 FROM pragma_table_info(?1) WHERE name = ?2",
+                rusqlite::params![table, column],
+                |row| row.get(0),
+            )?;
+            if !present {
+                tx.execute_batch(&format!(
+                    "ALTER TABLE {table} ADD COLUMN {column} {declaration};"
+                ))?;
+            }
+        }
+        tx.execute_batch("PRAGMA user_version = 53;")
+            .context("migrating helm.db to schema version 53")?;
+        version = 53;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4290,12 +4333,13 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
                         let remembered_permissions: Option<String> = row.get(3)?;
                         Ok(Preferences {
+                            claude_trust_hint_dismissed: row.get(13)?,
                             welcome_seen: row.get(12)?,
                             list_sort: row.get(0)?,
                             last_selected: row.get(1)?,
@@ -4352,6 +4396,8 @@ impl HelmStore {
             // which a COALESCE could not express.
             let welcome_seen_present = patch.welcome_seen.is_some();
             let welcome_seen = patch.welcome_seen.flatten();
+            let trust_hint_present = patch.claude_trust_hint_dismissed.is_some();
+            let trust_hint = patch.claude_trust_hint_dismissed.flatten();
             let sort_present = patch.list_sort.is_some();
             let selected_present = patch.last_selected.is_some();
             let compact_present = patch.compact.is_some();
@@ -4379,8 +4425,8 @@ impl HelmStore {
             conn
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -4399,7 +4445,8 @@ impl HelmStore {
                          skip_session_confirmations = CASE WHEN ?20 THEN excluded.skip_session_confirmations ELSE skip_session_confirmations END, \
                          quick_launch_template = CASE WHEN ?22 THEN excluded.quick_launch_template ELSE quick_launch_template END, \
                          template_shortcuts = CASE WHEN ?24 THEN excluded.template_shortcuts ELSE template_shortcuts END, \
-                         welcome_seen = CASE WHEN ?26 THEN excluded.welcome_seen ELSE welcome_seen END",
+                         welcome_seen = CASE WHEN ?26 THEN excluded.welcome_seen ELSE welcome_seen END, \
+                         claude_trust_hint_dismissed = CASE WHEN ?28 THEN excluded.claude_trust_hint_dismissed ELSE claude_trust_hint_dismissed END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -4426,7 +4473,9 @@ impl HelmStore {
                         template_shortcuts,
                         template_shortcuts_present,
                         welcome_seen,
-                        welcome_seen_present
+                        welcome_seen_present,
+                        trust_hint,
+                        trust_hint_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -7560,6 +7609,7 @@ mod tests {
     fn session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: id.to_string(),
@@ -7872,6 +7922,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -9367,6 +9418,7 @@ mod tests {
                     "identity-a",
                     &SessionInfo {
                         screen_yolo: false,
+                        claude_trust_prompt: false,
                         creation_seq: None,
                         ..session("b100", 10)
                     }
@@ -10265,6 +10317,7 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                claude_trust_hint_dismissed: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -10290,6 +10343,7 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                claude_trust_hint_dismissed: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -10314,6 +10368,7 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                claude_trust_hint_dismissed: None,
             },
             "an explicit null clears exactly the field it names"
         );
@@ -10387,6 +10442,7 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                claude_trust_hint_dismissed: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -10724,6 +10780,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -11592,6 +11649,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -11727,6 +11785,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -11766,6 +11825,7 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                claude_trust_hint_dismissed: None,
             },
             "the new field defaults absent while both existing choices survive"
         );
@@ -11802,6 +11862,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -11837,6 +11898,7 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                claude_trust_hint_dismissed: None,
             },
             "the new field defaults absent while every existing choice survives"
         );
@@ -11860,6 +11922,7 @@ mod tests {
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch("ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template; ALTER TABLE preferences DROP COLUMN skip_session_confirmations; PRAGMA user_version = 47;").unwrap();
             assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'skip_session_confirmations'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
@@ -11932,6 +11995,7 @@ mod tests {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch("ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations; PRAGMA user_version = 45;").unwrap();
@@ -12009,6 +12073,7 @@ mod tests {
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -12095,6 +12160,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -12236,6 +12302,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -13723,6 +13790,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN skip_host_setup_confirmation;
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -15834,16 +15902,19 @@ mod tests {
                 vec![
                     SessionInfo {
                         screen_yolo: false,
+                        claude_trust_prompt: false,
                         title: "keeper".to_string(),
                         ..session("good-1", 500)
                     },
                     SessionInfo {
                         screen_yolo: false,
+                        claude_trust_prompt: false,
                         title: "keeper".to_string(),
                         ..session("undecodable", 400)
                     },
                     SessionInfo {
                         screen_yolo: false,
+                        claude_trust_prompt: false,
                         title: "keeper".to_string(),
                         ..session("mislabelled", 300)
                     },
@@ -16347,7 +16418,8 @@ mod tests {
         drop(store);
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
-            "ALTER TABLE preferences DROP COLUMN welcome_seen; PRAGMA user_version = 50;",
+            "ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed; PRAGMA user_version = 50;",
         )
         .unwrap();
         assert_eq!(
@@ -16414,6 +16486,7 @@ mod tests {
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
             "ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts; PRAGMA user_version = 49;",
         )
         .unwrap();
@@ -16551,6 +16624,7 @@ mod tests {
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
             "ALTER TABLE preferences DROP COLUMN welcome_seen;
+                 ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template; PRAGMA user_version = 48;",
         )

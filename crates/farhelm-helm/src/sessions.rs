@@ -1214,6 +1214,7 @@ async fn github_checkout_resolution(
         repo,
         root,
         post_clone: config.post_clone,
+        claude_trust: config.claude_trust,
         preview: preview.binding.clone(),
     })))
 }

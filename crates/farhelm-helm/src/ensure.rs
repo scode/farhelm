@@ -489,6 +489,7 @@ mod tests {
                 "identity-known",
                 vec![farhelm_proto::SessionInfo {
                     screen_yolo: false,
+                    claude_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "remembered".to_string(),

@@ -754,6 +754,7 @@ mod tests {
     fn session(id: &str, title: &str) -> Session {
         Session {
             screen_yolo: false,
+            claude_trust_prompt: false,
             id: id.into(),
             title: title.into(),
             cwd: "/tmp".into(),
@@ -1096,6 +1097,7 @@ mod tests {
         let stale_above = vec![
             Session {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 stale: true,
                 ..session("a", "a")
             },

@@ -253,7 +253,7 @@ impl Supervisor {
         &self,
         entry: &SessionEntry,
         session_id: &str,
-        _directory_admission: tokio::sync::OwnedMutexGuard<()>,
+        directory_admission: tokio::sync::OwnedMutexGuard<()>,
     ) -> Result<farhelm_proto::SessionDeleteOutcome, TeardownError> {
         // The process-tree sweep runs BEFORE any lock is held: it can
         // take seconds (a grace period plus several /proc walks), and
@@ -547,6 +547,9 @@ impl Supervisor {
         let mut notices: Vec<String> = Vec::new();
         let mut archived = false;
         let mut released: Vec<String> = Vec::new();
+        // Only a confirmed archive/missing decision authorizes trust cleanup;
+        // releasing an unarchived checkout must retain its vendor entry.
+        let mut trust_cleanup = std::collections::HashMap::new();
         let teardown: Result<crate::store::DeleteSettlement, String> = async {
             if output_reap_blocked {
                 // Reaping is the only state that still proves a runtime task
@@ -734,6 +737,7 @@ impl Supervisor {
                         match self.archive_last_reference(&row, &registry, session_id).await {
                             Ok(moved) => {
                                 archived |= moved;
+                                trust_cleanup.insert(row.id.clone(), row.canonical_path.clone());
                             }
                             Err(skipped) => {
                                 let path = row.canonical_path.clone().unwrap_or_else(|| {
@@ -793,6 +797,9 @@ impl Supervisor {
                 late_released,
             }) => {
                 for late in late_released {
+                    // A directory that reappeared before retirement was
+                    // released, not archived. Preserve its trust as well.
+                    trust_cleanup.retain(|_, path| path.as_deref() != Some(late.path.as_str()));
                     warn!(
                         session = %session_id, path = %late.path, reason = %late.reason,
                         "the deleted session's missing checkout could not be re-proved missing; \
@@ -869,8 +876,51 @@ impl Supervisor {
         // Every former member's process teardown has now completed, and the
         // final membership is durably gone. Unlinking a preparation lock any
         // earlier could split a live shim's flock across two different inodes.
+        // Vendor lock contention must not delay this Delete's reply. Retain
+        // directory admission in the worker until cleanup settles: allocation
+        // must not reuse a freed path while its old remover can still erase a
+        // new checkout's trust key. Other lifecycle work may wait; terminal I/O
+        // and listings use neither this guard nor the worker's vendor lock.
+        let mut deferred = Vec::new();
         for checkout_id in retired_checkouts {
+            if trust_cleanup.contains_key(&checkout_id) {
+                let path = crate::launch::preparation_state_path(&self.state_dir, &checkout_id);
+                match crate::launch::read_preparation_state(&path, &checkout_id) {
+                    Ok(Some(record)) if record.claude_trust.is_some() => {
+                        deferred.push(checkout_id);
+                        continue;
+                    }
+                    Err(error) => {
+                        warn!(working_copy = %checkout_id, error = %error,
+                            "retired checkout preparation is unreadable; cleanup evidence retained");
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            // Legacy and opt-out checkouts keep their ordinary synchronous
+            // metadata cleanup; only a real vendor edit needs a worker.
             cleanup_retired_preparation(&self.state_dir, &checkout_id).await;
+        }
+        if !deferred.is_empty() {
+            let state_dir = self.state_dir.clone();
+            let ownership = self.ownership.clone();
+            tokio::task::spawn_blocking(move || {
+                let _admission = directory_admission;
+                // These guards belong to the actual filesystem worker, not
+                // an async waiter that cancellation can drop before it ends.
+                let _ownership = ownership;
+                for checkout_id in deferred {
+                    if let Err(error) =
+                        crate::launch::remove_preparation_trust_sync(&state_dir, &checkout_id)
+                    {
+                        warn!(working_copy = %checkout_id, error = %error,
+                            "checkout retired but Claude trust cleanup failed; preparation evidence retained");
+                    } else {
+                        cleanup_retired_preparation_sync(&state_dir, &checkout_id);
+                    }
+                }
+            });
         }
         // The row is gone, so the quarantined attachments now
         // belong to nothing and can be removed for real. Failure
@@ -1179,6 +1229,20 @@ impl Supervisor {
 /// teardown. Cleanup failure cannot undo committed Delete or authorize another
 /// checkout move: leave the failed artifact and report its path for inspection.
 async fn cleanup_retired_preparation(state_dir: &std::path::Path, checkout_id: &str) {
+    let state_dir = state_dir.to_owned();
+    let checkout_id = checkout_id.to_owned();
+    if let Err(error) = tokio::task::spawn_blocking(move || {
+        cleanup_retired_preparation_sync(&state_dir, &checkout_id)
+    })
+    .await
+    {
+        warn!(error = %error, "checkout preparation cleanup worker panicked");
+    }
+}
+
+/// The blocking retirement worker uses the same metadata cleanup as the
+/// ordinary async path, while keeping its admission guard in one closure.
+fn cleanup_retired_preparation_sync(state_dir: &std::path::Path, checkout_id: &str) {
     // Registry IDs originate as UUIDs. Corrupt persisted text must not turn
     // this metadata cleanup into an unlink outside the preparation directory.
     if uuid::Uuid::parse_str(checkout_id).is_err() {
@@ -1192,7 +1256,7 @@ async fn cleanup_retired_preparation(state_dir: &std::path::Path, checkout_id: &
         crate::launch::preparation_lock_path(&state_path),
         state_path,
     ] {
-        if let Err(error) = tokio::fs::remove_file(&path).await
+        if let Err(error) = std::fs::remove_file(&path)
             && error.kind() != std::io::ErrorKind::NotFound
         {
             warn!(working_copy = %checkout_id, path = %path.display(), error = %error,
@@ -2288,6 +2352,212 @@ mod tests {
         std::fs::File::create(&lock).unwrap();
         assert!(path.is_file() && lock.is_file());
         (path, lock)
+    }
+
+    /// Plant a real managed allocation with a recorded vendor trust edit. No
+    /// shim or Claude process runs; the deletion path still proves retirement
+    /// through the ordinary store and archive primitives.
+    async fn trusted_checkout(
+        sup: &Arc<Supervisor>,
+    ) -> (
+        Arc<SessionEntry>,
+        String,
+        PathBuf,
+        crate::launch::ClaudeTrustRecord,
+    ) {
+        let root = sup.state_dir.join("workroot");
+        std::fs::create_dir(&root).unwrap();
+        let checkout_id = uuid::Uuid::new_v4().to_string();
+        let allocation = {
+            let conn = sup.store.conn.lock();
+            crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: checkout_id.clone(),
+                    canonical_root: root.to_str().unwrap().into(),
+                    repo_owner: "example".into(),
+                    repo_name: "project".into(),
+                    original_basename: "project".into(),
+                    origin_session_id: "trust-origin".into(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .unwrap();
+            crate::working_copies::allocate(&conn, &checkout_id, None).unwrap()
+        };
+        let entry = seeded_session(
+            sup,
+            "trust-origin",
+            allocation.canonical_path.to_str().unwrap(),
+        )
+        .await;
+        let (preparation, _) = preparation_files(&sup.state_dir, &checkout_id);
+        let config = sup.state_dir.join(".claude.json");
+        std::fs::write(&config, "{\"unrelated\":42}").unwrap();
+        let environment = crate::agent_kind::claude::trust::Environment {
+            home: sup.state_dir.clone(),
+            config_dir: None,
+            custom_oauth: false,
+        };
+        let trust =
+            crate::agent_kind::claude::trust::resolve(&environment, &allocation.canonical_path)
+                .unwrap()
+                .unwrap();
+        let mut record = crate::launch::read_preparation_state(&preparation, &checkout_id)
+            .unwrap()
+            .unwrap();
+        record.claude_trust = Some(trust.clone());
+        crate::files::write_durable_sync(
+            &preparation,
+            &serde_json::to_vec(&record).unwrap(),
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        crate::agent_kind::claude::trust::edit(Some(&trust), true).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+        assert_eq!(
+            value["projects"][&trust.project_path]["hasTrustDialogAccepted"],
+            true
+        );
+        (entry, checkout_id, preparation, trust)
+    }
+
+    /// A busy vendor lock cannot delay Delete's reply, but path allocation
+    /// stays fenced until removal ends so the old worker cannot erase a newer
+    /// checkout's trust. Missing-source retirement has the same cleanup duty.
+    #[farhelm_testtrace::test]
+    async fn claude_trust_cleanup_is_off_reply_path_and_fences_reuse() {
+        for missing in [false, true] {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let (entry, checkout_id, preparation, trust) = trusted_checkout(&sup).await;
+            if missing {
+                std::fs::remove_dir(&trust.project_path).unwrap();
+            }
+            std::fs::create_dir(&trust.lock_path).unwrap();
+            assert!(
+                trust.lock_path.is_dir(),
+                "fixture owns the contended vendor lock"
+            );
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                sup.teardown_session(&entry, "trust-origin", test_admission(&sup).await),
+            )
+            .await
+            .expect("Delete must not wait for the twelve-second vendor lock budget")
+            .unwrap_or_else(|_| panic!("archive outcome must not block Delete"));
+            assert_eq!(outcome.archived, !missing);
+            assert!(sup.store.session("trust-origin").await.unwrap().is_none());
+            assert!(preparation.exists(), "worker still owns the removal record");
+            assert!(
+                sup.working_copy_operations.try_lock().is_err(),
+                "reuse remains fenced while the old edit is pending"
+            );
+            std::fs::remove_dir(&trust.lock_path).unwrap();
+            let _settled = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                sup.working_copy_operations.lock(),
+            )
+            .await
+            .expect("cleanup releases directory admission");
+            let value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&trust.config_path).unwrap()).unwrap();
+            assert!(
+                value["projects"][&trust.project_path]
+                    .get("hasTrustDialogAccepted")
+                    .is_none()
+            );
+            assert_eq!(value["unrelated"], 42);
+            assert!(!preparation.exists());
+            assert_eq!(
+                sup.store
+                    .working_copy_member_count(&checkout_id)
+                    .await
+                    .unwrap(),
+                0
+            );
+        }
+    }
+
+    /// A refused archive leaves the checkout in place and releases management.
+    /// It must not remove the trust key merely because its session was deleted.
+    #[farhelm_testtrace::test]
+    async fn claude_trust_survives_a_refused_archive() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let (entry, _, _, trust) = trusted_checkout(&sup).await;
+        let root = sup.state_dir.join("workroot");
+        std::fs::rename(&root, sup.state_dir.join("original-root")).unwrap();
+        std::fs::create_dir(&root).unwrap();
+        let outcome = sup
+            .teardown_session(&entry, "trust-origin", test_admission(&sup).await)
+            .await
+            .unwrap_or_else(|_| panic!("archive refusal still deletes the session"));
+        assert!(!outcome.archived);
+        assert!(outcome.notice.is_some());
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&trust.config_path).unwrap()).unwrap();
+        assert_eq!(
+            value["projects"][&trust.project_path]["hasTrustDialogAccepted"],
+            true
+        );
+    }
+
+    /// Retirement can commit just before a supervisor crash loses its worker.
+    /// The persisted record recovers that edit before a free path can be
+    /// allocated again, without re-running clone or preparation.
+    #[farhelm_testtrace::test]
+    async fn claude_trust_retired_record_recovers_at_startup() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let (entry, checkout_id, preparation, trust) = trusted_checkout(&sup).await;
+        let archived = sup
+            .store
+            .archive_move_working_copy(&checkout_id, None)
+            .await
+            .unwrap();
+        assert!(matches!(
+            archived,
+            crate::working_copies::ArchiveOutcome::Archived { .. }
+        ));
+        sup.store
+            .delete_session_archiving_memberships("trust-origin", &[])
+            .await
+            .unwrap();
+        assert!(!std::path::Path::new(&trust.project_path).exists());
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&trust.config_path).unwrap()).unwrap();
+        assert_eq!(
+            value["projects"][&trust.project_path]["hasTrustDialogAccepted"], true,
+            "fixture simulates loss of the worker, not completed cleanup"
+        );
+        drop(entry);
+        drop(sup);
+        let _reopened = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&trust.config_path).unwrap()).unwrap();
+        assert!(
+            value["projects"][&trust.project_path]
+                .get("hasTrustDialogAccepted")
+                .is_none()
+        );
+        assert!(
+            crate::launch::read_preparation_state(&preparation, &checkout_id)
+                .unwrap()
+                .unwrap()
+                .claude_trust
+                .is_none()
+        );
     }
 
     /// A checkout the teardown saw as missing, whose absence no longer holds

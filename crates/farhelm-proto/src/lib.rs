@@ -203,7 +203,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_50` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_51` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -214,7 +214,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 50;
+pub const PROTOCOL_VERSION: u32 = 51;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -870,6 +870,10 @@ impl SessionStatus {
 /// (SPEC.md); the helm never invents or mutates these fields.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionInfo {
+    /// Current sampled Claude trust dialog, used only for an informational
+    /// managed-checkout hint. Missing evidence and older stored rows mean false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub claude_trust_prompt: bool,
     /// Advisory permission-footer evidence from the current agent run. False
     /// means no observed bypass, not proof of guardrails. Never use this to admit
     /// launches or inherit permissions; only the stored launch has that authority.
@@ -4401,6 +4405,7 @@ mod tests {
     fn session_info_created_at_json_shape_is_pinned() {
         let info = SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -4566,6 +4571,7 @@ mod tests {
     fn session_info_github_fields_decode_absent_and_roundtrip() {
         let mut info = SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -4631,6 +4637,7 @@ mod tests {
             repo,
             root: "/checkouts".to_string(),
             post_clone: Some("cargo fetch".to_string()),
+            claude_trust: false,
             preview: CheckoutPreviewBinding {
                 canonical_root: "/checkouts".to_string(),
                 basename: "bar".to_string(),
@@ -4798,8 +4805,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_50() {
-        assert_eq!(PROTOCOL_VERSION, 50);
+    fn protocol_version_is_pinned_at_51() {
+        assert_eq!(PROTOCOL_VERSION, 51);
     }
 
     /// Placement setup has its own acknowledgement. Request echoes cannot settle it,
@@ -5710,6 +5717,7 @@ mod tests {
     fn session_info_agent_kind_decodes_absent_as_generic_and_roundtrips() {
         let info = SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             parent: None,
             id: "s1".to_string(),
             title: "demo".to_string(),
@@ -5768,6 +5776,7 @@ mod tests {
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -5918,6 +5927,7 @@ mod tests {
     fn the_effective_activity_falls_back_to_creation_time_only_when_unknown() {
         let at = |created_at: i64, last_activity_at: i64| SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             id: "s1".to_string(),
             parent: None,
@@ -5961,6 +5971,7 @@ mod tests {
     fn effective_work_start_falls_back_stably_and_saturates() {
         let mut info = SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             id: "s1".to_string(),
             parent: None,
@@ -6007,6 +6018,7 @@ mod tests {
     fn session_info_tabs_json_shape_is_pinned() {
         let info = SessionInfo {
             screen_yolo: false,
+            claude_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -6638,6 +6650,7 @@ mod tests {
             req_id: 42,
             session: SessionInfo {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
@@ -6776,6 +6789,7 @@ mod tests {
             req_id: 8,
             session: SessionInfo {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
@@ -6918,6 +6932,7 @@ mod tests {
                     req_id: 50,
                     session: SessionInfo {
                         screen_yolo: false,
+                        claude_trust_prompt: false,
                         agent_kind: crate::AgentKind::Generic,
                         parent: None,
                         id: "s1".to_string(),
@@ -7524,6 +7539,7 @@ mod tests {
             req_id: 1,
             sessions: vec![SessionInfo {
                 screen_yolo: false,
+                claude_trust_prompt: false,
                 agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
