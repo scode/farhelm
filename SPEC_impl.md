@@ -3814,6 +3814,35 @@ and then fail before publishing that record; an old or missing record is not evi
 state. Automatic replacement needs stronger attempted-version evidence and is deferred. Supervisor startup, the meaning
 of Running, the standalone installer, the helm, remote hosts and additional advisory directives are unchanged.
 
+Every check starts with a locked read of the installation (`farhelm_supervisor::installation::snapshot`): the
+installation lock on `~/Applications` taken without waiting and without the older installers' lock folder, the ownership
+record and the Installed record read through the app's folder, and the lock released. Nothing is installed without a
+readable snapshot of a complete installation. A busy lock ends the check as "busy": nothing installed, no failure notice
+for an automatic check (which runs again at the next one-minute tick instead of the next day), and the reason for a
+user's check; an installer that finds the lock busy past its own wait exits 74 (`BUSY`) and is treated the same. A
+snapshot that cannot be read is a failed check; no installation at the app's place installs nothing. A record in the
+`installing` or `removing` state (an odd generation found with the lock free) means an interrupted install or uninstall:
+the check installs nothing and publishes `UpdaterState::interrupted`, which the readout shows with the reinstall
+warning's mark and the command to run; only a later check that reads a complete record clears it. Otherwise the record's
+id (none for a two-field record), its generation and the Installed version become the expectation the installer is run
+with, as `FARHELM_INSTALL_EXPECT=<id or ->:<generation>:<installed or ->`. The installer's locked work compares it
+through the same `Contents/` folder it then updates, before changing anything, and, if the installation changed, changes
+nothing and exits 75 (`STATE_CHANGED`), which the updater treats like a busy lock. A two-field record matched by a "no
+id" expectation is given its id by that run, so the id is never minted before the comparison. Installers from before
+this variable ignore it.
+
+At startup the desktop app reads its installation's record through its own app folder before it resolves its version
+(`desktop/bundle.rs`). If its own version's `farhelm` is gone, it compares that with what is at the same place now: the
+same installation id, a different Installed version, and that version's program present mean the version moved on while
+the app was starting, and the app runs a helper that waits for it to exit and then runs
+`open -n --env FARHELM_DESKTOP_REOPENED=<installation id>` on the bundle, then exits. A reopened app whose own
+installation id is not the marker's (another installation was put at the place meanwhile) refuses, and one that is never
+reopens again. The marker is for that app alone: it is removed from the environment of the supervisor the app starts
+(and so from every session) and of the next instance Restart to update opens. A record that is gone or says `removing`
+refuses with "Farhelm was uninstalled" and the install command, one that says `installing` refuses with "an install was
+interrupted" and the command that finishes it, and anything else refuses with the plain missing-version sentence, which
+keeps the marker text the installer checks.
+
 Release tests in `releasing/mac-vm-test/` can select a stable candidate before `/latest` names it by launching the app
 with `FARHELM_DESKTOP_UPDATE_LATEST=v<version>`. The updater captures it once as an `Option<OsString>` when building its
 dependencies; automatic and on-demand checks share that probe. A present value goes through the same stable-tag parser
@@ -3832,20 +3861,20 @@ directory and run the script with `/bin/sh`, rather than piping a `curl` into `s
 failed download is an error before anything runs. The installer starts from the app's own environment with every
 `FARHELM_*` variable removed (an inherited `FARHELM_INSTALL_TEST_BASE_URL` would redirect the download) and exactly two
 set: `FARHELM_VERSION` to X, and `FARHELM_INSTALL_SUMS_FILE` to the verified checksum file, which the installer then
-uses instead of fetching its own, so every archive it downloads is checked against signed hashes. `HOME`, `PATH` and
-proxy settings stay what the user's own run would see. The installer's interface to the updater is a permanent contract,
-part of the site layout's contract ("Verification chain (D3)"): every shipped updater runs future releases' `install.sh`
-with exactly `FARHELM_VERSION` and `FARHELM_INSTALL_SUMS_FILE`, and with a checksum file that may list more entries than
-the installer needs. A later installer that renames or drops either variable, or rejects extra entries, breaks every
-installed app's updates. The install step is one function that takes the downloader and the runner (`install_release`),
-which is the seam its tests drive with signed fixtures. Its output goes to the app's log. A Finder-launched app has no
-tmux on its `PATH`, so that log shows the installer's tmux advice, harmlessly. Success is judged only by
-`Contents/Versions/installed` naming the target version once the installer has exited, never by its exit status alone.
-The installer runs in its own process group, with stdin from `/dev/null` and its output written to a file beside the
-script rather than to a pipe the app reads, so that quitting the app mid-install neither kills nor signals it: an
-installer killed by a broken pipe would skip its own cleanup and leave its lock behind, and every later install,
-automatic or by hand, would refuse until someone removed it. The worker copies that file into the app's log once the
-installer exits.
+uses instead of fetching its own, so every archive it downloads is checked against signed hashes (and, from the
+race-free installer on, `FARHELM_INSTALL_EXPECT`, below). `HOME`, `PATH` and proxy settings stay what the user's own run
+would see. The installer's interface to the updater is a permanent contract, part of the site layout's contract
+("Verification chain (D3)"): every shipped updater runs future releases' `install.sh` with exactly `FARHELM_VERSION` and
+`FARHELM_INSTALL_SUMS_FILE`, and with a checksum file that may list more entries than the installer needs. A later
+installer that renames or drops either variable, or rejects extra entries, breaks every installed app's updates. The
+install step is one function that takes the downloader and the runner (`install_release`), which is the seam its tests
+drive with signed fixtures. Its output goes to the app's log. A Finder-launched app has no tmux on its `PATH`, so that
+log shows the installer's tmux advice, harmlessly. Success is judged only by `Contents/Versions/installed` naming the
+target version once the installer has exited, never by its exit status alone. The installer runs in its own process
+group, with stdin from `/dev/null` and its output written to a file beside the script rather than to a pipe the app
+reads, so that quitting the app mid-install neither kills nor signals it: an installer killed by a broken pipe would
+skip its own cleanup and leave its lock behind, and every later install, automatic or by hand, would refuse until
+someone removed it. The worker copies that file into the app's log once the installer exits.
 
 Version order uses the helm's SemVer precedence (`farhelm_helm::build_is_newer`), the same comparison the host list uses
 for a host's build, so there is one rule for which build is newer.

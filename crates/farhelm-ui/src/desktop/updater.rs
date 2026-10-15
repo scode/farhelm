@@ -37,6 +37,7 @@ use std::sync::Condvar;
 use std::time::SystemTime;
 
 use farhelm_helm::{build_is_newer, is_development_build};
+use farhelm_supervisor::installation::{Expectation, InstallLockError, InstallState, Snapshot};
 use sha2::Digest as _;
 
 mod advisories;
@@ -98,6 +99,12 @@ const VERSION_PIN_ENV: &str = "FARHELM_VERSION";
 /// release's `install.sh` (SPEC_impl.md, "The desktop app's updater").
 const SUMS_FILE_ENV: &str = "FARHELM_INSTALL_SUMS_FILE";
 
+/// What this app read under the installation lock when it decided to
+/// update, for the installer to compare under the lock
+/// (`farhelm_supervisor::installation::Expectation`). Installers from
+/// before this variable ignore it.
+const EXPECT_ENV: &str = "FARHELM_INSTALL_EXPECT";
+
 // ===== What the updater publishes ==========================================
 
 use crate::app_updater::Activity;
@@ -129,9 +136,24 @@ pub(crate) struct UpdaterState {
     /// way (at startup, with automatic updates on). Network and HTTP
     /// failures never set it.
     pub(crate) needs_reinstall: bool,
+    /// The installation's ownership record, read under the installation
+    /// lock at the last check, says an install or uninstall was interrupted
+    /// (an odd generation with the lock free). Automatic updates stay off
+    /// until the user runs the installer or uninstall again, and the
+    /// readout says so (design, section 4; the maintainer chose this over
+    /// letting the updater finish an install it cannot know the target of).
+    /// Cleared by the next check that finds the installation complete.
+    pub(crate) interrupted: Option<Interrupted>,
     /// Last authenticated snapshot for this run. Failed or missing downloads
     /// retain it; a later verified file can lift a withdrawal.
     advisories: Advisories,
+}
+
+/// Which kind of run left the installation unfinished.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Interrupted {
+    Install,
+    Uninstall,
 }
 
 impl UpdaterState {
@@ -342,6 +364,9 @@ fn relaunch_command(
     let mut command = Command::new("/bin/sh");
     command
         .env_remove(LATEST_OVERRIDE_ENV)
+        // A reopen marker this app started with is not the next instance's:
+        // that one was opened by Restart to update, not by a reopen.
+        .env_remove(super::bundle::REOPENED_ENV)
         .arg("-c")
         .arg(RELAUNCH_SCRIPT)
         .arg("farhelm-relaunch")
@@ -387,6 +412,12 @@ pub(super) fn start(state_path: PathBuf) -> Option<UpdaterHandle> {
         probe: probe_with_latest_override(latest_override, Box::new(probe_latest_release)),
         advisories: Box::new(fetch_advisories),
         install: Box::new(run_installer),
+        snapshot: Box::new({
+            let bundle = contents.parent()?.to_path_buf();
+            let applications = bundle.parent()?.to_path_buf();
+            let app_name = bundle.file_name()?.to_str()?.to_string();
+            move || farhelm_supervisor::installation::snapshot(&applications, &app_name)
+        }),
         read_installed: Box::new(move || read_installed_record(&installed_record)),
         automatic_enabled: Box::new({
             let path = state_path.clone();
@@ -462,7 +493,12 @@ fn read_installed_record(path: &Path) -> Option<String> {
 // ===== The worker ===========================================================
 
 /// Runs the installer pinned to the version it is given.
-type InstallFn = dyn Fn(&str) -> anyhow::Result<()> + Send;
+/// Install a release, handing the installer what the check read under the
+/// installation lock (`None` when there was nothing to expect).
+type InstallFn = dyn Fn(&str, Option<&Expectation>) -> anyhow::Result<()> + Send;
+
+/// Read the installation under its lock, without waiting.
+type SnapshotFn = dyn Fn() -> Result<Snapshot, InstallLockError> + Send;
 
 /// Answers the latest stable release's version.
 type ProbeFn = dyn Fn() -> anyhow::Result<String> + Send;
@@ -482,6 +518,9 @@ pub(super) struct Deps {
     /// Run the installer pinned to this version. Its result is logged; the
     /// Installed record decides whether the install happened.
     pub(super) install: Box<InstallFn>,
+    /// The installation read under its lock: whether an install or
+    /// uninstall was interrupted, and what an update expects to find.
+    pub(super) snapshot: Box<SnapshotFn>,
     /// The version the Installed record names now.
     pub(super) read_installed: Box<dyn Fn() -> Option<String> + Send>,
     /// Whether automatic updates are on now.
@@ -522,6 +561,29 @@ pub(crate) fn readout(state: &UpdaterState) -> crate::app_updater::Readout {
     readout.withdrawn = !warnings.is_empty();
     if !warnings.is_empty() {
         readout.tooltip = format!("{} {}", warnings.join(" "), readout.tooltip);
+    }
+    if let Some(kind) = state.interrupted {
+        // Shown whatever the updater is doing, with the warning mark the
+        // reinstall notice uses: automatic updates are paused, and nothing
+        // else on screen would say so. The command goes last, as there.
+        let lead = match kind {
+            Interrupted::Install => format!(
+                "An install of Farhelm was interrupted, so Farhelm does not update itself until it \
+                 is finished. {} Finish it by running this in a terminal: {REINSTALL_COMMAND}",
+                readout.tooltip
+            ),
+            Interrupted::Uninstall => format!(
+                "An uninstall of Farhelm was interrupted, so Farhelm does not update itself. {} \
+                 Run ~/.local/bin/farhelm uninstall again to finish it, or keep Farhelm by \
+                 running this in a terminal: {REINSTALL_COMMAND}",
+                readout.tooltip
+            ),
+        };
+        return crate::app_updater::Readout {
+            needs_reinstall: true,
+            tooltip: lead,
+            ..readout
+        };
     }
     if !state.needs_reinstall {
         return readout;
@@ -634,6 +696,8 @@ struct Status {
     requested: bool,
     /// See [`UpdaterState::needs_reinstall`].
     needs_reinstall: bool,
+    /// See [`UpdaterState::interrupted`].
+    interrupted: Option<Interrupted>,
 }
 
 impl Status {
@@ -679,6 +743,7 @@ impl Shared {
             notice_id: 0,
             user_update_ready: false,
             needs_reinstall: false,
+            interrupted: None,
             advisories: Advisories::default(),
         });
         Self {
@@ -695,6 +760,7 @@ impl Shared {
                 user_update_ready: false,
                 requested: false,
                 needs_reinstall: false,
+                interrupted: None,
                 advisories: Advisories::default(),
             }),
             wake: Condvar::new(),
@@ -752,6 +818,7 @@ impl Shared {
             notice_id: status.notice_id,
             user_update_ready: status.user_update_ready,
             needs_reinstall: status.needs_reinstall,
+            interrupted: status.interrupted,
             advisories: status.advisories.clone(),
         };
         self.published.send_if_modified(|state| {
@@ -779,6 +846,13 @@ pub(super) struct Engine {
 /// probes end the offline streak even if a later install fails.
 enum CheckResult {
     Success(Activity),
+    /// Another install or uninstall holds the installation lock, or changed
+    /// the installation after this check read it. Nothing was changed; an
+    /// automatic check tries again at the next tick without a notice, and a
+    /// user's check says so.
+    Busy(String),
+    /// The installation is unfinished (see [`UpdaterState::interrupted`]).
+    Interrupted(String),
     ProbeFailed(String),
     InstallFailed(String),
     VerificationFailed(String),
@@ -795,7 +869,9 @@ impl CheckResult {
             Self::ProbeFailed(reason)
             | Self::InstallFailed(reason)
             | Self::VerificationFailed(reason)
-            | Self::Withdrawn(reason) => Activity::Failed(reason.clone()),
+            | Self::Withdrawn(reason)
+            | Self::Busy(reason)
+            | Self::Interrupted(reason) => Activity::Failed(reason.clone()),
         }
     }
 }
@@ -890,6 +966,11 @@ impl Engine {
             !status.user_waiting
         };
         let outcome = self.check_and_install();
+        if automatic && matches!(outcome, CheckResult::Busy(_)) {
+            // Not a failure: looked at again at the next tick rather than
+            // the next daily check.
+            self.last_check = None;
+        }
         let installed = (self.deps.read_installed)();
         let mut status = self.shared.status.lock().expect("updater status poisoned");
         let qualifies = match &outcome {
@@ -964,6 +1045,64 @@ impl Engine {
     /// the grace period only to an unusable `/latest` answer; successful
     /// probes clear that streak before the slower install can fail.
     fn check_and_install(&self) -> CheckResult {
+        // The installation first, read under its lock (design, section 4):
+        // an unfinished install or uninstall pauses updates, a busy lock
+        // means another install or uninstall is running, and what was read
+        // becomes the expectation an update hands its installer.
+        // Nothing is installed without a readable snapshot of a complete
+        // installation: without one there is no expectation to hand the
+        // installer, and an installer run without one updates whatever it
+        // finds, as an older app's would.
+        let snapshot = match (self.deps.snapshot)() {
+            Ok(snapshot) => snapshot,
+            Err(InstallLockError::Busy) => {
+                tracing::info!(
+                    "updater: another install or uninstall is running; trying again later"
+                );
+                return CheckResult::Busy(
+                    "another Farhelm install or uninstall is running; try again in a moment"
+                        .to_string(),
+                );
+            }
+            Err(error) => {
+                tracing::warn!("updater: reading the installation under its lock: {error}");
+                return CheckResult::InstallFailed(format!(
+                    "Farhelm could not read its installation under the installation lock: {error}"
+                ));
+            }
+        };
+        let interrupted = match snapshot.record.as_ref().map(|record| record.state) {
+            Some(InstallState::Installing) => Some(Interrupted::Install),
+            Some(InstallState::Removing) => Some(Interrupted::Uninstall),
+            Some(InstallState::Complete) => None,
+            None => {
+                // No installation of this layout at the app's place: nothing
+                // to update, and nothing positively finished either, so a
+                // shown interrupted warning stays.
+                tracing::info!("updater: no installation at the app's place; not updating");
+                return CheckResult::Success(Activity::Idle);
+            }
+        };
+        {
+            // Cleared only by a record seen complete.
+            let mut status = self.shared.status.lock().expect("updater status poisoned");
+            status.interrupted = interrupted;
+            self.shared.publish(&status);
+        }
+        if let Some(kind) = interrupted {
+            tracing::info!("updater: the installation is unfinished ({kind:?}); not updating");
+            return CheckResult::Interrupted(match kind {
+                Interrupted::Install => {
+                    "an install of Farhelm was interrupted; run the installer again to finish it"
+                        .to_string()
+                }
+                Interrupted::Uninstall => {
+                    "an uninstall of Farhelm was interrupted; run it again, or run the installer"
+                        .to_string()
+                }
+            });
+        }
+        let expectation = snapshot.expectation();
         let probe = (self.deps.probe)();
         // Even an unusable /latest can accompany a withdrawal. Errors here
         // are no new information, never a failed release verification.
@@ -1051,7 +1190,26 @@ impl Engine {
         }
         tracing::info!("updater: installing {latest} (installed: {baseline})");
         self.set_current(Activity::Installing(latest.clone()));
-        if let Err(error) = (self.deps.install)(&latest) {
+        if let Err(error) = (self.deps.install)(&latest, expectation.as_ref()) {
+            if error.downcast_ref::<InstallerBusy>().is_some() {
+                tracing::info!(
+                    "updater: the installer found the installation lock busy; trying again later"
+                );
+                return CheckResult::Busy(
+                    "another Farhelm install or uninstall is running; try again in a moment"
+                        .to_string(),
+                );
+            }
+            if error.downcast_ref::<StateChanged>().is_some() {
+                // Another install or uninstall got there first; the
+                // installer changed nothing. Looked at again shortly.
+                tracing::info!(
+                    "updater: the installation changed during the check; trying again later"
+                );
+                return CheckResult::Busy(
+                    "Farhelm was changed by another install or uninstall; try again".to_string(),
+                );
+            }
             if error.downcast_ref::<UnverifiableRelease>().is_some() {
                 // Nothing was run. Kept, and published whether or not a
                 // user is watching: an app that cannot verify its updates
@@ -1258,7 +1416,33 @@ fn hex_sha256(bytes: &[u8]) -> String {
 /// The file is copied into the app's log after the installer exits; if the
 /// app quits first, the directory holding the script, the checksums and the
 /// log stays in the temporary directory, which the system clears.
-fn run_installer(version: &str) -> anyhow::Result<()> {
+/// The installer reported that the installation changed after the check
+/// read it (`STATE_CHANGED`): nothing was installed, and nothing failed.
+#[derive(Debug)]
+struct StateChanged;
+
+impl std::fmt::Display for StateChanged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the installation changed after the update was decided")
+    }
+}
+
+impl std::error::Error for StateChanged {}
+
+/// The installer found the installation lock held by another install or
+/// uninstall for longer than it waits (`BUSY`): nothing was installed.
+#[derive(Debug)]
+struct InstallerBusy;
+
+impl std::fmt::Display for InstallerBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("another install or uninstall held the installation lock")
+    }
+}
+
+impl std::error::Error for InstallerBusy {}
+
+fn run_installer(version: &str, expectation: Option<&Expectation>) -> anyhow::Result<()> {
     let dir = private_temp_dir()?;
     let fetch = |name: &str, cap: usize| {
         fetch_capped(
@@ -1267,7 +1451,8 @@ fn run_installer(version: &str) -> anyhow::Result<()> {
             INSTALLER_DOWNLOAD_TIMEOUT,
         )
     };
-    let run = |script: &Path, sums: &Path| spawn_installer(&dir, script, sums, version);
+    let run =
+        |script: &Path, sums: &Path| spawn_installer(&dir, script, sums, version, expectation);
     let outcome = install_release(version, farhelm_helm::RELEASE_KEY_RING, &dir, &fetch, &run);
     let _ = std::fs::remove_dir_all(&dir);
     outcome
@@ -1275,7 +1460,13 @@ fn run_installer(version: &str) -> anyhow::Result<()> {
 
 /// Run the verified `script` pinned to `version` with `sums` as its checksum
 /// file, its output in a log in `dir`, and wait for it.
-fn spawn_installer(dir: &Path, script: &Path, sums: &Path, version: &str) -> anyhow::Result<()> {
+fn spawn_installer(
+    dir: &Path,
+    script: &Path,
+    sums: &Path,
+    version: &str,
+    expectation: Option<&Expectation>,
+) -> anyhow::Result<()> {
     let log_path = dir.join("install.log");
     let log =
         File::create(&log_path).with_context(|| format!("creating {}", log_path.display()))?;
@@ -1298,6 +1489,9 @@ fn spawn_installer(dir: &Path, script: &Path, sums: &Path, version: &str) -> any
     }
     command.env(VERSION_PIN_ENV, version);
     command.env(SUMS_FILE_ENV, sums);
+    if let Some(expectation) = expectation {
+        command.env(EXPECT_ENV, expectation.render());
+    }
     let status = command
         .spawn()
         .context("starting the installer")?
@@ -1309,6 +1503,10 @@ fn spawn_installer(dir: &Path, script: &Path, sums: &Path, version: &str) -> any
     }
     if status.success() {
         Ok(())
+    } else if status.code() == Some(farhelm_supervisor::installation::install::STATE_CHANGED) {
+        Err(StateChanged.into())
+    } else if status.code() == Some(farhelm_supervisor::installation::install::BUSY) {
+        Err(InstallerBusy.into())
     } else {
         bail!("the installer exited with {status}")
     }
@@ -1565,18 +1763,24 @@ mod tests {
 
     // ---- Restart to update ----
 
-    /// Spec: the opener's environment explicitly excludes the test override,
-    /// even when the parent app inherited it. This guards the child launch
-    /// contract without setting any variable in the test process; native
-    /// LaunchServices forwarding still needs the Mac release test.
+    /// Spec: the opener's environment explicitly excludes the test override
+    /// and the reopen marker, even when the parent app inherited them. The
+    /// marker belongs to the one app a reopen started (design, section 1:
+    /// at most once); the instance Restart to update opens is not that one.
+    /// This guards the child launch contract without setting any variable
+    /// in the test process; native LaunchServices forwarding still needs the
+    /// Mac release test.
     #[farhelm_testtrace::test]
     fn the_relaunch_command_removes_the_latest_override() {
         let command = relaunch_command(1, Path::new("bundle"), Path::new("opener"), 0, None);
-        assert!(
-            command
-                .get_envs()
-                .any(|(key, value)| key == LATEST_OVERRIDE_ENV && value.is_none())
-        );
+        for removed in [LATEST_OVERRIDE_ENV, super::super::bundle::REOPENED_ENV] {
+            assert!(
+                command
+                    .get_envs()
+                    .any(|(key, value)| key == removed && value.is_none()),
+                "{removed} is removed"
+            );
+        }
     }
 
     /// A stand-in for `/usr/bin/open` that records the arguments it was
@@ -2150,6 +2354,20 @@ mod tests {
         )
     }
 
+    /// A finished installation (generation 2, with an id) whose Installed
+    /// record names `installed`, as the locked read would return it.
+    fn complete_snapshot(installed: Option<String>) -> Snapshot {
+        Snapshot {
+            record: Some(farhelm_supervisor::installation::OwnershipRecord {
+                link: b"/Users/u/.local/bin/farhelm".to_vec(),
+                id: Some("0123456789abcdef0123456789abcdef".to_string()),
+                generation: 2,
+                state: InstallState::Complete,
+            }),
+            installed,
+        }
+    }
+
     /// Inject a restart's durable record without sharing a live worker. Tests
     /// can use the real file closures instead to exercise decoding/write errors.
     fn make_rig_with_streak(
@@ -2181,7 +2399,7 @@ mod tests {
             install: Box::new({
                 let installed = Arc::clone(&installed);
                 let installs = Arc::clone(&installs);
-                move |version| {
+                move |version, _expectation| {
                     installs.lock().unwrap().push(version.to_string());
                     if install_works {
                         *installed.lock().unwrap() = Some(version.to_string());
@@ -2190,6 +2408,12 @@ mod tests {
                         bail!("download failed")
                     }
                 }
+            }),
+            // A complete installation whose Installed record is the rig's;
+            // tests of the locked read replace this.
+            snapshot: Box::new({
+                let installed = Arc::clone(&installed);
+                move || Ok(complete_snapshot(installed.lock().unwrap().clone()))
             }),
             read_installed: Box::new({
                 let installed = Arc::clone(&installed);
@@ -2291,7 +2515,7 @@ mod tests {
         let install_view = Arc::clone(&rig.shared);
         let install_seen = Arc::clone(&seen);
         let installed = Arc::clone(&rig.installed);
-        rig.engine.deps.install = Box::new(move |version| {
+        rig.engine.deps.install = Box::new(move |version, _expectation| {
             install_seen
                 .lock()
                 .unwrap()
@@ -2305,6 +2529,189 @@ mod tests {
         assert_eq!(state.activity, Activity::Idle);
         assert_eq!(state.installed.as_deref(), Some("1.1.0"));
         assert!(state.update_ready());
+    }
+
+    /// Spec: an installation the locked read finds unfinished (an install
+    /// or uninstall was interrupted) pauses updates: an automatic check
+    /// installs nothing and shows no failure, the readout carries the
+    /// warning mark with what to run, and the next check that finds the
+    /// installation complete clears it and updates again.
+    ///
+    /// Why: the maintainer chose pausing with a notice over letting the
+    /// updater finish an install whose target it cannot know, or an
+    /// uninstall the user started; without the notice automatic updates
+    /// would stop silently.
+    #[farhelm_testtrace::test]
+    fn an_interrupted_installation_pauses_updates_with_a_notice() {
+        for (state, kind, words) in [
+            (
+                InstallState::Installing,
+                Interrupted::Install,
+                "install of Farhelm was interrupted",
+            ),
+            (
+                InstallState::Removing,
+                Interrupted::Uninstall,
+                "uninstall of Farhelm was interrupted",
+            ),
+        ] {
+            let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+            rig.engine.deps.snapshot = Box::new(move || {
+                let mut snapshot = complete_snapshot(Some("1.0.0".to_string()));
+                let record = snapshot.record.as_mut().unwrap();
+                record.state = state;
+                record.generation = 3;
+                Ok(snapshot)
+            });
+            rig.engine.wake_once();
+            assert!(
+                rig.installs.lock().unwrap().is_empty(),
+                "{kind:?}: nothing installed"
+            );
+            let published = rig.published();
+            assert_eq!(published.interrupted, Some(kind));
+            assert_eq!(
+                published.activity,
+                Activity::Idle,
+                "{kind:?}: no failure notice"
+            );
+            let shown = readout(&published);
+            assert!(shown.needs_reinstall, "{kind:?}: the warning mark");
+            assert!(shown.tooltip.contains(words), "{kind:?}: {}", shown.tooltip);
+
+            let installed = Arc::clone(&rig.installed);
+            rig.engine.deps.snapshot =
+                Box::new(move || Ok(complete_snapshot(installed.lock().unwrap().clone())));
+            rig.advance(CHECK_INTERVAL);
+            rig.engine.wake_once();
+            assert_eq!(rig.published().interrupted, None, "{kind:?}: cleared");
+            assert_eq!(
+                *rig.installs.lock().unwrap(),
+                ["1.1.0"],
+                "{kind:?}: updating again"
+            );
+        }
+    }
+
+    /// Spec: a busy installation lock (another install or uninstall
+    /// running) is not a failure: an automatic check installs nothing,
+    /// shows nothing, and tries again at the next tick rather than the next
+    /// day; an installer that finds the installation changed since the
+    /// check read it is treated the same. A user's check says why it did
+    /// nothing.
+    ///
+    /// Why: both are ordinary overlaps with another install or uninstall
+    /// that end on their own; a failure notice would cry wolf, and waiting a
+    /// day would leave the app behind for no reason.
+    #[farhelm_testtrace::test]
+    fn a_busy_or_changed_installation_is_retried_quietly() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        rig.engine.deps.snapshot = Box::new(|| Err(InstallLockError::Busy));
+        rig.engine.wake_once();
+        assert!(rig.installs.lock().unwrap().is_empty());
+        assert_eq!(rig.published().activity, Activity::Idle, "nothing shown");
+        let installed = Arc::clone(&rig.installed);
+        rig.engine.deps.snapshot =
+            Box::new(move || Ok(complete_snapshot(installed.lock().unwrap().clone())));
+        rig.engine.wake_once();
+        assert_eq!(
+            *rig.installs.lock().unwrap(),
+            ["1.1.0"],
+            "retried at the next tick, without a day's wait"
+        );
+
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        rig.engine.deps.install = Box::new(|_version, _expectation| Err(StateChanged.into()));
+        rig.engine.wake_once();
+        assert_eq!(
+            rig.published().activity,
+            Activity::Idle,
+            "a changed state is quiet"
+        );
+        rig.shared.check_now();
+        rig.engine.wake_once();
+        assert!(
+            matches!(rig.published().activity, Activity::Failed(ref reason) if reason.contains("another install or uninstall")),
+            "a user's check says why: {:?}",
+            rig.published().activity
+        );
+    }
+
+    /// Spec: nothing is installed without a readable snapshot of a complete
+    /// installation. An unreadable one is a failure the user sees; no
+    /// installation at the app's place installs nothing and leaves a shown
+    /// interrupted warning alone, since nothing was seen to finish; an
+    /// installer that finds the lock busy is retried quietly like a busy
+    /// snapshot.
+    ///
+    /// Why: an installer run without an expectation updates whatever it
+    /// finds, which is the old updaters' behavior this release replaces.
+    #[farhelm_testtrace::test]
+    fn no_install_without_a_readable_complete_snapshot() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        rig.engine.deps.snapshot = Box::new(|| {
+            Err(InstallLockError::Unsupported(PathBuf::from(
+                "/Users/u/Applications",
+            )))
+        });
+        rig.engine.wake_once();
+        assert!(
+            rig.installs.lock().unwrap().is_empty(),
+            "unreadable: nothing installed"
+        );
+        assert!(
+            matches!(rig.published().activity, Activity::Failed(_)),
+            "an unreadable installation is shown"
+        );
+
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        rig.shared.status.lock().unwrap().interrupted = Some(Interrupted::Install);
+        rig.engine.deps.snapshot = Box::new(|| {
+            Ok(Snapshot {
+                record: None,
+                installed: None,
+            })
+        });
+        rig.engine.wake_once();
+        assert!(
+            rig.installs.lock().unwrap().is_empty(),
+            "no app: nothing installed"
+        );
+        assert_eq!(
+            rig.published().interrupted,
+            Some(Interrupted::Install),
+            "not cleared without a complete record"
+        );
+
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        rig.engine.deps.install = Box::new(|_version, _expectation| Err(InstallerBusy.into()));
+        rig.engine.wake_once();
+        assert_eq!(
+            rig.published().activity,
+            Activity::Idle,
+            "a busy installer is quiet"
+        );
+    }
+
+    /// Spec: the installer of an update this app decided is handed exactly
+    /// what the locked read found (id, generation and Installed version),
+    /// so it can refuse if anything changed in between.
+    #[farhelm_testtrace::test]
+    fn an_update_hands_its_installer_the_locked_reads_expectation() {
+        let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
+        let seen = Arc::new(Mutex::new(None));
+        rig.engine.deps.install = Box::new({
+            let seen = Arc::clone(&seen);
+            move |_version, expectation| {
+                *seen.lock().unwrap() = expectation.cloned();
+                Ok(())
+            }
+        });
+        rig.engine.wake_once();
+        assert_eq!(
+            *seen.lock().unwrap(),
+            complete_snapshot(Some("1.0.0".to_string())).expectation()
+        );
     }
 
     /// Spec: an automatic check whose install is refused as unverifiable
@@ -2321,7 +2728,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn an_unverifiable_release_leaves_a_lasting_reinstall_notice() {
         let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
-        rig.engine.deps.install = Box::new(|_version| {
+        rig.engine.deps.install = Box::new(|_version, _expectation| {
             Err(UnverifiableRelease("no key in the ring verifies it".to_string()).into())
         });
         rig.engine.wake_once();
@@ -2332,7 +2739,7 @@ mod tests {
         assert!(readout(&state).tooltip.contains(REINSTALL_COMMAND));
 
         // A plain failure later leaves it as it was.
-        rig.engine.deps.install = Box::new(|_version| bail!("download failed"));
+        rig.engine.deps.install = Box::new(|_version, _expectation| bail!("download failed"));
         rig.advance(CHECK_INTERVAL);
         rig.engine.wake_once();
         assert!(
@@ -2351,14 +2758,14 @@ mod tests {
 
         // Set again, then cleared by a verified install.
         *rig.latest.lock().unwrap() = Some("1.1.0".to_string());
-        rig.engine.deps.install = Box::new(|_version| {
+        rig.engine.deps.install = Box::new(|_version, _expectation| {
             Err(UnverifiableRelease("signed for another version".to_string()).into())
         });
         rig.advance(CHECK_INTERVAL);
         rig.engine.wake_once();
         assert!(rig.published().needs_reinstall);
         let installed = Arc::clone(&rig.installed);
-        rig.engine.deps.install = Box::new(move |version| {
+        rig.engine.deps.install = Box::new(move |version, _expectation| {
             *installed.lock().unwrap() = Some(version.to_string());
             Ok(())
         });
@@ -2375,7 +2782,7 @@ mod tests {
         let mut rig = make_rig("1.0.0", Some("0.9.0"), Some("1.0.0"), true);
         let install = std::mem::replace(
             &mut rig.engine.deps.install,
-            Box::new(|_version| {
+            Box::new(|_version, _expectation| {
                 Err(UnverifiableRelease("signed for another version".to_string()).into())
             }),
         );
@@ -2403,7 +2810,7 @@ mod tests {
     fn a_reinstall_from_a_terminal_clears_the_notice() {
         let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
         *rig.automatic.lock().unwrap() = false;
-        rig.engine.deps.install = Box::new(|_version| {
+        rig.engine.deps.install = Box::new(|_version, _expectation| {
             Err(UnverifiableRelease("no key in the ring verifies it".to_string()).into())
         });
         rig.engine.shared.check_now();
@@ -2917,8 +3324,9 @@ mod tests {
         rig.engine.wake_once();
         rig.advance(PROBE_FAILURE_NOTICE_AFTER);
         *rig.latest.lock().unwrap() = Some("1.1.0".into());
-        rig.engine.deps.install =
-            Box::new(|_| Err(UnverifiableRelease("fixture signature refused".into()).into()));
+        rig.engine.deps.install = Box::new(|_, _expectation| {
+            Err(UnverifiableRelease("fixture signature refused".into()).into())
+        });
         rig.engine.wake_once();
         let state = rig.published();
         assert!(state.needs_reinstall);
@@ -2954,7 +3362,7 @@ mod tests {
         fresh.observe(&second.activity, second.notice_id);
         assert_eq!(feedback, fresh, "the equal later notice is shown again");
         let installed = Arc::clone(&rig.installed);
-        rig.engine.deps.install = Box::new(move |version| {
+        rig.engine.deps.install = Box::new(move |version, _expectation| {
             *installed.lock().unwrap() = Some(version.into());
             Ok(())
         });
@@ -3129,7 +3537,7 @@ mod tests {
         let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), true);
         // Replace the installer with one that claims success and installs
         // nothing.
-        rig.engine.deps.install = Box::new(|_| Ok(()));
+        rig.engine.deps.install = Box::new(|_, _expectation| Ok(()));
         rig.shared.check_now();
         rig.engine.wake_once();
         assert!(matches!(rig.published().activity, Activity::Failed(_)));
@@ -3156,7 +3564,7 @@ mod tests {
         let asked = Arc::clone(&shared);
         let seen_during = Arc::new(Mutex::new(None));
         let seen = Arc::clone(&seen_during);
-        engine.deps.install = Box::new(move |_| {
+        engine.deps.install = Box::new(move |_, _expectation| {
             asked.check_now();
             *seen.lock().unwrap() = Some(asked.subscribe().borrow().activity.clone());
             bail!("download failed")
@@ -3729,6 +4137,7 @@ mod tests {
             notice_id: 0,
             user_update_ready: false,
             needs_reinstall: false,
+            interrupted: None,
         }
     }
 
