@@ -113,9 +113,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can leave “program only” enabled for the shared test helm, causing subsequent link-opening tests to fail misleadingly.
   No shipped-product regression was confirmed.
 
-- [`copy-guidance-measures-stale-resize-position.md`](copy-guidance-measures-stale-resize-position.md) — Narrowing the
-  window while the notice is showing can collapse it into a thin column with most guidance clipped.
-
 - [`short-main-pane-hides-approval-requests.md`](short-main-pane-hides-approval-requests.md) — In a sufficiently short
   window, waiting approval requests disappear until the user enlarges the window or changes the selected session.
 

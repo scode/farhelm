@@ -206,12 +206,18 @@ function noticeFixture() {
       listeners.delete(type);
     },
   };
-  const size = { width: 200, height: 50 };
   const viewport = { width: 800, height: 600 };
   const el = {
     querySelector: (selector) => selector.endsWith("-text") ? text : dismiss,
     classList: { add: (name) => showing.add(name), remove: (name) => showing.delete(name) },
-    getBoundingClientRect: () => size,
+    // An auto-width fixed box wraps into the space left at its current
+    // position. A constant size would hide measuring at a stale right edge.
+    getBoundingClientRect: () => {
+      const left = parseFloat(el.style.left) || 0;
+      const width = Math.min(200, viewport.width - 8, Math.max(1, viewport.width - left - 4));
+      const height = Math.min(viewport.height - 8, 50 * Math.ceil(200 / width));
+      return { width, height };
+    },
     style: {},
   };
   let now = 0;
@@ -250,6 +256,27 @@ test("the notice stays above the release and entirely inside the viewport", () =
   f.controller.reposition();
   assert.ok(parseFloat(f.el.style.left) + 200 <= 396);
   assert.ok(parseFloat(f.el.style.top) + 50 <= 296);
+});
+
+/** A resize must measure natural wrapping, not the sliver left at the old
+ * right-edge position. Check both an ordinary width and a viewport narrower
+ * than the notice, so remeasurement must respect the viewport cap as well.
+ */
+test("narrowing the viewport measures the notice independently of its old position", () => {
+  const f = noticeFixture();
+  f.controller.show("copied nothing", { x: 780, y: 400 });
+  assert.deepEqual(f.el.getBoundingClientRect(), { width: 200, height: 50 });
+  assert.ok(parseFloat(f.el.style.left) > 500, "fixture starts near the old right edge");
+  for (const [width, expectedWidth] of [[400, 200], [160, 152]]) {
+    f.viewport.width = width;
+    f.viewport.height = 300;
+    f.controller.reposition();
+    const size = f.el.getBoundingClientRect();
+    assert.equal(size.width, expectedWidth, "notice keeps its natural width up to the viewport cap");
+    const left = parseFloat(f.el.style.left), top = parseFloat(f.el.style.top);
+    assert.ok(left >= 4 && left + size.width <= width - 4);
+    assert.ok(top >= 4 && top + size.height <= f.viewport.height - 4);
+  }
 });
 
 /** The same text is a fresh notice every time; an older deadline cannot retire its replacement. */
