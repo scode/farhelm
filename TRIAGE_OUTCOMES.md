@@ -14486,7 +14486,9 @@
   keystrokes, and the remaining text matches `sanitizePastedText`. The website build passes
   (`cd website && bun run build`) and `dprint check` is clean. No runtime tests. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/docs-accuracy-fixes.md`.
+- Execution: complete in change `ozmxontu`, bookmark `plan/docs-accuracy-fixes/01-paste-guide`; the guide states the
+  paste-boundary protection without promising removal of other control characters.
+  [PR #2104](https://github.com/scode/farhelm/pull/2104/changes).
 
 ## pin-test-skips-owned-session-cleanup.md
 
