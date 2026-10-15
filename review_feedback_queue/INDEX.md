@@ -59,9 +59,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 
-- [`native-download-publication-lacks-directory-durability.md`](native-download-publication-lacks-directory-durability.md)
-  — A power loss after a successful desktop download can lose its destination entry; acceptance scope is uncertain.
-
 - [`restart-ignores-retryable-conversation-admission.md`](restart-ignores-retryable-conversation-admission.md) — If the
   latest conversation report cannot be admitted, Restart can still resume the previously recorded conversation.
 

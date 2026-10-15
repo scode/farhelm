@@ -13189,7 +13189,8 @@
   required at most of the installer and of the helm's and supervisors' own state, and not of downloaded files or managed
   checkouts. The spec change is made once, by whichever of the two items executes first. No code change. Remove this
   feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-power-loss-spec.md`.
+- Execution: complete; jj change `wylrzsqw`; bookmark `plan/triage-power-loss-spec/01-download-durability`;
+  https://github.com/scode/farhelm/pull/2039/changes.
 
 ## first-use-checkout-root-missing-durability-barriers.md
 
