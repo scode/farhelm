@@ -126,9 +126,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can leave “program only” enabled for the shared test helm, causing subsequent link-opening tests to fail misleadingly.
   No shipped-product regression was confirmed.
 
-- [`automatic-install-warning-omits-cause.md`](automatic-install-warning-omits-cause.md) — Users see that an automatic
-  update failed, but must find the app log to learn why.
-
 - [`copy-guidance-measures-stale-resize-position.md`](copy-guidance-measures-stale-resize-position.md) — Narrowing the
   window while the notice is showing can collapse it into a thin column with most guidance clipped.
 

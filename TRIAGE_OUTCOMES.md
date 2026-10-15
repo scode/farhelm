@@ -13882,7 +13882,8 @@
 - Completion criteria: an install failure's hover names its cause (stage and error) in bounded text, and the fallback
   case says the installer finished without installing. Tests cover an erroring install and an install that leaves the
   installed record unchanged. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/update-failure-reporting.md`.
+- Execution: jj change `xxvoqksuotpmpzxorsyprptktnrzkzyv`, bookmark `plan/update-failure-reporting/01-install-cause`,
+  [PR #2105](https://github.com/scode/farhelm/pull/2105/changes).
 
 ## host-picker-refusal-fixture-enters-version-mismatch.md
 
