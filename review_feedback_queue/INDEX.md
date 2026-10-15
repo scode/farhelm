@@ -53,9 +53,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`checkout-recovery-requester-not-bound-to-host.md`](checkout-recovery-requester-not-bound-to-host.md) — Checkout
   recovery can accept another host's claimed requester and recover its approved attempt without approval for the sender.
 
-- [`os-trusted-proxy-can-read-feedback.md`](os-trusted-proxy-can-read-feedback.md) — An OS-trusted interception proxy
-  can inspect feedback; its intentional trust policy lacks explicit confidentiality acceptance in the specifications.
-
 - [`ntfy-token-follows-changed-server.md`](ntfy-token-follows-changed-server.md) — Changing the notification server can
   send the previous server's access token to the new one.
 

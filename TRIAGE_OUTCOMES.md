@@ -13619,7 +13619,9 @@
 - Completion criteria: SPEC.md generalizes its existing deliberate-versus-accidental interference paragraph into that
   principle, with the OS-trusted proxy and the retargeted symlink as examples, and states that feedback's
   confidentiality does not extend to proxies the OS trusts. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/deliberate-setup-spec.md`.
+- Execution: complete in change `mzovvwlvzomsnowvztyzvrknmomtkorm`, bookmark
+  `plan/deliberate-setup-spec/01-proxy-principle`; PR https://github.com/scode/farhelm/pull/2075/changes. The shared
+  principle and proxy limit are specified here; the retargeted-symlink example follows in the next outcome's PR.
 
 ## trash-guard-misses-retargeted-external-symlink.md
 

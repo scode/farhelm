@@ -2343,7 +2343,8 @@ This is about what Farhelm offers, not containment; anything that runs commands 
 
 The submission travels over HTTPS to a service the project runs on Vercel, which sees the helm machine's IP address
 (used only to rate-limit sends, never put into the feedback), and is stored as an issue in a private GitHub repository
-that only the maintainer can read.
+that only the maintainer can read. An intercepting proxy whose certificate the operating system trusts can read the
+message and contact information; feedback's privacy does not extend to it.
 
 ## Security
 
@@ -2659,11 +2660,18 @@ remote environments is an intended use. Farhelm still keeps simple local guards 
 their identity is available, such as excluding a session's recorded agent pane from tab discovery and destructive tab
 cleanup. Future container or sandbox support would require a new, explicit isolation contract.
 
-That line between deliberate and accidental interference applies to files too. A filesystem state that only exists
-because something running as the user made it on purpose counts as deliberate interference, and the accidental guards
-need not handle it. Examples: a hand-made imitation of an installation record, a symlink whose target path contains a
-newline, a symlink planted at a path Farhelm reserves for its own marker files, or every name the installer would use to
-keep a user's file already being taken.
+Farhelm defends against what an attached host or an agent's output can do, and against mistakes a user plausibly makes
+in ordinary use of Farhelm or their machine. The test is whether a reasonable user would hit the trigger by accident.
+Conditions the user, or whoever administers their machine, deliberately set up outside Farhelm count as the user's
+intent: their shell environment, the OS certificate store and proxies, or symlinks and files they reshape by hand. If
+the trigger takes a deliberate setup and the consequence follows from what that setup means, guarding against it is not
+Farhelm's job. For example, an intercepting proxy whose certificate the OS trusts can read feedback sent through it.
+This line between deliberate and accidental interference applies to files too: a hand-made imitation of an installation
+record, a symlink whose target path contains a newline, a symlink planted at a path Farhelm reserves for its own marker
+files, or every name the installer would use to keep a user's file already being taken. The accidental guards need not
+handle those states. This never relaxes the remote-host boundary, removes a protection this specification states for a
+specific case (such as the foreign-replacement guard, the installer keeping a user's file, or uninstall refusing unknown
+app-bundle entries), or accepts database corruption, a bricked installation or similar lasting damage.
 
 A supervisor trusts its attached helm to administer it, launch processes, and forward user input. That trust is
 directional: the helm and GUI must treat remote supervisor messages and agent-controlled output as untrusted. A remote
