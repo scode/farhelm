@@ -543,6 +543,10 @@ modal `HostRemoveDialog`; the modal is isolated from the page, starts focus on R
 and returns focus to the row toggle when cancelled. The dialog's permanent answer writes the shared helm preference
 best-effort before removing the registry row.
 
+Host Settings waits while any host prepares or holds an ADD/Uninstall confirmation, so independent modal isolation
+cannot lock both dialogs. Another host's one-click Update or accepted run does not block it; the host's own planning or
+busy state and the page operation lock still do.
+
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel opens just beyond the sidebar's right edge, with its top aligned to
 the row and a small pointer toward it. It stays beside the session list instead of covering neighbouring rows and their

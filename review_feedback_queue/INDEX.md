@@ -256,9 +256,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-body-lacks-keyboard-scroll-focus.md`](trash-body-lacks-keyboard-scroll-focus.md) — Keyboard-only users can
   lose access to offscreen host information when all trash actions are disabled.
 
-- [`host-update-blocks-all-host-settings.md`](host-update-blocks-all-host-settings.md) — Updating one remote host
-  prevents opening Settings on unrelated hosts, including the local host, until that update finishes.
-
 - [`live-sibling-test-returns-before-reap-completion.md`](live-sibling-test-returns-before-reap-completion.md) — The
   regression test can pass before cleanup finishes, weakening its assurance that another terminal survives.
 

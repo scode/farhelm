@@ -418,6 +418,54 @@ test("Settings waits while an uninstall confirmation is being planned", async ({
   }
 });
 
+/** Update planning has not acquired the page lock and opens no confirmation.
+ * It must exclude its own Settings, including a dispatched click, without
+ * blocking another host's dialog. Hold the actual planning request so the
+ * assertions cannot accidentally observe the later tracked-run busy flag. */
+test("Update planning keeps only its own Settings unavailable", async ({ page, request }, testInfo) => {
+  const remote = destination(testInfo, "settings-update-plan");
+  const accepted = await startAdd(request, remote);
+  await waitForProgress(request, accepted.host_id, "completed");
+  const gate = routeGate();
+  let planning = false;
+  await page.route(`**/api/hosts/${accepted.host_id}/update`, async (route) => {
+    if (route.request().postData()) {
+      await route.continue();
+      return;
+    }
+    planning = true;
+    await gate.wait();
+    // Released only at teardown. Failing the held plan, rather than letting
+    // it through, keeps the page from claiming it and submitting a real
+    // Update while the test shuts down, as the uninstall test cancels its own.
+    await route.abort().catch(() => {});
+  });
+  try {
+    await page.goto("/");
+    await openHostsPanel(page);
+    const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+    const local = (await hosts(request)).find((host) => host.kind === "local");
+    expect(local, "an independent Settings entry point exists before Update").toBeTruthy();
+    const otherRow = page.locator(`[data-host-id="${local!.id}"]`);
+    await openHostMenu(row);
+    await row.locator(".provisioning-update").click();
+    await expect.poll(() => planning).toBe(true);
+    expect((await progress(request, accepted.host_id)).status, "the held request has not started Update").toBe("completed");
+    await openHostMenu(row);
+    await expect(row.locator(".host-settings")).toHaveAttribute("aria-disabled", "true");
+    await row.locator(".host-settings").dispatchEvent("click");
+    await expect(page.locator(".host-settings-dialog")).toHaveCount(0);
+    await openHostMenu(otherRow);
+    await expect(otherRow.locator(".host-settings")).not.toHaveAttribute("aria-disabled", "true");
+    await otherRow.locator(".host-settings").click();
+    await expect(page.locator(".host-settings-dialog")).toBeVisible();
+    await page.locator(".host-settings-close").click();
+  } finally {
+    gate.release();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+});
+
 /** An earlier uninstall refusal occupies the same display slot as Update.
  * Starting Update must retire it before its own planning result is painted. */
 test("Update replaces an earlier uninstall action error with its own refusal", async ({ page, request }, testInfo) => {
@@ -1862,6 +1910,16 @@ test("single Update shows inline progress without opening its row", async ({
   await openHostMenu(row);
   await expect(row.locator(".host-settings")).toBeDisabled();
   await page.keyboard.press("Escape");
+
+  // The run remains held, but has released the page lock and cannot open a
+  // confirmation. Another host's Settings must actually open, not merely look
+  // enabled; this distinguishes the row's own busy guard from a global one.
+  expect((await progress(request, accepted.host_id)).status).toBe("running");
+  await openHostMenu(idle);
+  await expect(idle.locator(".host-settings")).not.toHaveAttribute("aria-disabled", "true");
+  await idle.locator(".host-settings").click();
+  await expect(page.locator(".host-settings-dialog")).toBeVisible();
+  await page.locator(".host-settings-close").click();
 
   // Authoritative success hands the status spot back to the ordinary label;
   // the row stays folded, the checkbox stays untouched, and nothing replays.

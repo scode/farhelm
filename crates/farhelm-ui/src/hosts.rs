@@ -1764,7 +1764,7 @@ pub(crate) fn HostsPanel(
                                 .get(&host.id)
                                 .copied()
                                 .unwrap_or_default(),
-                            provisioning_planning: provisioning_menu_states.read().values().any(|state| state.planning),
+                            provisioning_confirmation: provisioning_menu_states.read().values().any(|state| state.confirmation_may_open),
                             remote_update_available: remote_update_available(
                                 &host,
                                 provisioning_menu_states.read().get(&host.id),
@@ -1806,12 +1806,14 @@ pub(crate) fn HostsPanel(
                             on_retry: on_retry.clone(),
                             on_adopt: on_adopt.clone(),
                             on_settings_start: move |id: HostId| {
-                                // Any host's planning has not claimed the page operation
-                                // lock yet, but its eventual confirmation owns
-                                // modal isolation. Settings must wait for it.
+                                // ADD/Uninstall preparation owns no page lock yet,
+                                // but can open a modal that would isolate Settings
+                                // in return. Other hosts' one-click Updates cannot;
+                                // only this host's own broad planning stays a guard.
                                 if ops.busy_now()
                                     || provisioning_busy_hosts.peek().contains(&id)
-                                    || provisioning_menu_states.peek().values().any(|state| state.planning)
+                                    || provisioning_menu_states.peek().get(&id).is_some_and(|state| state.planning)
+                                    || provisioning_menu_states.peek().values().any(|state| state.confirmation_may_open)
                                 {
                                     return;
                                 }
@@ -2719,10 +2721,11 @@ fn HostRow(
     update_progress: Option<HostUpdateProgress>,
     /// Provisioning commands currently offered in this row's menu.
     provisioning_menu: ProvisioningMenuState,
-    /// Any host's pending plan can produce a modal confirmation. Settings
-    /// shares page-wide isolation with it, even when opened for another host.
+    /// Any host's ADD/Uninstall preparation or pending plan can still open a
+    /// modal and must exclude Settings page-wide. Other hosts' Updates and
+    /// accepted runs do not; this row's own broad planning remains a guard.
     #[props(default)]
-    provisioning_planning: bool,
+    provisioning_confirmation: bool,
     /// The shared update eligibility, including the parent's live provisioning
     /// busy flag; unrelated page operations do not disable update planning.
     remote_update_available: bool,
@@ -2812,6 +2815,7 @@ fn HostRow(
     // while busy and only a live provisioning lifecycle disables it — or the
     // row being one the panel cannot update at all (`update_menu_item`).
     let setup_disabled = busy || provisioning_menu.planning;
+    let settings_disabled = busy || provisioning_menu.planning || provisioning_confirmation;
     let update_item = update_menu_item(host.kind, provisioning_menu.planning, local_app_update);
     let update_disabled = update_item.disabled;
     // A failed UPDATE reruns down the automatic path, so it answers while
@@ -3431,7 +3435,7 @@ fn HostRow(
                                     class: "btn session-row-menu-item host-row-menu-item host-settings",
                                     role: "menuitem",
                                     aria_describedby: "host-menu-settings-description",
-                                    aria_disabled: if busy || provisioning_planning { "true" },
+                                    aria_disabled: if settings_disabled { "true" },
                                     tabindex: if menu_tab_stop == Some(HostMenuAction::Settings) { "0" } else { "-1" },
                                     onmounted: move |element| {
                                         remember_menu_item(menu_wiring, HostMenuAction::Settings, element.data())
@@ -3446,7 +3450,7 @@ fn HostRow(
                                         // `on_settings_start` closes the menu once
                                         // its own busy guard lets it through, as
                                         // `on_edit_start` does for the editor.
-                                        if !busy && !provisioning_planning {
+                                        if !settings_disabled {
                                             on_settings_start.call(id);
                                         }
                                     },
@@ -4560,6 +4564,7 @@ mod tests {
                 update: true,
                 uninstall: true,
                 planning: false,
+                confirmation_may_open: false,
             },
         );
         assert_eq!(all_actions.len(), 8);
