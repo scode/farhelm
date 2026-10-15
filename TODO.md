@@ -133,6 +133,22 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pending confirmations that can actually open a dialog, so Settings stays usable during an ordinary Update on another
   host, and keep the lockout case covered. The gap was noted when #1932 landed.
 
+- **Update the stale compact-rows browser test.** `e2e/tests/terminal.spec.ts`, "compact rows retain distinct ended and
+  harness glyphs within two characters", has failed on main on both engines since the guarded permission mode (#1992):
+  it still expects the old permission-mark tooltips, while each tooltip now names the agent first and its command last
+  ("Codex — YOLO, as asserted … — codex --yolo"), and a launch with no permission choice is no longer called "default
+  permission mode". Update the expected tooltips and descriptions to the current wording; this is stale test data, not a
+  product bug, but every run of the terminal browser specs shows two meaningless failures until it is fixed.
+
+- **Test that a named Goose restart stops offering the old conversation.** Restart with a named conversation on a Goose
+  session makes the supervisor forget the conversation it had captured (Goose does not report after a named resume), and
+  a definitive failure before Goose starts puts the old one back (#2012). Only the stored rows are tested
+  (`named_relaunch_clears_capture_and_definitive_abort_restores_it` in the supervisor's store); nothing checks the
+  in-memory state the session list publishes. Add a supervisor test that performs a named Restart with of a Goose
+  launch, asserts the session lists no captured conversation afterwards (so plain Restart cannot resume the old one),
+  and after an injected definitive pre-start failure asserts the old conversation is back in both memory and the
+  database.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
