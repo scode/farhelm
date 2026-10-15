@@ -51,3 +51,42 @@ It covered the full patch, plan, triage decision, both callers and the full test
 the encoding distinguishes inputs and keeps UUIDs unchanged. A separate wording cold read matched the intended failure
 and found no contradiction. A separate documentation pass corrected the test comment described above. No unresolved
 review finding remains.
+
+### Landing
+
+Landed as #2083, the round's only plan. While it landed, main gained a planning batch, two TODO entries and several
+plans' claims and report deliveries; none touches how identities are displayed.
+
+#### Review
+
+An independent fresh-context review found one blocker, fixed below, and confirmed the rest: both identity comparisons
+(the adopt prompt and the host mismatch, unverified and duplicate evidence) use the shared display; browser tests that
+assert identities use only letters, digits and hyphens; and the PR's own bookkeeping is right.
+
+#### Fix made while landing
+
+The report said only custom identities with punctuation would look different. In fact the same display function also
+renders the "site" row of the link approval card, whose job is to show the site a link opens. Passing only letters,
+digits and hyphens turned every ordinary domain there into escapes, `example.com` into `example<U+002E>com`, on a
+security prompt, with no test noticing. The display now passes printable ASCII through except `<` and the parentheses,
+which is all the original collisions need: every `<` then starts an escape, and only the empty identity can render as
+`(empty)`. Spaces, control characters and non-ASCII lookalikes are still escaped. A test now pins that `example.com`,
+`127.0.0.1`, `[::1]` and a host with a port render unchanged, and the doc comment says why. The changelog fragment no
+longer says "escape notation".
+
+#### Left as is
+
+- Pre-existing: a hosts test checks the adopt label with the general display rather than the identity display it
+  actually uses.
+- Pre-existing: the desktop app's refusal when its local supervisor reports another installation puts the raw identities
+  in its message.
+
+#### Checks
+
+- Run now, on the rebased change with the fix in: `cargo fmt --all -- --check`, `dprint check`, the changelog lint, the
+  UI crate's clippy; the peer-rendering and approval-card tests first, run `3ea58698-fd5b-4bd4-af95-15b015c255d0`: 25
+  passed; the UI crate in full with the desktop feature, run `17c9b45a-27a2-448d-89c9-ab1c4d6847f6`: 650 passed; the
+  destination-authority, m6-5-debts, provisioning and approval-layout specs on Chromium and WebKit, run
+  `0bf445c0-ab78-4fab-b04e-7d73d090b475`: 152 passed.
+- An earlier run of the same script on the original change was stopped once the review found the blocker; it is not
+  counted.
