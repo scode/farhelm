@@ -63,6 +63,59 @@ for (const field of ["command", "resume_command"] as const) {
   });
 }
 
+/** Old-rules templates cannot be restored through today's save path. Supply
+ * them at the list API boundary and prove the warning precedes the DELETE;
+ * a completed reload, rather than a delay, establishes the no-Undo boundary.
+ */
+for (const [field, value] of [
+  ["name", "joined 👩‍💻"],
+  ["command", "echo 'first\nsecond'"],
+  ["resume_command", "echo 'first\rsecond'"],
+] as const) {
+  test(`older template ${field} deletion warns before permanently deleting`, async ({ page }) => {
+    const name = `legacy-delete-${field}-${Date.now()}`;
+    const fields = { kind: "command", yolo: false, command: "echo safe", [field]: value };
+    let deleted = false;
+    let deletes = 0;
+    let writes = 0;
+    await page.route("**/api/templates", async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ response, json: { ...body, templates: [...body.templates, ...deleted ? [] : [{ name, fields }]] } });
+    });
+    await page.route("**/api/templates/*", async route => {
+      if (route.request().method() === "DELETE") {
+        expect(new URL(route.request().url()).pathname).toBe(`/api/templates/${name}`);
+        deletes++;
+        deleted = true;
+        await route.fulfill({ status: 204 });
+      } else {
+        if (route.request().method() === "PUT") writes++;
+        await route.fulfill({ status: 400, body: "old template must not be written" });
+      }
+    });
+    await page.goto("/");
+    await page.locator(".templates-button").click();
+    const dialog = page.locator(".templates-dialog");
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    const row = dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) });
+    await row.click();
+    await expect(row).toHaveAttribute("aria-pressed", "true");
+    // Repairing the draft cannot make the stored snapshot restorable.
+    if (field === "name") await dialog.locator(".templates-session-name").fill("repaired draft");
+    const remove = dialog.locator(".templates-delete");
+    await expect(remove).toHaveText("delete permanently");
+    await expect(remove).toHaveAttribute("data-tooltip", /current save rules.*undo is not available/);
+    expect(deletes, "the permanent warning must be visible before any delete").toBe(0);
+    await remove.click();
+    await expect(row).toHaveCount(0);
+    await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
+    await expect(dialog.locator(".templates-undo")).toHaveCount(0);
+    expect(deletes).toBe(1);
+    expect(writes, "permanent deletion must not attempt restoration").toBe(0);
+  });
+}
+
 /** Keys move between saved names independently of the bolt. Keyboard Escape
  * closes only the nested menu; rename must retain the key, while delete/Undo
  * retires it permanently. An ineligible saved name still offers removal.

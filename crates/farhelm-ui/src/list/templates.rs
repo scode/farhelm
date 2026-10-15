@@ -1208,6 +1208,13 @@ pub(super) fn TemplatesDialog(
         .and_then(|r| r.as_ref().ok())
         .cloned();
     let list = templates.read().clone();
+    // Delete removes the stored snapshot, even when the unsaved draft has
+    // repaired an old value. Undo would have to save that original snapshot.
+    let permanent_delete = list
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .and_then(|rows| rows.iter().find(|t| previous().as_ref() == Some(&t.name)))
+        .is_some_and(|t| check_template_shape(t).is_err());
     let names: Vec<String> = list
         .as_ref()
         .and_then(|r| r.as_ref().ok())
@@ -1388,6 +1395,9 @@ pub(super) fn TemplatesDialog(
             ));
             return;
         };
+        // Restoration uses the ordinary save path, which refuses old values
+        // outside today's shape rules. Do not offer an Undo that cannot work.
+        let restorable = check_template_shape(&template).is_ok();
         let base = delete_base.clone();
         busy.set(true);
         error.set(None);
@@ -1411,7 +1421,7 @@ pub(super) fn TemplatesDialog(
                         .retain(|_, owner| owner != &name);
                     undo_generation += 1;
                     let generation = undo_generation();
-                    undo.set(Some(Undo {
+                    undo.set(restorable.then_some(Undo {
                         template,
                         generation,
                     }));
@@ -1630,7 +1640,7 @@ pub(super) fn TemplatesDialog(
                                     div { class: "templates-actions",
                                         if previous().is_some() {
                                             button { r#type: "button", class: "btn btn-neutral templates-duplicate", disabled: disabled || templates.pending(), "data-tooltip": "open a new unsaved copy with a free name", onclick: move |_| depart.call(Departure::Duplicate), "duplicate" }
-                                            button { r#type: "button", class: "btn btn-danger templates-delete", disabled: disabled || templates.pending(), "data-tooltip": "delete this template now; undo is available here for about ten seconds", onclick: delete, "delete" }
+                                            button { r#type: "button", class: "btn btn-danger templates-delete", disabled: disabled || templates.pending(), "data-tooltip": if permanent_delete { "delete this template now; it fails current save rules, so undo is not available" } else { "delete this template now; undo is available here for about ten seconds" }, onclick: delete, if permanent_delete { "delete permanently" } else { "delete" } }
                                         }
                                         button { r#type: "button", class: "btn btn-primary templates-save", disabled, "data-tooltip": "save the template's name, switch and shown fields", onclick: move |_| save.call(None), "save" }
                                     }

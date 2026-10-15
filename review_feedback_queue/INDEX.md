@@ -24,10 +24,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`confirmation-restoration-failure-reloads-optout.md`](confirmation-restoration-failure-reloads-optout.md) — If
   turning confirmations back on fails to save, reloading can silently restore first-click destructive actions.
 
-- [`template-undo-refuses-legacy-session-names.md`](template-undo-refuses-legacy-session-names.md) — Deleting an older
-  template containing joined emoji or hidden characters offers Undo, but Undo always fails and the retained copy
-  expires.
-
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 

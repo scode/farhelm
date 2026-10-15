@@ -4479,12 +4479,14 @@ Opening another row, new, duplicate, mobile back, close and Escape share a pendi
 save/discard/keep-editing prompt. Save keeps the selected editor and refreshes its baseline; duplicate opens an unsaved
 copy with a free name. A rename saves the new name before deleting the old one, so a failure in between leaves both;
 saving under a name another template already has is refused in the panel rather than overwriting that template. A
-pending or failed name-list read cannot prove a new name is free. Delete retains the stored template client-side for
-about ten seconds; undo freshly reads the names before restoring and refuses a taken name. The notice and its timer
-belong to this mounted dialog, with a generation guarding against an earlier timer expiring a later deletion. Writes are
-serialized and disable navigation until their outcome is known. API last-write-wins semantics remain unchanged; name
-checks do not acquire an atomic cross-client reservation. The launcher reads templates when it opens and again whenever
-the Templates dialog closes, using the existing revision bump and focus return.
+pending or failed name-list read cannot prove a new name is free. Delete checks the stored snapshot, not the unsaved
+draft, against the existing template shape rules. If it fails, the control says "delete permanently" and deletion clears
+any Undo; the ordinary save path could not restore that snapshot. Otherwise Delete retains the stored template
+client-side for about ten seconds; undo freshly reads the names before restoring and refuses a taken name. The notice
+and its timer belong to this mounted dialog, with a generation guarding against an earlier timer expiring a later
+deletion. Writes are serialized and disable navigation until their outcome is known. API last-write-wins semantics
+remain unchanged; name checks do not acquire an atomic cross-client reservation. The launcher reads templates when it
+opens and again whenever the Templates dialog closes, using the existing revision bump and focus return.
 
 ### Agent launches from the CLI
 
