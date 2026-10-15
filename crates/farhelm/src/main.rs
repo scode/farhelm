@@ -1115,6 +1115,27 @@ enum InternalCmd {
     /// unknown subcommand (exit status 2), which is how the forwarder tells
     /// it has no version locks.
     VersionLock { fd: i32 },
+    /// The hold step a session's window starts with in the Mac app's
+    /// version layout: hold this version through the login shell's startup
+    /// by handing the lock to a keeper, mark the launch "held", then become
+    /// `command` (the login shell and its payload). See
+    /// `farhelm_supervisor::session_hold`.
+    Hold {
+        spec: PathBuf,
+        #[arg(last = true, required = true)]
+        command: Vec<std::ffi::OsString>,
+    },
+    /// The keeper the hold step starts: keep the adopted version lock until
+    /// the launch shim marks the launch "launched" with `watch`'s pid, or
+    /// `watch` exits. See `farhelm_supervisor::session_hold::run_keeper`.
+    KeepVersion {
+        #[arg(long)]
+        watch: i32,
+        #[arg(long)]
+        ready_fd: i32,
+        #[arg(long)]
+        launched: PathBuf,
+    },
 }
 
 /// Hold this program's own version for the rest of the process, when it runs
@@ -1162,7 +1183,19 @@ fn hold_own_version(command: &Cmd) -> anyhow::Result<()> {
     match version_lock::hold_for_process(&exe, inherited.as_deref()) {
         Ok(ProcessHold::NotInLayout | ProcessHold::Held | ProcessHold::Unsupported) => Ok(()),
         Err(_) if quiet => std::process::exit(0),
-        Err(error) => Err(anyhow::anyhow!(error)),
+        Err(error) => {
+            // A session's hold step or launch shim that cannot hold its
+            // version records why in the launch's status file, as every
+            // other failure to start an agent does, so the session shows an
+            // error rather than an ordinary exit.
+            if let Cmd::Internal {
+                command: InternalCmd::Hold { spec, .. } | InternalCmd::Launch { spec },
+            } = command
+            {
+                farhelm_supervisor::session_hold::record_start_failure(spec, error.to_string());
+            }
+            Err(anyhow::anyhow!(error))
+        }
     }
 }
 
@@ -1347,9 +1380,29 @@ fn main() -> anyhow::Result<()> {
                 runtime()?.block_on(stdio_proxy(&dir))
             }
             InternalCmd::Launch { spec } => {
+                // Holding its own version now, the shim lets the window's
+                // keeper go (farhelm_supervisor::session_hold). Outside the
+                // version layout there is no keeper and nothing to mark.
+                if farhelm_supervisor::version_lock::process_hold().is_some() {
+                    farhelm_supervisor::session_hold::mark_launched(&spec);
+                }
                 // On success exec never returns; reaching here is failure.
                 Err(farhelm_supervisor::launch::exec_launch_spec(&spec))
             }
+            InternalCmd::Hold { spec, command } => {
+                let exe =
+                    anyhow::Context::context(std::env::current_exe(), "locating this program")?;
+                // On success the hold step becomes the shell and never
+                // returns; reaching here is failure, already recorded.
+                Err(farhelm_supervisor::session_hold::run_hold(
+                    &exe, &spec, &command,
+                ))
+            }
+            InternalCmd::KeepVersion {
+                watch,
+                ready_fd,
+                launched,
+            } => farhelm_supervisor::session_hold::run_keeper(watch, &launched, ready_fd),
             InternalCmd::VersionLock { fd } => {
                 // Silent by contract: the forwarder runs this with every
                 // stream pointed at /dev/null and reads only the status.
