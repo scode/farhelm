@@ -182,10 +182,19 @@ installations or stop sessions on remote hosts.
 
 Uninstall also refuses, with nothing removed, when an install, update or setup of this installation holds its lock, and
 when what it is about to remove changed after you confirmed; an install or update started while uninstall is running
-refuses in turn, and so does a setup when Farhelm's services are set up. If you interrupt an uninstall after confirming
-(Ctrl-C, a closed terminal), it can leave `~/Applications/.farhelm-app.lock` on a Mac, or `.farhelm-install.lock` in a
-Linux installation's directory, and the retry then refuses and names it: once nothing is running, remove it as the
-message says. The command does not inspect running processes or prove that sessions have stopped.
+refuses in turn, and so does a setup when Farhelm's services are set up. On a Mac it also refuses while any program
+still runs a version of Farhelm kept in the app, naming the version and the `lsof` command that shows which program it
+is, and on a volume where files cannot be locked, where it says how to remove Farhelm by hand. If you interrupt an
+uninstall after confirming (Ctrl-C, a closed terminal), the app records that an uninstall was interrupted and the retry
+finishes it; on Linux it can leave `.farhelm-install.lock` in the installation's directory, and the retry then refuses
+and names it: once nothing is running, remove it as the message says. The command does not inspect running processes or
+prove that sessions have stopped.
+
+An uninstall from 0.31.0 or an earlier release, typed in a session that still runs such a release, refuses the record
+that newer installers write and asks to rerun the installer. Quit Farhelm and run `~/.local/bin/farhelm uninstall` from
+a terminal outside Farhelm instead (or `env -u FARHELM_SUPERVISOR_SOCK ~/.local/bin/farhelm uninstall` from a shell that
+has the session's variables); if an upgrade was interrupted, run the installer first. Opening Farhelm once on the new
+release also moves its sessions there.
 
 ## Refusals and interrupted removal
 

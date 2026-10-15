@@ -966,94 +966,9 @@ impl Context<'_> {
 
     // -- beside the app ----------------------------------------------------
 
-    /// Remove staging and trash folders a run that died left beside the
-    /// app. The lock proves no run is using them. Only folders this module
-    /// could have made are touched: the exact name it gives them (its prefix
-    /// and 32 hex digits) and only the entries it puts in them (version
-    /// folders in a trash folder; `version`, `Farhelm.app` or `previous` in
-    /// a staging folder). Anything else with a similar name is someone
-    /// else's and stays.
-    ///
-    /// A rebuild killed between moving the previous app aside and placing
-    /// the new one left the previous app in its staging folder; with
-    /// nothing at the app's place it is put back first, and if that fails
-    /// the run refuses with the folder kept, rather than delete the only
-    /// copy.
+    /// [`remove_leftovers`] for this run, refusing on any failure.
     fn remove_own_leftovers(&self) -> Result<(), Refusal> {
-        let names =
-            dirs::list(self.applications).map_err(|e| self.fail("listing ~/Applications", &e))?;
-        for name in names {
-            let Some(kind) = leftover_kind(&name) else {
-                continue;
-            };
-            if dirs::entry_kind(self.applications, &name).ok() != Some(EntryKind::Folder) {
-                continue;
-            }
-            let Ok(Some(folder)) = dirs::open_folder(self.applications, &name) else {
-                continue;
-            };
-            let Ok(children) = dirs::list(folder.as_fd()) else {
-                continue;
-            };
-            let ours = children.iter().all(|child| match kind {
-                Leftover::Trash => is_version_folder_name(child),
-                Leftover::Stage => matches!(child.as_str(), "version" | APP_NAME | "previous"),
-            });
-            if !ours {
-                continue;
-            }
-            if children.iter().any(|child| child == "previous")
-                && dirs::entry_kind(self.applications, APP_NAME).ok() == Some(EntryKind::Absent)
-            {
-                rustix::fs::renameat_with(
-                    folder.as_fd(),
-                    "previous",
-                    self.applications,
-                    APP_NAME,
-                    rustix::fs::RenameFlags::NOREPLACE,
-                )
-                .map_err(|e| {
-                    self.fail(
-                        &format!(
-                            "putting back the app an interrupted run left in {}",
-                            self.request.applications.join(&name).display()
-                        ),
-                        &e,
-                    )
-                })?;
-            }
-            self.flush_moves_into(folder.as_fd())
-                .map_err(|e| self.fail("flushing an earlier run's leftovers", &e))?;
-            dirs::remove_tree(self.applications, &name)
-                .map_err(|e| self.fail("removing an earlier run's leftovers", &e))?;
-        }
-        Ok(())
-    }
-
-    /// Make every move that can have put something in the leftover
-    /// `folder` durable before it is deleted: a version moved out of the
-    /// app's `Versions/` into trash, or a previous app moved out of (and
-    /// perhaps just back into) `~/Applications`.
-    ///
-    /// The run that made the move may have been killed before it flushed
-    /// both folders, and a leftover does not say how far it got. Deleting
-    /// first would break the design's rule that nothing is deleted before
-    /// its removal from view is on disk: after a power cut, the version's
-    /// old name could come back inside `Versions/` with half its contents
-    /// gone. Any failure stops the cleanup, and the run with it.
-    fn flush_moves_into(&self, folder: BorrowedFd<'_>) -> std::io::Result<()> {
-        // A place that holds no such folder chain (nothing, a link, a file:
-        // the inspection that follows refuses those) has no Versions/ a
-        // version could have left.
-        let open = |dir: BorrowedFd<'_>, name: &str| dirs::open_folder(dir, name).ok().flatten();
-        if let Some(app) = open(self.applications, APP_NAME)
-            && let Some(contents) = open(app.as_fd(), "Contents")
-            && let Some(versions) = open(contents.as_fd(), "Versions")
-        {
-            full_sync(versions.as_fd())?;
-        }
-        full_sync(self.applications)?;
-        full_sync(folder)
+        remove_leftovers(self.applications).map_err(|e| self.fail(&e.what, &e.error))
     }
 
     fn stage_folder(&self) -> Result<StagedFolder<'_>, Refusal> {
@@ -1164,6 +1079,103 @@ impl Context<'_> {
         step(hook, Step::Link).map_err(|e| self.fail("stopping", &e))?;
         Ok(notes)
     }
+}
+
+/// Why [`remove_leftovers`] stopped: what it was doing, and the error.
+#[derive(Debug)]
+pub struct LeftoverError {
+    pub what: String,
+    pub error: io::Error,
+}
+
+/// Remove staging and trash folders a run that died left beside the app,
+/// in `applications` (held under the installation lock, which proves no run
+/// is using them). Install runs this before it inspects the app, and
+/// uninstall before it removes anything. Only folders this module could have
+/// made are touched: the exact name it gives them (its prefix and 32 hex
+/// digits) and only the entries it puts in them (version folders in a trash
+/// folder; `version`, `Farhelm.app` or `previous` in a staging folder).
+/// Anything else with a similar name is someone else's and stays.
+///
+/// A rebuild killed between moving the previous app aside and placing the
+/// new one left the previous app in its staging folder; with nothing at the
+/// app's place it is put back first, and if that fails this stops with the
+/// folder kept, rather than delete the only copy.
+pub fn remove_leftovers(applications: BorrowedFd<'_>) -> Result<(), LeftoverError> {
+    let fail = |what: &str, error: io::Error| LeftoverError {
+        what: what.to_string(),
+        error,
+    };
+    let names = dirs::list(applications).map_err(|e| fail("listing ~/Applications", e))?;
+    for name in names {
+        let Some(kind) = leftover_kind(&name) else {
+            continue;
+        };
+        if dirs::entry_kind(applications, &name).ok() != Some(EntryKind::Folder) {
+            continue;
+        }
+        let Ok(Some(folder)) = dirs::open_folder(applications, &name) else {
+            continue;
+        };
+        let Ok(children) = dirs::list(folder.as_fd()) else {
+            continue;
+        };
+        let ours = children.iter().all(|child| match kind {
+            Leftover::Trash => is_version_folder_name(child),
+            Leftover::Stage => matches!(child.as_str(), "version" | APP_NAME | "previous"),
+        });
+        if !ours {
+            continue;
+        }
+        if children.iter().any(|child| child == "previous")
+            && dirs::entry_kind(applications, APP_NAME).ok() == Some(EntryKind::Absent)
+        {
+            rustix::fs::renameat_with(
+                folder.as_fd(),
+                "previous",
+                applications,
+                APP_NAME,
+                rustix::fs::RenameFlags::NOREPLACE,
+            )
+            .map_err(|e| {
+                fail(
+                    &format!("putting back the app an interrupted run left in {name}"),
+                    e.into(),
+                )
+            })?;
+        }
+        flush_moves_into(applications, folder.as_fd())
+            .map_err(|e| fail("flushing an earlier run's leftovers", e))?;
+        dirs::remove_tree(applications, &name)
+            .map_err(|e| fail("removing an earlier run's leftovers", e))?;
+    }
+    Ok(())
+}
+
+/// Make every move that can have put something in the leftover `folder`
+/// durable before it is deleted: a version moved out of the app's
+/// `Versions/` into trash, or a previous app moved out of (and perhaps just
+/// back into) `applications`.
+///
+/// The run that made the move may have been killed before it flushed both
+/// folders, and a leftover does not say how far it got. Deleting first
+/// would break the design's rule that nothing is deleted before its removal
+/// from view is on disk: after a power cut, the version's old name could
+/// come back inside `Versions/` with half its contents gone. Any failure
+/// stops the cleanup.
+fn flush_moves_into(applications: BorrowedFd<'_>, folder: BorrowedFd<'_>) -> io::Result<()> {
+    // A place that holds no such folder chain (nothing, a link, a file: the
+    // inspection or removal that follows deals with those) has no Versions/
+    // a version could have left.
+    let open = |dir: BorrowedFd<'_>, name: &str| dirs::open_folder(dir, name).ok().flatten();
+    if let Some(app) = open(applications, APP_NAME)
+        && let Some(contents) = open(app.as_fd(), "Contents")
+        && let Some(versions) = open(contents.as_fd(), "Versions")
+    {
+        full_sync(versions.as_fd())?;
+    }
+    full_sync(applications)?;
+    full_sync(folder)
 }
 
 /// Which of this module's folders beside the app a name is, if it is one.
