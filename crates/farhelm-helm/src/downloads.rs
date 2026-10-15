@@ -226,6 +226,10 @@ fn basename(path: &str) -> anyhow::Result<String> {
 /// The desktop's naming convention preserves the final extension, including
 /// dotfiles. No existence check precedes publication; atomic no-clobber links
 /// resolve concurrent saves against this same candidate sequence.
+/// Numbered copies shorten only the stem to fit a 255-byte component, at a
+/// UTF-8 boundary. The original name is untouched; an extension that leaves no
+/// room for a stem keeps the existing filesystem refusal rather than changing
+/// the file's type to make it fit.
 fn candidates(name: String) -> impl Iterator<Item = String> {
     let path = Path::new(&name);
     let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
@@ -233,7 +237,20 @@ fn candidates(name: String) -> impl Iterator<Item = String> {
         .extension()
         .map(|ext| format!(".{}", ext.to_string_lossy()))
         .unwrap_or_default();
-    std::iter::once(name).chain((1u64..).map(move |n| format!("{stem} ({n}){extension}")))
+    std::iter::once(name).chain((1u64..).map(move |n| {
+        let suffix = format!(" ({n}){extension}");
+        let shortened = match 255usize.checked_sub(suffix.len()) {
+            Some(limit) if limit > 0 => {
+                let mut end = stem.len().min(limit);
+                while !stem.is_char_boundary(end) {
+                    end -= 1;
+                }
+                &stem[..end]
+            }
+            _ => &stem,
+        };
+        format!("{shortened}{suffix}")
+    }))
 }
 
 /// One owner keeps the stream and its private directory together through
@@ -336,6 +353,75 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use farhelm_proto::{ControlMsg, DownloadFileStatus, Frame};
     use tower::ServiceExt;
+
+    /// Collision numbering must keep ordinary names and the final extension
+    /// stable, including compound extensions and leading-dot names.
+    #[farhelm_testtrace::test]
+    fn numbered_names_keep_the_existing_convention() {
+        for (name, first, second) in [
+            ("report.pdf", "report (1).pdf", "report (2).pdf"),
+            ("archive.tar.gz", "archive.tar (1).gz", "archive.tar (2).gz"),
+            (".env", ".env (1)", ".env (2)"),
+        ] {
+            assert_eq!(
+                candidates(name.into()).take(3).collect::<Vec<_>>(),
+                [name, first, second]
+            );
+        }
+    }
+
+    /// A real no-clobber publication must save a second copy even when the
+    /// original leaf fills the byte limit. Multibyte stems must stay valid UTF-8
+    /// and existing bytes must survive; candidate generation alone proves neither.
+    #[farhelm_testtrace::test]
+    fn long_numbered_names_publish_without_overwriting_the_original() {
+        for (stem, shortened) in [
+            ("a".repeat(251), "a".repeat(247)),
+            (format!("{}a", "é".repeat(125)), "é".repeat(123)),
+        ] {
+            let downloads = tempfile::tempdir().unwrap();
+            let name = format!("{stem}.pdf");
+            let original = downloads.path().join(&name);
+            assert_eq!(
+                name.len(),
+                255,
+                "fixture starts at the component byte limit"
+            );
+            std::fs::write(&original, b"existing").unwrap();
+            assert_eq!(std::fs::read(&original).unwrap(), b"existing");
+            assert_eq!(candidates(name.clone()).next().unwrap(), name);
+            let staging = tempfile::tempdir_in(downloads.path()).unwrap();
+            let mut stream =
+                StagedStream::create(staging.path(), downloads.path(), "download", &RealFs)
+                    .unwrap();
+            stream.write_chunk(&RealFs, b"second copy").unwrap();
+            let saved = stream
+                .publish_no_clobber(&RealFs, candidates(name))
+                .unwrap();
+            assert_eq!(saved, downloads.path().join(format!("{shortened} (1).pdf")));
+            assert!(saved.file_name().unwrap().to_str().unwrap().len() <= 255);
+            assert_eq!(std::fs::read(saved).unwrap(), b"second copy");
+            assert_eq!(std::fs::read(original).unwrap(), b"existing");
+        }
+    }
+
+    /// More collision digits consume the same fixed component budget. An
+    /// extension that leaves no stem space is not silently shortened or dropped.
+    #[farhelm_testtrace::test]
+    fn numbered_names_budget_for_digits_without_changing_oversized_extensions() {
+        let name = format!("{}.pdf", "a".repeat(251));
+        assert_eq!(
+            candidates(name).nth(10).unwrap(),
+            format!("{} (10).pdf", "a".repeat(246))
+        );
+        for extension in ["x".repeat(250), "x".repeat(251)] {
+            let name = format!("a.{extension}");
+            assert_eq!(
+                candidates(name).nth(1).unwrap(),
+                format!("a (1).{extension}")
+            );
+        }
+    }
 
     /// Drive the real router rather than a handler call, including the JSON
     /// extractor and device authentication supplied by the REST harness.

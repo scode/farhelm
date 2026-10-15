@@ -130,9 +130,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   checkout tests can remove their fixture folders while leaving their trash records behind, contaminating later trash
   listings.
 
-- [`native-download-collision-exceeds-filename-limit.md`](native-download-collision-exceeds-filename-limit.md) — The
-  desktop cannot download another copy of a file whose name already fills the destination filesystem’s filename limit.
-
 - [`download-regression-fixtures-arm-cleanup-too-late.md`](download-regression-fixtures-arm-cleanup-too-late.md) — A
   failed test setup can leave its agent session running and listed for subsequent browser tests.
 
