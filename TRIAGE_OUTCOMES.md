@@ -13233,7 +13233,11 @@
 - Decision: on 2026-10-14, decided with `ssh-help-fish-command-quoting.md` (see the user's words there).
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-trusted-host-values-spec.md`.
+- Execution: `complete`; covered by the trusted user-configuration rule in SPEC.md "Supported user environments",
+  recorded in [PR #2040](https://github.com/scode/farhelm/pull/2040/changes). No code change. Feedback file and index
+  entry removed. Change `qtwzpyzxrmmvrrtnnpvyyytkvmwnuwux`, bookmark
+  `plan/triage-trusted-host-values-spec/02-ssh-help-controls`,
+  [PR #2042](https://github.com/scode/farhelm/pull/2042/changes).
 
 ## unit-reader-dollar-decoding-selects-wrong-installation.md
 

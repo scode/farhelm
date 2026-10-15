@@ -8,9 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`ssh-help-copies-hidden-terminal-controls.md`](ssh-help-copies-hidden-terminal-controls.md) — SSH help copies hidden
-  terminal controls without warning; their execution effect depends on the receiving terminal.
-
 - [`trash-confirmation-answer-consumes-new-selection.md`](trash-confirmation-answer-consumes-new-selection.md) — If an
   old confirmation event survives a change of pending selection, it could delete the newly selected host’s archives.
 
