@@ -23,10 +23,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`mouse-reporting-drag-activates-file-link.md`](mouse-reporting-drag-activates-file-link.md) — Dragging across a
   program’s hyperlink can still open a website or transfer a host file; a native modifier-drag can also open the save.
 
-- [`trash-confirmation-scroll-hides-deletion-context.md`](trash-confirmation-scroll-hides-deletion-context.md) — A
-  sufficiently tall confirmation opens at its buttons with the selected hosts, totals, or permanent-loss warning above
-  the visible area.
-
 - [`wrapped-file-link-partial-redraw-keeps-old-target.md`](wrapped-file-link-partial-redraw-keeps-old-target.md) —
   Repainting only part of a wrapped link can leave its previous click target active, including for native file opening.
 
