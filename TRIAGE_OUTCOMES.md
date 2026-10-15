@@ -14600,7 +14600,8 @@
   path/lifetime explanation, to assistive technology. Nothing visible changes. A browser test asserts the accessible
   description (or hidden text) for a full managed row, and existing tooltip-coverage tests still pass. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/managed-checkout-row-accessibility.md`.
+- Execution: complete in change `mxspuxysrwvy`, bookmark `plan/managed-checkout-row-accessibility/01-row-a11y`.
+  [PR #2113](https://github.com/scode/farhelm/pull/2113/changes).
 
 ## native-download-collision-exceeds-filename-limit.md
 

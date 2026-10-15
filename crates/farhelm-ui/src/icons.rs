@@ -94,6 +94,9 @@ pub(crate) fn BranchIcon() -> Element {
 /// The working-copy association, rather than launch provenance, establishes
 /// this mark. Peer values are escaped in the tooltip just as they are in the
 /// visible row; the hidden word gives the decorative SVG an accessible name.
+/// A clipped copy of the location and lifetime joins that name because the
+/// pointer tooltip itself is excluded from the accessibility tree. This keeps
+/// the full row's repository label from concealing its working directory.
 /// The full row shows the repository within the hover target and says its
 /// accessible name once. Other callers retain that name in hidden text. A
 /// cwd differing byte for byte from the recorded root, including a symlink
@@ -106,14 +109,15 @@ pub(crate) fn ManagedCheckoutMark(
 ) -> Element {
     let repo = crate::peer::display_peer(&checkout.repo.identifier());
     let path = crate::peer::display_peer(&checkout.canonical_path);
-    let mut tooltip = format!("managed checkout of {repo} at {path}.");
+    let mut description = format!(" at {path}.");
     if cwd != checkout.canonical_path {
-        tooltip.push_str(&format!(
+        description.push_str(&format!(
             " Session folder: {}.",
             crate::peer::display_peer(&cwd)
         ));
     }
-    tooltip.push_str(" Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.");
+    description.push_str(" Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.");
+    let tooltip = format!("managed checkout of {repo}{description}");
     rsx! {
         span { class: "managed-checkout-mark", "data-tooltip": tooltip,
             BranchIcon {}
@@ -123,6 +127,7 @@ pub(crate) fn ManagedCheckoutMark(
             } else {
                 span { class: "visually-hidden", "managed checkout of {repo}" }
             }
+            span { class: "visually-hidden managed-checkout-description", "{description}" }
         }
     }
 }

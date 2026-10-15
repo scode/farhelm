@@ -371,7 +371,9 @@ async function assertCheckout(
 
 /** Current membership must be visible even for a borrower with no launch
  * repository. Full rows name the repository; compact rows preserve the mark,
- * and both expose the path and last-session lifetime through the tooltip. */
+ * and both expose the actual directory and last-session lifetime in the open
+ * button's accessible name as well as the pointer-only tooltip. A borrower
+ * subdirectory must remain distinguishable from its checkout root. */
 async function assertManagedMark(page: Page, id: string, repo: string, root: string, cwd = root) {
   const row = page.locator(`.session-row[data-session-id="${id}"]`);
   const compact = page.getByRole("checkbox", { name: "compact", exact: true });
@@ -379,13 +381,21 @@ async function assertManagedMark(page: Page, id: string, repo: string, root: str
   await expect(row.locator(".session-repository")).toHaveText(repo);
   const mark = row.locator(".managed-checkout-mark");
   await expect(mark.locator('svg[data-glyph="branch"]')).toHaveAttribute("aria-hidden", "true");
-  await expect(mark.locator(".visually-hidden")).toHaveText("managed checkout");
+  await expect(mark.locator(".visually-hidden").first()).toHaveText("managed checkout");
   const location = cwd === root ? "" : ` Session folder: ${cwd}.`;
-  await expect(mark).toHaveAttribute("data-tooltip", `managed checkout of ${repo} at ${root}.${location} Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.`);
+  const description = `at ${root}.${location} Farhelm made the checkout folder for its first session. When the last session using it is deleted, the checkout moves to the trash.`;
+  await expect(mark).toHaveAttribute("data-tooltip", `managed checkout of ${repo} ${description}`);
+  await expect(mark.locator(".managed-checkout-description")).toHaveText(description);
+  const directory = new RegExp(cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  await expect(row.locator(".session-row-open")).toHaveAccessibleName(directory);
+  await expect(row.locator(".session-row-open")).toHaveAccessibleName(/When the last session using it is deleted, the checkout moves to the trash\./);
   await expect(page.locator(".titlebar .managed-checkout-mark")).toHaveAttribute("data-tooltip", await mark.getAttribute("data-tooltip") as string);
   await compact.check();
   await expect(row.locator(".session-identity-copy .managed-checkout-mark")).toBeVisible();
   await expect(row.locator(".session-repository")).toHaveCount(0);
+  await expect(mark.locator(".managed-checkout-description")).toHaveText(description);
+  await expect(row.locator(".session-row-open")).toHaveAccessibleName(directory);
+  await expect(row.locator(".session-row-open")).toHaveAccessibleName(/When the last session using it is deleted, the checkout moves to the trash\./);
   await compact.uncheck();
 }
 

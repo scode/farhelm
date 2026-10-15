@@ -116,10 +116,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`short-main-pane-hides-approval-requests.md`](short-main-pane-hides-approval-requests.md) — In a sufficiently short
   window, waiting approval requests disappear until the user enlarges the window or changes the selected session.
 
-- [`managed-checkout-row-hides-accessible-directory.md`](managed-checkout-row-hides-accessible-directory.md) —
-  Screen-reader users lose the working directory when browsing managed-checkout sessions in the default, noncompact
-  list.
-
 - [`appearance-test-restoration-skips-session-cleanup.md`](appearance-test-restoration-skips-session-cleanup.md) — A
   failed browser test can leave its session and agent running in the shared test stack.
 
