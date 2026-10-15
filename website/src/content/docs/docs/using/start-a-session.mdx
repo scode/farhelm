@@ -58,7 +58,8 @@ session list; leave it empty and Farhelm picks a name.
 />
 
 Not every agent has every choice, and some offer more permission modes than these two. Switching to another agent
-clears any choice it cannot take, and the launcher tells you when it does. [Supported agents](/docs/agents/) lists what
+clears any choice it cannot take, and the launcher tells you when it does. If that leaves a riskier permission mode
+than you had, a red banner says so and offers **Undo**. [Supported agents](/docs/agents/) lists what
 each agent offers; workspace trust is explained on the [Codex](/docs/agents/codex/), [Muse](/docs/agents/muse/), and
 [Pi](/docs/agents/pi/) pages. To run something that is not one of these agents, switch the launcher to its **command**
 tab, covered in [Custom commands](/docs/agents/custom-commands/).
@@ -88,7 +89,7 @@ Before a YOLO launch, Farhelm asks you to confirm. Every host asks until you tel
 />
 
 It is not only the **yolo** choice that asks. Farhelm offers Pi and OpenCode only in YOLO mode, so every launch of
-either asks. Goose and OMP run in YOLO mode unless you pick one of their approval modes, so their launches ask too, and
+either asks. Goose runs in YOLO mode unless you pick one of its approval modes, so its launches ask too, and
 so does a custom command you say runs in YOLO mode. Farhelm goes by that answer alone and never reads the command to
 check it. Cursor launches ask as well, because they run on Cursor's own setting, and so does a plain **Replace** of a
 session an older version of Farhelm started without choosing a permission mode. It does not take an agent's word for it, though, and an agent cannot confirm a YOLO launch: on a

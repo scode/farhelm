@@ -42,7 +42,7 @@ export const agents = [
   { name: 'Goose', href: '/docs/agents/goose/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'y', warn: 'y', farhelm: 'y' },
     tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO by default; also approve, smart approve, and chat.', status: basic, resume: 'Available as soon as it starts.' } },
   { name: 'OMP', href: '/docs/agents/omp/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'y', warn: 'p', farhelm: 'y' },
-    tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO by default; guarded approves workspace edits, while approve asks about every action.', status: basic, resume: "Available after the agent's first reply.", warn: 'Warns when its reporter cannot be added or does not match, but not when it never reports.' } },
+    tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'Guarded by default, which approves workspace edits; also YOLO, and approve, which asks about every action.', status: basic, resume: "Available after the agent's first reply.", warn: 'Warns when its reporter cannot be added or does not match, but not when it never reports.' } },
   { name: 'Pi', href: '/docs/agents/pi/', tier: 1, v: { launch: 'y', model: 'y', effort: 'y', perms: 'p', trust: 'p', status: 'p', waiting: 'n', resume: 'y', warn: 'p', farhelm: 'y' },
     tip: { perms: 'YOLO only: Pi has no approval prompts to turn on.', trust: "Approves the project's own settings and extensions, not the agent's actions.", status: basic, resume: "Available after the agent's first reply.", warn: 'Warns when its reporter cannot be added, but not when it never reports.' } },
   { name: 'Muse', href: '/docs/agents/muse/', tier: 2, v: { launch: 'y', model: 'y', effort: 'y', perms: 'y', trust: 'p', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
@@ -124,7 +124,8 @@ choice Farhelm started it with; its hover names the agent's mode and the command
 | OMP | Write: workspace edits are approved automatically; other actions ask you | `--approval-mode write` |
 | Cursor | Agent's own setting: Farhelm cannot override its configured Run Everything mode | No forcing permission flag |
 
-Goose keeps its approve, smart approve and chat choices. Goose and OMP start in YOLO unless you choose another mode;
+Guarded is the default for every agent that offers it, unless you chose another mode or the launcher remembered one. Goose keeps its
+approve, smart approve and chat choices and starts in YOLO unless you choose another mode;
 Pi and OpenCode offer YOLO only. [Custom commands](/docs/agents/custom-commands/) use your own assertion about whether
 the command is YOLO.
 

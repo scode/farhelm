@@ -2683,19 +2683,33 @@ repository and complete selection, independently of their previous ephemeral cwd
 repository suggestions with its other history; ordinary history rows retain their existing semantics.
 
 `LaunchHarness::omitted_permission` is the one per-harness fact for new request defaults. The helm fills omissions
-before validation and still refuses unsupported explicit choices; draft reconciliation uses `request_permission`. Stored
-launches use `stored_permission` instead: missing fields keep their historical no-flag meaning on Claude, Codex, Grok,
-Muse and Cursor, and their historical YOLO meaning on Pi, OpenCode, OMP and Goose. Own-setting launches count as YOLO
-for admission but get a grey dashed shield rather than a positive bypass claim. Protocol 48 adds the closed `Guarded`
-permission variant; older supervisors cannot decode it, and older releases cannot read new stored guarded launches.
-`LaunchHarness::guarded_flags` supplies both the compiler's argv and the launcher's help, so the two cannot describe
-different flags. A resume copies these before its selector, including before Codex's subcommand. The helm's remembered
-permission and the browser's local mirror discard a permission equal to the harness's omitted mode. This prevents
-default or forced YOLO from becoming another harness's preselection while preserving explicit YOLO on harnesses with a
-non-YOLO default. Harness switching applies the same boundary: passing through a default-YOLO harness loses any earlier
-explicit YOLO provenance, so switching back selects the real default. Preferences written before this change retain
-their value until the next structured launch; the stored word does not say which harness supplied it. No second
-default-mode table or preference provenance is kept.
+before validation and still refuses unsupported explicit choices; every harness that offers Guarded defaults to it,
+including OMP. Draft reconciliation uses `request_permission`. Stored launches use `stored_permission` instead: missing
+fields keep their historical no-flag meaning on Claude, Codex, Grok, Muse and Cursor, and their historical YOLO meaning
+on Pi, OpenCode, OMP and Goose. Own-setting launches count as YOLO for admission but get a grey dashed shield rather
+than a positive bypass claim. Protocol 48 adds the closed `Guarded` permission variant; older supervisors cannot decode
+it, and older releases cannot read new stored guarded launches. `LaunchHarness::guarded_flags` supplies both the
+compiler's argv and the launcher's help, so the two cannot describe different flags. A resume copies these before its
+selector, including before Codex's subcommand. The helm's remembered permission and the browser's local mirror discard a
+permission equal to the harness's omitted mode. This prevents default or forced YOLO from becoming another harness's
+preselection while preserving explicit YOLO on harnesses with a non-YOLO default. Harness switching applies the same
+boundary: passing through a default-YOLO harness loses any earlier explicit YOLO provenance, so switching back selects
+the real default. Preferences written before this change retain their value until the next structured launch; the stored
+word does not say which harness supplied it. No second default-mode table or preference provenance is kept.
+
+The launcher observes completed agent-switch transactions for permission escalation, including cross-agent model picks
+and search. A template's explicit permission is a deliberate choice, not an automatic fallback; compare after its full
+replay rather than after each inner edit. The comparison uses effective request permissions, including passive memory
+seeds, ordered as Chat/Approve, SmartApprove/Guarded, then YOLO/Custom/own-setting. The existing reconciliation and
+remembered-choice rules are unchanged. One transient notice retains the complete pre-switch draft and raw editor
+ownership, but never retry intent, connection evidence or cache contents. Undo invalidates browse/preview work and
+retires ordinary create/replace authority. An ambiguous managed-checkout attempt still reconciles through its retained
+key when the request binding matches; Undo does not rewind or discard that attempt. Notice generations fence queued
+Undo, dismiss and expiry callbacks. Undo also checks the live launcher opening generation, and a new opening or prefill
+clears the notice, so a mounted Clone/Replace reseed cannot receive another source's saved draft. CSS supplies the
+slide, permission outline and a separate visually constant eight-second lifetime animation; hover, focus within the
+banner and the existing inactive-window rule pause that lifetime. Reduced motion keeps only the lifetime animation and a
+static outline. Removing the notice's controls returns focus through the existing launcher helper.
 
 Protocol 49 adds the closed `Custom` permission and `LaunchSelection::permission_flags`, an optional vector present
 exactly with Custom. Older peers refuse the new protocol and older releases cannot read custom sessions or templates;

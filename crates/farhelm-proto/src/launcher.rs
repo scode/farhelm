@@ -101,9 +101,9 @@ pub fn reconcile_harness_selection(
         selection.permissions = None;
         selection.permission_flags = None;
     }
-    // A harness's default YOLO does not express an approval preference for a
-    // different harness. Keep explicit approval choices, and explicit YOLO
-    // from harnesses whose omitted mode is non-YOLO.
+    // A choice equal to the source's default does not pin another harness
+    // to it. The destination supplies its own default; other supported
+    // choices survive. Guarded is the default wherever it is offered.
     if selection.harness != harness
         && selection.permissions == selection.harness.omitted_permission()
     {
@@ -784,6 +784,31 @@ mod tests {
         );
     }
     use super::*;
+
+    /// Switching from an explicitly guarded agent to OMP must not enable
+    /// approval-free execution. The source-default reset still applies; OMP's
+    /// destination default now preserves the same effective Guarded choice.
+    #[test]
+    fn switching_a_guarded_agent_to_omp_keeps_guarded() {
+        for harness in [
+            crate::LaunchHarness::Claude,
+            crate::LaunchHarness::Codex,
+            crate::LaunchHarness::Grok,
+            crate::LaunchHarness::Muse,
+        ] {
+            let before = crate::LaunchSelection {
+                harness,
+                model: None,
+                effort: None,
+                permissions: Some(crate::LaunchPermission::Guarded),
+                permission_flags: None,
+                workspace_trust: None,
+            };
+            let (after, _) =
+                reconcile_harness_selection(before, None, crate::LaunchHarness::Omp, &[]);
+            assert_eq!(after.permissions, Some(crate::LaunchPermission::Guarded));
+        }
+    }
 
     /// Every launch-specific field determines a legacy template's tab, while
     /// placement fields do not. False assertions and null resets are choices,

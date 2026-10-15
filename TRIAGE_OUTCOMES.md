@@ -13502,4 +13502,8 @@
   dismiss; the mode control gets a thick red outline for about two and a half seconds and the banner stays about eight
   seconds; with reduced motion the outline is static while the banner shows. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/guarded-default-and-escalation-banner.md`.
+- Execution: implemented in jj change `sowupqnqnqmqnoqznwsvtykrnttmmxkm`, bookmark
+  `plan/guarded-default-and-escalation-banner/01-guarded-switch`. New OMP defaults are Guarded, historical stored
+  omissions retain YOLO, and the launcher warns on automatic permission escalation with draft Undo. Both specs, affected
+  docs and tests are updated; feedback file and index entry removed.
+  [PR #2055](https://github.com/scode/farhelm/pull/2055/changes).

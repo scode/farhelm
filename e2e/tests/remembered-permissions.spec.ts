@@ -220,7 +220,7 @@ test("a create reply claiming yolo does not change what the next New dialog pres
 /** A harness's own YOLO default must not become a request to bypass another
  * harness's approvals, either through switching or after a successful launch.
  * Use real creates so the browser mirror and helm preference are both checked. */
-for (const [label, harness] of [["Pi", "pi"], ["OpenCode", "open_code"], ["OMP", "omp"], ["Goose", "goose"]] as const) {
+for (const [label, harness] of [["Pi", "pi"], ["OpenCode", "open_code"], ["Goose", "goose"]] as const) {
   test(`${label}'s default YOLO does not spill into the next harness`, async ({ page, request }) => {
     const created: string[] = [];
     await setLocalYoloWithoutAsking(request, true);

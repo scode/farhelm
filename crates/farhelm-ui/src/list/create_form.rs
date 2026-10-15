@@ -316,6 +316,115 @@ struct TemplateTargets {
     intent_key: Signal<Option<(String, IntentBinding)>>,
 }
 
+/// Semantic draft values outside the template projection still belong to
+/// Undo. Connection evidence, cache reads and async generations do not: they
+/// must be checked afresh when a restored destination is used.
+#[derive(Clone, Copy)]
+struct PermissionUndoTargets {
+    fields: TemplateTargets,
+    conversation: Signal<String>,
+    folder_is_explicit: Signal<bool>,
+    clone_host_state: Signal<CloneHostState>,
+    remembered_destination: Signal<Option<CreateTarget>>,
+    model_draft: Signal<String>,
+    model_draft_error: Signal<Option<String>>,
+}
+
+/// One immutable pre-switch draft, kept only if the completed user action
+/// escalates permissions. Raw editor seeds and ownership are part of the
+/// draft: restoring displayed text alone could change peer-provided bytes.
+struct PermissionSwitchBefore {
+    harness: Option<LaunchHarness>,
+    permission: Option<LaunchPermission>,
+    tab: LaunchTab,
+    restore: std::rc::Rc<dyn Fn()>,
+}
+
+/// At most one banner owns recovery within one launcher opening. The opening
+/// generation also fences a queued Undo when a mounted Clone/Replace reseed
+/// has superseded its source, before effects have removed the old controls.
+#[derive(Clone)]
+struct PermissionEscalation {
+    generation: u64,
+    opening_generation: u64,
+    message: String,
+    restore: std::rc::Rc<dyn Fn()>,
+}
+
+/// Capture user-editable values, never an old retry key or authority cache.
+/// The bounded restoration closure avoids a second independently maintained
+/// form model, while keeping the pre-switch values immutable during the notice.
+#[allow(
+    clippy::clone_on_copy,
+    reason = "the snapshot macro handles Copy and Clone signal values together"
+)]
+fn capture_permission_switch(targets: PermissionUndoTargets) -> PermissionSwitchBefore {
+    let t = targets.fields;
+    let harness = *t.structured_harness.peek();
+    let permission = harness.and_then(|h| h.request_permission(*t.structured_permissions.peek()));
+    let tab = *t.launch_tab.peek();
+    macro_rules! capture {
+        (($($field:ident),*); ($($extra:ident),*)) => {{
+            $(let $field = t.$field.peek().clone();)*
+            $(let $extra = targets.$extra.peek().clone();)*
+            std::rc::Rc::new(move || {
+                let mut t = t;
+                let mut targets = targets;
+                $(t.$field.set($field.clone());)*
+                $(targets.$extra.set($extra.clone());)*
+                // Ordinary create/replace must reacquire submission authority.
+                // An ambiguous managed-checkout attempt remains outside this
+                // snapshot: matching retries still reconcile its existing key.
+                t.intent_key.set(None);
+            }) as std::rc::Rc<dyn Fn()>
+        }};
+    }
+    let restore = capture!((
+        launch_tab, structured_harness, structured_model, structured_model_raw_seed,
+        structured_model_edited, custom_model_harness, composer_reset_reason,
+        structured_effort, structured_permissions, structured_permission_flags,
+        structured_permissions_is_explicit, structured_workspace_trust,
+        structured_workspace_trust_is_explicit, invocation, invocation_raw_seed,
+        invocation_edited, command_yolo, command_agent, command_resume_on,
+        command_resume, command_resume_raw_seed, command_resume_edited, chosen_host,
+        destination, cwd, cwd_raw_seed, cwd_edited, title, title_raw_seed, title_edited,
+        clone_checkout_naming
+    ); (
+        conversation, folder_is_explicit, clone_host_state, remembered_destination,
+        model_draft, model_draft_error
+    ));
+    PermissionSwitchBefore {
+        harness,
+        permission,
+        tab,
+        restore,
+    }
+}
+
+/// Rank the shown mode, including an agent's unclassified own-setting mode.
+/// Modes in one group have different mechanisms but no warning-worthy order.
+fn permission_danger(permission: Option<LaunchPermission>) -> u8 {
+    match permission {
+        Some(LaunchPermission::Chat | LaunchPermission::Approve) => 0,
+        Some(LaunchPermission::SmartApprove | LaunchPermission::Guarded) => 1,
+        Some(LaunchPermission::Yolo | LaunchPermission::Custom) | None => 2,
+    }
+}
+
+/// Banner wording names the mode itself; detailed vendor behavior remains in
+/// the permission control's existing help rather than a second explanation.
+fn permission_mode_name(permission: Option<LaunchPermission>) -> &'static str {
+    match permission {
+        Some(LaunchPermission::Guarded) => "Guarded",
+        Some(LaunchPermission::Yolo) => "YOLO",
+        Some(LaunchPermission::Custom) => "Custom flags",
+        Some(LaunchPermission::Approve) => "Approve",
+        Some(LaunchPermission::SmartApprove) => "Smart approve",
+        Some(LaunchPermission::Chat) => "Chat",
+        None => "agent's own setting",
+    }
+}
+
 /// Capture the same raw launcher values for template application and saving.
 /// Relayed editor text retains its original bytes until deliberately edited;
 /// destination and name are included so saving does not grow a second reader.
@@ -2368,6 +2477,18 @@ pub(super) fn CreateSessionForm(
     // Compatibility clears are intentional, but defaults must never make an
     // earlier explicit choice vanish without telling the person what changed.
     let mut composer_reset_reason = use_signal(|| None::<String>);
+    let mut permission_escalation = use_signal(|| None::<PermissionEscalation>);
+    let mut permission_escalation_generation = use_signal(|| 0_u64);
+    use_effect(move || {
+        let opening = opening_generation();
+        if permission_escalation
+            .peek()
+            .as_ref()
+            .is_some_and(|notice| notice.opening_generation != opening)
+        {
+            permission_escalation.set(None);
+        }
+    });
     let mut composer_search = use_signal(String::new);
     let mut composer_search_open = use_signal(|| false);
     let mut composer_search_index = use_signal(|| 0_usize);
@@ -2715,6 +2836,7 @@ pub(super) fn CreateSessionForm(
                 .filter(|prefill| Some(prefill.generation) != *prefill_applied.peek())
             {
                 prefill_applied.set(Some(prefill.generation));
+                permission_escalation.set(None);
                 // A clone generation replaces the destination as a unit.
                 // Invalidate before reseeding so an A→B→A clone sequence
                 // cannot make an old A listing current again by restoring
@@ -3424,6 +3546,10 @@ pub(super) fn CreateSessionForm(
                 selection.harness,
                 selection.workspace_trust,
             );
+            // A recent replaces the whole draft deliberately, so an earlier
+            // escalation notice no longer describes it, and its Undo would
+            // throw the recent away.
+            permission_escalation.set(None);
             structured_harness.set(Some(selection.harness));
             structured_model_raw_seed.set(selection.model.clone());
             structured_model_edited.set(false);
@@ -3480,6 +3606,86 @@ pub(super) fn CreateSessionForm(
             true
         }
     });
+    let template_targets = TemplateTargets {
+        launch_tab,
+        structured_harness,
+        structured_model,
+        structured_model_raw_seed,
+        structured_model_edited,
+        custom_model_harness,
+        composer_reset_reason,
+        structured_effort,
+        structured_permissions,
+        structured_permissions_is_explicit,
+        structured_permission_flags,
+        structured_workspace_trust,
+        structured_workspace_trust_is_explicit,
+        invocation,
+        invocation_raw_seed,
+        invocation_edited,
+        command_yolo,
+        command_agent,
+        command_resume_on,
+        command_resume,
+        command_resume_raw_seed,
+        command_resume_edited,
+        chosen_host,
+        destination: destination_draft,
+        cwd,
+        cwd_raw_seed,
+        cwd_edited,
+        title,
+        title_raw_seed,
+        title_edited,
+        clone_checkout_naming,
+        template_error,
+        intent_key,
+    };
+    let undo_targets = PermissionUndoTargets {
+        fields: template_targets,
+        conversation,
+        folder_is_explicit,
+        clone_host_state,
+        remembered_destination,
+        model_draft,
+        model_draft_error,
+    };
+    // Observe completed user transactions, not inner template edits: an
+    // explicit template permission can replace an intermediate fallback.
+    let note_permission_switch =
+        use_callback(move |(before, automatic): (PermissionSwitchBefore, bool)| {
+            let after = *structured_harness.peek();
+            if before.harness == after {
+                return;
+            }
+            permission_escalation.set(None);
+            if !automatic
+                || before.tab != LaunchTab::Agent
+                || *launch_tab.peek() != LaunchTab::Agent
+            {
+                return;
+            }
+            let (Some(_), Some(harness)) = (before.harness, after) else {
+                return;
+            };
+            let permission = harness.request_permission(*structured_permissions.peek());
+            if permission_danger(permission) <= permission_danger(before.permission) {
+                return;
+            }
+            permission_escalation_generation += 1;
+            permission_escalation.set(Some(PermissionEscalation {
+                generation: permission_escalation_generation(),
+                opening_generation: *opening_generation.peek(),
+                message: format!(
+                    "Permission changed: {} → {}, because {} does not support {}.",
+                    permission_mode_name(before.permission),
+                    permission_mode_name(permission),
+                    crate::launch_composer::harness_label(harness),
+                    permission_mode_name(before.permission)
+                ),
+                restore: before.restore,
+            }));
+        });
     // Apply every catalog-row choice through one path so pointer and keyboard
     // activation cannot drift on reconciliation, error cleanup, or intent-key
     // invalidation. Custom drafts stay separate because they have no catalog
@@ -3514,6 +3720,7 @@ pub(super) fn CreateSessionForm(
                     model_open.set(false);
                 }
                 crate::launch_composer::ModelOption::Model { id, harness } => {
+                    let switch_before = capture_permission_switch(undo_targets);
                     // A pick within the chosen harness is what the old model
                     // chip did: keep the harness, and clear an effort the
                     // picked model does not offer, saying so in terms of the
@@ -3584,6 +3791,7 @@ pub(super) fn CreateSessionForm(
                         structured_workspace_trust.set(selection.workspace_trust);
                         custom_model_harness.set(owner);
                     }
+                    note_permission_switch.call((switch_before, true));
                     model_draft_error.set(None);
                     model_draft.set(String::new());
                     model_open.set(false);
@@ -3783,41 +3991,6 @@ pub(super) fn CreateSessionForm(
     let catalog_models_for_search_input = catalog_models.clone();
     let composer_hosts_for_search_input = composer_hosts.clone();
     let template_names_for_search_input = template_names.clone();
-    let template_targets = TemplateTargets {
-        launch_tab,
-        structured_harness,
-        structured_model,
-        structured_model_raw_seed,
-        structured_model_edited,
-        custom_model_harness,
-        composer_reset_reason,
-        structured_effort,
-        structured_permissions,
-        structured_permissions_is_explicit,
-        structured_permission_flags,
-        structured_workspace_trust,
-        structured_workspace_trust_is_explicit,
-        invocation,
-        invocation_raw_seed,
-        invocation_edited,
-        command_yolo,
-        command_agent,
-        command_resume_on,
-        command_resume,
-        command_resume_raw_seed,
-        command_resume_edited,
-        chosen_host,
-        destination: destination_draft,
-        cwd,
-        cwd_raw_seed,
-        cwd_edited,
-        title,
-        title_raw_seed,
-        title_edited,
-        clone_checkout_naming,
-        template_error,
-        intent_key,
-    };
     let search_results_for_keys = search_result_groups
         .iter()
         .flat_map(|(_, results)| results.iter().cloned())
@@ -3860,6 +4033,16 @@ pub(super) fn CreateSessionForm(
             if !draft_transition_allowed(ops) {
                 return false;
             }
+            let switch_before = capture_permission_switch(undo_targets);
+            let automatic_permission = match &result {
+                crate::launch_composer::ComposerSearchResult::Template(name) => templates_now
+                    .iter()
+                    .find(|template| &template.name == name)
+                    .is_some_and(|template| template.fields.permissions.is_none()),
+                crate::launch_composer::ComposerSearchResult::Recent(_)
+                | crate::launch_composer::ComposerSearchResult::Permissions(_) => false,
+                _ => true,
+            };
             invalidate_directory_browse(
                 browse_generation,
                 browse_request,
@@ -3933,6 +4116,7 @@ pub(super) fn CreateSessionForm(
                     cwd_edited,
                 );
             }
+            note_permission_switch.call((switch_before, automatic_permission));
             composer_search.set(String::new());
             composer_search_open.set(false);
             focus_composer_surface(false);
@@ -4003,6 +4187,7 @@ pub(super) fn CreateSessionForm(
             if !draft_transition_allowed(ops) {
                 return;
             }
+            let switch_before = capture_permission_switch(undo_targets);
             promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
             let selection = LaunchSelection {
                 permission_flags: crate::launch_composer::permission_words(
@@ -4059,6 +4244,7 @@ pub(super) fn CreateSessionForm(
             structured_workspace_trust.set(selection.workspace_trust);
             custom_model_harness.set(owner);
             launch_tab.set(LaunchTab::Agent);
+            note_permission_switch.call((switch_before, true));
             if changed {
                 intent_key.set(None);
             }
@@ -4299,6 +4485,7 @@ pub(super) fn CreateSessionForm(
             },
         form {
             class: "create-session-form",
+            "data-permission-escalation": permission_escalation.read().as_ref().map(|notice| if notice.generation % 2 == 0 { "even" } else { "odd" }),
             tabindex: "-1",
             hidden: quick_launch_hidden(),
             "data-opening-generation": "{opening_generation()}",
@@ -5000,6 +5187,56 @@ pub(super) fn CreateSessionForm(
                     }
                 });
             },
+            if let Some(notice) = permission_escalation() {
+                div {
+                    key: "permission-escalation-{notice.generation}",
+                    class: "permission-escalation-banner",
+                    role: "alert",
+                    onanimationend: move |event| {
+                        // CSS owns active, unpaused viewing time. Entrance
+                        // and descendant animations must not expire recovery.
+                        if event.animation_name() == "permission-banner-lifetime"
+                            && permission_escalation.peek().as_ref().is_some_and(|current| current.generation == notice.generation)
+                        {
+                            permission_escalation.set(None);
+                        }
+                    },
+                    span { "{notice.message}" }
+                    button {
+                        r#type: "button", class: "btn btn-neutral permission-escalation-undo",
+                        "data-tooltip": "undo: restore the draft from before this agent switch",
+                        disabled: busy,
+                        onclick: move |_| {
+                            // Expired or replaced controls have no remaining
+                            // authority, even if their click was already queued.
+                            let current = permission_escalation.peek().clone();
+                            if let Some(current) = current
+                                && current.generation == notice.generation
+                                && current.opening_generation == *opening_generation.peek()
+                                && draft_transition_allowed(ops)
+                            {
+                                (current.restore)();
+                                invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
+                                preview_revision += 1;
+                                permission_escalation.set(None);
+                                focus_composer_surface(false);
+                            }
+                        },
+                        "undo"
+                    }
+                    button {
+                        r#type: "button", class: "btn btn-neutral permission-escalation-dismiss",
+                        "data-tooltip": "dismiss this permission warning",
+                        onclick: move |_| {
+                            if permission_escalation.peek().as_ref().is_some_and(|current| current.generation == notice.generation) {
+                                permission_escalation.set(None);
+                                focus_composer_surface(false);
+                            }
+                        },
+                        "dismiss"
+                    }
+                }
+            }
             if let Some(message) = preparation_error() {
                 p { class: "create-session-error", role: "alert", "{display_peer(&message)}" }
             }
@@ -6654,6 +6891,29 @@ mod tests {
             Some(test_command("c")),
             "clearing the agent type drops the resume command it hid"
         );
+    }
+
+    /// The banner orders approval mechanisms by policy, not by enum order or
+    /// agent identity. Own-setting and custom flags have no safety guarantee;
+    /// equivalent safety groups must not create spurious escalations.
+    #[test]
+    fn permission_warning_orders_modes_by_their_safety_group() {
+        use crate::LaunchPermission::*;
+        assert_eq!(
+            permission_danger(Some(Chat)),
+            permission_danger(Some(Approve))
+        );
+        assert_eq!(
+            permission_danger(Some(SmartApprove)),
+            permission_danger(Some(Guarded))
+        );
+        assert_eq!(permission_danger(None), permission_danger(Some(Custom)));
+        assert_eq!(
+            permission_danger(Some(Custom)),
+            permission_danger(Some(Yolo))
+        );
+        assert!(permission_danger(Some(Approve)) < permission_danger(Some(Guarded)));
+        assert!(permission_danger(Some(Guarded)) < permission_danger(Some(Yolo)));
     }
 
     /// The helm's remembered permissions word seeds the composer's segment

@@ -703,7 +703,8 @@ fn parse_effort(value: &str) -> Result<Choice<farhelm_proto::LaunchEffort>, Stri
 /// Parse explicit permissions without advertising the older `default` alias.
 ///
 /// The alias still means request omission, so existing callers keep the
-/// harness's admission default (notably OMP's YOLO default). Reasoning effort
+/// harness's admission default (guarded where offered, YOLO for Goose,
+/// Pi and OpenCode). Reasoning effort
 /// has a separate default vocabulary and still uses [`parse_choice`].
 fn parse_permissions(value: &str) -> Result<Choice<farhelm_proto::LaunchPermission>, String> {
     if value == "custom" {
@@ -788,7 +789,8 @@ struct LaunchFlags {
     effort: Option<Choice<farhelm_proto::LaunchEffort>>,
     /// Permission mode for an agent launch (guarded, yolo, approve,
     /// smart_approve, chat), where supported. `default` remains an alias for
-    /// omission; OMP, Goose, Pi and OpenCode default to YOLO.
+    /// omission; agents that offer guarded default to it, while Goose, Pi
+    /// and OpenCode default to YOLO.
     #[arg(long, value_name = "MODE", value_parser = parse_permissions)]
     permissions: Option<Choice<farhelm_proto::LaunchPermission>>,
     /// Workspace trust for an agent launch: true, false, or default.
@@ -2326,7 +2328,8 @@ mod tests {
 
     /// Guarded is explicit intent, while the old default spelling remains
     /// omission for callers and templates written before the rename. Keeping
-    /// it absent is necessary for OMP's unchanged YOLO admission default.
+    /// it absent is necessary for Goose, Pi and OpenCode's YOLO admission
+    /// default.
     #[farhelm_testtrace::test]
     fn guarded_permissions_and_the_legacy_default_alias_reach_create_intent() {
         for (word, permission) in [
