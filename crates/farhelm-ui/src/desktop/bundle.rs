@@ -34,7 +34,8 @@ pub(super) fn helm_payload_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Locate the `farhelm` CLI this app spawns its supervisor from.
+/// Locate the `farhelm` CLI this app spawns its supervisor from, holding its
+/// version when it is this app's own (see [`supervisor_farhelm`]).
 ///
 /// D6 ships two bare binaries that install side by side, so "next to me" is
 /// the base contract. The Mac app bundle with side-by-side versions
@@ -51,11 +52,43 @@ pub(super) fn helm_payload_dir() -> Option<PathBuf> {
 /// start with no other diagnostic.
 pub(super) fn bundled_farhelm() -> anyhow::Result<PathBuf> {
     let current = std::env::current_exe().context("locating desktop executable")?;
-    resolve_supervisor_farhelm(
+    supervisor_farhelm(
         &current,
         std::env::var_os("FARHELM_DESKTOP_FARHELM").as_deref(),
         env!("CARGO_PKG_VERSION"),
     )
+}
+
+/// Resolve the supervisor's `farhelm` and, when it is this app's own version
+/// folder, hold that version for the rest of the app's life.
+///
+/// One function rather than two calls at the start of the bootstrap so that
+/// the hold cannot be forgotten, and cannot be applied to a path the app did
+/// not pick itself. Only the program [`resolve_supervisor_farhelm`] chose
+/// from this app's `Contents/Versions/<version>/` is held: an override
+/// selects a program the developer controls, which the app held nothing on
+/// before and still does not, even when it happens to point into an
+/// installed bundle. The caller runs this before discovery probes anything or
+/// a supervisor is spawned, which is what makes the hold cover the whole
+/// window in which the app still needs its version.
+fn supervisor_farhelm(
+    current_exe: &Path,
+    override_path: Option<&std::ffi::OsStr>,
+    version: &str,
+) -> anyhow::Result<PathBuf> {
+    let chosen = resolve_supervisor_farhelm(current_exe, override_path, version)?;
+    if chosen.own_version {
+        hold_supervisor_version(&chosen.path, version)?;
+    }
+    Ok(chosen.path)
+}
+
+/// The `farhelm` the bootstrap starts its supervisor from, and whether the
+/// app picked it from its own version folder (and must therefore hold it).
+#[derive(Debug)]
+struct SupervisorFarhelm {
+    path: PathBuf,
+    own_version: bool,
 }
 
 /// Decide which `farhelm` to start the managed supervisor from, given this
@@ -76,7 +109,7 @@ fn resolve_supervisor_farhelm(
     current_exe: &Path,
     override_path: Option<&std::ffi::OsStr>,
     version: &str,
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<SupervisorFarhelm> {
     if override_path.is_none()
         && let Some(contents) =
             farhelm_supervisor::app_bundle::bundle_contents_of_main_program(current_exe)
@@ -84,15 +117,69 @@ fn resolve_supervisor_farhelm(
     {
         let versioned = contents.join("Versions").join(version).join("farhelm");
         if versioned.is_file() {
-            return Ok(versioned);
+            return Ok(SupervisorFarhelm {
+                path: versioned,
+                own_version: true,
+            });
         }
-        bail!(
-            "farhelm-desktop {version} needs its own version of the farhelm binary at {} \
-             and did not find one; reinstall Farhelm or set FARHELM_DESKTOP_FARHELM",
-            versioned.display()
-        );
+        return Err(own_version_missing(version, &versioned));
     }
-    resolve_sibling_farhelm(current_exe, override_path)
+    Ok(SupervisorFarhelm {
+        path: resolve_sibling_farhelm(current_exe, override_path)?,
+        own_version: false,
+    })
+}
+
+/// The refusal for an app whose own version's `farhelm` is gone, whether
+/// resolution found it missing or it vanished before the hold took it.
+///
+/// Both moments have the same cause in practice (an update or uninstall
+/// removed the version while this app was not yet holding it) and the same
+/// way out: opening Farhelm again starts whatever is installed now. Keeping
+/// one text also gives the later bounded reopen a single refusal to act on.
+/// The text keeps the fixed marker the installer looks for in a downloaded
+/// desktop program to recognize a release with the side-by-side layout
+/// (`scripts/install.sh`, pinned by
+/// `the_installers_release_marker_is_in_this_refusal`), so the marker must
+/// stay one unbroken literal with no placeholder inside it.
+fn own_version_missing(version: &str, program: &Path) -> anyhow::Error {
+    anyhow::anyhow!(
+        "farhelm-desktop {version} needs its own version of the farhelm binary at {} \
+         and did not find one; an update or uninstall probably removed it, so open Farhelm \
+         again (if that does not help, reinstall Farhelm or set FARHELM_DESKTOP_FARHELM)",
+        program.display()
+    )
+}
+
+/// Hold this app's own version for the app's whole life, before anything is
+/// started from it (see `farhelm_supervisor::version_lock`).
+///
+/// The app itself is `Contents/MacOS/farhelm-desktop`, not a program in a
+/// version folder, so nothing else would tell an install or an uninstall
+/// that its version is in use: between the app starting and its supervisor
+/// running, and again whenever it restarts its supervisor, the version
+/// folder is something it still needs. Holding it closes that gap; the
+/// supervisor then takes its own lock as well. The lock's descriptor is
+/// close-on-exec, so no child of the app (its supervisor, the updater's
+/// installer) inherits it.
+///
+/// Nothing on a filesystem that cannot lock is held, and that is not an
+/// error. A version that is already gone refuses with
+/// [`own_version_missing`]; one that an update or uninstall still holds
+/// exclusively after a few seconds refuses with its own sentence. Either
+/// way, reopening Farhelm starts whatever is installed then.
+fn hold_supervisor_version(farhelm: &Path, version: &str) -> anyhow::Result<()> {
+    use farhelm_supervisor::version_lock::{self, HoldError};
+    match version_lock::hold_for_process(farhelm, None) {
+        Ok(_) => Ok(()),
+        Err(HoldError::Gone { program }) => Err(own_version_missing(version, &program)),
+        Err(HoldError::Busy { .. }) => {
+            bail!("Farhelm is being updated or uninstalled; open it again in a moment")
+        }
+        Err(HoldError::Io { program, error }) => {
+            Err(error).with_context(|| format!("locking {} for this app", program.display()))
+        }
+    }
 }
 
 /// Decide where `farhelm` is, given this executable's path and the override.
@@ -224,7 +311,111 @@ mod tests {
             "1.2.3",
         )
         .expect("this app's version folder is found");
+        assert_eq!(chosen.path, own);
+    }
+
+    /// Write an executable stand-in for one version's `farhelm` inside the
+    /// bundle whose `Contents` is `contents`, and return its path.
+    fn versioned_program(contents: &Path, version: &str) -> PathBuf {
+        let program = contents.join("Versions").join(version).join("farhelm");
+        std::fs::create_dir_all(program.parent().unwrap()).expect("version folder");
+        std::fs::write(&program, b"#!/bin/sh\n").expect("writing the versioned program");
+        program
+    }
+
+    /// Whether something already holds `program`'s version lock: an
+    /// exclusive no-wait attempt, which is what deleting a version takes,
+    /// fails exactly when it does.
+    fn version_is_held(program: &Path) -> bool {
+        let deleter = std::fs::File::open(program).expect("open the versioned program");
+        match deleter.try_lock() {
+            Ok(()) => {
+                deleter.unlock().expect("release the probe's lock");
+                false
+            }
+            Err(std::fs::TryLockError::WouldBlock) => true,
+            Err(std::fs::TryLockError::Error(error)) => panic!("probing the lock: {error}"),
+        }
+    }
+
+    /// The app holds the version it picked from its own version folder, so
+    /// an install or uninstall cannot delete it while the app runs. This is
+    /// what protects the app before its supervisor exists and while it
+    /// restarts one.
+    #[farhelm_testtrace::test]
+    fn the_app_holds_its_supervisors_version() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let contents = versioned_bundle(dir.path());
+        let own = versioned_program(&contents, "1.2.3");
+        assert!(
+            !version_is_held(&own),
+            "control: nothing holds the version before the app does"
+        );
+
+        let chosen = supervisor_farhelm(
+            &contents.join("MacOS").join("farhelm-desktop"),
+            None,
+            "1.2.3",
+        )
+        .expect("the app finds and holds its version");
         assert_eq!(chosen, own);
+        assert!(
+            version_is_held(&own),
+            "deleting the version is refused while the app holds it"
+        );
+    }
+
+    /// An override that points into an installed bundle's version folder is
+    /// taken as given and NOT held: the override is a developer's choice the
+    /// app never locked before, and holding it would keep that version from
+    /// being pruned or uninstalled for as long as the app runs. A missing
+    /// override target is still returned rather than refused, as before.
+    #[farhelm_testtrace::test]
+    fn an_override_into_a_version_folder_is_not_held() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let contents = versioned_bundle(dir.path());
+        let installed = versioned_program(&contents, "1.2.3");
+        let exe = contents.join("MacOS").join("farhelm-desktop");
+
+        let chosen = supervisor_farhelm(&exe, Some(installed.as_os_str()), "1.2.3")
+            .expect("an override is taken as given");
+        assert_eq!(chosen, installed);
+        assert!(
+            !version_is_held(&installed),
+            "the app holds nothing on an overridden program"
+        );
+
+        let missing = contents.join("Versions").join("9.9.9").join("farhelm");
+        let chosen = supervisor_farhelm(&exe, Some(missing.as_os_str()), "1.2.3")
+            .expect("a missing override target is still taken as given");
+        assert_eq!(chosen, missing);
+    }
+
+    /// The app's own version gone, whether resolution already finds it
+    /// missing or it disappears between resolution and the hold, refuses with
+    /// one sentence that says to open Farhelm again and keeps the installer's
+    /// release marker. Two texts for one cause would leave the later bounded
+    /// reopen two refusals to recognize, and a user two different answers.
+    #[farhelm_testtrace::test]
+    fn a_missing_own_version_refuses_the_same_way_before_and_after_resolution() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let contents = versioned_bundle(dir.path());
+        let exe = contents.join("MacOS").join("farhelm-desktop");
+        let own = contents.join("Versions").join("1.2.3").join("farhelm");
+        let expected = own_version_missing("1.2.3", &own).to_string();
+        assert!(expected.contains("open Farhelm again"), "{expected}");
+
+        let already_gone =
+            supervisor_farhelm(&exe, None, "1.2.3").expect_err("no version folder exists yet");
+        assert_eq!(already_gone.to_string(), expected);
+
+        versioned_program(&contents, "1.2.3");
+        let chosen = resolve_supervisor_farhelm(&exe, None, "1.2.3").expect("found");
+        assert!(chosen.own_version);
+        std::fs::remove_file(&chosen.path).expect("an update removes the version");
+        let gone_before_hold = hold_supervisor_version(&chosen.path, "1.2.3")
+            .expect_err("the version vanished before the hold");
+        assert_eq!(gone_before_hold.to_string(), expected);
     }
 
     /// A missing version folder refuses and names the path, rather than
@@ -263,7 +454,11 @@ mod tests {
             "1.2.3",
         )
         .expect("an override is taken as given");
-        assert_eq!(chosen, PathBuf::from("/elsewhere/farhelm"));
+        assert_eq!(chosen.path, PathBuf::from("/elsewhere/farhelm"));
+        assert!(
+            !chosen.own_version,
+            "an override is never this app's own pick"
+        );
     }
 
     /// A bundle without `Versions/` (the layout before this one) keeps the
@@ -280,7 +475,7 @@ mod tests {
         std::fs::write(macos.join("farhelm"), b"#!/bin/sh\n").expect("sibling");
         let chosen = resolve_supervisor_farhelm(&macos.join("farhelm-desktop"), None, "1.2.3")
             .expect("the sibling");
-        assert_eq!(chosen, macos.join("farhelm"));
+        assert_eq!(chosen.path, macos.join("farhelm"));
     }
 
     /// The installer refuses releases from before the side-by-side layout
@@ -324,7 +519,7 @@ mod tests {
             "1.2.3",
         )
         .expect("the sibling");
-        assert_eq!(chosen, package.join("MacOS").join("farhelm"));
+        assert_eq!(chosen.path, package.join("MacOS").join("farhelm"));
     }
 
     /// A DIRECTORY named `farhelm` next to the executable is not the CLI.
