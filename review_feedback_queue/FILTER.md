@@ -133,3 +133,42 @@ It does not match when the consequence includes any of the following:
 - connecting to, sending an operation to, or acting on the wrong machine or session;
 - a wrong state that persists with no ordinary way back;
 - a security or trust-boundary consequence.
+
+### Upgrades from older releases combined with another rare condition
+
+Added 2026-10-14. In the maintainer's words: "forget any edge case having to do with upgrading rom old versions if its
+combined with "super rare unlikely situation". its ok."
+
+A finding matches when both of these hold:
+
+- The trigger needs something carried across an upgrade from an older Farhelm release: state an older release wrote, a
+  session or agent that kept running through the upgrade, or a hook or report an older release installed.
+- The trigger also needs another rare condition on top of that: a narrow timing window, a crash or fault at a specific
+  point, or an unusual sequence of user or agent actions.
+
+Unlike the filters above, this one also covers losing user-owned work within the affected sessions, such as resuming the
+wrong conversation. It does not match when the consequence includes any of the following:
+
+- an installation that cannot update through its normal path, or comes up broken on its existing state, which SPEC.md
+  "Upgrade compatibility and client scale" forbids outright;
+- a corrupted helm or supervisor database, or a bricked installation, which SPEC.md never accepts however unlikely the
+  trigger;
+- a security or trust-boundary consequence.
+
+### Work continued in a checkout whose preparation was killed partway
+
+Added 2026-10-14 for this one case, not as a general rule about interrupted operations. A new managed checkout borrows
+data from the host's repository cache while it is cloned and copies that data in at the end; only then is it independent
+of the cache. The maintainer accepted the gap before that copy, in their words: "so long as the user is told that it
+failed I woudlsay this is acceptable."
+
+A finding matches when all of these hold:
+
+- The checkout's preparation was killed outright before it stopped depending on the cache, and Farhelm showed the
+  preparation as failed or interrupted.
+- The user then kept working in that checkout anyway.
+- The whole consequence stays within that checkout: later cache cleanup removes data it still borrowed, leaving its
+  repository incomplete.
+
+It does not match when the user was not told that preparation failed, or when a checkout whose preparation completed is
+affected.

@@ -126,6 +126,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a tag is never deleted or reused. Work out what GitHub rulesets, bypass lists or a separate agent identity can enforce
   without blocking the PR flow.
 
+- **Consider an ordered transport between the GUI and the helm.** Today every save and read the GUI sends is an
+  independent HTTP request, and the helm serves them concurrently, so nothing keeps a request sent after a save from
+  being answered as if the save had not happened. Two findings showed this, both discarded in triage on 2026-10-14 as
+  too rare to fix one by one (see their entries in `TRIAGE_OUTCOMES.md`):
+  `quick-launch-acknowledgment-revives-previous-mark.md` (marking a template for quick launch and pressing the shortcut
+  while the save is still in flight can launch the previously marked template) and
+  `pending-command-save-overwrites-newer-save.md` (a slow post-clone command save can land after a newer one and win).
+  Consider sending one GUI's requests over an ordered channel, so that a save is applied before anything the user
+  started after it. Nothing needs saves and later actions to be unordered; it is just what independent HTTP requests
+  give.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.

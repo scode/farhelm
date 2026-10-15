@@ -13087,3 +13087,317 @@
   and its index entry.
 - Execution: complete; jj change `rymmyqmqlsrsxywswpzuxusmkwqkvxou`; bookmark
   `plan/supervisor-and-test-followups/01-followups`; https://github.com/scode/farhelm/pull/1933/changes.
+
+## restart-drain-skips-newly-published-conversation.md
+
+- Outcome: `fix spec`.
+- Assessment: likely by static reading at 4c9e9612, not reproduced; the mechanism is unchanged on main 6b237507. If the
+  agent publishes its conversation report while Restart is collecting reports (a sub-second window, no fault needed),
+  Restart resumes the previous conversation and the new report is discarded, so the session follows the previous
+  conversation until the agent reports again. The newer conversation itself is not deleted.
+- Decision: on 2026-10-14 the user set a principle for conversation tracking that decides this item and five others
+  triaged with it: "Resuming the previous section in a brief window after a session has been replaced/conversation
+  replaced whether by clicking or using /clear in an agent or similar is fine. For cases where the new session is
+  long-term undiscoverable, that is a bug we mitigate with the pre-existing notification system when we don't learn of
+  conversations. For the case where we have a conversation recorded and somehow behavior breaks underneath us and we
+  stop updating but the user doesn't learn of it because we have what we believe is a valid conversation - that is
+  "okay" in the sense that it's a reasonable consequene of a bug. We should avoid having those bugs, but the fact that
+  we don't have a magical solution to that last case is not in and of itself a bug. SPEC should be updated." This item
+  falls under the brief-window case.
+- Completion criteria: SPEC.md (Durability and resume, and the cleanup-and-resume exception under Lifecycle operations)
+  states the three cases: Restart resuming the previous conversation in a brief window after a conversation switch is
+  acceptable; a new conversation Farhelm never learns of is a defect, mitigated by the existing session-tracking
+  notifications; and continuing to follow a recorded conversation after tracking silently stops updating is an accepted
+  consequence of whatever bug stopped it, not a defect in itself. The spec change is made once, by whichever of the six
+  items executes first; the others record that it covers them. No code change. Remove this feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## restart-ignores-retryable-conversation-admission.md
+
+- Outcome: `fix spec`.
+- Assessment: likely by static reading at 4c9e9612, not reproduced; unchanged on main. One transient failure to record
+  the new conversation report just before Restart makes Restart resume the previous conversation. The report stays
+  pending and is likely applied later.
+- Decision: on 2026-10-14, decided by the conversation-tracking principle recorded under
+  `restart-drain-skips-newly-published-conversation.md`; brief-window case.
+- Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## reboot-discards-pending-new-conversation.md
+
+- Outcome: `fix spec`.
+- Assessment: likely by static reading at 4c9e9612, not reproduced; unchanged on main. If the host reboots after the
+  agent reported a new conversation but before Farhelm applied the report, Restart resumes the previous conversation.
+  File-watch pickup has narrowed the window.
+- Decision: on 2026-10-14, decided by the conversation-tracking principle recorded under
+  `restart-drain-skips-newly-published-conversation.md`; brief-window case.
+- Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## restart-withdrawal-discards-new-codex-selection.md
+
+- Outcome: `fix spec`.
+- Assessment: likely by static reading at 4c9e9612, not reproduced; unchanged on main. When the previous Codex
+  conversation's record goes missing at the same moment Codex reports a new conversation, the new report is discarded
+  and Restart cannot resume until Codex next reports. Withdrawing the offer because the record is missing is one of the
+  session-tracking notifications SPEC.md already lists.
+- Decision: on 2026-10-14, decided by the conversation-tracking principle recorded under
+  `restart-drain-skips-newly-published-conversation.md`; the never-learned case, mitigated by the existing notification.
+- Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## codex-upgrade-replays-legacy-selection.md
+
+- Outcome: `fix spec`.
+- Assessment: likely by static reading at 4c9e9612, not reproduced; unchanged on main. When Farhelm is upgraded while
+  Codex keeps running across it, an older report written before the upgrade can override a newer one, and Restart
+  resumes the conversation the user had moved away from. Rare, multi-step trigger.
+- Decision: on 2026-10-14, decided by the conversation-tracking principle recorded under
+  `restart-drain-skips-newly-published-conversation.md`; the recorded-conversation-stops-updating case.
+- Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## codex-transcript-error-discards-new-selection.md
+
+- Outcome: `fix spec`.
+- Assessment: likely by static reading at 4c9e9612, not reproduced; unchanged on main. An I/O error reading the new
+  Codex conversation's transcript discards its report, and Restart keeps resuming the previous conversation. SPEC.md
+  "Healthy local filesystems" already accepts failures from local I/O errors but says nothing about which conversation
+  is followed.
+- Decision: on 2026-10-14, decided by the conversation-tracking principle recorded under
+  `restart-drain-skips-newly-published-conversation.md`; the recorded-conversation-stops-updating case.
+- Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## native-download-publication-lacks-directory-durability.md
+
+- Outcome: `fix spec`.
+- Assessment: likely by static reading, not reproduced; unchanged on main. A power loss right after a successful desktop
+  download can lose the downloaded file because its folder entry was not flushed. The source file is still on the host
+  and can be downloaded again.
+- Decision: on 2026-10-14 the user rejected power-loss durability for this item and
+  `first-use-checkout-root-missing-durability-barriers.md`: "No. Only super critical stuff like the installer would
+  possibly be subject to such reqiurements, and stuff liek the helm/supervisor state (via sqlite). Random files being
+  downloaded andd git checkouts - no."
+- Completion criteria: SPEC.md (Maintainer-confirmed decisions) states that surviving a power loss or system crash is
+  required at most of the installer and of the helm's and supervisors' own state, and not of downloaded files or managed
+  checkouts. The spec change is made once, by whichever of the two items executes first. No code change. Remove this
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## first-use-checkout-root-missing-durability-barriers.md
+
+- Outcome: `fix spec`.
+- Assessment: plausible by static reading, not reproduced; unchanged on main. A power loss after a new managed checkout
+  is recorded but before the folders created for its checkout root are flushed can leave the checkout missing.
+- Decision: on 2026-10-14, decided with `native-download-publication-lacks-directory-durability.md` (see the user's
+  words there).
+- Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## ssh-help-fish-command-quoting.md
+
+- Outcome: `fix spec`.
+- Assessment: plausible by static reading, not run. The copied "ssh needs 2FA?" commands use POSIX quoting, so a host
+  destination or state path containing `\'` can run extra commands when pasted into fish. These values come only from
+  the user's own input and configuration; no route from a remote host was found.
+- Decision: on 2026-10-14 the user decided this item and `ssh-help-copies-hidden-terminal-controls.md`: "spec - we trust
+  that the user's system is not configured with a hostname with nonsensical characters that shells interpret".
+- Completion criteria: SPEC.md (Supported user environments) states that Farhelm trusts the user's system not to be
+  configured with host names containing characters that shells interpret, so commands Farhelm offers for copying need
+  not defend against them. The help commands also embed the host's state path; if the wording cannot cover that value
+  without going beyond the user's principle, bring it back to the user. The spec change is made once, by whichever of
+  the two items executes first. No code change. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## ssh-help-copies-hidden-terminal-controls.md
+
+- Outcome: `fix spec`.
+- Assessment: plausible by static reading, not run. The SSH help Copy button copies control characters in a stored
+  destination or path without warning; their effect depends on the receiving terminal. Same user-supplied origin as the
+  fish item.
+- Decision: on 2026-10-14, decided with `ssh-help-fish-command-quoting.md` (see the user's words there).
+- Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## unit-reader-dollar-decoding-selects-wrong-installation.md
+
+- Outcome: `fix spec`.
+- Assessment: plausible by static reading; unchanged on main. A hand-edited Farhelm service containing `$$` in its
+  program path, with a second installation at the decoded path, can make uninstall or setup attribute the service to the
+  other installation and stop or remove its service.
+- Decision: on 2026-10-14 the user decided this item and `continued-unit-line-bypasses-service-type-guard.md`: "hand
+  editing means all bets are off. spec it."
+- Completion criteria: SPEC.md (Supported host setup) states that a hand-edited Farhelm service unit voids Farhelm's
+  guarantees about how setup, Update and uninstall treat it, including attributing it to the wrong installation. The
+  spec change is made once, by whichever of the two items executes first. No code change. Remove this feedback file and
+  its index entry.
+- Execution: `pending`.
+
+## continued-unit-line-bypasses-service-type-guard.md
+
+- Outcome: `fix spec`.
+- Assessment: plausible by static reading; unchanged on main. A hand-edited Farhelm service using a backslash
+  continuation line can hide a non-simple service type or a second start command from the refusal, so another
+  installation's service can be stopped or removed.
+- Decision: on 2026-10-14, decided with `unit-reader-dollar-decoding-selects-wrong-installation.md` (see the user's
+  words there).
+- Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## quick-launch-acknowledgment-revives-previous-mark.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by static ordering analysis, not reproduced. Marking template B (or binding a number key to it)
+  and pressing the shortcut while that save is still in flight can launch the previously marked template A. It needs the
+  helm to answer the shortcut's later preference read before applying the earlier save, and the save's acknowledgment to
+  land before the template read finishes; separate requests to the helm carry no ordering guarantee, but the whole
+  window is as long as one save, which is milliseconds against a local helm.
+- Decision: on 2026-10-14 the user discarded this item and the three other quick-launch timing items: "this is fine. we
+  are not worryed about it. we are not adding tons of complexity to account for multiple interfaces to the helm, and
+  within the same interface this is a ridiculous condition that is impractical to reach, you'd have to click super fast
+  AND the order of req/resp to helm would need to be out of order." After learning that the out-of-order part comes from
+  independent HTTP requests rather than from any requirement, the user asked to "discard the relevant ones for now, but
+  put a near term todo item to consider moving to an ordered transport instead of out of order http requests, with a
+  reference to the specific issues that prompted this."
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes. The TODO.md Near
+  term entry "Consider an ordered transport between the GUI and the helm" names this item.
+- Execution: `pending`.
+
+## quick-launch-changes-inherited-destination.md
+
+- Outcome: `discard`.
+- Assessment: likely by static reading, not reproduced. A quick launch of a template with no destination of its own
+  borrows the selected session's host and folder; selecting another session while the template loads makes it launch
+  there instead.
+- Decision: on 2026-10-14, discarded with `quick-launch-acknowledgment-revives-previous-mark.md` (see the user's words
+  there).
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## quick-launch-host-removal-falls-back-silently.md
+
+- Outcome: `discard`.
+- Assessment: likely by static reading, not reproduced. If another client removes a quick-launched template's remote
+  host while its checkout preview is pending, the launch proceeds on the default host without showing the change.
+- Decision: on 2026-10-14, discarded with `quick-launch-acknowledgment-revives-previous-mark.md` (see the user's words
+  there); the trigger needs a second interface to the helm.
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## quick-launch-template-identity-follows-successor.md
+
+- Outcome: `discard`.
+- Assessment: plausible by static reading, not reproduced. If the template's host entry is seen pointing at a
+  reinstalled installation while a quick launch is preparing, the agent runs on the new installation. SPEC.md has texts
+  pointing both ways (in-flight creates follow the same host entry; templates never silently aim at a successor).
+- Decision: on 2026-10-14, discarded with `quick-launch-acknowledgment-revives-previous-mark.md` (see the user's words
+  there).
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## pending-command-save-overwrites-newer-save.md
+
+- Outcome: `discard`.
+- Assessment: likely by static reading; the overtaking order was not reproduced. Saving post-clone command A, closing
+  Settings while it is still saving, reopening and saving B can leave A stored if A's request reaches the helm after
+  B's, while Settings shows B as saved. Realistic only over a slow link to a standalone helm.
+- Decision: on 2026-10-14 the user, after asking how saves could land out of order: "yeah we don't care. this is fine.
+  this is too extreme of a use case. if as a user I do that, that's on me." It is one of the two items the ordered
+  transport TODO names (see `quick-launch-acknowledgment-revives-previous-mark.md`).
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes. The TODO.md Near
+  term entry "Consider an ordered transport between the GUI and the helm" names this item.
+- Execution: `pending`.
+
+## codex-ancestor-clear-withdraws-unverified-resume.md
+
+- Outcome: `discard`.
+- Assessment: the control-flow exception is confirmed by reading; no real trigger was found. The harm needs a nested
+  Codex's report to be adopted before the session's own Codex reports, then a `/clear` from the session's own Codex
+  before its new transcript exists. In a fresh launch the session's own Codex reports first: Codex runs its start hook
+  when the first prompt is submitted and adds the hook's output to the model's context (per the vendor documentation
+  SPEC_impl.md cites), so the report is on disk before the agent can run any tool, `codex exec` included. The one
+  documented route to a nested report coming first is a session that kept running across the upgrade that introduced
+  Codex process pinning. Even then the consequence is losing a Resume that pointed at the nested Codex's conversation,
+  the same as an ordinary `/clear` followed by Restart.
+- Decision: on 2026-10-14 the user: "forget any edge case having to do with upgrading rom old versions if its combined
+  with "super rare unlikely situation". its ok."
+- Completion criteria: remove this feedback file and its index entry, without code or spec changes.
+- Execution: `pending`.
+
+## confirmation-restoration-failure-reloads-optout.md
+
+- Outcome: `fix code`.
+- Assessment: plausible by static reading, not reproduced; unchanged on main. When the user turns session confirmations
+  back on and that save fails, the failure is not shown, and the next reload or app restart restores the stored opt-out,
+  so Delete, Replace and closing a tab act on the first click again. SPEC.md lists this preference among the ones whose
+  persistence failures are silent, but describes falling back to defaults, not to an older opt-out.
+- Decision: on 2026-10-14 the user chose: "show error".
+- Completion criteria: a failed save of the setting that turns confirmations back on is shown to the user, so they know
+  the opt-out still stands. If SPEC.md's list of silent persistence failures says otherwise for this preference, narrow
+  it in the same change. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## interrupted-checkout-retains-evictable-cache-dependency.md
+
+- Outcome: `other`.
+- Assessment: likely by static reading, not reproduced. A managed checkout borrows data from the host's repository cache
+  while git clones it and copies that data in at the end. If the clone is killed outright in between, the checkout looks
+  usable but still borrows from the cache. Farhelm refuses to repeat an interrupted preparation and shows the failed
+  stage in the session terminal, but a user who keeps working there anyway can later have the checkout's repository left
+  incomplete by cache cleanup. Completed checkouts are unaffected.
+- Decision: on 2026-10-14 the user: "I see, didn't realize the cache wasn't permanently referenced. so long as the user
+  is told that it failed I woudlsay this is acceptable. not sure about generatrlization but lets put a filter for the
+  specific issue". A filter for exactly this case, "Work continued in a checkout whose preparation was killed partway",
+  was added to `review_feedback_queue/FILTER.md`, and the item was removed under the filter-match rule.
+- Completion criteria: the filter exists, and this feedback file and its index entry are removed.
+- Execution: complete, in the same change that recorded this triage session (filter added, file and index entry
+  removed).
+
+## legacy-template-edit-sanitizes-before-save-refusal.md
+
+- Outcome: `fix code`.
+- Assessment: likely by static reading; the browser's newline stripping was not reproduced. Editing the launch or resume
+  command of a template saved under older rules with a quoted newline makes the single-line field drop the newline
+  silently, so the changed command passes the save check and stores contents the user did not write. Saving without
+  editing is refused, as intended.
+- Decision: on 2026-10-14 the user: "older templates here are not important enough, 0 users are in this situation. do
+  not add complexity. this may not stand for future template changes, but for anything we currently consider to be older
+  as of today, we should not expend complexity fixing this. having said that, if this is a very simple fix that doesn't
+  add more than trivial complexity, let's fix the code with a complexity gate."
+- Completion criteria: editing such a command either keeps it exactly or refuses visibly, through a change of no more
+  than trivial complexity. If that is not possible, stop and record the item as discarded under the user's rule rather
+  than building more. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## template-undo-refuses-legacy-session-names.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by source inspection, not run. Undo after deleting a template re-saves it through the ordinary
+  save path, which refuses templates saved under older rules (joined emoji or invisible characters in the session name,
+  or a newline in a command), so Undo always fails for them and the template is gone once the undo notice expires.
+- Decision: on 2026-10-14, the same rule as `legacy-template-edit-sanitizes-before-save-refusal.md` (see the user's
+  words there).
+- Completion criteria: Undo restores such a template exactly as stored, or deletion says up front that it cannot be
+  undone, through a change of no more than trivial complexity. If that is not possible, stop and record the item as
+  discarded under the user's rule. Remove this feedback file and its index entry.
+- Execution: `pending`.
+
+## folder-history-replaces-highlighted-reset.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by static state-flow reading, not reproduced. With a remote host selected, highlighting "local
+  home" in the New launcher's folder picker before recent folders load, then pressing Enter after they load, picks a
+  recent remote folder instead, because the highlight is kept by position. The draft shows the result before Launch.
+- Decision: on 2026-10-14 the user: "discard for now but no filter/rule/spec".
+- Completion criteria: remove this feedback file and its index entry, without code, spec or filter changes.
+- Execution: `pending`.

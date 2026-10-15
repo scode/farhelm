@@ -510,6 +510,11 @@ Every queued finding also has a triage priority bucket, recorded in `review_feed
 - `high`: bugs that materially degrade the user experience, either through severe rare failures or moderate common ones.
 - `other`: everything else, including correctness, diagnostics, cleanup, and convenience issues without those impacts.
 
+Some consequences look like `highest` but are not (maintainer, 2026-10-14). Losing something the user can recreate in a
+moment, such as unsaved form input or the clipboard's contents, is not losing user-owned work. Harm confined to
+maintainer tooling (tests, release procedures, the docs build) stays out of `highest` unless it is catastrophic. A
+documentation error is `highest` only when the statement could lead a reader into a security or data-loss mistake.
+
 Assign the bucket from the user-visible consequence, not from implementation difficulty or reviewer confidence. A rare
 security or data-loss consequence remains `highest`; uncertainty about whether a consequence crosses that boundary must
 be surfaced to the user before finalizing the bucket. Keep the index grouped by bucket, with the highest bucket first,
