@@ -13981,7 +13981,8 @@
 - Completion criteria: a sweep over a directory whose socket has a full backlog completes within the existing budgets
   and preserves that directory. The new test is bounded and annotated per the test-sleep checker. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/rust-test-portability.md`.
+- Execution: complete in jj change `uuomyvuouqyt`, bookmark `plan/rust-test-portability/06-socket-probe`,
+  [PR #2103](https://github.com/scode/farhelm/pull/2103/changes).
 
 ## git-discovery-fixtures-inherit-bare-git-config.md
 

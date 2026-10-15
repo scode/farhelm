@@ -505,7 +505,52 @@ fn reap(
 /// socket that accepted the connection (a live incompatible server, or a
 /// wedged one), preserve the directory for retry.
 fn kill_tmux_server(socket: &Path) -> bool {
-    match std::os::unix::net::UnixStream::connect(socket) {
+    // A blocking connect can hang on a full listen backlog, before the child
+    // deadline below even starts. Probe once without waiting; only a definite
+    // absent listener may bypass the existing deadline-bound kill command.
+    let probe = || -> io::Result<()> {
+        use std::os::fd::FromRawFd;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::net::UnixStream;
+
+        // SAFETY: sockaddr_un is plain C storage; all-zero bytes are valid.
+        let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+        let bytes = socket.as_os_str().as_bytes();
+        if bytes.len() >= address.sun_path.len() || bytes.contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid socket path",
+            ));
+        }
+        address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+        for (slot, byte) in address.sun_path.iter_mut().zip(bytes) {
+            *slot = *byte as libc::c_char;
+        }
+        let length = (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1)
+            as libc::socklen_t;
+        // SAFETY: socket has no borrowed-pointer arguments and returns one
+        // new descriptor, transferred immediately into an owning stream.
+        let raw = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+        if raw < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: raw is a fresh socket descriptor; no other owner exists.
+        let stream = unsafe { UnixStream::from_raw_fd(raw) };
+        // SAFETY: stream owns this descriptor for the duration of the call.
+        if unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        stream.set_nonblocking(true)?;
+        // SAFETY: address is initialized, length stays within its storage,
+        // and stream owns a live AF_UNIX socket throughout this call.
+        if unsafe { libc::connect(stream.as_raw_fd(), (&raw const address).cast(), length) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    };
+    // The probe's descriptor is closed on every result before spawning tmux.
+    // EAGAIN/EINPROGRESS and other ambiguous errors still require that child.
+    match probe() {
         Err(error)
             if matches!(
                 error.kind(),
@@ -1109,6 +1154,83 @@ mod tests {
         assert!(
             socket.exists(),
             "unconfirmed kills retain the socket for retry"
+        );
+    }
+
+    /// A full listen queue must not freeze the sweep before its kill deadline.
+    /// Linux reports EAGAIN for a nonblocking AF_UNIX connect in this state;
+    /// assert that premise before sweeping. Closing the listener after the
+    /// bounded wait also releases a regressed blocking probe before joining,
+    /// so the failing test cannot strand a worker or tear down its fixture early.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sweep_keeps_a_directory_whose_socket_backlog_is_full() {
+        use std::os::fd::{FromRawFd, OwnedFd};
+        use std::os::unix::net::{UnixListener, UnixStream};
+
+        let root = tempfile::tempdir().unwrap();
+        let dead = dead_dir(root.path(), "fh-it.full00");
+        let socket = dead.join("tmux.sock");
+        let listener = UnixListener::bind(&socket).expect("fixture listener");
+        // SAFETY: listener is an owned listening socket. Linux permits one
+        // queued connection with backlog zero; no other client uses it here.
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
+        let _queued = UnixStream::connect(&socket).expect("fill the private backlog");
+        // SAFETY: zeroed sockaddr_un is valid storage, with its full writable
+        // size supplied to getsockname on the owned listener.
+        let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+        let mut length = std::mem::size_of_val(&address) as libc::socklen_t;
+        // SAFETY: both output pointers remain valid for the declared sizes.
+        assert_eq!(
+            unsafe {
+                libc::getsockname(listener.as_raw_fd(), (&raw mut address).cast(), &mut length)
+            },
+            0
+        );
+        // SAFETY: socket takes no borrowed pointers and returns a fresh fd.
+        let raw = unsafe {
+            libc::socket(
+                libc::AF_UNIX,
+                libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+                0,
+            )
+        };
+        assert!(raw >= 0, "create the nonblocking premise probe");
+        // SAFETY: raw was successfully created above and has no other owner.
+        let contender = unsafe { OwnedFd::from_raw_fd(raw) };
+        // SAFETY: getsockname initialized address/length, and contender owns
+        // the nonblocking socket for this entire connect call.
+        assert_eq!(
+            unsafe { libc::connect(contender.as_raw_fd(), (&raw const address).cast(), length) },
+            -1
+        );
+        assert_eq!(
+            io::Error::last_os_error().raw_os_error(),
+            Some(libc::EAGAIN),
+            "premise: the backlog refuses another nonblocking connection"
+        );
+        drop(contender);
+
+        let result = std::thread::scope(|scope| {
+            let (send, receive) = std::sync::mpsc::sync_channel(1);
+            let path = root.path();
+            scope.spawn(move || {
+                let _ = send.send(sweep(path, &instant_policy()));
+            });
+            let result = receive.recv_timeout(TMUX_KILL_DEADLINE + Duration::from_secs(3));
+            // Release a blocking-connect regression before scope joins its
+            // worker, on both success and timeout. The fixture outlives it.
+            drop(listener);
+            result
+        });
+        let outcome = result.expect("sweep must finish within the existing kill budget");
+        assert!(
+            outcome.reaped.is_empty(),
+            "a full backlog is not an absent server"
+        );
+        assert!(
+            dead.exists() && socket.exists(),
+            "unconfirmed kills retain the directory and socket"
         );
     }
 
