@@ -13138,7 +13138,9 @@
   `restart-drain-skips-newly-published-conversation.md`; brief-window case.
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-conversation-tracking-spec.md`.
+- Execution: complete; jj change `vzpkmypvxkoxkztwmkpvkwuosmtxptss`; bookmark
+  `plan/triage-conversation-tracking-spec/03-reboot-report`; https://github.com/scode/farhelm/pull/2045/changes. Covered
+  by the conversation-tracking specification in #2038.
 
 ## restart-withdrawal-discards-new-codex-selection.md
 

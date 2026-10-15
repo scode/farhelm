@@ -28,10 +28,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   template containing joined emoji or hidden characters offers Undo, but Undo always fails and the retained copy
   expires.
 
-- [`reboot-discards-pending-new-conversation.md`](reboot-discards-pending-new-conversation.md) — If the host reboots
-  before a newly reported conversation is recorded, Restart can return to the session’s previous conversation even after
-  a successful refresh.
-
 - [`legacy-template-edit-sanitizes-before-save-refusal.md`](legacy-template-edit-sanitizes-before-save-refusal.md) —
   Editing a legacy multiline template command can silently change its argument text and then save successfully.
 
