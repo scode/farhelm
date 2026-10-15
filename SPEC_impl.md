@@ -3641,6 +3641,18 @@ this layout ran from `Contents/MacOS/farhelm`, so sessions they started already 
 forwarder exactly there is what keeps them working without migration; it must never move. Outside the layout the
 supervisor uses its own program for all of these, as it always has.
 
+A target release older than the first build with this installer (`HANDOFF_FLOOR` in `install.sh`, the lowest prerelease
+of the release that brought it, so its dev builds and release candidates are never handed off) cannot do the locked work
+below, so `install.sh` hands it to that release's own installer: once it has resolved the target (from
+`FARHELM_VERSION`, or from `/latest`, which can be rolled back) and read the target's `SHA256SUMS`, and before it
+creates or changes anything, it downloads `/<tag>/install.sh`, checks it against that file's `install.sh` entry, and
+runs it with the same environment and `FARHELM_VERSION` pinned to the resolved release (so a `/latest` that moves
+meanwhile cannot make it install a newer release the old way), exiting with its status. Version numbers are compared as
+digit strings, so their length is unbounded. The comparison is semantic-version precedence written in POSIX `sh` (a
+release sorts above its prereleases, `dev` below `rc`), and the development version `0.0.0-unreleased` is exempt. Older
+installers accept the extended ownership record below by its first two fields and rewrite it in the two-field form, so a
+downgrade leaves the older release the record it expects.
+
 An install's locked work is done by the release's own `farhelm`, which `install.sh` runs as `farhelm internal install`
 once it has downloaded, checked and staged the release (its two programs, the icon, and the forwarder and `Info.plist`
 texts the script writes); the script writes nothing inside the app and reads the outcome from an `install-result` or
