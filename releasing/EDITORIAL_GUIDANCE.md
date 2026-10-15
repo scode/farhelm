@@ -41,3 +41,15 @@ with in place.
   draft's Codex entry ran six sentences, through when Farhelm reads a saved conversation, what happens if its file was
   deleted and what a passing read error does; it became one sentence saying which sessions to relaunch and why. The
   whole draft got the same pass. (Stated by the maintainer during the v0.26.0 curation, 2026-10-10.)
+- When how likely a bug was differs by platform, say where it was common and where it was rare, so a reader can tell
+  whether it was likely to have hit them. This is one caveat the rule about leaving out edge cases does not cut. The
+  v0.28.2 Git clone fix gained "The failure was common with the Git built into macOS and rare, but possible, on Linux."
+  (Proposed during the v0.28.2 curation and agreed by the maintainer, 2026-10-13.)
+- When a bug's cause is in a third-party tool, link that tool's upstream fix, so a reader can see the cause and which
+  version of the tool fixes it. The v0.28.2 Git clone fix links the Git commit that fixed it in Git 2.55. (Proposed
+  during the v0.28.2 curation and agreed by the maintainer, 2026-10-13.)
+- When Farhelm works around a bug in a third-party tool, say that it is a workaround and that the user's own copy of the
+  tool is still what runs. Otherwise the entry can read as if Farhelm now ships or installs a fixed version. The v0.28.2
+  Git clone fix ends "Farhelm still uses the Git already on the host and works around the bug by turning off one Git
+  optimization (the commit-graph) for that clone, so you do not need to upgrade Git." (Proposed during the v0.28.2
+  curation and agreed by the maintainer, 2026-10-13.)
