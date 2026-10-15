@@ -92,6 +92,10 @@ pub(crate) struct ProvisioningMenuState {
     /// run that has not reached a terminal state. While set, the menu offers
     /// no new provisioning command and disables the in-flight one.
     pub(crate) planning: bool,
+    /// ADD or Uninstall is preparing or holding a confirmation. Unlike a
+    /// one-click Update, it can still open a modal and must exclude Settings
+    /// on every host until the question is settled.
+    pub(crate) confirmation_may_open: bool,
 }
 
 /// What decides a host row's provisioning offers: [`ProvisioningMenuState::offered`]'s
@@ -109,8 +113,13 @@ struct MenuFacts {
     uninstall_allowed: bool,
     /// The local row's supervisor is not running (setup, not Update).
     local_setup: bool,
-    /// A plan or an automatic-update intent is under way.
-    plan_in_flight: bool,
+    /// ADD or Uninstall preparation has not returned yet, including the
+    /// local row's automatic setup probe.
+    confirmation_planning: bool,
+    /// A prepared plan still awaits confirmation or automatic submission.
+    has_pending_plan: bool,
+    /// An Update intent or a tracked run is still owned by this panel.
+    update_owned: bool,
     /// The local setup's automatic retry is allowed.
     can_retry_local_setup: bool,
     /// The host runs a newer farhelm than the helm
@@ -121,6 +130,8 @@ struct MenuFacts {
 impl ProvisioningMenuState {
     /// The offers a row's menu makes, as one pure function of its facts so
     /// the rules can be tested without mounting the component.
+    /// It also publishes the narrower confirmation lifecycle separately:
+    /// Settings on other hosts need not wait for a one-click Update.
     ///
     /// Update is never offered for a host running a newer farhelm than the
     /// helm: it would install the helm's older build over it (SPEC.md:
@@ -132,10 +143,16 @@ impl ProvisioningMenuState {
             update_allowed,
             uninstall_allowed,
             local_setup,
-            plan_in_flight,
+            confirmation_planning,
+            has_pending_plan,
+            update_owned,
             can_retry_local_setup,
             too_new,
         } = facts;
+        // A pending plan is conservatively modal-producing, even for the
+        // defensive Update-plan branch. Ordinary Updates never enter it.
+        let confirmation_may_open = confirmation_planning || has_pending_plan;
+        let plan_in_flight = confirmation_may_open || update_owned;
         ProvisioningMenuState {
             // A failed Update is not offered again on a too-new host either:
             // the rerun is the same downgrade. A failed uninstall is never a
@@ -154,6 +171,7 @@ impl ProvisioningMenuState {
             update: !run_active && update_allowed && !local_setup && !plan_in_flight && !too_new,
             uninstall: !run_active && uninstall_allowed && !plan_in_flight,
             planning: plan_in_flight,
+            confirmation_may_open,
         }
     }
 }
@@ -2508,14 +2526,15 @@ pub(crate) fn ProvisioningPanel(
                     .flatten()
             });
             let update_allowed = menu_host_kind.offers_provisioning_actions();
-            let plan_in_flight = is_planning || has_pending_plan || owned;
             let next = ProvisioningMenuState::offered(MenuFacts {
                 run_active,
                 failed_operation,
                 update_allowed,
                 uninstall_allowed: menu_host_kind.uninstalls_from_panel(),
                 local_setup,
-                plan_in_flight,
+                confirmation_planning: is_planning,
+                has_pending_plan,
+                update_owned: owned,
                 can_retry_local_setup,
                 too_new: menu_too_new,
             });
@@ -2964,6 +2983,40 @@ fn operation_label(operation: Option<ProvisioningOperation>) -> &'static str {
 mod tests {
     use super::*;
 
+    /// Updates keep their own row busy without excluding Settings elsewhere.
+    /// ADD/Uninstall preparation and pending plans still exclude other dialogs,
+    /// including before they acquire the page operation lock. Reducing the raw
+    /// lifecycle facts here pins that distinction without changing any offers.
+    #[farhelm_testtrace::test]
+    fn only_confirmation_preparation_and_pending_plans_exclude_other_settings() {
+        for (confirmation_planning, has_pending_plan, update_owned, broad, modal) in [
+            (false, false, false, false, false),
+            (false, false, true, true, false),
+            (true, false, false, true, true),
+            (false, true, false, true, true),
+            (true, true, true, true, true),
+        ] {
+            let menu = ProvisioningMenuState::offered(MenuFacts {
+                confirmation_planning,
+                has_pending_plan,
+                update_owned,
+                update_allowed: true,
+                uninstall_allowed: true,
+                ..MenuFacts::default()
+            });
+            assert_eq!(menu.planning, broad, "{menu:?}");
+            assert_eq!(menu.confirmation_may_open, modal, "{menu:?}");
+            assert_eq!(
+                menu.update, !broad,
+                "Update availability retains its broad guard"
+            );
+            assert_eq!(
+                menu.uninstall, !broad,
+                "Uninstall availability retains its broad guard"
+            );
+        }
+    }
+
     /// A host running a newer farhelm than the helm is never offered Update
     /// from its row's menu, while an otherwise identical host is.
     ///
@@ -3035,7 +3088,7 @@ mod tests {
                 ..ready
             },
             MenuFacts {
-                plan_in_flight: true,
+                has_pending_plan: true,
                 ..ready
             },
             MenuFacts {
