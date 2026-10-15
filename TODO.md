@@ -78,22 +78,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   cargo-dist release build jobs honor the pin: they install Rust only when it is missing and otherwise use the runner's
   own. Once pinned, drop the newest-stable clippy step from `.agents/run-all-tests.md`.
 
-- **Make the Mac installer race-free.** Updating, automatically updating and uninstalling Farhelm.app can race with each
-  other and with a running Farhelm. An install can delete the version a starting Farhelm or a session's `farhelm`
-  command is about to use. An automatic update can put back an older version over a newer manual install, or reinstall
-  an app that was just uninstalled. A killed run can leave a lock behind that silently stops automatic updates. A power
-  cut mid-update has no guaranteed outcome. This started as the review finding that an interrupted update followed by a
-  second install can delete the version a starting Farhelm runs from; a small pending-version marker was rejected after
-  three adversarial reviews showed it closes only that one case. The design to build is
-  https://snippets.scode.org/s/farhelm-installer-race-free-design/ (version 6): versions held by shared locks while in
-  use and deleted only under an exclusive lock, one installation lock on `~/Applications`, the locked work done by the
-  new `farhelm` through folders it opened and checked, an installation id and generation for the updater, flushes before
-  renames, and uninstall in today's order. After four review rounds by gpt-6.1-sol, gpt-6-astra and Opus 5.5, all three
-  are satisfied with it as a basis for implementation, and the macOS primitives it relies on were checked on a real Mac
-  (https://snippets.scode.org/s/farhelm-mac-lock-flush-probe-results/). Still to settle before building: the page's four
-  "Decisions for you", and getting there from today's installer (older releases' tools, the old lock folder), which the
-  design deliberately leaves out. FAT, ExFAT and network volumes are out of scope.
-
 - **Consider matching Claude's conversation capture to Codex's.** Codex's conversation capture changed recently;
   consider adjusting how Farhelm captures a Claude session's conversation to match. The maintainer knows which change
   this refers to and what matching it would mean; ask before starting.
