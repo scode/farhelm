@@ -46,7 +46,7 @@ mod updater;
 mod window_state;
 
 pub(crate) use assets::use_embedded_asset_handler;
-use bundle::{bundled_farhelm, desktop_state_dir};
+use bundle::{bundled_farhelm, desktop_state_dir, helm_payload_dir};
 use state::{APP_STATE_FILE, update_state};
 use tmux_preflight::{
     is_executable_file, macos_tmux_prefixes, resolve_supervisor_tmux, run_tmux_preflight_or_exit,
@@ -409,7 +409,14 @@ impl DesktopBootstrap {
                     // owns, including GUI exits that skip Rust destructors.
                     .stdin(Stdio::piped())
                     .stdout(Stdio::null())
-                    .stderr(Stdio::inherit());
+                    .stderr(Stdio::inherit())
+                    // The payload directory is this app's embedded helm's
+                    // setting alone. Inherited, it would reach the
+                    // supervisor's tmux server and every session shell in
+                    // it, so a `farhelm helm run` typed in a session would
+                    // silently push this launch's payloads, possibly long
+                    // after the app that set it has quit.
+                    .env_remove("FARHELM_HELM_PAYLOAD_DIR");
                 if let Some(tmux) = &supervisor_tmux {
                     command.env(farhelm_supervisor::tmux::TMUX_PROGRAM_ENV, tmux);
                 }
@@ -455,7 +462,7 @@ impl DesktopBootstrap {
                             state_dir: Some(helm_state),
                             ui_dist: None,
                             ensure_hosts: None,
-                            payload_dir: None,
+                            payload_dir: helm_payload_dir(),
                             release_base_url: None,
                             backstop_refresh_secs: None,
                         },

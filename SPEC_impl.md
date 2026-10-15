@@ -3947,8 +3947,10 @@ and skew"), has no release to download from and refuses by default, naming `--pa
 same commit (`UnreleasedPayloads`). A developer build defaults to no payloads at all (`NoPayloads`, D13) rather than to
 a download, and `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`) selects an operator-staged directory instead —
 files in an explicitly selected local directory are treated as operator-trusted and are not verified, on ANY build,
-developer or release. The downloading source is `ReleasePayloadSource` (`provisioning/release_payloads.rs`), which
-caches one release's assets, their extracted binaries, and the signed checksum file under
+developer or release. The desktop app's embedded helm takes the same directory from the same environment variable, so a
+desktop build from a working copy can update hosts with Linux payloads built from that working copy
+(`scripts/devbuild-mac.sh`). The downloading source is `ReleasePayloadSource` (`provisioning/release_payloads.rs`),
+which caches one release's assets, their extracted binaries, and the signed checksum file under
 `<state_dir>/payloads/v{version}-<first 12 hex of sha256(base_url)>/` — keyed by version so an upgraded helm never
 reuses the previous release's binaries, and by base URL so a mirror or test server can neither read nor poison what the
 real release wrote. Motivation for reversing the embedding: bundling every target's binaries inside every platform's own

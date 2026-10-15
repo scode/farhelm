@@ -81,6 +81,10 @@ binary under Xvfb, which is the same `desktop::run` shell with the asset names f
 - `FARHELM_DESKTOP_FARHELM` — path to the `farhelm` CLI, instead of the sibling next to this binary (or, in the Mac
   app's side-by-side version layout, this version's own `Contents/Versions/<version>/farhelm`).
 - `FARHELM_DESKTOP_STATE_DIR` — state directory for the embedded helm and managed local supervisor.
+- `FARHELM_HELM_PAYLOAD_DIR` — the embedded helm's provisioning payload directory, with the same meaning as the
+  standalone helm's `--payload-dir`: setup and Update push the Linux binaries staged there, unverified. A build from a
+  working copy has no release to download them from, so this is what lets it update remote hosts;
+  `scripts/devbuild-mac.sh` stages the directory and sets it.
 - `FARHELM_DESKTOP_UPDATE_LATEST` — `v<version>` of a stable release for the installed Mac app's updater to treat as
   latest, for the release test in `releasing/mac-vm-test/`. An invalid or empty value fails every check without asking
   `/latest`; the real download origin and verification remain unchanged. Restart to update removes it from the relaunch
