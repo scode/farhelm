@@ -40,9 +40,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can permanently delete archived work after showing a confirmation that only describes unchecked entries and possible
   forgetting.
 
-- [`trash-guard-misses-retargeted-external-symlink.md`](trash-guard-misses-retargeted-external-symlink.md) — Emptying
-  the trash can delete files being used by a retained session’s terminal tab.
-
 - [`file-disclosure-cannot-scroll-oversized-path.md`](file-disclosure-cannot-scroll-oversized-path.md) — A long path can
   conceal required directory and size information before transfer or native opening; the new layout puts the leaf first.
 
