@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`guarded-permission-mode`](reports/guarded-permission-mode.report.md) landed 2026-10-14 in #1992: Rename non-YOLO to "guarded", force each agent's guarded mode with explicit flags, and explain it per agent
 - [`confirmation-focus-and-skip`](reports/confirmation-focus-and-skip.report.md) landed 2026-10-14 in #1990, #1993: Enter goes ahead on every confirmation (except YOLO), and a Settings switch skips the everyday session confirmations
 - [`quick-launch-template`](reports/quick-launch-template.report.md) landed 2026-10-14 in #1994: Mark one template ⚡ quick launch; Cmd+P / Ctrl+Shift+P starts a session from it with no launcher
 - [`custom-permission-flags`](reports/custom-permission-flags.report.md) landed 2026-10-14 in #1995: A "custom" permission choice that passes the user's own permission flags and always counts as YOLO
