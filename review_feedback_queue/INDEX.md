@@ -75,9 +75,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-editor-conceals-peer-model-and-folder.md`](template-editor-conceals-peer-model-and-folder.md) — Saving a
   cloned session opens template controls that conceal host-supplied model and folder characters.
 
-- [`codex-transcript-error-discards-new-selection.md`](codex-transcript-error-discards-new-selection.md) — A transcript
-  read error permanently discards Codex's new selection while retaining the old Resume offer; pre-existing.
-
 ## High priority: material UX degradation
 
 - [`bare-cache-fetch-conflicts-with-explicit-git-policy.md`](bare-cache-fetch-conflicts-with-explicit-git-policy.md) —
