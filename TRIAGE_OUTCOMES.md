@@ -13544,7 +13544,8 @@
 - Completion criteria: a click whose link text has changed since the hover was shown transfers and opens nothing; an
   unchanged link still works. If the fix or its regression test turns out large or very complex, stop and return the
   item to the user. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-link-safety.md`.
+- Execution: jj change `vsvtlxklupsxztxksktrxymtypytmkyo`, bookmark `plan/terminal-link-safety/02-current-text`,
+  [PR #2085](https://github.com/scode/farhelm/pull/2085/changes).
 
 ## file-disclosure-cannot-scroll-oversized-path.md
 

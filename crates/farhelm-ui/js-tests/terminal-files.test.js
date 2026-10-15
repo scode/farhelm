@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { linkRangeText } = require('../assets/terminal-links.js');
 const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, MAX_BYTES } = require('../assets/terminal-files.js');
 
 /** Decimal display and exact byte thresholds must agree with the host cap;
@@ -128,12 +129,19 @@ test('OSC allows web unchanged and decoded file paths only', () => {
     'file://host?next=/tmp/report.pdf', 'file://host#/tmp/report.pdf', 'file://?next=/tmp/report.pdf', 'file://#/tmp/report.pdf', 'file:///a?', 'file:///a#', 'file:///a%00b', 'file:///a?x', 'file:///a#x', 'file:///bad%']) assert.equal(oscTarget(uri), null, uri);
 });
 
-/** Public cell fixtures represent Unicode/wrapping contracts without private xterm internals. */
+/** Public cell fixtures represent Unicode/wrapping contracts without private
+ * xterm internals. Both recognition and text snapshots read these same cells,
+ * so a partial repaint changes one shared buffer rather than two test doubles.
+ */
 function terminal(rows) {
   return { buffer: { active: { getLine(y) {
     const row = rows[y];
     if (!row) return undefined;
-    return { isWrapped: row.wrapped, length: row.cells.length, getCell(x) {
+    return { isWrapped: row.wrapped, length: row.cells.length,
+    translateToString(trim, from, to) {
+      const text = row.cells.slice(from, to).map(([chars, width]) => width ? chars || ' ' : '').join('');
+      return trim ? text.trimEnd() : text;
+    }, getCell(x) {
       const [chars, width] = row.cells[x];
       return { getChars: () => chars, getWidth: () => width };
     } };
@@ -176,7 +184,7 @@ function hoverFixture(native = false, isMac = false) {
     clearTimeout: id => tasks.delete(id),
   };
   const context = vm.createContext({
-    window: {}, AbortController,
+    window: { farhelmTerminalLinks: { linkRangeText } }, AbortController,
     fetch: (url, options) => new Promise(resolve => {
       requests.push({ url, signal: options.signal, path: JSON.parse(options.body).path,
         reply: info => resolve({ ok: true, json: async () => info }) });
@@ -384,7 +392,7 @@ test('disposal clears pending hover teardown and rejects late replies', async ()
 });
 
 /** Run the shipped addon with an owned DOM and clock, without changing globals.
- * Only notice, click and save primitives are modeled; xterm geometry and real
+ * Notice, click, save and public buffer primitives are modeled; real geometry and
  * browser rendering remain the two-engine integration suite's responsibility.
  */
 function noticeFixture(native = true, opened = true, defaultTimers = false, isMac = false) {
@@ -414,7 +422,7 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
     clearTimeout: id => timers.delete(id),
   };
   const context = vm.createContext({
-    window: { farhelmTerminalLinks: { visibleFormatCharacters: text => text } },
+    window: { farhelmTerminalLinks: { visibleFormatCharacters: text => text, linkRangeText } },
     document: { createElement: element },
     AbortController, Blob,
     // A strict callable rejects an addon receiver just as browser timers do.
@@ -433,11 +441,88 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
   });
   vm.runInContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
   const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, isClick: () => true, ...(defaultTimers ? {} : clock) });
-  const term = { element: opened ? root : undefined, registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '' };
+  const term = { element: opened ? root : undefined, registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '',
+    buffer: { active: { getLine: () => ({ length: 10, translateToString: () => 'report.pdf' }) } } };
   addon.activate(term);
-  addon.hovered = { path: 'report.pdf', info: { status: 'ready', path: '/output/report.pdf' }, controller: new AbortController() };
+  addon.hovered = { path: 'report.pdf', info: { status: 'ready', path: '/output/report.pdf' }, controller: new AbortController(),
+    range: { start: { x: 1, y: 1 }, end: { x: 10, y: 1 } }, screenText: 'report.pdf' };
   return { addon, timers, listeners, open: () => { term.element = root; }, notice: () => root.querySelector(':scope > .terminal-file-message') };
 }
+
+/** A cached link can survive repaint of only its continuation. The actual
+ * shipped admission path must reject the changed cells before requesting
+ * either a browser transfer or a native save/open, and still accept unchanged
+ * cells. Capturing via hover pins the snapshot timing, not just comparison.
+ */
+test('partial wrapped redraw invalidates file transfer evidence', async () => {
+  for (const native of [false, true]) {
+    const fixture = noticeFixture(native, true, false, true);
+    let rows = ['report', '.pdf'];
+    fixture.addon.term.buffer.active.getLine = y => rows[y] === undefined ? undefined : {
+      length: rows[y].length,
+      translateToString: (_trim, start, end) => rows[y].slice(start, end),
+    };
+    const range = { start: { x: 1, y: 1 }, end: { x: 4, y: 2 } };
+    fixture.addon.show = () => {};
+    const requests = [];
+    fixture.addon.request = async (operation, _path, _signal, open) => {
+      requests.push({ operation, open });
+      if (operation === 'stat') return { json: async () => ({ status: 'ready', path: '/output/report.pdf', size: 1, host: 'fixture' }) };
+      return native ? { json: async () => ({ path: '/Downloads/report.pdf', opened: false }) } : new Response('bytes');
+    };
+    await fixture.addon.hover({}, 'report.pdf', null, range, 'report.pdf');
+    assert.equal(fixture.addon.hovered.screenText, 'report.pdf');
+    assert.equal(fixture.addon.hovered.info.status, 'ready');
+    rows[1] = '.txt';
+    await fixture.addon.download('report.pdf', { metaKey: true });
+    assert.equal(requests.length, 1, 'changed cells cannot reuse the stat for a transfer');
+    rows[1] = '.pdf';
+    await fixture.addon.download('report.pdf', { metaKey: true });
+    assert.deepEqual(requests[1], { operation: 'download', open: native });
+    rows = [];
+    await fixture.addon.download('report.pdf', { metaKey: true });
+    assert.equal(requests.length, 2, 'missing rows cannot establish unchanged text');
+    fixture.addon.dispose();
+  }
+});
+
+/** A repaint may append a suffix while leaving every cached link cell intact.
+ * Recognition must still identify the complete printed token and its endpoints;
+ * comparing the old rectangle alone would download/open the previous filename.
+ */
+test('a wrapped printed path cannot grow beyond its cached endpoint', async () => {
+  for (const native of [false, true]) {
+    const fixture = noticeFixture(native, true, false, true);
+    const cells = text => Array.from(text, ch => [ch, 1]);
+    const rows = [
+      { cells: cells('long/repor'), wrapped: false },
+      { cells: cells('t.txt     '), wrapped: true },
+    ];
+    fixture.addon.term.buffer = terminal(rows).buffer;
+    const [{ path, range }] = bufferLinks(fixture.addon.term, 1);
+    assert.equal(path, 'long/report.txt');
+    assert.deepEqual(range.end, { x: 5, y: 2 });
+    fixture.addon.show = () => {};
+    const requests = [];
+    fixture.addon.request = async (operation, _path, _signal, open) => {
+      requests.push({ operation, open });
+      if (operation === 'stat') return { json: async () => ({ status: 'ready', path: '/output/long/report.txt', size: 1, host: 'fixture' }) };
+      return native ? { json: async () => ({ path: '/Downloads/report.txt', opened: true }) } : new Response('bytes');
+    };
+    await fixture.addon.hover({}, path, { range, decorations: {} }, range);
+    assert.equal(fixture.addon.hovered.info.status, 'ready');
+    rows[1].cells = cells('t.txt.bak ');
+    assert.equal(linkRangeText(fixture.addon.term, range), fixture.addon.hovered.screenText,
+      'the old rectangle alone still matches after the extension');
+    assert.equal(bufferLinks(fixture.addon.term, 1)[0].path, 'long/report.txt.bak');
+    await fixture.addon.download(path, { metaKey: true });
+    assert.equal(requests.length, 1, 'the newly extended token must not reuse the previous target');
+    rows[1].cells = cells('t.txt     ');
+    await fixture.addon.download(path, { metaKey: true });
+    assert.deepEqual(requests[1], { operation: 'download', open: native });
+    fixture.addon.dispose();
+  }
+});
 
 /** Real browser timers reject an addon as their receiver. Default scheduling
  * and cancellation must retain global-call semantics just like injected clocks.

@@ -34,6 +34,7 @@ const {
   displayedTarget,
   linkTextMismatch,
   linkRowText,
+  linkRangeText,
   visibleFormatCharacters,
 } = require("../assets/terminal-links.js");
 
@@ -65,6 +66,26 @@ test("only a primary click within four pixels admits that exact release", () => 
   const secondary = event('mouseup', 10, 10, 2);
   gesture.observe(secondary, true);
   assert.equal(gesture.isClick(secondary), false);
+});
+
+/** Range snapshots must include a wrapped continuation without trimming
+ * meaningful spaces. Unreadable or unbounded ranges cannot authorize a file.
+ */
+test("file link snapshots cover every row and refuse missing or excessive ranges", () => {
+  const rows = ['prefix file ', 'name.txt end'];
+  const term = { buffer: { active: { getLine: y => rows[y] === undefined ? undefined : {
+    length: rows[y].length,
+    translateToString: (_trim, from, to) => rows[y].slice(from, to),
+  } } } };
+  const range = { start: { x: 8, y: 1 }, end: { x: 8, y: 2 } };
+  assert.equal(linkRangeText(term, range), 'file name.txt');
+  rows[1] = 'other.txt end';
+  assert.equal(linkRangeText(term, range), 'file other.tx');
+  assert.equal(linkRangeText(term, { ...range, end: { x: 1, y: 3 } }), null);
+  assert.equal(linkRangeText(term, { ...range, end: { x: 1, y: 130 } }), null);
+  assert.equal(linkRangeText(term, { ...range, start: { x: 0, y: 1 } }), null);
+  assert.equal(linkRangeText(term, { ...range, end: { x: 50, y: 2 } }), null);
+  assert.equal(linkRangeText(term, null), null);
 });
 
 /** Link ownership must never consume a file, forced selection or another
