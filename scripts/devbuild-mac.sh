@@ -41,7 +41,7 @@
 #
 # ## Requirements
 #
-# On the Mac: `dx` (the Dioxus CLI version the repo pins), `cargo-zigbuild`
+# On the Mac: `dx` (the Dioxus CLI version the repo pins, 0.7.10), `cargo-zigbuild`
 # and `zig` for the Linux cross-builds (`cargo install --locked
 # cargo-zigbuild`, `brew install zig`), and the rustup targets
 # `x86_64-unknown-linux-musl` and/or `aarch64-unknown-linux-musl`. The script
@@ -101,9 +101,22 @@ fi
 # one is fixed and the web build has run is a waste of that time.
 
 missing=()
-command -v dx >/dev/null 2>&1 || missing+=("dx (the Dioxus CLI)")
+
+# Cargo's bin directory goes first because both cargo-installed tools here
+# have namesakes: Homebrew's deno installs its own `dx`, and when Homebrew's
+# bin precedes ~/.cargo/bin on PATH, a bare `dx` runs deno instead of the
+# Dioxus CLI. The version check still runs, so a `dx` from somewhere else, or
+# a Dioxus CLI other than the pinned one, is reported rather than used.
+export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+dx_version=0.7.10
+case "$(dx --version 2>/dev/null)" in
+  "dioxus $dx_version"*) ;;
+  *) missing+=("dx $dx_version, the Dioxus CLI (cargo install --locked dioxus-cli --version $dx_version)") ;;
+esac
 command -v zig >/dev/null 2>&1 || missing+=("zig (brew install zig)")
-cargo zigbuild --version >/dev/null 2>&1 || missing+=("cargo-zigbuild (cargo install --locked cargo-zigbuild)")
+# `cargo-zigbuild --version`, not `cargo zigbuild --version`: the subcommand
+# form rejects --version (seen with cargo-zigbuild 0.23.4).
+cargo-zigbuild --version >/dev/null 2>&1 || missing+=("cargo-zigbuild (cargo install --locked cargo-zigbuild)")
 command -v curl >/dev/null 2>&1 || missing+=("curl")
 installed_targets=$(rustup target list --installed)
 for arch in "${arches[@]}"; do
