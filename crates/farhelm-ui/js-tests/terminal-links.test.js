@@ -26,6 +26,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const {
   isPlainWebUrl,
+  createLinkGesture,
   interceptLinkPress,
   suppressMouseReport,
   linkTargetParts,
@@ -40,6 +41,31 @@ const SHIPPED_SOURCE = fs.readFileSync(
   path.join(__dirname, "..", "assets", "terminal-links.js"),
   "utf8",
 );
+
+/** Mouse reporting can leave selection empty for a real drag. Admission
+ * therefore follows the complete primary gesture, including an excursion
+ * that returns to the starting cell, and never leaks to a later event.
+ */
+test("only a primary click within four pixels admits that exact release", () => {
+  const gesture = createLinkGesture();
+  const event = (type, x, y = 10, button = 0) => ({ type, clientX: x, clientY: y, button });
+  for (const [excursion, end, allowed] of [[10, 10, true], [14, 14, true], [15, 15, false], [30, 10, false]]) {
+    gesture.observe(event('mousedown', 10), true);
+    gesture.observe(event('mousemove', excursion), true);
+    const release = event('mouseup', end);
+    gesture.observe(release, true);
+    assert.equal(gesture.isClick(release), allowed);
+    assert.equal(gesture.isClick({ ...release }), false, 'another event cannot borrow the last click');
+  }
+  gesture.observe(event('mousedown', 10), false);
+  const outside = event('mouseup', 10);
+  gesture.observe(outside, true);
+  assert.equal(gesture.isClick(outside), false, 'a press elsewhere cannot activate this terminal');
+  gesture.observe(event('mousedown', 10, 10, 2), true);
+  const secondary = event('mouseup', 10, 10, 2);
+  gesture.observe(secondary, true);
+  assert.equal(gesture.isClick(secondary), false);
+});
 
 /** Link ownership must never consume a file, forced selection or another
  * button. The pure press policy complements real browser report assertions;

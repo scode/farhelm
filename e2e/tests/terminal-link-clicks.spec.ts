@@ -22,6 +22,81 @@ const labels = {
  */
 const NO_NOTICE_WINDOW_MS = 3_000;
 
+/** An agent TUI can consume a drag without creating any local selection.
+ * Keep the real mouse-reporting fixture alive and admit file lookup with a
+ * controlled reply, then observe all transfer/open entry points. Positive
+ * clicks on the same links prove these negatives did not disable links.
+ */
+test("mouse-reporting drags never open web or file links", async ({ page, request }) => {
+  await page.addInitScript(() => {
+    (window as any).__linkOpens = [];
+    window.open = ((url: string) => { (window as any).__linkOpens.push(String(url)); return null; }) as typeof window.open;
+  });
+  await patchPreferences(request, { terminal_link_click: "both" });
+  const session = await createSession(request, { title: `link-drag-${Date.now()}`, cwd: "/tmp", invocation });
+  let transfers = 0;
+  await page.route(`**/api/sessions/${session.id}/files/stat`, route => route.fulfill({
+    json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
+  }));
+  await page.route(`**/api/sessions/${session.id}/files/download`, route => {
+    transfers++;
+    return route.fulfill({ status: 403, body: "fixture transfer observed" });
+  });
+  try {
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await cue(page, "drag");
+    await waitForTermText(page, "MOUSE-MODE:drag");
+    await expect.poll(() => page.evaluate(() => (window as any).__farhelmTerm.modes.mouseTrackingMode)).toBe("drag");
+    const reports = reportBarrier(page);
+    expect(await reports()).toBe(0);
+    for (const label of ["https://example.test/link-click", "OSC-LINK", "relative/report.txt", "OSC-FILE"]) {
+      await cue(page, "links");
+      // Add only a display label in the fixture's fixed header. Input still
+      // belongs to the live fake-agent, never to a shell left in mouse mode.
+      await page.evaluate(() => new Promise<void>(resolve => {
+        (window as any).__farhelmTerm.write("\x1b7\x1b[5;1H\x1b]8;;file:///output/report.txt\x07OSC-FILE\x1b]8;;\x07\x1b8", resolve);
+      }));
+      const point = await cell(page, label);
+      const file = label === "relative/report.txt" || label === "OSC-FILE";
+      if (file) await expect(page.locator("#terminal .terminal-file-target")).toContainText("8 B");
+      await expectLinkUnderPointer(page, point, label);
+      // The release point must still be on the same link, or this negative
+      // would not show xterm would otherwise have activated it.
+      await expectLinkUnderPointer(page, { x: point.x + 18, y: point.y }, label);
+      const beforeReports = await reports();
+      // The report acknowledgement stays below the header, but reestablish
+      // hover after it to pin the target under this exact press.
+      await cell(page, label);
+      // OSC file links show a pointer before their lookup answers; wait for the
+      // ready disclosure so the drag, not a pending lookup, is what is refused.
+      if (file) await expect(page.locator("#terminal .terminal-file-target")).toContainText("8 B");
+      await page.keyboard.down("Control");
+      await page.mouse.down();
+      await page.mouse.move(point.x + 18, point.y, { steps: 5 });
+      await page.mouse.up();
+      await page.keyboard.up("Control");
+      expect(await reports()).toBeGreaterThan(beforeReports);
+      expect(await page.evaluate(() => (window as any).__farhelmTerm.getSelection())).toBe("");
+      expect(await page.evaluate(() => (window as any).__linkOpens)).toEqual([]);
+      expect(transfers).toBe(0);
+      const click = await cell(page, label);
+      if (file) await expect(page.locator("#terminal .terminal-file-target")).toContainText("8 B");
+      await page.mouse.click(click.x, click.y);
+      if (file) await expect.poll(() => transfers).toBe(1);
+      else await expect.poll(() => page.evaluate(() => (window as any).__linkOpens.length)).toBe(1);
+      await page.evaluate(() => { (window as any).__linkOpens = []; });
+      transfers = 0;
+    }
+  } finally {
+    await page.mouse.up();
+    await page.keyboard.up("Control");
+    await cleanupSession(request, session.id);
+    await patchPreferences(request, { terminal_link_click: null });
+  }
+});
+
 /** Focus the actual terminal input before sending a program cue. */
 async function cue(page: Page, word: string, element = "terminal") {
   // Link redraws repeat the same visible URLs. A fresh sequence prevents a

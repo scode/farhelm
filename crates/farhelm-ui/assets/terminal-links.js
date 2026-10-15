@@ -99,6 +99,36 @@
     return true;
   }
 
+  /** Admit only the release of a primary press on this terminal's screen.
+   * Mouse-reporting programs suppress local selection, so selection alone
+   * cannot distinguish a click from a drag. Four CSS pixels tolerate hand
+   * jitter; crossing that distance retires the gesture even if it returns
+   * to the press. Document capture observes the whole gesture before xterm
+   * activates a link, including releases outside the terminal. The exact
+   * release event is the admission token, never a sticky permission.
+   */
+  function createLinkGesture() {
+    let press = null;
+    let click = null;
+    return {
+      observe(event, onScreen) {
+        if (event.type === 'mousedown' && event.button === 0) {
+          click = null;
+          press = onScreen ? { x: event.clientX, y: event.clientY, dragged: false } : null;
+        }
+        if (!press) return;
+        if (event.type === 'mousemove' || (event.type === 'mouseup' && event.button === 0)) {
+          press.dragged ||= Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4;
+        }
+        if (event.type === 'mouseup' && event.button === 0) {
+          click = press.dragged ? null : event;
+          press = null;
+        }
+      },
+      isClick(event) { return event === click; },
+    };
+  }
+
   /** Decide whether this press belongs to Farhelm's web link gesture.
    * Forced local selection keeps xterm's own path. File links never qualify:
    * their broad path detection must not steal ordinary transcript input.
@@ -459,6 +489,7 @@
   const api = {
     openTerminalUrl,
     isPlainWebUrl,
+    createLinkGesture,
     interceptLinkPress,
     suppressMouseReport,
     linkTargetParts,
