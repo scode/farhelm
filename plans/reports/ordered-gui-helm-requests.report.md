@@ -63,3 +63,44 @@ A fresh gpt-6.1-sol reviewer at high effort reviewed correctness, design, idioma
 checklist. It found one browser fixture-premise issue: opening Templates already made the shortcut generation nonzero.
 The test now requires that generation to advance before measuring blocked dispatch. That corrected test passed on both
 engines. No production-code findings remained. The commit/PR wording also passed a separate cold read.
+
+### Landing
+
+Landed as #2062, after pin-sessions (#2064) in the same round; both were tested stacked on top of main, which had gained
+mid-session YOLO detection (#2063) and plan bookkeeping, none of which sends configuration saves.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. Every slot is released on success, failure, timeout and
+drop; a preference that is dirty but idle holds none, so the re-authentication seed read cannot deadlock against its own
+replay; locks are always taken in one order and never held across an await; a waiting request reads its credential after
+waiting; the wait is charged to the request's existing deadline. Every write the app sends to the helm was classified,
+and the tracked ones match the plan; nothing waits on a newer save, and navigation, terminals and the event feed add no
+round trip. The restoring-confirmations and template-binding acknowledgments keep their meaning.
+
+#### Fixes made while landing
+
+- No test exercised the timer that ends a read's wait behind a save that never settles, only an already-expired
+  deadline; a new test holds a save forever and checks that a 30 ms wait gives up with the ordering timeout. The
+  existing deadline test no longer fails if its thread stalls for a second.
+- The quick-launch browser test showed only that no preference read happened within 150 ms of the shortcut, which cannot
+  tell "held by ordering" from "not reached yet". It now records the order of events at the route and checks that the
+  shortcut's read does happen, and only after the held save starts answering.
+- The changelog fragment now opens with what the user sees, and SPEC_impl.md says every preference field other than the
+  template bindings takes no slot, not only list-view preferences.
+
+#### Left as is
+
+- Nits: every request creates a timer even with nothing pending; a template delete's budget includes its preparation, so
+  a slow preparation could report the ordering timeout; a request that times out while waiting leaves no line in the
+  per-request log; the Settings test could assert the held read directly.
+
+#### Checks
+
+- See the pin-sessions landing for the shared runs: the helm package (run `90aa4784-5c92-44bc-a321-bd3ccedf81b1`, 1103
+  passed), the UI crate after the fixes (run `e482a9d7-033c-4e99-9b34-ce99c43a0bee`, 648 passed), the first browser run
+  (run `99fa749b-2ba2-41cb-b452-7efdf838832b`, including the auth, feed and terminal-reconnect specs this change could
+  affect) and the follow-up browser run (run `969a625e-943d-45d9-8695-6d72c0327f0a`, including quick-launch and
+  settings). The one session-confirmations timeout is described there; it passed in three isolated runs on both engines.
+- Run now for this plan's fixes: the save-order and pin unit tests, run `3626eb14-befb-4737-9927-6b491c8cee39`: 9
+  passed.
