@@ -9,8 +9,9 @@ use dioxus::prelude::*;
 use farhelm_proto::ntfy::{Priority, SaveSettings, Settings};
 use std::{cell::Cell, rc::Rc};
 
-/// An empty replacement preserves the existing secret; clearing is a separate
-/// deliberate choice. This keeps ordinary edits from accidentally deleting it.
+/// A blank replacement leaves the helm to apply its origin-bound preservation
+/// rule. The form never knows the secret and cannot safely carry it between
+/// servers; explicit replacement or clearing still wins over that rule.
 fn save_request(draft: Settings, token: String, clear: bool) -> SaveSettings {
     SaveSettings {
         enabled: draft.enabled,
@@ -27,6 +28,21 @@ fn save_request(draft: Settings, token: String, clear: bool) -> SaveSettings {
     }
 }
 
+/// Match the helm's URL-origin comparison for the pre-save explanation, including
+/// default-port normalization. Invalid drafts cannot be saved and have no new
+/// origin to compare; the helm remains authoritative for stale forms and writes.
+fn server_origin_changed(saved: &str, draft: &str) -> bool {
+    let parsed = |value: &str| {
+        url::Url::parse(value)
+            .ok()
+            .filter(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+    };
+    match (parsed(saved), parsed(draft)) {
+        (Some(saved), Some(draft)) => saved.origin() != draft.origin(),
+        _ => false,
+    }
+}
+
 /// Explicit Save and Send test report their own outcome inline. Requests survive
 /// modal dismissal, but component state is touched only while mounted; the saved
 /// token is never seeded into a password field or preference queue.
@@ -40,6 +56,9 @@ pub(crate) fn NtfySettings() -> Element {
     });
     let mut initialized = use_signal(|| false);
     let mut draft = use_signal(Settings::default);
+    // The editable draft cannot also be the origin baseline: edits must keep
+    // comparing against the last successful load/save, not the last keystroke.
+    let mut saved_server = use_signal(String::new);
     let mut token = use_signal(String::new);
     let mut clear = use_signal(|| false);
     let mut busy = use_signal(|| false);
@@ -51,6 +70,7 @@ pub(crate) fn NtfySettings() -> Element {
         if !initialized()
             && let Some(Ok(settings)) = load.read().as_ref()
         {
+            saved_server.set(settings.server_url.clone());
             draft.set(settings.clone());
             initialized.set(true);
         }
@@ -61,6 +81,8 @@ pub(crate) fn NtfySettings() -> Element {
         .and_then(|result| result.as_ref().err())
         .cloned();
     let locked = !initialized() || busy();
+    let origin_changed = server_origin_changed(&saved_server(), &draft.read().server_url);
+    let token_will_clear = draft.read().token_set && (clear() || origin_changed);
     let testing_base = base.clone();
     let testing_mounted = mounted.clone();
 
@@ -97,9 +119,17 @@ pub(crate) fn NtfySettings() -> Element {
                 // the bearer token on every alert.
                 input { r#type: "password", class: "ntfy-token", value: "{token}", readonly: locked || clear(),
                     autocomplete: "new-password", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "optional server access token; leave blank to preserve the saved token",
-                    placeholder: if draft.read().token_set { "token saved; leave blank to keep it" } else { "no token saved" },
+                    "data-tooltip": if clear() {
+                        "the saved access token will be cleared when you save"
+                    } else if origin_changed && draft.read().token_set {
+                        "optional token for this server; leaving it blank clears the previous server's saved token"
+                    } else { "optional server access token; leave blank to preserve the saved token" },
+                    placeholder: if token_will_clear { "saved token will be cleared" }
+                        else if draft.read().token_set { "token saved; leave blank to keep it" } else { "no token saved" },
                     oninput: move |event| { token.set(event.value()); outcome.set(None); } }
+            }
+            if draft.read().token_set && origin_changed && token().is_empty() && !clear() {
+                p { class: "host-settings-help ntfy-token-origin-hint", "changing the server clears the saved token when you save" }
             }
             label { class: "app-settings-choice",
                 span { "clear saved token" }
@@ -138,7 +168,7 @@ pub(crate) fn NtfySettings() -> Element {
                         if !mounted.get() { return; }
                         busy.set(false);
                         match result {
-                            Ok(settings) => { draft.set(settings); token.set(String::new()); clear.set(false);
+                            Ok(settings) => { saved_server.set(settings.server_url.clone()); draft.set(settings); token.set(String::new()); clear.set(false);
                                 outcome.set(Some(Ok("ntfy alert settings saved".into()))); }
                             Err(error) => outcome.set(Some(Err(error))),
                         }
@@ -195,5 +225,27 @@ mod tests {
                 .as_deref(),
             Some("")
         );
+    }
+
+    /// The warning follows server authority, not topic or URL spelling. Match
+    /// the backend's default-port treatment so equivalent addresses do not
+    /// falsely promise token removal, and incomplete edits have no origin yet.
+    #[test]
+    fn token_warning_compares_normalized_server_origins() {
+        for equivalent in [
+            "https://example.test",
+            "https://example.test:443/prefix",
+            "https://EXAMPLE.test/",
+        ] {
+            assert!(!server_origin_changed("https://example.test", equivalent));
+        }
+        for different in [
+            "http://example.test",
+            "https://other.test",
+            "https://example.test:8443",
+        ] {
+            assert!(server_origin_changed("https://example.test", different));
+        }
+        assert!(!server_origin_changed("https://example.test", "https://"));
     }
 }

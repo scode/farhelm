@@ -365,6 +365,107 @@ async fn settings_secret_lifecycle_and_persistence() {
     );
 }
 
+/// Only the URL origin owns a retained token: path/topic edits and equivalent
+/// default-port spellings preserve it, while scheme, host or effective-port
+/// changes clear it. Explicit replacement and clearing always take precedence.
+#[farhelm_testtrace::test]
+fn token_preservation_is_limited_to_the_saved_origin() {
+    let previous = || {
+        Config::saved(
+            Config::default(),
+            save("https://example.test", Some(TOKEN), true),
+        )
+        .unwrap()
+    };
+    for server in [
+        "https://example.test",
+        "https://example.test:443/prefix",
+        "https://EXAMPLE.test/other",
+    ] {
+        let result = Config::saved(previous(), save(server, None, true)).unwrap();
+        assert_eq!(result.token.as_deref(), Some(TOKEN));
+    }
+    for server in [
+        "http://example.test",
+        "https://other.test",
+        "https://example.test:8443",
+    ] {
+        let result = Config::saved(previous(), save(server, None, true)).unwrap();
+        assert!(result.token.is_none());
+        assert!(!result.settings.token_set);
+        let replaced = Config::saved(previous(), save(server, Some("replacement"), true)).unwrap();
+        assert_eq!(replaced.token.as_deref(), Some("replacement"));
+        let cleared = Config::saved(previous(), save(server, Some(""), true)).unwrap();
+        assert!(cleared.token.is_none());
+    }
+}
+
+/// A stale form has never seen the saved secret, yet can change the server.
+/// Drive the real protected save and send routes against two live listeners:
+/// the first must receive its token, and the second must receive the same
+/// test alert without it after either an omitted or null token submission.
+/// This pins the database save rule, not just the form's advisory warning.
+#[farhelm_testtrace::test]
+async fn changing_server_from_a_stale_form_never_forwards_the_saved_token() {
+    let mut first = stand_in(Answer::Success).await;
+    let mut second = stand_in(Answer::Success).await;
+    let harness = helm().await;
+    for (index, omit) in [false, true].into_iter().enumerate() {
+        // Capture a token-free draft before another client saves a secret.
+        let mut stale = serde_json::to_value(save(&second.server_url, None, false)).unwrap();
+        if omit {
+            stale.as_object_mut().unwrap().remove("token");
+        }
+        harness
+            .store
+            .save_ntfy_config(save(&first.server_url, Some(TOKEN), false))
+            .await
+            .ok()
+            .unwrap();
+        assert!(
+            harness
+                .store
+                .ntfy_config()
+                .await
+                .unwrap()
+                .settings
+                .token_set
+        );
+        assert!(!first.task.is_finished() && !second.task.is_finished());
+        assert!(harness.state.ntfy.test().await.is_ok());
+        first.arrived(index + 1).await;
+        assert_eq!(
+            first.received.lock().unwrap()[index].headers["authorization"],
+            format!("Bearer {TOKEN}")
+        );
+
+        let response = harness
+            .router()
+            .oneshot(request("PUT", "/api/ntfy-alerts", stale))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let saved = text(response).await;
+        assert!(!saved.contains(TOKEN));
+        assert!(!serde_json::from_str::<Settings>(&saved).unwrap().token_set);
+        assert!(harness.store.ntfy_config().await.unwrap().token.is_none());
+        let response = harness
+            .router()
+            .oneshot(request(
+                "POST",
+                "/api/ntfy-alerts/test",
+                serde_json::Value::Null,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        second.arrived(index + 1).await;
+        let received = second.received.lock().unwrap()[index].clone();
+        assert_eq!(received.body, "Farhelm ntfy alerts are working");
+        assert!(!received.headers.contains_key("authorization"));
+    }
+}
+
 /// Validation and malformed JSON use fixed refusals even when a secret was
 /// submitted where serde expects another type. No failed save changes settings.
 #[farhelm_testtrace::test]

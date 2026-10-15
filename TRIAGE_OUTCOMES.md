@@ -13753,7 +13753,10 @@
   token for the new server; saving with the same origin keeps the token as today. While the entered origin differs and a
   token is saved, Settings says that saving clears it. The rule holds in the helm's atomic save path, and a regression
   uses two loopback servers. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/ntfy-token-server-change.md`.
+- Execution: `complete`; the atomic save preserves an omitted token only on the stored server's origin, and Settings
+  explains when a server change will clear it. Unit, two-loopback and browser regressions cover the boundary. Change
+  `qxrypnzu`, bookmark `plan/ntfy-token-server-change/01-drop-token`,
+  [PR #2098](https://github.com/scode/farhelm/pull/2098/changes).
 
 ## codex-guide-calls-trust-bypass-warning-harmless.md
 

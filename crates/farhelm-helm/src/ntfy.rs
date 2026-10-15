@@ -34,8 +34,10 @@ pub(crate) struct Config {
 }
 
 impl Config {
-    /// Resolve a write against the previous secret, refusing values with fixed
-    /// messages so a bad URL, topic or token cannot escape in an error string.
+    /// Preserve an omitted secret only for the same server origin. Resolve this
+    /// against stored settings inside the save operation: a stale form must not
+    /// move another client's token to a new server. Refusals use fixed messages
+    /// so a bad URL, topic or token cannot escape in an error string.
     fn saved(previous: Self, save: SaveSettings) -> Result<Self, &'static str> {
         let server =
             reqwest::Url::parse(&save.server_url).map_err(|_| "enter a valid server URL")?;
@@ -60,8 +62,11 @@ impl Config {
         if save.enabled && save.topic.is_empty() {
             return Err("enter a topic before enabling ntfy alerts");
         }
+        let same_origin = reqwest::Url::parse(&previous.settings.server_url)
+            .is_ok_and(|previous| previous.origin() == server.origin());
         let token = match save.token {
-            None => previous.token,
+            None if same_origin => previous.token,
+            None => None,
             Some(value) if value.is_empty() => None,
             Some(value) => {
                 if value.len() > 4096 || !value.bytes().all(|b| (0x21..=0x7e).contains(&b)) {
@@ -452,8 +457,9 @@ impl HelmStore {
             .await
     }
 
-    /// Preserve/replace/clear the token inside one database operation so two
-    /// simultaneous clients cannot restore an old token from a stale snapshot.
+    /// Bind token preservation to the stored server inside one database operation.
+    /// A stale client supplies no secret, so its origin change must clear the
+    /// current token even if that token was saved after the form loaded.
     pub(crate) async fn save_ntfy_config(&self, save: SaveSettings) -> Result<Settings, SaveError> {
         let result = self
             .conn()

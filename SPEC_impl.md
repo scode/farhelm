@@ -3342,13 +3342,17 @@ Test-built helms default offline and inject a loopback client only for alert tes
 
 Protected GET/PUT `/api/ntfy-alerts` read/save an independent schema-47 singleton, not replayed shared preferences. The
 JSON stored in helm.db includes the token; the response contains only `token_set`. Saves atomically preserve an
-omitted/null token, clear an empty token or replace a non-empty one. URL/topic/token validation uses fixed refusals,
-including malformed JSON, so the usual decoder diagnostic cannot echo secret input. Server URLs are http(s), at most
-2048 bytes, without credentials, query or fragment; topics use ntfy's 64-character ASCII letter/digit/underscore/dash
-grammar and may be empty only while disabled. Tokens contain at most 4096 visible ASCII bytes. The form saves explicitly
-and shows its outcome; it never receives the stored token. POST `/api/ntfy-alerts/test` posts with saved settings even
-while disabled, bypasses queue/policy/cap, and waits on one owned send under the same timeout. Modal dismissal does not
-retract a save or test; component state is updated only while mounted.
+omitted/null token only for the same server origin (scheme, host and effective port, with default ports normalized),
+clear it on an origin change, clear an empty token or replace a non-empty one. The comparison uses stored settings in
+the same save operation, so stale forms cannot carry a saved token across origins. While a saved token would be cleared
+by the entered server change, the form explains that before saving and does not offer to keep it by leaving the field
+blank. URL/topic/token validation uses fixed refusals, including malformed JSON, so the usual decoder diagnostic cannot
+echo secret input. Server URLs are http(s), at most 2048 bytes, without credentials, query or fragment; topics use
+ntfy's 64-character ASCII letter/digit/underscore/dash grammar and may be empty only while disabled. Tokens contain at
+most 4096 visible ASCII bytes. The form saves explicitly and shows its outcome; it never receives the stored token. POST
+`/api/ntfy-alerts/test` posts with saved settings even while disabled, bypasses queue/policy/cap, and waits on one owned
+send under the same timeout. Modal dismissal does not retract a save or test; component state is updated only while
+mounted.
 
 ## Feedback forwarding
 

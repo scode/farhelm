@@ -63,6 +63,37 @@ test("ntfy settings explicitly save, refuse, preserve and clear a token", async 
     await section.getByRole("button", { name: "save", exact: true }).click();
     await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
     expect((await (await request.get("/api/ntfy-alerts")).json()).token_set).toBe(true);
+    // A path edit stays on the same server; another origin must explain the
+    // secret's removal before Save, without teaching the form the token.
+    const originHint = section.locator(".ntfy-token-origin-hint");
+    await server.fill("http://localhost:1");
+    await expect(originHint).toHaveText("changing the server clears the saved token when you save");
+    // Back on the saved server with only a path added: the hint must go away
+    // again, which only a same-server comparison can do.
+    await server.fill(`${serverUrl}/prefix`);
+    await expect(originHint).toHaveCount(0);
+    await expect(password).toHaveAttribute("placeholder", "token saved; leave blank to keep it");
+    await server.fill("http://localhost:1");
+    await expect(originHint).toHaveText("changing the server clears the saved token when you save");
+    await expect(password).toHaveAttribute("placeholder", "saved token will be cleared");
+    await expect(password).toHaveAttribute("data-tooltip", /leaving it blank clears/);
+    await password.fill("replacement-token");
+    await expect(originHint).toHaveCount(0);
+    await password.fill("");
+    await expect(originHint).toBeVisible();
+    // Disable background sends before saving this intentionally non-listening
+    // loopback origin; the fixture must never contact a public ntfy server.
+    await section.getByLabel("send ntfy alerts", { exact: true }).uncheck();
+    await section.getByRole("button", { name: "save", exact: true }).click();
+    await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
+    expect((await (await request.get("/api/ntfy-alerts")).json()).token_set).toBe(false);
+    await expect(originHint).toHaveCount(0);
+    await expect(password).toHaveAttribute("placeholder", "no token saved");
+    await server.fill(serverUrl);
+    await password.fill("replacement-token");
+    await section.getByRole("button", { name: "save", exact: true }).click();
+    await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
+    expect((await (await request.get("/api/ntfy-alerts")).json()).token_set).toBe(true);
     await section.getByLabel("clear saved token", { exact: true }).check();
     await section.getByRole("button", { name: "save", exact: true }).click();
     await expect(section.getByRole("status")).toHaveText("ntfy alert settings saved");
