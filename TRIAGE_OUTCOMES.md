@@ -13526,7 +13526,7 @@
   transfers or opens a file; a plain click still does. Regression coverage drives a mouse-reporting program in both
   browser engines. If the fix turns out large or very complex, stop and return the item to the user rather than build
   it. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/terminal-link-safety.md`.
 
 ## wrapped-file-link-partial-redraw-keeps-old-target.md
 
@@ -13543,7 +13543,7 @@
 - Completion criteria: a click whose link text has changed since the hover was shown transfers and opens nothing; an
   unchanged link still works. If the fix or its regression test turns out large or very complex, stop and return the
   item to the user. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/terminal-link-safety.md`.
 
 ## file-disclosure-cannot-scroll-oversized-path.md
 
@@ -13558,7 +13558,7 @@
 - Completion criteria: a click on a file link whose hover does not fit transfers and opens nothing and tells the user
   why; a hover that fits behaves as before. If the fix turns out large or very complex, stop and return the item to the
   user. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/terminal-link-safety.md`.
 
 ## trash-confirmation-scroll-hides-deletion-context.md
 
@@ -13573,7 +13573,7 @@
   not match when content cannot be reached at all, or when an action happens without a click.
 - Completion criteria: that filter exists in `review_feedback_queue/FILTER.md`; this feedback file and its index entry
   are removed under it.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-layout-filter-and-devbuild.md`.
 
 ## long-launch-refusal-displaces-replace-warning.md
 
@@ -13584,7 +13584,7 @@
 - Decision: on 2026-10-15, covered by the layout filter recorded under
   `trash-confirmation-scroll-hides-deletion-context.md`.
 - Completion criteria: this feedback file and its index entry are removed under that filter.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-layout-filter-and-devbuild.md`.
 
 ## unchecked-trash-selection-omits-deletion-warning.md
 
@@ -13599,7 +13599,7 @@
 - Completion criteria: the unchecked-entry paragraph says that any of those entries Farhelm can verify when cleanup runs
   is deleted, with work never committed or pushed lost permanently, and that the rest stay in place and may be forgotten
   from the trash. Tests asserting the old text are updated. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/trash-unchecked-wording.md`.
 
 ## os-trusted-proxy-can-read-feedback.md
 
@@ -13619,7 +13619,7 @@
 - Completion criteria: SPEC.md generalizes its existing deliberate-versus-accidental interference paragraph into that
   principle, with the OS-trusted proxy and the retargeted symlink as examples, and states that feedback's
   confidentiality does not extend to proxies the OS trusts. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/deliberate-setup-spec.md`.
 
 ## trash-guard-misses-retargeted-external-symlink.md
 
@@ -13631,7 +13631,7 @@
 - Decision: on 2026-10-15, covered by the principle recorded under `os-trusted-proxy-can-read-feedback.md`.
 - Completion criteria: the same SPEC.md change, naming this as an example of deliberate setup the guards need not
   handle. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/deliberate-setup-spec.md`.
 
 ## devbuild-git-environment-discards-caller-work.md
 
@@ -13643,7 +13643,7 @@
 - Decision: on 2026-10-15 the user agreed to discard it as harm confined to maintainer tooling under a deliberately set
   environment, rather than putting a dev script in the product spec.
 - Completion criteria: remove this feedback file and its index entry, without code, spec or filter changes.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-layout-filter-and-devbuild.md`.
 
 ## installation-identity-escape-collision.md
 
@@ -13657,7 +13657,7 @@
 - Completion criteria: distinct raw identities, including ones containing literal escape notation and the empty value,
   always render differently in the adopt prompt and mismatch evidence, with a regression test. Remove this feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/adopt-identity-escaping.md`.
 
 ## file-disclosure-misses-invisible-path-characters.md
 
@@ -13673,7 +13673,7 @@
 - Completion criteria: the file-link hover and its outcome messages show every character Farhelm's shared list marks
   unsafe, escape literal `<U+…>` text, and keep repeated spaces, so distinct paths never look alike; covered by tests.
   Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/terminal-link-safety.md`.
 
 ## template-editor-conceals-peer-model-and-folder.md
 
@@ -13687,7 +13687,7 @@
 - Completion criteria: a template's model or folder containing presentation-unsafe characters is shown escaped and
   cannot be silently edited into different bytes; saving another field keeps it exactly; clearing it works. Covered by
   tests. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/template-editor-unsafe-values.md`.
 
 ## checkout-recovery-requester-not-bound-to-host.md
 
@@ -13702,7 +13702,7 @@
 - Completion criteria: a keyed create or clone repeated from a different host never reconciles with another host's
   attempt and goes through ordinary approval; a retry from the same host and session still finishes its approved
   attempt. Covered by a regression test. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/checkout-recovery-host-binding.md`.
 
 ## claude-trust-rewrites-unrelated-numbers.md
 
@@ -13715,7 +13715,7 @@
 - Decision: on 2026-10-15 the user chose `fix code`.
 - Completion criteria: trust edits preserve every unrelated number exactly, or refuse a document they cannot preserve; a
   round-trip test uses a decimal that distinguishes the parsers. Remove this feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/claude-trust-decimals.md`.
 
 ## ntfy-token-follows-changed-server.md
 
@@ -13723,11 +13723,14 @@
 - Assessment: confirmed by reading current main. Saving notification settings with a blank token field keeps the
   previous token even when the server URL changes, and alerts send it as bearer authentication, so a new server receives
   the old server's token.
-- Decision: on 2026-10-15 the user chose `fix code`.
+- Decision: on 2026-10-15 the user chose `fix code`. Asked during planning what should happen when the server changes to
+  a different host (or scheme or port) and the token field is left blank, they picked "Drop the saved token; Settings
+  says so": the save goes through with no token, and the form says so before saving.
 - Completion criteria: changing the server's origin does not carry the saved token to it unless the user supplies a
-  token for the new server; saving with the same origin keeps the token as today. The rule holds in the helm's atomic
-  save path, and a regression uses two loopback servers. Remove this feedback file and its index entry.
-- Execution: pending.
+  token for the new server; saving with the same origin keeps the token as today. While the entered origin differs and a
+  token is saved, Settings says that saving clears it. The rule holds in the helm's atomic save path, and a regression
+  uses two loopback servers. Remove this feedback file and its index entry.
+- Execution: planned in `plans/queue/ntfy-token-server-change.md`.
 
 ## codex-guide-calls-trust-bypass-warning-harmless.md
 
@@ -13739,4 +13742,4 @@
 - Completion criteria: the Codex page says which warning to expect and discloses, or links to the explanation of, the
   configured-hook consequence, without changing the accepted integration behavior. Remove this feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/codex-guide-hook-warning.md`.
