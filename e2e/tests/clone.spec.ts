@@ -311,8 +311,10 @@ test("opening a clone from the keyboard focuses search before any typing", async
         await page.keyboard.press("ArrowDown");
         await expect(sourceRow.locator(".session-row-menu-panel")).toBeVisible();
         // Opening from the closed toggle lands on the first item; one
-        // step down the real menu order (rename, clone, …) reaches clone.
+        // steps down the real menu order (rename, pin, clone, …) reach clone.
         await expect(sourceRow.locator(".session-row-rename")).toBeFocused();
+        await page.keyboard.press("ArrowDown");
+        await expect(sourceRow.locator(".session-row-pin")).toBeFocused();
         await page.keyboard.press("ArrowDown");
         await expect(sourceRow.locator(".session-row-clone")).toBeFocused();
         await page.keyboard.press(key);

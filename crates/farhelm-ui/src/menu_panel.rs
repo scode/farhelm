@@ -65,15 +65,16 @@ use dioxus::prelude::*;
 /// the full menu near the viewport bottom without internal scrolling.
 ///
 /// Measured, not derived: the tallest ordinary menu (header, then rename,
-/// mark read/unread, clone, replace with, replace, stop and delete, with
-/// the five descriptions and three separators) renders 341.6px tall in both
-/// Chromium and WebKit under the browser suite. 380px leaves about 38px of
-/// slack for font-metric differences between renderers and platforms.
+/// mark read/unread, pin to top, clone, replace with, replace, stop and
+/// delete, with the five descriptions and three separators) renders 368.6px
+/// tall in both Chromium and WebKit under the browser suite. 407px leaves
+/// about 38px of slack for font-metric differences between renderers and
+/// platforms.
 /// Re-measure when an item, description, or the header changes height.
 /// Shorter menus and the confirm prompts fit inside the same reserve;
 /// `max-height` with internal scrolling is what keeps a viewport shorter
 /// than the reserve safe.
-const SESSION_MENU_PANEL_MIN_RESERVE_PX: f64 = 380.0;
+const SESSION_MENU_PANEL_MIN_RESERVE_PX: f64 = 407.0;
 
 /// Where the actions panel currently believes its own screen position is,
 /// while an async `get_client_rect()` measurement races the render that
@@ -1298,7 +1299,7 @@ mod tests {
         let placement = PanelPlacement::Measured(rect);
         let style = session_menu_placement_style(placement);
         assert!(style.contains("--menu-left: max(8px, min(344px, calc(100vw - 254px)))"));
-        assert!(style.contains("min(46px, calc(100vh - 380px))"));
+        assert!(style.contains("min(46px, calc(100vh - 407px))"));
         assert!(style.contains("right: auto"));
         assert!(
             session_menu_pointer_style(placement)

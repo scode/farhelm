@@ -1968,7 +1968,8 @@ mod tests {
                 .unwrap();
             // Every table a later schema added goes, including schema 38's
             // `launch_templates`, schema 41's `session_notification_marks`
-            // and schema 47's `ntfy_alerts`. Later preference columns also
+            // schema 47's `ntfy_alerts` and schema 52's `session_pins`.
+            // Later preference columns also
             // go, including the session-confirmation choice added in schema 48:
             // the test compares the result with the frozen v26 DDL, which
             // has none of them.
@@ -1978,6 +1979,7 @@ mod tests {
                  DROP TABLE launch_templates;
                  DROP TABLE session_notification_marks;
                  DROP TABLE ntfy_alerts;
+                 DROP TABLE session_pins;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;

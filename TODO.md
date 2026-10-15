@@ -44,9 +44,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Pin sessions to the top of the sidebar.** Support pinning sessions to the top of the sidebar. Details TBD. Plan:
-  `plans/queue/pin-sessions.md`.
-
 - **Investigate suppressing Claude Code’s Project Trust prompt.** Determine whether a supported CLI argument exists;
   consider whether Farhelm could update the user’s configuration on their behalf. Approach/details TBD. Plan:
   `plans/queue/claude-trust-prompt.md`.

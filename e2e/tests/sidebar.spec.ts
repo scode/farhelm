@@ -1620,7 +1620,7 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
     invocation: "sleep 300",
   });
   try {
-    // Fixed six-item navigation, not the seen-state feature — see
+    // Fixed seven-item navigation, not the seen-state feature — see
     // `hideSeenState`'s own doc.
     await hideSeenState(page);
     await page.goto("/");
@@ -1634,6 +1634,7 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
     await openRowMenu(target);
     const toggle = target.locator(".session-row-menu");
     const rename = target.locator(".session-row-rename");
+    const pin = target.locator(".session-row-pin");
     const clone = target.locator(".session-row-clone");
     const replaceWith = target.locator(".session-row-replace-with");
     const replace = target.locator(".session-row-replace");
@@ -1648,6 +1649,8 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
 
     await page.keyboard.press("ArrowDown");
     await expect(rename).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(pin).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -1728,6 +1731,7 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
 
     const toggle = target.locator(".session-row-menu");
     const rename = target.locator(".session-row-rename");
+    const pin = target.locator(".session-row-pin");
     const clone = target.locator(".session-row-clone");
     const stop = target.locator(".session-row-stop");
     const remove = target.locator(".session-row-delete");
@@ -1789,9 +1793,13 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     await expect(stop).toHaveAttribute("tabindex", "-1");
     await expect(remove).toHaveAttribute("tabindex", "-1");
     await page.keyboard.press("ArrowDown");
+    await expect(pin).toBeFocused();
+    await expect(pin).toHaveAttribute("tabindex", "0");
+    await expect(rename).toHaveAttribute("tabindex", "-1");
+    await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
     await expect(clone).toHaveAttribute("tabindex", "0");
-    await expect(rename).toHaveAttribute("tabindex", "-1");
+    await expect(pin).toHaveAttribute("tabindex", "-1");
 
     // Tab dismisses the menu and lands on the toggle — the tab stop the
     // whole menu stands in for — rather than walking the remaining
@@ -1831,6 +1839,8 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await openRowMenu(target);
     await expect(rename).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(pin).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -2110,6 +2120,7 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
 
     const toggle = target.locator(".session-row-menu");
     const rename = target.locator(".session-row-rename");
+    const pin = target.locator(".session-row-pin");
     const clone = target.locator(".session-row-clone");
     const replaceWith = target.locator(".session-row-replace-with");
     const replace = target.locator(".session-row-replace");
@@ -2119,6 +2130,8 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
     // A keyboard user must land back on the toggle, ready to reopen it.
     await openRowMenu(target);
     await expect(rename).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(pin).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -2134,6 +2147,8 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
 
     await openRowMenu(target);
     await expect(rename).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(pin).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -2348,7 +2363,7 @@ test("the actions menu has a raised surface and inset choices", async ({ page, r
     invocation: "sleep 300",
   });
   try {
-    // Fixed six-item geometry, not the seen-state feature — see
+    // Fixed seven-item geometry, not the seen-state feature — see
     // `hideSeenState`'s own doc.
     await hideSeenState(page);
     await page.goto("/");
@@ -2386,7 +2401,7 @@ test("the actions menu has a raised surface and inset choices", async ({ page, r
         };
       });
     });
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(7);
     for (const item of items) {
       expect(item.textAlign).toBe("left");
       expect(item.insetLeft).toBeGreaterThan(0);
@@ -2401,6 +2416,9 @@ test("the actions menu has a raised surface and inset choices", async ({ page, r
     await expect.poll(() => clone.evaluate((element) => getComputedStyle(element).backgroundColor))
       .not.toBe(restingFill);
     await page.mouse.move(0, 0);
+    // Rename holds focus after opening; pin sits between it and clone.
+    await page.keyboard.press("ArrowDown");
+    await expect(panel.locator(".session-row-pin")).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
     await expect.poll(() => clone.evaluate((element) => getComputedStyle(element).backgroundColor))
@@ -2448,12 +2466,12 @@ test("the session flyout sits beside its row with a titled, described menu", asy
     await waitForHostsListSettled(page);
     await target.evaluate((element) => element.scrollIntoView({ block: "center" }));
     await target.locator(".session-row-menu").hover();
-    // The flyout keeps SESSION_MENU_PANEL_MIN_RESERVE_PX (380px) below its
+    // The flyout keeps SESSION_MENU_PANEL_MIN_RESERVE_PX (407px) below its
     // top before clamping upward; a row lower than that is the clamp's
     // case, which the scrolled-list tests below own.
     const restingRow = (await target.boundingBox())!;
     expect(
-      restingRow.y + 380,
+      restingRow.y + 407,
       "the row must leave the full menu's reserve below it, or this test measures the clamp",
     ).toBeLessThanOrEqual(900);
     await openRowMenu(target);
@@ -4219,8 +4237,8 @@ async function placeOwnRowAtSidebarBottom(
  * described actions make it far taller than a row.
  *
  * The row pointer must stay on the panel's edge while the clamp lifts the
- * panel above its row. The menu here is the six-item one (the seen toggle
- * is hidden), shorter than the reserve sized for all seven items, so for a
+ * panel above its row. The menu here is the seven-item one (the seen toggle
+ * is hidden), shorter than the reserve sized for all eight items, so for a
  * row at the very bottom the spot the pointer aims at lies below the
  * panel's bottom and the pointer has to be held inside the panel's
  * extent; the test asserts that premise before checking the pointer. Every
@@ -4403,7 +4421,7 @@ test("a retained refusal stays inside a bottom-row menu's scrolling panel", asyn
   const created = await fillSidebarPastOneScreen(request, marker);
   try {
     // Same geometry as the scrolled-list test above: a short viewport, a
-    // fixed six-item menu, settled rows, and a settled host list.
+    // fixed seven-item menu, settled rows, and a settled host list.
     await page.setViewportSize({ width: 900, height: 500 });
     await hideSeenState(page);
     await waitForFixtureStates(request, created, "idle");
@@ -4461,7 +4479,7 @@ test("a retained refusal stays inside a bottom-row menu's scrolling panel", asyn
     expect(
       (await error.boundingBox())!.height,
       "the refusal must be taller than the flyout's height reserve",
-    ).toBeGreaterThan(380);
+    ).toBeGreaterThan(407);
     const deleteBox = (await panel.locator(".session-row-delete").boundingBox())!;
     expect(
       rowAimedPointerTop(toggleBox),

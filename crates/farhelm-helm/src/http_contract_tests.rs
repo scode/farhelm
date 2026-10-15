@@ -92,6 +92,7 @@ fn session_list_body() -> SessionListBody {
             host_name: "buildbox".to_string(),
             stale: true,
             seen_activity_at: Some(1_700_000_090),
+            pinned: true,
             notifications_read_through: 3,
         }],
         total: 5,

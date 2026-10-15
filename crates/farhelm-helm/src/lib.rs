@@ -692,6 +692,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::put(sessions::mark_seen),
         )
         .route(
+            "/api/sessions/{id}/pin",
+            axum::routing::put(sessions::set_pin),
+        )
+        .route(
             "/api/sessions/{id}/notifications/read",
             axum::routing::put(sessions::mark_notifications_read),
         )

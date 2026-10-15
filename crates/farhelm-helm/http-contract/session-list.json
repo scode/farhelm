@@ -84,7 +84,8 @@
           "name": "widgets",
           "owner": "octo"
         }
-      }
+      },
+      "pinned": true
     }
   ],
   "total": 5,

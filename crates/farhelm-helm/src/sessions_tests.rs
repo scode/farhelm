@@ -1364,6 +1364,16 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
         "fixture premise: the marks exist before the delete"
     );
 
+    assert!(harness.store.set_pinned("sess-1", true).await.unwrap());
+    assert!(
+        harness
+            .store
+            .pinned_sessions(&["sess-1".into()])
+            .await
+            .unwrap()
+            .contains("sess-1"),
+        "fixture premise: source pin exists"
+    );
     let app = harness.router();
     let request = axum::http::Request::builder()
         .method("DELETE")
@@ -1393,6 +1403,15 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
         "the notification marks must not survive the session they name"
     );
 
+    assert!(
+        !harness
+            .store
+            .pinned_sessions(&["sess-1".into()])
+            .await
+            .unwrap()
+            .contains("sess-1"),
+        "deleted source pin must be cleared"
+    );
     peer.await.unwrap();
 }
 
@@ -1435,6 +1454,82 @@ async fn mark_seen_route_records_and_clears_the_stamp() {
         "a clear (mark unread) must read back as null, not merely absent \
          or reverted to some prior value"
     );
+}
+
+/// A pin changes shared listing/detail metadata and revision exactly once.
+/// Missing bodies and unknown sessions must never create stray pins, since
+/// the store itself intentionally has no foreign key to session cache.
+#[farhelm_testtrace::test]
+async fn pin_route_round_trip_changes_only_on_real_writes() {
+    let harness = rest_harness::helm_listing(vec![rest_harness::session("sess-1", 100)]).await;
+    for (pinned, changes) in [(true, true), (true, false), (false, true), (false, false)] {
+        let before = harness.manager.events().revision();
+        let (status, body) = put_json(
+            &harness,
+            "/api/sessions/sess-1/pin",
+            serde_json::json!({ "pinned": pinned }),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert_eq!(harness.manager.events().revision() > before, changes);
+        let (_, body) = get_json(&harness, "/api/sessions").await;
+        assert_eq!(body["sessions"][0]["pinned"], pinned);
+        let (_, detail) = get_json(&harness, "/api/sessions/sess-1").await;
+        assert_eq!(detail["pinned"], pinned);
+    }
+    let before = harness.manager.events().revision();
+    let (status, _) = put_json(&harness, "/api/sessions/sess-1/pin", serde_json::json!({})).await;
+    assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/absent/pin",
+        serde_json::json!({ "pinned": true }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+    assert_eq!(harness.manager.events().revision(), before);
+    assert!(
+        harness
+            .store
+            .pinned_sessions(&["sess-1".into(), "absent".into()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// Pinning an unreachable row is a local metadata edit, not a supervisor
+/// operation. Prove the host is down before the PUT so a reachable fixture
+/// cannot accidentally make a routed implementation pass.
+#[farhelm_testtrace::test]
+async fn pin_route_succeeds_on_an_unreachable_host() {
+    let (builder, host) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@breaks",
+            rest_harness::HostScript {
+                identity: Some("pin-identity".into()),
+                sessions: vec![rest_harness::session("owned-pin", 100)],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(host).await;
+    harness.fleet.take_down(host);
+    harness
+        .await_state(host, |state| state.phase() == "unreachable-reprobing")
+        .await;
+    let (status, _) = put_json(
+        &harness,
+        "/api/sessions/owned-pin/pin",
+        serde_json::json!({ "pinned": true }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let (_, body) = get_json(&harness, "/api/sessions/owned-pin").await;
+    assert_eq!(body["stale"], true);
+    assert_eq!(body["pinned"], true);
 }
 
 /// The existence check is the same helm-wide "no host has ever reported
@@ -2552,6 +2647,16 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         Some(&(2, 2)),
         "fixture premise: the source's notification marks exist before the replace"
     );
+    assert!(harness.store.set_pinned("sess-1", true).await.unwrap());
+    assert!(
+        harness
+            .store
+            .pinned_sessions(&["sess-1".into()])
+            .await
+            .unwrap()
+            .contains("sess-1"),
+        "fixture premise: source pin exists"
+    );
     let (status, body) = post_text(
         &harness,
         "/api/sessions/sess-1/replace",
@@ -2576,6 +2681,24 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             .unwrap()
             .is_empty(),
         "the replaced source's notification marks must not survive it"
+    );
+    assert!(
+        !harness
+            .store
+            .pinned_sessions(&["sess-1".into()])
+            .await
+            .unwrap()
+            .contains("sess-1"),
+        "deleted source pin must be cleared"
+    );
+    assert!(
+        harness
+            .store
+            .pinned_sessions(&["sess-2".into()])
+            .await
+            .unwrap()
+            .contains("sess-2"),
+        "replacement inherits the pin"
     );
     let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
     assert_eq!(session.id, "sess-2");

@@ -583,6 +583,8 @@ test("opening replace-with from the keyboard focuses search before any typing", 
         await expect(sourceRow.locator(".session-row-menu-panel")).toBeVisible();
         await expect(sourceRow.locator(".session-row-rename")).toBeFocused();
         await page.keyboard.press("ArrowDown");
+        await expect(sourceRow.locator(".session-row-pin")).toBeFocused();
+        await page.keyboard.press("ArrowDown");
         await expect(sourceRow.locator(".session-row-clone")).toBeFocused();
         await page.keyboard.press("ArrowDown");
         await expect(sourceRow.locator(".session-row-replace-with")).toBeFocused();
