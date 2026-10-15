@@ -565,6 +565,143 @@ impl OwnershipRecord {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The updater's view: a locked snapshot and the expectation it hands over
+// ---------------------------------------------------------------------------
+
+/// What the app's updater reads, under the installation lock, before it
+/// decides to update (design, section 4): the ownership record and the
+/// Installed version. Read under the lock so the updater can never see a
+/// generation an install is still working on; an odd one it does see means
+/// an install or uninstall was interrupted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Snapshot {
+    /// `None` when there is no app at the place, or no record this layout's.
+    pub record: Option<OwnershipRecord>,
+    /// The Installed record's version, when it could be read.
+    pub installed: Option<String>,
+}
+
+impl Snapshot {
+    /// What an update decided from this snapshot expects to find under the
+    /// lock when it runs. `None` without a record (nothing to update).
+    pub fn expectation(&self) -> Option<Expectation> {
+        let record = self.record.as_ref()?;
+        Some(Expectation {
+            id: record.id.clone(),
+            generation: record.generation,
+            installed: self.installed.clone(),
+        })
+    }
+}
+
+/// Take the installation lock without waiting, read [`Snapshot`] through
+/// the app folder in `applications` (`~/Applications`), and let the lock
+/// go. Only the kernel lock: older installers' lock folder is never taken
+/// here, so this short read never makes an older installer refuse or leaves
+/// a folder behind. A busy lock is [`InstallLockError::Busy`]; the updater
+/// tries again later.
+pub fn snapshot(applications: &Path, app_name: &str) -> Result<Snapshot, InstallLockError> {
+    let lock = lock_installation(applications, Duration::ZERO)?;
+    let io_error = |error: io::Error| InstallLockError::Io {
+        path: applications.join(app_name),
+        error,
+    };
+    let Some(app) = dirs::open_folder(lock.applications(), app_name).map_err(io_error)? else {
+        return Ok(Snapshot {
+            record: None,
+            installed: None,
+        });
+    };
+    Ok(read_installation(app.as_fd()))
+}
+
+/// The record and Installed version inside an opened app folder; anything
+/// unreadable reads as absent.
+pub fn read_installation(app: BorrowedFd<'_>) -> Snapshot {
+    match dirs::open_folder(app, "Contents").ok().flatten() {
+        Some(contents) => read_contents(contents.as_fd()),
+        None => Snapshot {
+            record: None,
+            installed: None,
+        },
+    }
+}
+
+/// [`read_installation`] from an opened `Contents/` folder.
+pub fn read_contents(contents: BorrowedFd<'_>) -> Snapshot {
+    let record = dirs::read_small(contents, RECORD_FILE, RECORD_LIMIT)
+        .ok()
+        .flatten()
+        .and_then(|bytes| OwnershipRecord::parse(&bytes));
+    let installed = dirs::open_folder(contents, "Versions")
+        .ok()
+        .flatten()
+        .and_then(|versions| {
+            dirs::read_small(versions.as_fd(), "installed", 4096)
+                .ok()
+                .flatten()
+        })
+        .map(|bytes| String::from_utf8_lossy(&bytes).trim_end().to_string());
+    Snapshot { record, installed }
+}
+
+/// What an update started by this release's app expects the installation
+/// to still be when its installer takes the lock: the record's id (none for
+/// a two-field record), its generation, and the Installed version. If any
+/// of them changed (another install, an uninstall, a Terminal run), the
+/// installer changes nothing and reports that the state changed, and the
+/// updater looks again later. An expectation of "no id" matches only a
+/// two-field record; the installer then gives the installation its id, so
+/// the id is never minted before the comparison.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Expectation {
+    pub id: Option<String>,
+    pub generation: u64,
+    pub installed: Option<String>,
+}
+
+impl Expectation {
+    /// The text form passed to the installer: `<id>:<generation>:<installed>`,
+    /// with `-` for an absent id or Installed version. None of the three can
+    /// contain a colon (an id is letters and digits, a version's grammar has
+    /// none).
+    pub fn render(&self) -> String {
+        format!(
+            "{}:{}:{}",
+            self.id.as_deref().unwrap_or("-"),
+            self.generation,
+            self.installed.as_deref().unwrap_or("-")
+        )
+    }
+
+    /// Read [`Self::render`]'s form; `None` for anything else.
+    pub fn parse(text: &str) -> Option<Self> {
+        let mut parts = text.splitn(3, ':');
+        let id = parts.next()?;
+        let generation = parts.next()?.parse().ok()?;
+        let installed = parts.next()?;
+        let present = |field: &str| (field != "-").then(|| field.to_string());
+        if id != "-" && (id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_alphanumeric())) {
+            return None;
+        }
+        Some(Self {
+            id: present(id),
+            generation,
+            installed: present(installed),
+        })
+    }
+
+    /// Whether the installation still is what this expectation describes.
+    pub fn matches(&self, snapshot: &Snapshot) -> bool {
+        snapshot.record.as_ref().is_some_and(|record| {
+            record.id == self.id
+                && record.generation == self.generation
+                && snapshot.installed == self.installed
+        })
+    }
+}
+
 /// A random installation id: 32 lowercase hex digits.
 pub fn new_installation_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()

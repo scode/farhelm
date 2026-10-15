@@ -2759,6 +2759,43 @@ check "P1: Info.plist is 0644 despite the umask" \
   [ "$(stat -c %a "$HOME_P1/Applications/Farhelm.app/Contents/Info.plist")" = 644 ]
 
 # ===========================================================================
+# Scenario: an update this release's app decided carries what the app read
+# under the installation lock (FARHELM_INSTALL_EXPECT: id, generation,
+# Installed version). Why: between the app's check and its installer taking
+# the lock, another install or an uninstall can change the installation; the
+# installer must then change nothing and exit 75, which the app treats as
+# "look again later" rather than a failure, and must go ahead when nothing
+# changed. The record is read field by field because it is NUL-separated.
+# ===========================================================================
+echo
+echo "== the app's updater: the expectation =="
+expectation_of() {
+  local record="$1/Applications/Farhelm.app/Contents/.farhelm-installation" id generation installed
+  id=$(tr '\000' '\n' <"$record" | sed -n 3p)
+  generation=$(tr '\000' '\n' <"$record" | sed -n 4p)
+  installed=$(cat "$1/Applications/Farhelm.app/Contents/Versions/installed")
+  printf '%s:%s:%s' "$id" "$generation" "$installed"
+}
+HOME_EXPECT="$WORKDIR/home-expect"
+mkdir -p "$HOME_EXPECT"
+run_install "$MAC_TOOLS" "$HOME_EXPECT" "$BASE/good" 1.2.3
+check "expectation premise: installed" [ "$RC" -eq 0 ]
+stale=$(expectation_of "$HOME_EXPECT")
+run_install "$MAC_TOOLS" "$HOME_EXPECT" "$BASE/good-v2" 1.2.4
+check "expectation premise: a Terminal update moved the generation on" [ "$RC" -eq 0 ]
+cp "$WWW/good-v3/SHA256SUMS" "$WORKDIR/good-v3-sums"
+run_install "$MAC_TOOLS" "$HOME_EXPECT" "$BASE/good-v3" 1.2.5 \
+  FARHELM_INSTALL_SUMS_FILE="$WORKDIR/good-v3-sums" FARHELM_INSTALL_EXPECT="$stale"
+check "expectation (changed): the updater's installer exits 75" [ "$RC" -eq 75 ]
+check "expectation (changed): nothing was changed" \
+  [ "$(cat "$HOME_EXPECT/Applications/Farhelm.app/Contents/Versions/installed")" = 1.2.4 ]
+run_install "$MAC_TOOLS" "$HOME_EXPECT" "$BASE/good-v3" 1.2.5 \
+  FARHELM_INSTALL_SUMS_FILE="$WORKDIR/good-v3-sums" FARHELM_INSTALL_EXPECT="$(expectation_of "$HOME_EXPECT")"
+check "expectation (unchanged): the update exits 0" [ "$RC" -eq 0 ]
+check "expectation (unchanged): the update installed 1.2.5" \
+  [ "$(cat "$HOME_EXPECT/Applications/Farhelm.app/Contents/Versions/installed")" = 1.2.5 ]
+
+# ===========================================================================
 # Scenario: a release older than this installer installs itself (design,
 # section 7, "Installing an older release with L's script hands off to that
 # release's own installer"). Why: the documented way back to an older
