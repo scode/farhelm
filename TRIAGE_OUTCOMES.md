@@ -13153,7 +13153,9 @@
   `restart-drain-skips-newly-published-conversation.md`; the never-learned case, mitigated by the existing notification.
 - Completion criteria: covered by the spec change described there. No code change. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-conversation-tracking-spec.md`.
+- Execution: complete; jj change `tuloxputurzmqlknsroxpxrpxvxsqzxy`; bookmark
+  `plan/triage-conversation-tracking-spec/04-codex-withdrawal`; https://github.com/scode/farhelm/pull/2046/changes.
+  Covered by the conversation-tracking specification in #2038.
 
 ## codex-upgrade-replays-legacy-selection.md
 
