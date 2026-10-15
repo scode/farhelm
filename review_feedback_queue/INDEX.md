@@ -25,9 +25,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`bare-cache-fetch-conflicts-with-explicit-git-policy.md`](bare-cache-fetch-conflicts-with-explicit-git-policy.md) —
   Hosts using Git’s safe.bareRepository=explicit setting cannot launch sessions in fresh GitHub checkouts.
 
-- [`uninstall-uutils-stat-rejects-missing-socket.md`](uninstall-uutils-stat-rejects-missing-socket.md) — Remote
-  uninstall stops Farhelm but repeatedly refuses to finish on hosts using uutils coreutils.
-
 - [`uninstall-stale-socket-loses-private-client.md`](uninstall-stale-socket-loses-private-client.md) — An interrupted
   uninstall can become impossible to finish through Retry even though the supervisor and tmux server are gone.
 

@@ -5765,6 +5765,91 @@ mod tests {
         );
     }
 
+    /// A removed private socket must let uninstall finish without a tmux
+    /// client, regardless of the host's supported stat implementation.
+    /// Permission and I/O diagnostics must still retain the host: a failed
+    /// lookup does not establish that its server is gone. Execute the real
+    /// stop script with controlled stat output and a deliberately absent
+    /// client, so neither a real socket nor an installed tmux can hide a
+    /// mistaken refusal or an overly broad absence match.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn uninstall_stop_accepts_only_known_missing_socket_diagnostics() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let bin = root.path().join("bin");
+        tokio::fs::create_dir_all(&home).await.unwrap();
+        tokio::fs::create_dir_all(&bin).await.unwrap();
+        write_fake_tool(&bin, "systemctl", "printf 'inactive\\n'").await;
+        let system = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(FixtureHomeLauncher {
+                home,
+                bin: bin.clone(),
+            }),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let target = ProvisioningTarget::Ssh {
+            destination: "scripted.example".into(),
+        };
+        let socket = root.path().join("missing.sock");
+        let tmux = root.path().join("removed-tmux");
+        assert!(
+            !socket.exists() && !tmux.exists(),
+            "fixture starts without socket or client"
+        );
+        for (diagnostic, absent) in [
+            (
+                "stat: cannot stat 'missing.sock': No such file or directory",
+                true,
+            ),
+            (
+                "stat: cannot stat 'missing.sock': No such file or directory (os error 2)",
+                true,
+            ),
+            (
+                "stat: can't stat 'missing.sock': No such file or directory",
+                true,
+            ),
+            (
+                "stat: cannot stat 'No such file or directory': Permission denied (os error 13)",
+                false,
+            ),
+            (
+                "stat: cannot stat 'missing.sock': Input/output error (os error 5)",
+                false,
+            ),
+        ] {
+            write_fake_tool(
+                &bin,
+                "stat",
+                &format!(
+                    "printf '%s\\n' {} >&2; exit 1",
+                    shell_words::quote(diagnostic)
+                ),
+            )
+            .await;
+            let result = system
+                .stop(&target, "farhelm-supervisor.service", &tmux, &socket)
+                .await;
+            if absent {
+                assert!(
+                    matches!(result.unwrap(), ActionOutcome::Skipped(_)),
+                    "{diagnostic}"
+                );
+            } else {
+                let failure = result.expect_err("non-absence lookup failure must refuse");
+                assert!(
+                    failure.rendered().contains(diagnostic),
+                    "{}",
+                    failure.rendered()
+                );
+            }
+        }
+    }
+
     /// Why this matters: UNINSTALL's host commands delete files and stop a
     /// service on someone's machine, and a retry reruns them over whatever
     /// an earlier run left. They must refuse setup's unit at the moment of

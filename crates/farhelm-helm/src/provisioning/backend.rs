@@ -2538,8 +2538,9 @@ impl ProvisioningBackend for SystemBackend {
         // command; permission, executable and protocol failures retain the host.
         // stat reports the lookup failure instead of collapsing all errors
         // into false, as shell existence predicates do. It receives one path
-        // in the C locale: only its missing-path diagnostic excuses bypassing
-        // a client that may already have been removed on a lib-gone retry.
+        // in the C locale: only the known GNU, uutils and BusyBox missing-path
+        // diagnostics excuse bypassing a client that may already have been
+        // removed on a lib-gone retry. Other lookup errors retain the host.
         let script = format!(
             "export LC_ALL=C; socket={socket}; tmux={tmux}; changed=no; \
              state=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
@@ -2547,7 +2548,9 @@ impl ProvisioningBackend for SystemBackend {
                *) systemctl --user stop -- {unit} || exit 1; changed=yes ;; esac; \
              if inspection=$(stat -L -c '%F' -- \"$socket\" 2>&1); then :; \
                else status=$?; case \"$inspection\" in \
-                 'stat: cannot stat'*': No such file or directory') \
+                 'stat: cannot stat'*': No such file or directory'|\
+                 'stat: cannot stat'*': No such file or directory (os error 2)'|\
+                 'stat: can'\"'\"'t stat'*': No such file or directory') \
                    if [ \"$changed\" = no ]; then printf absent; fi; exit 0 ;; \
                  *) printf '%s\\n' \"$inspection\" >&2; exit \"$status\" ;; esac; fi; \
              if error=$(\"$tmux\" -S \"$socket\" kill-server 2>&1); then exit 0; else status=$?; fi; \
