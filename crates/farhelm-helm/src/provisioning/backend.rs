@@ -2541,6 +2541,9 @@ impl ProvisioningBackend for SystemBackend {
         // in the C locale: only the known GNU, uutils and BusyBox missing-path
         // diagnostics excuse bypassing a client that may already have been
         // removed on a lib-gone retry. Other lookup errors retain the host.
+        // tmux leaves its socket behind on exit. Remove it while the frozen
+        // client is still available, so a retry after lib removal can prove
+        // absence without trying to execute that now-missing client.
         let script = format!(
             "export LC_ALL=C; socket={socket}; tmux={tmux}; changed=no; \
              state=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
@@ -2553,11 +2556,12 @@ impl ProvisioningBackend for SystemBackend {
                  'stat: can'\"'\"'t stat'*': No such file or directory') \
                    if [ \"$changed\" = no ]; then printf absent; fi; exit 0 ;; \
                  *) printf '%s\\n' \"$inspection\" >&2; exit \"$status\" ;; esac; fi; \
-             if error=$(\"$tmux\" -S \"$socket\" kill-server 2>&1); then exit 0; else status=$?; fi; \
+             if error=$(\"$tmux\" -S \"$socket\" kill-server 2>&1); then :; else status=$?; \
              case \"$error\" in \
                \"no server running on $socket\"|\"error connecting to $socket (No such file or directory)\") \
                  if [ \"$changed\" = no ]; then printf absent; fi ;; \
-               *) printf '%s\\n' \"$error\" >&2; exit \"$status\" ;; esac",
+               *) printf '%s\\n' \"$error\" >&2; exit \"$status\" ;; esac; fi; \
+             rm -f -- \"$socket\" || exit 1",
             unit = crate::ssh::shell_quote(unit),
             tmux = shell_path(tmux_program)?,
             socket = shell_path(tmux_socket)?,

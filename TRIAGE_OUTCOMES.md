@@ -13805,7 +13805,8 @@
   lib directory was removed skips the tmux cleanup and goes on to forget the host. The updated real-user-manager
   regression covers the stale-socket and missing-client combination without manual socket removal. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/remote-uninstall-fixes.md`.
+- Execution: complete in change `nyxlxnvknlvtnlotvvnozkytxourqkmp`, bookmark
+  `plan/remote-uninstall-fixes/02-retry-socket`; [PR #2100](https://github.com/scode/farhelm/pull/2100/changes).
 
 ## claude-trust-tests-compare-lexical-temp-paths.md
 

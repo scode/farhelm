@@ -25,9 +25,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`bare-cache-fetch-conflicts-with-explicit-git-policy.md`](bare-cache-fetch-conflicts-with-explicit-git-policy.md) —
   Hosts using Git’s safe.bareRepository=explicit setting cannot launch sessions in fresh GitHub checkouts.
 
-- [`uninstall-stale-socket-loses-private-client.md`](uninstall-stale-socket-loses-private-client.md) — An interrupted
-  uninstall can become impossible to finish through Retry even though the supervisor and tmux server are gone.
-
 - [`setup-advice-omits-environment-selected-state-directory.md`](setup-advice-omits-environment-selected-state-directory.md)
   — Following setup’s sign-in advice can return an unusable token or create credentials for a different helm.
 
