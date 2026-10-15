@@ -66,3 +66,51 @@ reported token counters. Some accounting events were recorded afterwards. The re
 external results do not independently identify the model served; token usage for native cold readers and the main
 session is unavailable. These accounting gaps do not change the validation results above. Both PRs remain drafts; the
 executor has marked neither ready nor merged either.
+
+### Landing
+
+Landed as #2051 and #2052, bottom-up, the round's only plan. While it landed, main gained only plan bookkeeping,
+including the delivered reports of two other plans; nothing touched the template editor.
+
+#### Review
+
+An independent fresh-context review found nothing blocking and confirmed the change stays within the maintainer's
+trivial-complexity gate. The read-only guard uses the same check as the save refusal, so it applies exactly when saving
+would be refused and never to a valid command; read-only also blocks typing, paste and drop. Whether Undo is offered is
+decided from the saved template, which is what Undo would restore, so an unsaved draft that repairs the value cannot
+make it restorable; a permanent delete clears any earlier Undo notice, and valid deletions keep Undo.
+
+#### Fixes made while landing
+
+- The read-only hint told the user to delete and recreate the template to change such a command. Deleting it also
+  removes the template's quick-launch mark and shortcuts, while removing the field with ✕ and adding it again already
+  replaces the command without either loss. The hint and the changelog fragment now say that, and the browser test
+  checks the new hint.
+- The permanent-delete tooltip now says what clicking does ("delete this template now; it fails current save rules, so
+  undo is not available").
+
+#### Left as is
+
+- Follow-up, outside this item's scope: an older template's session name with a line break has the same problem. Editing
+  the name silently drops the line break and the result passes the save check. The triage item covered only launch and
+  resume commands; the fix would be one more case in the same read-only check, with a hint that does not say "command".
+- The read-only check also triggers for a tab or zero-width character, which the field could keep; it matches the save
+  refusal, so the boundary is right.
+- Nits in the new test: the check that no restoration was written can never fail because nothing clicks Undo (the real
+  check, that no Undo is offered, is there too), and the two fragments are formatted differently.
+
+#### Checks
+
+- Run now, on the rebased stack with the fixes in:
+  - `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker;
+  - `cargo clippy --all-targets -- -D warnings` and the UI crate's clippy with the desktop feature;
+  - the UI crate in full with the desktop feature through the recorder, run `839165f8-541a-47b3-9147-a07b99bdfd24`: 634
+    passed;
+  - the JS harness: 248 passed;
+  - the templates, quick-launch and tooltip-coverage specs on Chromium and WebKit, run
+    `99c57b83-e088-47a1-b8a9-5b191892bed0`: 120 passed, 6 failed. The six were the permanent-delete cases, whose
+    assertion still expected the tooltip wording from before this landing's own change. With the assertion updated, the
+    templates spec on both engines, run `5fe1cf63-f127-436d-8ac2-4de373d8c5d2`: 68 passed. The quick-launch and
+    tooltip-coverage results from the first run still apply; only that assertion changed since.
+- Reused: the executor's template browser runs, superseded by the above.
+- Not run: the Rust workspace beyond the UI crate and other browser specs; only the template editor changed.
