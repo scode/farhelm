@@ -50,7 +50,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   consider whether Farhelm could update the user’s configuration on their behalf. Approach/details TBD.
 
 - **Click to open agent-provided paths.** Extend click-to-download for paths agents provide to also support
-  click-to-open. How and implementation details are TBD.
+  click-to-open. How and implementation details are TBD. Plan: `plans/queue/click-to-open-paths.md`.
 
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
@@ -131,14 +131,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   one-click Update. The triaged decision was narrower: wait only while an uninstall confirmation is being prepared,
   because opening Settings for another host then could stack two dialogs and lock the page. Narrow the condition to the
   pending confirmations that can actually open a dialog, so Settings stays usable during an ordinary Update on another
-  host, and keep the lockout case covered. The gap was noted when #1932 landed.
+  host, and keep the lockout case covered. The gap was noted when #1932 landed. Plan:
+  `plans/queue/settings-lockout-scope.md`.
 
 - **Update the stale compact-rows browser test.** `e2e/tests/terminal.spec.ts`, "compact rows retain distinct ended and
   harness glyphs within two characters", has failed on main on both engines since the guarded permission mode (#1992):
   it still expects the old permission-mark tooltips, while each tooltip now names the agent first and its command last
   ("Codex — YOLO, as asserted … — codex --yolo"), and a launch with no permission choice is no longer called "default
   permission mode". Update the expected tooltips and descriptions to the current wording; this is stale test data, not a
-  product bug, but every run of the terminal browser specs shows two meaningless failures until it is fixed.
+  product bug, but every run of the terminal browser specs shows two meaningless failures until it is fixed. Plan:
+  `plans/queue/compact-rows-test.md`.
 
 - **Test that a named Goose restart stops offering the old conversation.** Restart with a named conversation on a Goose
   session makes the supervisor forget the conversation it had captured (Goose does not report after a named resume), and
@@ -147,7 +149,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   in-memory state the session list publishes. Add a supervisor test that performs a named Restart with of a Goose
   launch, asserts the session lists no captured conversation afterwards (so plain Restart cannot resume the old one),
   and after an injected definitive pre-start failure asserts the old conversation is back in both memory and the
-  database.
+  database. Plan: `plans/queue/goose-named-restart-test.md`.
 
 ## Doc todo
 
