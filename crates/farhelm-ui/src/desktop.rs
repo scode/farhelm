@@ -393,6 +393,9 @@ impl DesktopBootstrap {
             tokio::runtime::Runtime::new().context("starting desktop bootstrap runtime")?;
         runtime.block_on(farhelm_supervisor::ensure_private_dir(&state_dir))?;
 
+        // Also holds this app's own version for the rest of the process, so
+        // it must come before discovery probes anything or a supervisor is
+        // spawned from it (see `bundle::supervisor_farhelm`).
         let farhelm = bundled_farhelm()?;
         // Discovery MUST run before the tmux preflight, not after: an
         // answering supervisor is an ownership boundary (this type's own

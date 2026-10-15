@@ -3687,7 +3687,13 @@ tests `supervisor.lock`.
 The desktop app starts its managed supervisor from `Contents/Versions/<its own compiled version>/farhelm` when its
 bundle has a `Contents/Versions/` folder, and refuses with an error naming the missing folder rather than falling back
 to its sibling, which in that layout is the forwarder. `FARHELM_DESKTOP_FARHELM` still overrides the choice, and an app
-without the folder still uses its sibling.
+without the folder still uses its sibling. The app is not itself a program in a version folder, so it holds that
+version's lock (above) on the `farhelm` it chose from its own version folder, from before it probes for or spawns a
+supervisor until it exits; that covers the time before its supervisor exists and every supervisor restart. A program
+named by `FARHELM_DESKTOP_FARHELM` is never held, even inside a bundle. A version that is already gone, whether found
+missing or removed before the lock was taken, refuses startup with one sentence saying to open Farhelm again, and so
+does one still held exclusively after the five-second wait. The lock's descriptor is close-on-exec, so neither the
+supervisor nor the updater's installer inherits it.
 
 ### The desktop app's updater
 
