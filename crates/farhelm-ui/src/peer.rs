@@ -105,22 +105,26 @@ pub(crate) fn editable_peer(raw: &str) -> String {
         .collect()
 }
 
-/// A host identity as it should be SHOWN: spaces and every non-ASCII
-/// character escaped, not just the known-bad ones [`display_peer`] escapes.
+/// An injective display spelling for a host identity, preserving ordinary UUIDs.
 ///
 /// The adopt prompt ("recorded as install X; now reports Y") exists so the
 /// user notices when a destination is a different install, and it only works
-/// if two different identities can never look alike. Identities are
-/// supervisor-minted UUIDs, so anything outside ASCII is already suspect,
-/// and escaping all of it also covers what the shared list deliberately
-/// leaves out (variation selectors) and whatever invisible character it does
-/// not know about yet. Titles and paths keep [`display_peer`], where
-/// escaping every non-ASCII character would mangle ordinary text.
+/// if two different identities can never look alike. Printable ASCII passes
+/// through except `<` and the parentheses; every other character, spaces
+/// included, gets a Unicode escape. Escaping `<` keeps a literal `<U+0020>`
+/// from impersonating a space (every `<` then starts an escape), and escaping
+/// parentheses reserves `(empty)` for the empty identity. Supervisor-minted
+/// UUIDs remain unchanged, and so do domain names and IP addresses: the link
+/// approval card's site row renders through this function too, and must keep
+/// showing `example.com` readably. This also covers variation selectors the
+/// shared unsafe list leaves alone for ordinary text.
+/// Titles and paths keep [`display_peer`], whose broader readable alphabet
+/// is appropriate for those values rather than an identity comparison.
 pub(crate) fn display_identity(raw: &str) -> String {
     let escaped: String = raw
         .chars()
         .map(|ch| {
-            if ch.is_ascii() && ch != ' ' && !is_presentation_unsafe(ch) {
+            if ch.is_ascii_graphic() && !matches!(ch, '<' | '(' | ')') {
                 ch.to_string()
             } else {
                 format!("<U+{:04X}>", ch as u32)
@@ -321,6 +325,42 @@ mod tests {
             display_identity(" install  id "),
             "<U+0020>install<U+0020><U+0020>id<U+0020>"
         );
+    }
+
+    /// Escape syntax and the empty marker must not hide a changed installation.
+    /// The first two pairs used to produce identical labels; the third checks
+    /// that escaping placeholder punctuation cannot introduce a new collision.
+    /// Compare the actual display values used by both the approval card and
+    /// mismatch evidence, whose adoption requests still send the raw bytes.
+    #[farhelm_testtrace::test]
+    fn identity_escape_notation_and_empty_marker_cannot_be_impersonated() {
+        for (raw, imitation) in [
+            ("left right", "left<U+0020>right"),
+            ("", "(empty)"),
+            ("(install)", "<U+0028>install<U+0029>"),
+        ] {
+            assert_ne!(
+                raw, imitation,
+                "the fixture must compare distinct identities"
+            );
+            assert_ne!(
+                display_identity(raw),
+                display_identity(imitation),
+                "distinct identities {raw:?} and {imitation:?} must stay distinguishable"
+            );
+        }
+        assert_eq!(display_identity("(empty)"), "<U+0028>empty<U+0029>");
+        assert_eq!(display_identity("<"), "<U+003C>");
+        // The link approval card's site row shares this display: ordinary
+        // hosts must stay readable there.
+        for host in [
+            "example.com",
+            "127.0.0.1",
+            "[::1]",
+            "sub-domain.example.org:8443",
+        ] {
+            assert_eq!(display_identity(host), host);
+        }
     }
 
     /// Why this matters: the shared unsafe list now covers more invisible

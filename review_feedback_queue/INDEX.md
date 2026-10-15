@@ -39,9 +39,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`ntfy-token-follows-changed-server.md`](ntfy-token-follows-changed-server.md) — Changing the notification server can
   send the previous server's access token to the new one.
 
-- [`installation-identity-escape-collision.md`](installation-identity-escape-collision.md) — Distinct peer-chosen
-  installation identities can display identically in an adoption prompt.
-
 - [`codex-guide-calls-trust-bypass-warning-harmless.md`](codex-guide-calls-trust-bypass-warning-harmless.md) — The Codex
   guide calls a hook-trust bypass warning harmless without disclosing its configured-hook consequence.
 
