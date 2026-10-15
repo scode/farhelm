@@ -13507,3 +13507,236 @@
   omissions retain YOLO, and the launcher warns on automatic permission escalation with draft Undo. Both specs, affected
   docs and tests are updated; feedback file and index entry removed.
   [PR #2055](https://github.com/scode/farhelm/pull/2055/changes).
+
+## mouse-reporting-drag-activates-file-link.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main, not reproduced in a browser. Every terminal link activation (web URL,
+  program-emitted OSC 8 link, printed file path) treats a press and release on the same link as a click, and the only
+  drag guard is a non-empty local selection. With mouse reporting on, the terminal makes no local selection, so a drag
+  that starts and ends inside one link opens the URL or downloads the file, and with the native modifier held also opens
+  an admitted `.md`/`.txt` save. Web links are affected too, not only file links. SPEC.md's file-link and link-opening
+  rules treat the click as the authorization, and a drag is not a click.
+- Decision: on 2026-10-15 the user ruled the explicit click "not a hard line but all of these are nice to fix if it's
+  not terribly complicated, ESPECIALLY the 'dragging across a link' that seems super POLA violating", then chose "fix
+  code, with complexity gate. can't turn large/very complex." The assessed fix is small: remember where the primary
+  press landed and ignore activation when the release is more than a few pixels away, in one check shared by web, OSC 8
+  and file-path activation.
+- Completion criteria: a drag across any terminal link, with or without mouse reporting, neither opens a URL nor
+  transfers or opens a file; a plain click still does. Regression coverage drives a mouse-reporting program in both
+  browser engines. If the fix turns out large or very complex, stop and return the item to the user rather than build
+  it. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## wrapped-file-link-partial-redraw-keeps-old-target.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed for the bundled terminal library's invalidation rule (a repaint clears the current link only
+  when it covers both ends of the link); the file-link consequence is likely but not reproduced. After a program
+  repaints only part of a wrapped link, a click can still act on the previous target, including a file transfer or, with
+  the native modifier, opening it. The hover still shows the old target, so this is a stale target, not an undisclosed
+  one.
+- Decision: on 2026-10-15, the same ruling and complexity gate as `mouse-reporting-drag-activates-file-link.md`. The
+  assessed fix works around the vendor defect at click time: re-read the terminal text under the link and ignore the
+  click unless it still matches what the hover disclosed. The vendor defect itself stays an upstream matter under the
+  existing vendor policy.
+- Completion criteria: a click whose link text has changed since the hover was shown transfers and opens nothing; an
+  unchanged link still works. If the fix or its regression test turns out large or very complex, stop and return the
+  item to the user. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## file-disclosure-cannot-scroll-oversized-path.md
+
+- Outcome: `fix code`.
+- Assessment: likely by reading current main, not rendered. The file-link hover is limited to the window's height and
+  cannot be scrolled (it ignores the pointer, and moving the pointer onto it would leave the link anyway), so a deeply
+  nested path in a short window clips the folder, size or action while the click still downloads, and with the native
+  modifier opens, the file. The current layout shows the filename first, so the leaf itself stays visible.
+- Decision: on 2026-10-15, the same ruling and complexity gate as `mouse-reporting-drag-activates-file-link.md`. The
+  assessed fix is to refuse the click while the hover is clipped and say the window is too small to show the full path,
+  rather than making the hover scrollable.
+- Completion criteria: a click on a file link whose hover does not fit transfers and opens nothing and tells the user
+  why; a hover that fits behaves as before. If the fix turns out large or very complex, stop and return the item to the
+  user. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## trash-confirmation-scroll-hides-deletion-context.md
+
+- Outcome: `other`.
+- Assessment: likely by layout reading, not rendered. A trash cleanup confirmation tall enough to scroll (many hosts, or
+  a long unchecked-entry paragraph) opens scrolled to its buttons, with the host list, totals or permanent-loss warning
+  above the visible area. Everything stays reachable by scrolling and deletion still needs the user's click.
+- Decision: on 2026-10-15 the user said the layout cases "seem like something to put in the filter" and agreed with this
+  generalization: a finding matches when its trigger needs unusually large content (many hosts, a very long error or
+  path) or an unusually small window, and the whole consequence is that part of a dialog's or confirmation's explanation
+  is out of view while it remains reachable by scrolling, and nothing is acted on without the user's own click. It does
+  not match when content cannot be reached at all, or when an action happens without a click.
+- Completion criteria: that filter exists in `review_feedback_queue/FILTER.md`; this feedback file and its index entry
+  are removed under it.
+- Execution: pending.
+
+## long-launch-refusal-displaces-replace-warning.md
+
+- Outcome: `other`.
+- Assessment: likely by layout reading, not rendered. A long launch refusal sits above the Replace warning about killing
+  the source session, and the whole dialog scrolls, so the warning can sit below the visible area while Replace is
+  clickable. The warning stays reachable by scrolling and Replace still needs the user's click.
+- Decision: on 2026-10-15, covered by the layout filter recorded under
+  `trash-confirmation-scroll-hides-deletion-context.md`.
+- Completion criteria: this feedback file and its index entry are removed under that filter.
+- Execution: pending.
+
+## unchecked-trash-selection-omits-deletion-warning.md
+
+- Outcome: `fix code`.
+- Assessment: likely by reading current main, not reproduced. Trash entries Farhelm could not inspect when the list
+  loaded (for example, an archived folder that was briefly unreadable) are "unchecked". For those, bulk cleanup's
+  confirmation only says that folders Farhelm cannot verify stay in place and unusable entries may be forgotten from the
+  trash (the record is dropped, the folder stays). Cleanup re-checks each entry when it runs, so a folder that became
+  readable in the meantime is deleted, uncommitted work included, without the permanent-loss warning.
+- Decision: on 2026-10-15 the user: "for the trash thing, yeah fix the wording". No change to which entries cleanup
+  deletes.
+- Completion criteria: the unchecked-entry paragraph says that any of those entries Farhelm can verify when cleanup runs
+  is deleted, with work never committed or pushed lost permanently, and that the rest stay in place and may be forgotten
+  from the trash. Tests asserting the old text are updated. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## os-trusted-proxy-can-read-feedback.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed as deliberate by reading; no interception set up. Feedback uses the OS certificate store and
+  system proxy on purpose, so it works behind proxies that use their own certificates. An interception proxy the OS
+  trusts can therefore read feedback. That trust was configured by the user or their machine's administrator.
+- Decision: on 2026-10-15 the user: "all these findings should be ignored. my only hesitation in adjusting the spec is i
+  don't know how to convey where the line is. Like we want to not be unreasonable and take reasonable precautions
+  against likely real life mistakes, but something like the interception proxy is just crazy insane over zealous
+  security." They then agreed to this principle: Farhelm defends against what an attached host or an agent's output can
+  do, and against mistakes a user plausibly makes in ordinary use of Farhelm or their machine. It does not defend
+  against conditions the user, or whoever administers their machine, deliberately set up outside Farhelm (their shell
+  environment, the OS certificate store and proxies, symlinks or files they reshape by hand); it takes those as the
+  user's intent. The test is whether a reasonable user would hit the trigger by accident. This never relaxes the
+  remote-host boundary.
+- Completion criteria: SPEC.md generalizes its existing deliberate-versus-accidental interference paragraph into that
+  principle, with the OS-trusted proxy and the retargeted symlink as examples, and states that feedback's
+  confidentiality does not extend to proxies the OS trusts. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## trash-guard-misses-retargeted-external-symlink.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed mechanism by source inspection in the original review, not reproduced. A session launched
+  through a symlink outside the checkout root, whose symlink the user later points at an archived checkout in the trash
+  before opening a tab, is not recognized as using that archive, so emptying the trash can delete the tab's files. The
+  trigger is the user deliberately retargeting the symlink.
+- Decision: on 2026-10-15, covered by the principle recorded under `os-trusted-proxy-can-read-feedback.md`.
+- Completion criteria: the same SPEC.md change, naming this as an example of deliberate setup the guards need not
+  handle. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## devbuild-git-environment-discards-caller-work.md
+
+- Outcome: `discard`.
+- Assessment: confirmed for the command sequence with scratch repositories in the original review. The Mac dev-build
+  helper inherits Git's repository-selecting environment variables, so running it with `GIT_DIR` and related variables
+  exported can reset and clean another clone. It is maintainer tooling, not part of the product, and the trigger is a
+  deliberately exported environment.
+- Decision: on 2026-10-15 the user agreed to discard it as harm confined to maintainer tooling under a deliberately set
+  environment, rather than putting a dev script in the product spec.
+- Completion criteria: remove this feedback file and its index entry, without code, spec or filter changes.
+- Execution: pending.
+
+## installation-identity-escape-collision.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main, not rendered. The adopt prompt's identity rendering spells spaces and
+  non-ASCII characters as `<U+…>` but leaves a literal `<` as itself, so an identity containing the text `<U+0020>`
+  renders like one containing a space. Only a host choosing a non-UUID identity can trigger it. SPEC.md requires that
+  two different identities never look alike.
+- Decision: on 2026-10-15 the user chose `fix code` after being told the fix is trivial: escape `<` (and anything the
+  empty-value placeholder could collide with) in identity rendering.
+- Completion criteria: distinct raw identities, including ones containing literal escape notation and the empty value,
+  always render differently in the adopt prompt and mismatch evidence, with a regression test. Remove this feedback file
+  and its index entry.
+- Execution: pending.
+
+## file-disclosure-misses-invisible-path-characters.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main, not rendered. The file-link hover's browser-side escaping covers only
+  Unicode's format category, not Farhelm's shared list of presentation-unsafe characters (the combining grapheme joiner
+  U+034F, for example), and it leaves literal `<U+…>` text unescaped while runs of spaces collapse. Two different paths
+  can therefore look identical in the disclosure that authorizes a transfer or, with the native modifier, an open.
+  SPEC.md requires host-supplied text outside a terminal to show such characters visibly.
+- Decision: on 2026-10-15 the user chose `fix code` after being told it is small. The suggested shape keeps one list:
+  the helm sends an already-escaped path in the lookup reply the hover renders, rather than the browser code carrying a
+  second copy of the list. Literal escape notation is escaped and spaces are preserved.
+- Completion criteria: the file-link hover and its outcome messages show every character Farhelm's shared list marks
+  unsafe, escape literal `<U+…>` text, and keep repeated spaces, so distinct paths never look alike; covered by tests.
+  Remove this feedback file and its index entry.
+- Execution: pending.
+
+## template-editor-conceals-peer-model-and-folder.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main, not rendered. The template editor's model and folder inputs show the
+  stored text raw, so a model or folder carried over from a cloned remote session can contain an invisible character
+  (U+200B, for example) that the input does not show. SPEC.md names exactly this case as needing visible escaping.
+- Decision: on 2026-10-15 the user chose `fix code` after being told the small fix reuses the editor's existing rule for
+  commands: a stored value containing presentation-unsafe characters is shown escaped and read-only, with a hint to
+  clear and retype it. The launcher's full escaped-but-editable treatment was judged medium-sized and is not required.
+- Completion criteria: a template's model or folder containing presentation-unsafe characters is shown escaped and
+  cannot be silently edited into different bytes; saving another field keeps it exactly; clearing it works. Covered by
+  tests. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## checkout-recovery-requester-not-bound-to-host.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main, not exploited. The key that lets a retried agent create into a managed
+  checkout finish an attempt the user already approved is built from the asking session's id, which the remote host
+  supplies, and the agent's key. Another attached host that knows or guesses both can repeat the request and finish the
+  first host's approved attempt without an approval of its own. SPEC.md limits that replay to the session that asked.
+- Decision: on 2026-10-15 the user chose `fix code` after being told it is small: include the helm-known host of the
+  requesting connection in the key at both call sites. Retries in flight across the upgrade stop matching and are asked
+  about again, the same accepted effect as when keys were first scoped to the asking session.
+- Completion criteria: a keyed create or clone repeated from a different host never reconciles with another host's
+  attempt and goes through ordinary approval; a retry from the same host and session still finishes its approved
+  attempt. Covered by a regression test. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## claude-trust-rewrites-unrelated-numbers.md
+
+- Outcome: `fix code`.
+- Assessment: the parser behavior is confirmed (the original review rewrote `0.9176884786531495` as `0.9176884786531496`
+  with the workspace's serde_json, which has neither `float_roundtrip` nor `arbitrary_precision` enabled, still the case
+  on current main); whether a consequential decimal occurs in real Claude configuration is unverified. Granting or
+  removing checkout trust re-serializes Claude's whole settings file, so unrelated decimals can change, against
+  SPEC.md's rule that only the checkout's trust key changes.
+- Decision: on 2026-10-15 the user chose `fix code`.
+- Completion criteria: trust edits preserve every unrelated number exactly, or refuse a document they cannot preserve; a
+  round-trip test uses a decimal that distinguishes the parsers. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## ntfy-token-follows-changed-server.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main. Saving notification settings with a blank token field keeps the
+  previous token even when the server URL changes, and alerts send it as bearer authentication, so a new server receives
+  the old server's token.
+- Decision: on 2026-10-15 the user chose `fix code`.
+- Completion criteria: changing the server's origin does not carry the saved token to it unless the user supplies a
+  token for the new server; saving with the same origin keeps the token as today. The rule holds in the helm's atomic
+  save path, and a regression uses two loopback servers. Remove this feedback file and its index entry.
+- Execution: pending.
+
+## codex-guide-calls-trust-bypass-warning-harmless.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main. The Codex docs page still calls the hook warning "harmless", while the
+  same per-launch bypass also lets hooks from the user's Codex configuration and a trusted workspace's `.codex/` run
+  without review (SPEC_impl.md explains this; the agent hook injection page already warns about it).
+- Decision: on 2026-10-15 the user chose `fix code` (a documentation fix).
+- Completion criteria: the Codex page says which warning to expect and discloses, or links to the explanation of, the
+  configured-hook consequence, without changing the accepted integration behavior. Remove this feedback file and its
+  index entry.
+- Execution: pending.
