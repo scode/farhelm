@@ -126,15 +126,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a tag is never deleted or reused. Work out what GitHub rulesets, bypass lists or a separate agent identity can enforce
   without blocking the PR flow.
 
-- **Test that a named Goose restart stops offering the old conversation.** Restart with a named conversation on a Goose
-  session makes the supervisor forget the conversation it had captured (Goose does not report after a named resume), and
-  a definitive failure before Goose starts puts the old one back (#2012). Only the stored rows are tested
-  (`named_relaunch_clears_capture_and_definitive_abort_restores_it` in the supervisor's store); nothing checks the
-  in-memory state the session list publishes. Add a supervisor test that performs a named Restart with of a Goose
-  launch, asserts the session lists no captured conversation afterwards (so plain Restart cannot resume the old one),
-  and after an injected definitive pre-start failure asserts the old conversation is back in both memory and the
-  database. Plan: `plans/queue/goose-named-restart-test.md`.
-
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
