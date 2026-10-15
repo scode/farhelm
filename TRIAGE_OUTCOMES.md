@@ -13761,7 +13761,8 @@
 - Completion criteria: the Codex page says which warning to expect and discloses, or links to the explanation of, the
   configured-hook consequence, without changing the accepted integration behavior. Remove this feedback file and its
   index entry.
-- Execution: planned in `plans/queue/codex-guide-hook-warning.md`.
+- Execution: complete in change `yrnmmvyrwzwovylnykoswxrxnrsvrzko`, bookmark
+  `plan/codex-guide-hook-warning/01-hook-warning`; [PR #2091](https://github.com/scode/farhelm/pull/2091/changes).
 
 ## uninstall-stale-socket-loses-private-client.md
 
