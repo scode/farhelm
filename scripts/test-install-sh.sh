@@ -2797,6 +2797,161 @@ check "P1: Info.plist is 0644 despite the umask" \
   [ "$(stat -c %a "$HOME_P1/Applications/Farhelm.app/Contents/Info.plist")" = 644 ]
 
 # ===========================================================================
+# Scenario: a release older than this installer installs itself (design,
+# section 7, "Installing an older release with L's script hands off to that
+# release's own installer"). Why: the documented way back to an older
+# release is FARHELM_VERSION=... with the newest /install.sh, and /latest
+# can be rolled back below this release; in both cases the target's farhelm
+# cannot do this installer's locked work, so the target's own installer must
+# run instead, checked against the target's SHA256SUMS, before anything on
+# the machine changes. Releases at or above the first build with this
+# installer (its dev builds and release candidates included) are never
+# handed off, so a candidate cannot hand off to itself.
+#
+# The older release's installer is v0.27.0's own install.sh, vendored as
+# scripts/fixtures/install-v0.27.0.sh because CI checkouts have no tags to
+# read it from. Its fake release's farhelm is a plain stand-in that, like a
+# real farhelm from before this installer, rejects every internal command
+# it does not know with exit status 2.
+# ===========================================================================
+echo
+echo "== older releases install themselves =="
+OLD_INSTALL_SH="$REPO_ROOT/scripts/fixtures/install-v0.27.0.sh"
+# build_old_release DIR VERSION -- a release whose farhelm predates this
+# installer, published with OLD_INSTALL_SH as its install.sh (listed in its
+# SHA256SUMS, as every release's is).
+build_old_release() {
+  local dir=$1 version=$2
+  build_good_release "$dir" "$version"
+  local stage
+  stage=$(mktemp -d "$WORKDIR/old-stage.XXXXXX")
+  mkdir -p "$stage/farhelm-aarch64-apple-darwin"
+  # shellcheck disable=SC2016 # The stand-in's own $1 is meant literally.
+  printf '#!/bin/sh\ncase "${1:-}" in\n  --version) echo "farhelm %s"; exit 0 ;;\nesac\nexit 2\n' "$version" \
+    >"$stage/farhelm-aarch64-apple-darwin/farhelm"
+  chmod 755 "$stage/farhelm-aarch64-apple-darwin/farhelm"
+  tar -czf "$dir/farhelm-aarch64-apple-darwin.tar.gz" -C "$stage" farhelm-aarch64-apple-darwin/farhelm
+  rm -rf "$stage"
+  cp "$OLD_INSTALL_SH" "$dir/install.sh"
+  (cd "$dir" && sha256sum -- *.tar.gz install.sh >SHA256SUMS)
+}
+record_fields() { tr '\000' '\n' <"$1/Applications/Farhelm.app/Contents/.farhelm-installation" | grep -c .; }
+HANDOFF_BANNER="older than this installer, so its own installer installs it"
+build_old_release "$WWW/old" 0.27.0
+printf 'v0.27.0\n' >"$WWW/old/latest"
+build_good_release "$WWW/floor" 0.31.1-dev.0
+build_good_release "$WWW/candidate" 0.31.1-rc.1
+# The last release published with the installer before this one.
+build_old_release "$WWW/last-old" 0.31.0
+
+HOME_OLD="$WORKDIR/home-handoff-pinned"
+mkdir -p "$HOME_OLD"
+run_install "$MAC_TOOLS" "$HOME_OLD" "$BASE/old" 0.27.0
+check "hand-off (pinned): exits 0" [ "$RC" -eq 0 ]
+check "hand-off (pinned): says the older release's own installer runs" contains "$ERR" "$HANDOFF_BANNER"
+check "hand-off (pinned): the older release is Installed" \
+  [ "$(cat "$HOME_OLD/Applications/Farhelm.app/Contents/Versions/installed")" = 0.27.0 ]
+check "hand-off (pinned): the older installer wrote its own two-field record" [ "$(record_fields "$HOME_OLD")" -eq 2 ]
+check "hand-off (pinned): the older installer fetched itself from its release folder" \
+  [ "$(grep -c '/old/v0.27.0/install.sh' "$SERVER_LOG")" -ge 1 ]
+
+HOME_LATEST="$WORKDIR/home-handoff-latest"
+mkdir -p "$HOME_LATEST"
+before=$(server_request_count)
+run_install "$MAC_TOOLS" "$HOME_LATEST" "$BASE/old" ""
+check "hand-off (/latest rolled back): exits 0" [ "$RC" -eq 0 ]
+# The older installer gets the release resolved here, pinned, so a /latest
+# that moves meanwhile cannot make it install a newer release the old way.
+check "hand-off (/latest rolled back): /latest is read once, by this installer" \
+  [ "$(tail -n "+$((before + 1))" "$SERVER_LOG" | grep -c '/old/latest')" -eq 1 ]
+check "hand-off (/latest rolled back): hands off" contains "$ERR" "$HANDOFF_BANNER"
+check "hand-off (/latest rolled back): the older release is Installed" \
+  [ "$(cat "$HOME_LATEST/Applications/Farhelm.app/Contents/Versions/installed")" = 0.27.0 ]
+
+HOME_DOWN="$WORKDIR/home-handoff-downgrade"
+mkdir -p "$HOME_DOWN"
+run_install "$MAC_TOOLS" "$HOME_DOWN" "$BASE/good" 1.2.3
+check "downgrade premise: this installer's own install exits 0" [ "$RC" -eq 0 ]
+check "downgrade premise: the record is the extended one" [ "$(record_fields "$HOME_DOWN")" -eq 5 ]
+run_install "$MAC_TOOLS" "$HOME_DOWN" "$BASE/old" 0.27.0
+check "downgrade: the older installer accepts the extended record and exits 0" [ "$RC" -eq 0 ]
+check "downgrade: the older release is Installed" \
+  [ "$(cat "$HOME_DOWN/Applications/Farhelm.app/Contents/Versions/installed")" = 0.27.0 ]
+check "downgrade: the older installer leaves its own two-field record" [ "$(record_fields "$HOME_DOWN")" -eq 2 ]
+check "downgrade: the app is launchable on the older release" app_launchable "$HOME_DOWN/Applications/Farhelm.app"
+run_install "$MAC_TOOLS" "$HOME_DOWN" "$BASE/good-v2" 1.2.4
+check "upgrade again over the older installer's work: exits 0" [ "$RC" -eq 0 ]
+check "upgrade again: the record is the extended one" [ "$(record_fields "$HOME_DOWN")" -eq 5 ]
+check "upgrade again: the older release stays (it was Installed)" \
+  contains "$(versions_of "$HOME_DOWN/Applications/Farhelm.app")" 0.27.0
+
+HOME_LAST_OLD="$WORKDIR/home-handoff-last-old"
+mkdir -p "$HOME_LAST_OLD"
+run_install "$MAC_TOOLS" "$HOME_LAST_OLD" "$BASE/last-old" 0.31.0
+check "hand-off (0.31.0, the last release before this installer): exits 0" [ "$RC" -eq 0 ]
+check "hand-off (0.31.0): hands off" contains "$ERR" "$HANDOFF_BANNER"
+check "hand-off (0.31.0): the older installer wrote its own two-field record" [ "$(record_fields "$HOME_LAST_OLD")" -eq 2 ]
+
+for boundary in floor:0.31.1-dev.0 candidate:0.31.1-rc.1; do
+  fixture=${boundary%%:*}
+  version=${boundary#*:}
+  home="$WORKDIR/home-no-handoff-$fixture"
+  mkdir -p "$home"
+  run_install "$MAC_TOOLS" "$home" "$BASE/$fixture" "$version"
+  check "no hand-off at $version: exits 0" [ "$RC" -eq 0 ]
+  check "no hand-off at $version: this installer did the work" not_contains "$ERR" "$HANDOFF_BANNER"
+  check "no hand-off at $version: the record is the extended one" [ "$(record_fields "$home")" -eq 5 ]
+done
+
+# Version numbers of any length order correctly on both sides of the floor:
+# shell arithmetic overflows at 2^63, so the comparison must not use it.
+build_good_release "$WWW/huge-major" 18446744073709551616.0.0
+HOME_HUGE="$WORKDIR/home-huge-major"
+mkdir -p "$HOME_HUGE"
+run_install "$MAC_TOOLS" "$HOME_HUGE" "$BASE/huge-major" 18446744073709551616.0.0
+check "huge major version: not handed off" not_contains "$ERR" "$HANDOFF_BANNER"
+check "huge major version: exits 0" [ "$RC" -eq 0 ]
+check "huge major version: this installer did the work" [ "$(record_fields "$HOME_HUGE")" -eq 5 ]
+build_old_release "$WWW/huge-prerelease" 0.28.0-rc.18446744073709551616
+HOME_HUGE_PRE="$WORKDIR/home-huge-prerelease"
+mkdir -p "$HOME_HUGE_PRE"
+run_install "$MAC_TOOLS" "$HOME_HUGE_PRE" "$BASE/huge-prerelease" 0.28.0-rc.18446744073709551616
+check "huge prerelease number below the floor: handed off" contains "$ERR" "$HANDOFF_BANNER"
+check "huge prerelease number below the floor: exits 0" [ "$RC" -eq 0 ]
+
+# A release below the floor published with this installer (a floor set
+# above the release's own version) would hand off to itself forever; the
+# hand-off's marker makes the second hand-off a refusal instead.
+build_old_release "$WWW/self-handoff" 0.28.9
+cp "$REPO_ROOT/scripts/install.sh" "$WWW/self-handoff/install.sh"
+(cd "$WWW/self-handoff" && sha256sum -- *.tar.gz install.sh >SHA256SUMS)
+HOME_SELF="$WORKDIR/home-self-handoff"
+mkdir -p "$HOME_SELF"
+run_install "$MAC_TOOLS" "$HOME_SELF" "$BASE/self-handoff" 0.28.9
+check "self hand-off: refuses" [ "$RC" -ne 0 ]
+check "self hand-off: hands off exactly once" [ "$(grep -c "$HANDOFF_BANNER" <<<"$ERR")" -eq 1 ]
+check "self hand-off: names the loop" contains "$ERR" "handed off to itself"
+check "self hand-off: nothing installed" [ ! -e "$HOME_SELF/Applications/Farhelm.app" ]
+
+build_old_release "$WWW/old-tampered" 0.27.0
+printf '# tampered\n' >>"$WWW/old-tampered/install.sh"
+HOME_TAMPERED="$WORKDIR/home-handoff-tampered"
+mkdir -p "$HOME_TAMPERED"
+run_install "$MAC_TOOLS" "$HOME_TAMPERED" "$BASE/old-tampered" 0.27.0
+check "hand-off (tampered installer): refuses" [ "$RC" -ne 0 ]
+check "hand-off (tampered installer): says it does not match" contains "$ERR" "does not match its SHA256SUMS"
+check "hand-off (tampered installer): nothing in HOME changed" [ -z "$(find "$HOME_TAMPERED" -mindepth 1)" ]
+
+build_old_release "$WWW/old-no-installer" 0.27.0
+rm -f "$WWW/old-no-installer/install.sh"
+HOME_NOINSTALLER="$WORKDIR/home-handoff-missing"
+mkdir -p "$HOME_NOINSTALLER"
+run_install "$MAC_TOOLS" "$HOME_NOINSTALLER" "$BASE/old-no-installer" 0.27.0
+check "hand-off (no installer published): refuses" [ "$RC" -ne 0 ]
+check "hand-off (no installer published): names the URL" contains "$ERR" "/v0.27.0/install.sh"
+check "hand-off (no installer published): nothing in HOME changed" [ -z "$(find "$HOME_NOINSTALLER" -mindepth 1)" ]
+
+# ===========================================================================
 echo
 echo "== summary =="
 echo "$CHECKS checks, $FAILURES failed"

@@ -92,7 +92,10 @@ still starts, records that the install is unfinished, and is finished by running
 files cannot be locked the installer refuses and leaves the installed version as it is.
 
 Releases that cannot be updated while running (from before this layout) and releases without the Mac app resources are
-refused before anything changes. Leave `FARHELM_VERSION` unset for the latest stable release.
+refused before anything changes. Leave `FARHELM_VERSION` unset for the latest stable release. A release older than the
+installer you run (releases after 0.31.0 have this installer) is installed by that release's own installer: this one
+downloads it from the release's folder, checks it against the release's checksums, and runs it before changing anything,
+so going back to an older release with `FARHELM_VERSION` works with the newest `install.sh`.
 
 Installation does not start Farhelm or register services. The desktop app manages its own helm and local supervisor.
 
