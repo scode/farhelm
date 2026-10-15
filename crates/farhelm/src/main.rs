@@ -1103,10 +1103,72 @@ enum InternalCmd {
     },
     /// The credential-free MCP reporter Goose retains in session metadata.
     GooseHook,
+    /// The forwarder's claim on this version: take a shared lock on the
+    /// inherited descriptor `fd` (this very program, opened by the
+    /// forwarder), check it, and report through the exit status (see
+    /// `farhelm_supervisor::version_lock::run_helper`). The lock belongs to
+    /// the open file the forwarder keeps, so it outlives this process and is
+    /// carried into the program the forwarder then starts.
+    ///
+    /// The command line is part of the contract with every forwarder an
+    /// installer has written since; an older `farhelm` rejects it as an
+    /// unknown subcommand (exit status 2), which is how the forwarder tells
+    /// it has no version locks.
+    VersionLock { fd: i32 },
+}
+
+/// Hold this program's own version for the rest of the process, when it runs
+/// from the Mac app bundle's version layout (see
+/// `farhelm_supervisor::version_lock`). A no-op everywhere else.
+///
+/// Runs before any command does its work, so a version a running Farhelm
+/// program needs can never be deleted under it. The forwarder's handoff
+/// variable is removed here, before anything can start a child, whether or
+/// not it was adopted. A version that is gone, or still held exclusively by
+/// an update or uninstall past the bounded wait, is never run unprotected:
+/// every command refuses, agent hooks included. Hooks do it silently and
+/// with exit status 0, because their stderr is the agent's terminal and a
+/// failure would surface as a hook error; they lose that one report, which
+/// the next hook replaces. Only a filesystem that cannot lock at all runs
+/// without one, as before version locks existed.
+fn hold_own_version(command: &Cmd) -> anyhow::Result<()> {
+    use farhelm_supervisor::version_lock::{self, LOCK_FD_ENV, ProcessHold};
+    let inherited = std::env::var_os(LOCK_FD_ENV);
+    if inherited.is_some() {
+        // SAFETY: called first thing in `main`, before this process starts
+        // any thread (no runtime exists yet), so nothing reads the
+        // environment concurrently.
+        unsafe { std::env::remove_var(LOCK_FD_ENV) };
+    }
+    if matches!(
+        command,
+        Cmd::Internal {
+            command: InternalCmd::VersionLock { .. }
+        }
+    ) {
+        // The helper locks the forwarder's descriptor itself; it takes no
+        // second lock of its own.
+        return Ok(());
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return Ok(());
+    };
+    let quiet = matches!(
+        command,
+        Cmd::Internal {
+            command: InternalCmd::Hook { .. } | InternalCmd::GooseHook
+        }
+    );
+    match version_lock::hold_for_process(&exe, inherited.as_deref()) {
+        Ok(ProcessHold::NotInLayout | ProcessHold::Held | ProcessHold::Unsupported) => Ok(()),
+        Err(_) if quiet => std::process::exit(0),
+        Err(error) => Err(anyhow::anyhow!(error)),
+    }
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    hold_own_version(&cli.command)?;
     match cli.command {
         Cmd::Uninstall(options) => uninstall::run(options),
         Cmd::Spawn {
@@ -1287,6 +1349,15 @@ fn main() -> anyhow::Result<()> {
             InternalCmd::Launch { spec } => {
                 // On success exec never returns; reaching here is failure.
                 Err(farhelm_supervisor::launch::exec_launch_spec(&spec))
+            }
+            InternalCmd::VersionLock { fd } => {
+                // Silent by contract: the forwarder runs this with every
+                // stream pointed at /dev/null and reads only the status.
+                let status = match std::env::current_exe() {
+                    Ok(exe) => farhelm_supervisor::version_lock::run_helper(&exe, fd),
+                    Err(_) => farhelm_supervisor::version_lock::HELPER_RETRY,
+                };
+                std::process::exit(status)
             }
             InternalCmd::GooseHook => {
                 std::panic::set_hook(Box::new(|_| {}));
