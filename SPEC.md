@@ -430,10 +430,12 @@ clear message for any held lock.
 
 Removal covers the recognized installer-created macOS app bundle and its terminal link, the installed CLI on Linux, and
 Linux user services owned by `farhelm helm setup` for this installation. Recognize services through the existing setup
-marker and the executable recorded in their unit files, and reuse setup's service-removal behavior. Those services are
-stopped and disabled before their executables are removed. Operator-authored services and service drop-ins are not
-deleted; retained integration files are reported. The user must stop services outside Farhelm's removal authority. Basic
-uninstall does not analyze effective service overrides or inspect their processes.
+marker and the executable recorded in their unit files, and reuse setup's service-removal behavior. A unit edited by
+hand is outside this recognition guarantee and may be attributed to another installation; see
+[Supported host setup](#supported-host-setup). Those services are stopped and disabled before their executables are
+removed. Operator-authored services and service drop-ins are not deleted; retained integration files are reported. The
+user must stop services outside Farhelm's removal authority. Basic uninstall does not analyze effective service
+overrides or inspect their processes.
 
 Persistent user data is retained, including session history, attachments, credentials, the host registry, preferences,
 logs, cached payloads, and repository caches. Completion names the retained data locations; retaining data must not be
@@ -2866,9 +2868,10 @@ the escaping rule in [Local authority and trust between hosts](#local-authority-
 
 Confirmed 2026-10-10: a configuration Farhelm does not support is refused with a clear message rather than left to
 undefined behavior, except where this section says otherwise (other login shells, unsupported tmux programs, filesystem
-aliasing, out-of-band manipulation of managed checkouts and the trash, including uncommon filesystems under them, and
-the proxy case below). An install whose `farhelm` program path contains `$` is unsupported and refused, because systemd
-does not decode `$$` in a service's program position, so a service written for that path could not start.
+aliasing, out-of-band manipulation of managed checkouts and the trash, including uncommon filesystems under them, the
+proxy case below, and hand-edited Farhelm service units under [Supported host setup](#supported-host-setup)). An install
+whose `farhelm` program path contains `$` is unsupported and refused, because systemd does not decode `$$` in a
+service's program position, so a service written for that path could not start.
 
 Two host aliases that reach the same host, user and port through different `ProxyCommand` routes are unsupported. The
 helm shares SSH connections by OpenSSH's connection hash, which does not include the proxy command, so such aliases may
@@ -2903,6 +2906,13 @@ or preserve such setups; refusing with a clear message is enough. Setup and Upda
 their own, including re-applying the settings they manage, such as start at boot and linger, on every run. The rules
 above about shared directories and unrelated host configuration still hold.
 
+Confirmed 2026-10-14: editing a Farhelm service unit by hand voids Farhelm's guarantees about how operations that read
+that unit identify its owning installation and treat its service. This applies to `farhelm helm setup` (including its
+uninstall), `farhelm uninstall`, and the hosts panel's setup, Update and uninstall. An edited unit may be attributed to
+the wrong installation, causing an operation to overwrite, stop or remove another installation's service. Farhelm need
+not detect or defend against these edits; its ownership and refusal guarantees, including the service-type refusal
+below, do not cover them. The guarantees for unedited Farhelm units remain unchanged.
+
 Confirmed 2026-10-11: switching a remote host to `farhelm helm setup` or another best-effort setup while a panel setup
 or Update is queued or running is best effort too. The panel run may act on the binary that setup now uses, and a
 visible failure is enough; Farhelm need not re-check for such a switch mid-run.
@@ -2910,7 +2920,8 @@ visible failure is enough; Farhelm need not re-check for such a switch mid-run.
 Confirmed 2026-10-10: Farhelm's units use systemd's `simple` service type (the default, so a unit may also leave it
 unset) with one start command. Setup and uninstall treat a Farhelm unit changed to any other type as one they do not
 recognise, and refuse it, because Farhelm reads a unit's one start command to learn which program it runs, and only a
-`oneshot` unit can list several.
+`oneshot` unit can list several. Such a change is a hand edit, so this refusal is best effort under the exception above:
+an edit that hides the type or a start command from Farhelm's reading may not be refused.
 
 A Linux machine running a helm remains supported, but the standalone installer temporarily does not cover that setup. On
 a Mac the installer supplies the desktop app, which manages its own helm and local supervisor.

@@ -56,9 +56,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`restart-ignores-retryable-conversation-admission.md`](restart-ignores-retryable-conversation-admission.md) — If the
   latest conversation report cannot be admitted, Restart can still resume the previously recorded conversation.
 
-- [`unit-reader-dollar-decoding-selects-wrong-installation.md`](unit-reader-dollar-decoding-selects-wrong-installation.md)
-  — An edited service containing literal dollars can be attributed to another installation during uninstall.
-
 - [`long-launch-refusal-displaces-replace-warning.md`](long-launch-refusal-displaces-replace-warning.md) — After a long
   refusal, Replace can remain visible while its warning about killing the source session is below the viewport.
 
