@@ -1100,9 +1100,10 @@ number, and the like). Under those conditions it is accepted that a process on a
 killed without the usual warning, or keeps running beside a relaunch; that a session's recorded conversation is wrong
 until the agent next reports one, so Restart may resume a different conversation of that agent; or that the helm
 reconnects a host to its previous destination until the next reload. These are exceptions to "never alongside them", to
-failing visibly when cleanup is unconfirmed, to Restart resuming the conversation the agent was actually in, and to a
+failing visibly when cleanup is unconfirmed, to Restart resuming the conversation the agent last reported, and to a
 corrected destination taking effect, for those conditions only. In the maintainer's words, they are accepted when they
-are of the "the process on the remote host got killed" kind. Corrupting the supervisor's or the helm's database,
+are of the "the process on the remote host got killed" kind. Conversation tracking also has the accepted limits under
+Durability and resume, which need no crash or coinciding faults. Corrupting the supervisor's or the helm's database,
 bricking an installation, or similar lasting damage is never accepted, however unlikely the trigger.
 
 ### Session view
@@ -1699,9 +1700,19 @@ running while the supervisor is down and reattach when it returns. Sessions pers
 
 Conversation tracking keeps working while a host's supervisor is down: when an agent reports which conversation it is in
 (a new session, a `/clear`), the report waits on the host and the supervisor applies it when it returns, so a later
-Restart resumes the conversation the agent was actually in. Asking Farhelm for something from inside a session does not
-work while the supervisor is down, and that is expected for now: an agent's `farhelm spawn` and `farhelm agent` commands
-fail until the supervisor is running again. On the Mac that is whenever the desktop app is closed.
+Restart uses the conversation Farhelm has recorded, subject to the tracking limits below. Asking Farhelm for something
+from inside a session does not work while the supervisor is down, and that is expected for now: an agent's
+`farhelm spawn` and `farhelm agent` commands fail until the supervisor is running again. On the Mac that is whenever the
+desktop app is closed.
+
+Confirmed 2026-10-14: after a session or its conversation is replaced, by clicking, `/clear` in the agent, or similar,
+Restart resuming the previous conversation within a brief window is acceptable, and so is Farhelm then continuing with
+the conversation Restart resumed instead of the one the agent had switched to. Separately, a new conversation Farhelm
+never learns of, leaving it undiscoverable long term, is a defect; the existing session-tracking notifications under
+Status mitigate failures to learn a conversation. When Farhelm already has a conversation recorded and tracking silently
+stops updating underneath it, continuing to resume that recorded conversation is an accepted consequence of whatever bug
+stopped the updates, not a separate defect in itself. Such tracking bugs are still to be avoided; having a recorded
+conversation does not mean Farhelm can detect every later failure to update it.
 
 The environment contract: a session process behaves as if the user had SSHed into the host and typed the command in
 their interactive shell — PATH, rc-file variables, locale included — even though the supervisor starts at boot. That
@@ -2828,6 +2839,9 @@ OMP, Grok, and any added later) are intentionally partial; gaps there are expect
 review. That allowance stops at those features. It does not cover lost user work (resuming the wrong conversation
 included), a session that fails to launch or run, an effect on other sessions, other hosts or the helm, or a security
 consequence. This may change as those integrations mature.
+
+The conversation-tracking limits under Durability and resume apply to every harness, first-class or not; a resume they
+accept is not the lost user work this allowance excludes.
 
 ### Supported user environments
 

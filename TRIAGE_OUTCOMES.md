@@ -13111,7 +13111,8 @@
   consequence of whatever bug stopped it, not a defect in itself. The spec change is made once, by whichever of the six
   items executes first; the others record that it covers them. No code change. Remove this feedback file and its index
   entry.
-- Execution: planned in `plans/queue/triage-conversation-tracking-spec.md`.
+- Execution: complete; jj change `qxzptotyzzkuxyzxowvqlxpnkuxtrlpk`; bookmark
+  `plan/triage-conversation-tracking-spec/01-restart-drain`; https://github.com/scode/farhelm/pull/2038/changes.
 
 ## restart-ignores-retryable-conversation-admission.md
 
