@@ -32,7 +32,9 @@ class ProfileTests(unittest.TestCase):
         """Own a private configuration tree and an unrelated simulated home."""
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        # macOS exposes temporary paths through /var -> /private/var. Profile
+        # normalization resolves that alias, so fixture expectations must too.
+        self.root = Path(self.tmp.name).resolve()
         self.home = self.root / 'different-home'
         self.path = self.root / 'environment.json'
         self.data = fixture(self.root)
@@ -62,6 +64,35 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(profile.values['journal'], str(self.root / 'journal.md'))
         self.assertEqual(profile.values['tart_home'], str(self.home / 'vm-store'))
         self.assertEqual(profile.values['evidence_root'], str(self.root / 'runs'))
+
+    def test_format_two_runtime_and_consent_paths_are_explicit(self):
+        """Native setup references follow the private profile, never the current checkout."""
+        self.data.update(format=2, guest_tester={
+            'settings': {'codex': '/fixture/codex', 'python': '/fixture/python',
+                         'desktop_app': '/fixture/Codex.app', 'model': 'fixture-model', 'effort': 'high'},
+            'auth_source': 'fixture-login.json', 'authorization': 'consent.json', 'fixture_receipt': 'native.json'})
+        self.write()
+        profile = self.load()
+        self.assertEqual(profile.values['guest_tester']['authorization'], str(self.root / 'consent.json'))
+        self.assertEqual(profile.values['guest_tester']['auth_source'], str(self.root / 'fixture-login.json'))
+        self.data['guest_tester']['settings']['codex'] = 'relative/codex'
+        self.write()
+        with self.assertRaisesRegex(Refused, 'absolute'):
+            self.load()
+
+    def test_legacy_format_cannot_smuggle_native_fields_and_references_stay_private(self):
+        """Historical cleanup compatibility must not silently acquire new credential capabilities."""
+        config = {'settings': {'codex': '/fixture/codex', 'python': '/fixture/python',
+                              'desktop_app': '/fixture/Codex.app', 'model': 'fixture-model', 'effort': 'high'},
+                  'auth_source': 'public/login.json', 'authorization': 'consent.json', 'fixture_receipt': 'native.json'}
+        self.data['guest_tester'] = config
+        self.write()
+        with self.assertRaisesRegex(Refused, 'format'):
+            self.load()
+        self.data['format'] = 2
+        self.write()
+        with self.assertRaisesRegex(Refused, 'outside'):
+            Profile.load(self.path, home=self.home, repo=self.root / 'public')
 
     def test_incomplete_and_secret_like_extra_fields_are_refused(self):
         """Misspellings and credential additions need an explicit schema change."""

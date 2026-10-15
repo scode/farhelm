@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Coordinate an agent-driven release test through private, resumable run state.
 
-The host agent performs the recipe's genuine GUI checks. This driver supplies
+An independent Codex tester inside the Mac guest performs genuine GUI checks.
+The host owns setup, lifecycle, credentials and evidence collection. This driver supplies
 the machine bindings, release plan, owned guest pair and evidence gates; it
 never invents GUI results or promotes a release. A separate fixture smoke path
 exercises command wiring without claiming any release acceptance checks passed.
@@ -28,7 +29,11 @@ from control import Control, Refused, atomic_json
 from continuity import require_progress
 from machine_profile import Profile, discover, filesystem_id, require_shared_storage
 from network import connect
+from fixture_probe import require_clean_pair
 from verify_release import require_comment
+from guest_tester import native_events, native_image_digests, request as tester_request, RESULT_STATES
+from guest_workflow import (copy_credentials, execute as execute_guest, cancel as cancel_guest, require_setup,
+                            source_url, task_for, Unavailable, CheckStopped, CleanupPending)
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -223,7 +228,7 @@ was planned; report callers must check its required set before calling verdict.
                 results={key: entry['results'][key] for key in required if key in entry['results']})
 
 
-def artifact(root, reference):
+def artifact(root, reference, limit=16 * 1024 * 1024):
     """Read a bounded private evidence file or tar member without extracting it.
 
 References are relative to this run. Symlinks cannot escape it, and the member
@@ -238,18 +243,41 @@ must be a regular file. This validates linkage/format, not image semantics.
     if separator:
         with tarfile.open(path) as archive:
             info = archive.getmember(member)
-            if not info.isfile() or info.size > 16 * 1024 * 1024:
-                raise Refused('evidence member must be a regular file <=16 MiB')
+            if not info.isfile() or info.size > limit:
+                raise Refused('evidence member must be a regular file within its declared bound')
             return archive.extractfile(info).read()
-    if path.stat().st_size > 16 * 1024 * 1024:
+    if path.stat().st_size > limit:
         raise Refused('direct evidence file exceeds 16 MiB')
     return path.read_bytes()
 
 
 def is_image(value):
-    """Recognize a nonempty PNG frame; interpreting the frame remains agent work."""
-    return (len(value) >= 33 and value.startswith(b'\x89PNG\r\n\x1a\n')
-            and value[12:16] == b'IHDR' and all(struct.unpack('>II', value[16:24])))
+    """Recognize PNG or native CUA JPEG framing without interpreting the pixels.
+
+Native CUA returns JPEGs on the exercised Mac runtime. Requiring conversion to
+PNG would add an unnecessary capture/serialization step and obscure provenance.
+GUI results separately bind the retained bytes to the actual native tool stream.
+"""
+    if (len(value) >= 33 and value.startswith(b'\x89PNG\r\n\x1a\n')
+            and value[12:16] == b'IHDR' and all(struct.unpack('>II', value[16:24]))):
+        return True
+    if not value.startswith(b'\xff\xd8') or not value.endswith(b'\xff\xd9'):
+        return False
+    offset = 2
+    while offset + 4 <= min(len(value), 65536):
+        if value[offset] != 0xff:
+            return False
+        marker = value[offset + 1]
+        if marker in (0xd8, 0xd9):
+            offset += 2
+            continue
+        size = int.from_bytes(value[offset + 2:offset + 4], 'big')
+        if size < 2 or offset + 2 + size > len(value):
+            return False
+        if marker in (0xc0, 0xc1, 0xc2):
+            return size >= 8 and all(struct.unpack('>HH', value[offset + 5:offset + 9]))
+        offset += size + 2
+    return False
 
 
 def progress(root, before, after, contents=None):
@@ -318,7 +346,13 @@ reconciliation rather than guessed safe to retry.
 """
 
     def __init__(self, directory, profile, factory=Control, disk_usage=shutil.disk_usage, connector=connect,
-                 volume_id=filesystem_id):
+                 volume_id=filesystem_id, tester=execute_guest):
+        """Bind lifecycle and tester execution to one profile's private evidence root.
+
+Injected services let orchestration tests observe the scheduling and evidence
+contracts without a real model, VM or credential store. Construction itself
+claims no guests and does not read or alter the persisted workflow.
+"""
         self.directory = Path(directory).resolve()
         if not self.directory.is_relative_to(Path(profile.values['evidence_root'])):
             raise Refused('workflow must stay under the configured private evidence root')
@@ -327,6 +361,7 @@ reconciliation rather than guessed safe to retry.
         self.disk_usage = disk_usage
         self.connector = connector
         self.volume_id = volume_id
+        self.tester = tester
         self.path = self.directory / 'workflow.json'
         self.data = None
 
@@ -380,6 +415,8 @@ that never declared the independent P0 installation paths.
             raise Refused('limited scope requires a plan with explicit P0 fixtures')
         self.data = {'format': 1, 'run_id': str(uuid.uuid4()), 'kind': 'fixture-smoke' if smoke else 'release',
                      'profile': self.profile.values, 'plan': release_plan, 'passes': {},
+                     'gui_backend': ('fixture-command' if smoke else
+                                     'guest-native' if 'guest_tester' in self.profile.values else 'historical-host'),
                      'scope': 'p0-only' if p0_only else 'p1-only' if p1_only else 'full'}
         self.data['initial_free_bytes'] = self.budget()
         specifications = [{'id': 'smoke', 'previous': None, 'update_path': None}] if smoke else release_plan['passes']
@@ -440,6 +477,8 @@ recorded with partial state; neither cleanup authority nor a retry is invented.
 P0 scheduling and scope are checked before budget probes or clone mutations.
 """
         entry = self.selected(pass_id)
+        if headless and self.data.get('gui_backend') == 'guest-native':
+            raise Refused('guest-native product fixtures require the normal Mac desktop start')
         if self.data['plan'] and self.data['plan'].get('p0_sequence'):
             self.require_priority(pass_id)
         if entry['phase'] != 'pending':
@@ -493,7 +532,8 @@ P0 scheduling and scope are checked before budget probes or clone mutations.
             # and writes. Transfer them before the foreground caller unwinds.
             processes.extend(c.processes)
 
-    def record(self, pass_id, check_id, status, references, detail, before=None, after=None):
+    def record(self, pass_id, check_id, status, references, detail, before=None, after=None, native=None,
+               p1_in_flight=False):
         """Accept explicit observations only when required evidence is present.
 
 Image presence does not interpret its contents: the agent's detail is the GUI
@@ -502,6 +542,12 @@ checks, and later report generation revalidates retained artifact references.
 New P0 plans additionally fence check order and stop accepting observations
 after a failed or unavailable check outside P1. P1 failures are retained but
 do not stop bonus coverage; historical manifests retain their declared rules.
+Every guest-native pass binds its observation to the current checkpoint and
+runtime, including command-only checks. GUI passes additionally require actual
+native capture bytes; a matching task file cannot lend a stale result its identity.
+Only the owning guest import can retain an already-dispatched P1 observation
+after scope narrows. A stop request fences future actions; it cannot recall a
+live send or erase its independently retained outcome.
 """
         entry = self.selected(pass_id)
         if entry['phase'] != 'ready' or check_id not in entry['required']:
@@ -516,12 +562,17 @@ do not stop bonus coverage; historical manifests retain their declared rules.
         if self.data['plan'] and self.data['plan'].get('p0_sequence'):
             self.require_no_failure()
             if spec.get('priority', entry.get('priority')) == 'P1':
-                if self.data.get('scope') == 'p0-only':
+                claim = entry.get('tester', {})
+                dispatched = (p1_in_flight and self.data.get('gui_backend') == 'guest-native' and native
+                              and claim.get('phase') == 'running' and claim.get('check_id') == check_id
+                              and claim.get('termination_observed') is True)
+                if self.data.get('scope') == 'p0-only' and not dispatched:
                     raise Refused('stop after P0 checks: P1 is outside this run scope')
-                # A failed/unavailable P1 observation still asserts that P1
-                # was attempted at the right boundary, after every valid P0.
-                if any(self.verdict(priority_entry(self.selected(key), 'P0')) != 'pass'
-                       for key in self.data['plan']['p0_sequence']):
+                # Manual observations must prove their ordering here. Native
+                # dispatch already established that premise before Send; later
+                # evidence loss changes P0's verdict, but cannot erase the send.
+                if not dispatched and any(self.verdict(priority_entry(self.selected(key), 'P0')) != 'pass'
+                                          for key in self.data['plan']['p0_sequence']):
                     raise Refused('complete all P0 checks with valid evidence before P1')
             elif entry.get('priority') == 'P0' and status == 'pass':
                 preceding = list(entry['required'])[:list(entry['required']).index(check_id)]
@@ -529,14 +580,49 @@ do not stop bonus coverage; historical manifests retain their declared rules.
                               results={key: entry['results'][key] for key in preceding if key in entry['results']})
                 if self.verdict(prefix) != 'pass':
                     raise Refused('complete preceding P0 checks with valid evidence first')
-        bound = set(references) | {ref for ref in (before, after) if ref is not None}
-        validated = {ref: artifact(self.directory, ref) for ref in bound}
+        native = {} if native is None else native
+        if status == 'pass' and self.data.get('gui_backend') == 'guest-native' and set(native) != {'execution', 'events', 'task'}:
+            raise Refused('guest-native passes require the independent executor; manual record is for failures/history')
+        bound = set(references) | {ref for ref in (before, after) if ref is not None} | set(native.values())
+        validated = {ref: artifact(self.directory, ref, limit=96 * 1024 * 1024)
+                     if ref == native.get('events') else artifact(self.directory, ref) for ref in bound}
         contents = [validated[ref] for ref in references]
         if status == 'pass':
+            image_digests = set()
             if not any(contents) or (spec['gui'] and not any(is_image(v) for v in contents)):
-                raise Refused('a passing check requires evidence, including an actual PNG for GUI checks')
-            if spec.get('command') and not any(v and not is_image(v) for v in contents):
+                raise Refused('a passing check requires evidence, including an actual image for GUI checks')
+            if self.data.get('gui_backend') == 'guest-native':
+                task = tester_request(json.loads(validated[native['task']]))
+                execution = json.loads(validated[native['execution']])
+                events = [json.loads(line) for line in validated[native['events']].splitlines() if line]
+                identity = {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
+                if (task['run_id'] != self.data['run_id'] or task['pass_id'] != pass_id or task['check_id'] != check_id
+                        or task['gui'] != spec['gui'] or task['settings'] != self.profile.values['guest_tester']['settings']
+                        or execution.get('status') != 'pass' or execution.get('result', {}).get('status') != 'pass'
+                        or execution.get('result', {}).get('identity') != identity):
+                    raise Refused('native tester receipt does not match this checkpoint')
+                calls = native_events(events)
+                image_digests = native_image_digests(events)
+                if spec['gui'] and (not calls or not any(hashlib.sha256(v).hexdigest() in native_image_digests(events)
+                                                        for v in contents if is_image(v))):
+                    raise Refused('GUI image was not returned by actual guest-native CUA')
+                if check_id == 'p1-feedback-send':
+                    captures = {hashlib.sha256(v).hexdigest() for v in contents if is_image(v)}
+                    if len(captures & native_image_digests(events)) < 2:
+                        raise Refused('P1 needs two distinct native images; review their before/after-Send meaning')
+            if spec.get('command') and not any(v and not is_image(v)
+                                               and hashlib.sha256(v).hexdigest() not in image_digests
+                                               for v in contents):
                 raise Refused('this check also requires retained command/identity evidence')
+            if check_id == 'fixture-clean' and self.data.get('gui_backend') == 'guest-native':
+                receipts = [json.loads(validated[ref]) for ref in references
+                            if ref.rsplit('/', 1)[-1] == 'fixture-clean.json']
+                if len(receipts) != 1:
+                    raise Refused('fixture-clean needs the deterministic pair receipt')
+                try:
+                    require_clean_pair(receipts[0])
+                except (ValueError, RuntimeError, KeyError, TypeError) as error:
+                    raise Refused('fixture-clean receipt is not complete and clean') from error
             if check_id in ('update-relaunch', 'update-discovery') and 'latest_at_selection' not in entry:
                 raise Refused('select the update path from a fresh latest observation first')
             if check_id == 'update-discovery' and entry['update_path'] not in ('ordinary', 'override'):
@@ -562,6 +648,10 @@ do not stop bonus coverage; historical manifests retain their declared rules.
                 if not valid:
                     raise Refused('old-ring verification receipt does not match this pass and candidate')
         value = {'status': status, 'evidence': references, 'detail': detail}
+        if p1_in_flight and self.data.get('scope') == 'p0-only':
+            value['dispatched_before_scope_stop'] = True
+        if native:
+            value['native'] = native
         if before is not None or after is not None:
             value['continuity'] = {'before': before, 'after': after}
         # Bind each accepted observation to retained bytes, so a later accidental
@@ -570,6 +660,257 @@ do not stop bonus coverage; historical manifests retain their declared rules.
         entry['results'][check_id] = value
         self.save()
         self.note('decision', f'Pass `{pass_id}`, check `{check_id}` recorded `{status}`; private evidence retained.')
+
+    def test(self, pass_id, source=None, timeout=1200):
+        """Own the host tester lease through execution and guest termination import.
+
+Status uses a different lock. This lease prevents abandoned-claim repair from
+racing a live coordinator without guessing numeric PID ownership.
+"""
+        with self.tester_owner():
+            return self.test_owned(pass_id, source, timeout)
+
+    @contextlib.contextmanager
+    def tester_owner(self):
+        """Reserve the tester independently from brief, queryable state transitions."""
+        with (self.directory / '.tester-owner.lock').open('a') as stream:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise Refused('another live coordinator owns this guest tester') from error
+            yield
+
+    def test_owned(self, pass_id, source=None, timeout=1200):
+        """Run one prepared pass without host GUI input or interactive approval.
+
+The workflow lock protects the attempt claim and each imported result, but is
+released while the guest works so status remains queryable. Cleanup and another
+tester refuse the active claim. Every checkpoint gets a fresh bounded turn;
+failures retain their artifacts and stop the sequence without automatic retry.
+"""
+        source = Source() if source is None else source
+        if type(timeout) is not int or not 30 <= timeout <= 3600:
+            raise Refused('guest tester deadline must be 30..3600 seconds')
+        check_id = 'native-preflight'
+        with self.locked():
+            feedback = (self.data.get('scope') != 'p0-only' and any(
+                priority_entry(value, 'P1')['required'] for value in self.data['passes'].values()))
+            config = require_setup(self.profile, feedback=feedback)
+            entry = self.selected(pass_id)
+            if entry['phase'] != 'ready' or entry.get('tester', {}).get('phase') in ('running', 'reconciliation-required'):
+                raise Refused('test needs a ready pass with no active tester')
+            if self.data.get('gui_backend') != 'guest-native':
+                raise Refused('historical host-GUI workflow cannot acquire guest-native test results')
+            if entry.get('automation_failure'):
+                raise Refused('failed automation is retained; fix the fixture and use a new run')
+            self.require_priority(pass_id)
+            # Resolve read-only source inputs before claiming the test. Once the
+            # claim is saved, every mutation failure must leave a terminal state.
+            context = {'candidate': self.data['plan']['candidate'], 'previous': entry['previous'],
+                       'previous_commit': source.commit(entry['previous']), 'source_url': source_url(source),
+                       'pass_id': pass_id}
+            c = self.pair(pass_id)
+            entry['tester'] = {'phase': 'running', 'check_id': check_id}
+            self.save()
+        try:
+            with c.locked():
+                if any(c.state(role)['State'] != 'running' for role in ('mac', 'linux')):
+                    raise Refused('both owned guests must be running before testing')
+                if not entry.get('credentials_injected'):
+                    copy_credentials(c, config)
+                    entry['credentials_injected'] = True
+                guest_home = c.command('exec', c.owned('mac'), config['settings']['python'], '-c',
+                                       'from pathlib import Path; print(Path.home())', capture_output=True).stdout.decode().strip()
+                ssh = dict(c.data['ssh'])
+            with self.locked():
+                self.selected(pass_id)['credentials_injected'] = True
+                self.save()
+            context.update(ssh=ssh, pass_directory=guest_home + '/farhelm-brick-test/' + self.data['run_id'] + '/' + pass_id)
+            context.update(source_checkout=context['pass_directory'] + '/source',
+                           signed_inputs=context['pass_directory'] + '/signed-inputs',
+                           shared_state=context['pass_directory'] + '/shared_state.json')
+            source_files = {name: (HERE / name).read_text() for name in
+                            ('guest_tester.py', 'fixture_probe.py', 'verify_release.py', 'continuity.py', 'RECIPE.md', 'OPERATIONS.md')}
+            with self.locked():
+                entry = self.selected(pass_id)
+                context['check_contracts'] = entry['required']
+                if entry.get('priority') != 'P0':
+                    addendum = self.directory / 'addendum.md'
+                    if addendum.is_symlink() or not addendum.is_file() or not 0 < addendum.stat().st_size <= 32768:
+                        raise Unavailable('bonus checks require a bounded filled addendum.md in the private run')
+                    source_files['addendum.md'] = addendum.read_text()
+            with self.locked():
+                entry = self.selected(pass_id)
+                sequence = ([] if entry.get('native_preflight') else ['native-preflight']) + [
+                    key for key, spec in entry['required'].items() if key not in entry['results']
+                    and not (spec.get('priority') == 'P1' and self.data.get('scope') == 'p0-only')]
+            for check_id in sequence:
+                with self.locked():
+                    entry = self.selected(pass_id)
+                    is_p1 = entry['required'].get(check_id, {}).get('priority') == 'P1'
+                    if is_p1 and self.data.get('scope') == 'p0-only':
+                        continue
+                    context.pop('feedback_authorized', None)
+                    if is_p1:
+                        # Recheck the separate live-send consent at its action
+                        # boundary; earlier credential consent cannot stand in.
+                        require_setup(self.profile, feedback=True)
+                        p0 = self.report()['p0']
+                        if p0['verdict'] != 'pass':
+                            raise Refused('complete all P0 checks with valid evidence before P1 dispatch')
+                        context['feedback_authorized'] = True
+                        print(json.dumps({'p0': p0}), flush=True)
+                    if check_id in ('update-discovery', 'update-relaunch') and 'latest_at_selection' not in entry:
+                        self.select_update(pass_id, download(ORIGIN + '/latest').decode().strip())
+                    context['update_path'] = entry['update_path']
+                    if check_id == 'update-discovery' and entry['update_path'] == 'manual':
+                        raise Unavailable('this old updater/candidate combination cannot demonstrate discovery')
+                    context['latest_at_selection'] = entry.get('latest_at_selection')
+                    context['prior_results'] = entry['results']
+                    task = task_for(self, pass_id, check_id, context, timeout)
+                    entry['tester'].update(check_id=check_id, attempt=task['attempt'])
+                    entry['tester']['guest_directory'] = context['pass_directory'] + '/' + task['attempt']
+                    entry['tester']['termination_observed'] = False
+                    self.save()
+                with c.locked():
+                    label = self.tester(c, task, source_files)
+                with self.locked():
+                    self.selected(pass_id)['tester']['termination_observed'] = True
+                    self.save()
+                prefix = pass_id + '/' + label + '.tar::./'
+                native = {key: prefix + filename for key, filename in
+                          (('execution', 'execution.json'), ('events', 'events.jsonl'), ('task', 'task.json'))}
+                execution = json.loads(artifact(self.directory, native['execution']))
+                retained_task = json.loads(artifact(self.directory, native['task']))
+                if retained_task != task:
+                    raise Refused('retained guest envelope differs from the claimed attempt')
+                observation = execution.get('result') or execution.get('unverified_result')
+                identity = {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
+                if observation is not None and observation.get('identity') != identity:
+                    raise Refused('guest observation identity differs from the claimed attempt')
+                if execution.get('status') not in ('pass', 'fail', 'could-not-run'):
+                    with self.locked():
+                        claim = self.selected(pass_id)['tester']
+                        claim['guest_status'] = execution.get('status')
+                        claim['observation'] = execution.get('result') or execution.get('unverified_result')
+                        self.save()
+                    raise Refused('guest-native automation failed; retained attempt ' + task['attempt'] + ': '
+                                  + str(execution.get('error', execution.get('result', {}).get('detail', '')))[:1000])
+                result = execution['result']
+                if execution['status'] != result['status']:
+                    raise Refused('guest execution summary and observation disagree')
+                with self.locked():
+                    entry = self.selected(pass_id)
+                    if check_id == 'native-preflight':
+                        if result['status'] != 'pass':
+                            entry['tester']['observation'] = result
+                            self.save()
+                            raise Refused(result['detail'])
+                        events = [json.loads(line) for line in artifact(self.directory, native['events'],
+                                                                         limit=96 * 1024 * 1024).splitlines() if line]
+                        if not native_image_digests(events):
+                            raise Refused('native readiness has no actual guest CUA screenshot')
+                        bound = list(native.values()) + [prefix + ref for ref in result['evidence']]
+                        images = native_image_digests(events)
+                        if not any(hashlib.sha256(artifact(self.directory, prefix + ref)).hexdigest() in images
+                                   for ref in result['evidence']):
+                            raise Refused('native readiness image was not retained')
+                        entry['native_preflight'] = {'native': native, 'sha256': {
+                            ref: hashlib.sha256(artifact(self.directory, ref, limit=96 * 1024 * 1024)
+                                                if ref == native['events'] else artifact(self.directory, ref)).hexdigest()
+                            for ref in bound}}
+                        self.save()
+                    else:
+                        continuity = result['continuity'] or {}
+                        self.record(pass_id, check_id, result['status'], [prefix + ref for ref in result['evidence']],
+                                    result['detail'], prefix + continuity['before'] if continuity else None,
+                                    prefix + continuity['after'] if continuity else None, native=native,
+                                    p1_in_flight=is_p1)
+                        if result['status'] != 'pass' and not is_p1:
+                            raise CheckStopped(result['detail'])
+                print(json.dumps({'pass': pass_id, 'check': check_id, 'status': result['status']}), flush=True)
+        except BaseException as error:
+            with self.locked():
+                entry = self.selected(pass_id)
+                if not isinstance(error, CheckStopped):
+                    entry['automation_failure'] = {'check_id': check_id, 'error': type(error).__name__,
+                                                   'status': 'could-not-run',
+                                                   'kind': 'unavailable' if isinstance(error, Unavailable) else 'harness-failure',
+                                                   'detail': str(error)[:1000]}
+                claim = entry['tester']
+                uncertain = claim.get('attempt') and not claim.get('termination_observed')
+                claim['phase'] = 'reconciliation-required' if uncertain or isinstance(error, CleanupPending) else 'failed'
+                self.save()
+                self.note('decision', f'Guest-native test failed at `{pass_id}/{check_id}`; no host/manual rescue is allowed.')
+            raise
+        with self.locked():
+            self.selected(pass_id)['tester']['phase'] = 'complete'
+            self.save()
+
+    def reconcile_tester(self, pass_id):
+        """Release an abandoned claim only after independently observed guest termination.
+
+The live host lease refuses interference with another operator. The exclusive
+guest cancellation marker asks its executor to terminate its owned child group;
+no persisted PID is signaled. A stopped VM independently proves its tester gone.
+Missing acknowledgement preserves the cleanup fence and the failed observation.
+Recovered observations remain diagnostics, never accepted checkpoints. A host
+interruption must not hide a product-failure claim that the guest exported,
+but unreadable or mismatched diagnostics cannot undo acknowledged termination.
+"""
+        with self.tester_owner(), self.locked():
+            entry = self.selected(pass_id)
+            claim = entry.get('tester', {})
+            if claim.get('phase') not in ('running', 'reconciliation-required'):
+                raise Refused('no abandoned active tester claim to reconcile')
+            c = self.pair(pass_id)
+            with c.locked():
+                state = c.state('mac')['State']
+                if state == 'running':
+                    if not claim.get('guest_directory') or not claim.get('attempt'):
+                        # The claim precedes authentication preparation. No task
+                        # identifier means this coordinator never staged a tester.
+                        if claim.get('attempt'):
+                            raise CleanupPending('missing guest task path; preserve the cleanup fence')
+                    else:
+                        task = {'attempt': claim['attempt'], 'settings': self.profile.values['guest_tester']['settings']}
+                        cancel_guest(c, task, claim['guest_directory'])
+                        label = 'reconciled-' + str(uuid.uuid4())
+                        c.collect('mac', claim['guest_directory'] + '/output/export', label)
+                        claim['reconciliation_archive'] = pass_id + '/' + label + '.tar'
+                        prefix = claim['reconciliation_archive'] + '::./'
+                        try:
+                            retained = tester_request(json.loads(artifact(self.directory, prefix + 'task.json')))
+                            identity = {'attempt': claim['attempt'], 'run_id': self.data['run_id'],
+                                        'pass_id': pass_id, 'check_id': claim['check_id']}
+                            if ({key: retained[key] for key in identity} != identity
+                                    or retained['settings'] != self.profile.values['guest_tester']['settings']):
+                                raise Refused('reconciled task identity/runtime differs from the abandoned claim')
+                            execution = json.loads(artifact(self.directory, prefix + 'execution.json'))
+                            if not isinstance(execution, dict) or execution.get('format') != 1:
+                                raise Refused('reconciled execution summary is malformed')
+                            observation = execution.get('result') or execution.get('unverified_result')
+                            if observation is not None:
+                                if not isinstance(observation, dict) or observation.get('identity') != identity:
+                                    raise Refused('reconciled observation identity differs from the abandoned claim')
+                                detail = observation.get('detail')
+                                if (observation.get('status') not in RESULT_STATES or not isinstance(detail, str)
+                                        or not detail.strip() or len(detail) > 4000):
+                                    raise Refused('reconciled diagnostic observation is malformed')
+                                # No record() call: turn provenance and evidence
+                                # acceptance were interrupted. Retain only the
+                                # bounded claim needed by the review-warning report.
+                                claim['observation'] = {key: observation[key] for key in ('identity', 'status', 'detail')}
+                        except (OSError, ValueError, RuntimeError, KeyError, TypeError, tarfile.TarError) as error:
+                            claim['reconciliation_evidence_error'] = str(error)[:1000]
+                elif state != 'stopped':
+                    raise CleanupPending('guest state cannot establish tester termination')
+            claim.update(phase='failed', reconciled=True)
+            entry.setdefault('automation_failure', {'check_id': claim.get('check_id', 'native-preflight'),
+                             'status': 'could-not-run', 'kind': 'harness-failure', 'error': 'abandoned-coordinator',
+                             'detail': 'Abandoned tester stopped by verified reconciliation.'})
+            self.save()
+            self.note('decision', f'Abandoned tester for `{pass_id}` reconciled; failed evidence retained, no test resumed.')
 
     def select_update(self, pass_id, latest):
         """Reobserve /latest at the action boundary instead of trusting initial planning.
@@ -631,6 +972,8 @@ operator still finishes evidence collection and cleans up the last P0 pair.
 """
         if not any(priority_entry(entry, 'P1')['required'] for entry in self.data['passes'].values()):
             raise Refused('this historical run has no planned P1 check; start a new plan')
+        if self.data.get('gui_backend') == 'guest-native':
+            require_setup(self.profile, feedback=True)
         self.data['scope'] = 'p1-only'
         self.save()
         self.note('decision', 'Stop after P1 checks requested; future bonus fixtures are outside scope.')
@@ -638,11 +981,11 @@ operator still finishes evidence collection and cleans up the last P0 pair.
     def require_no_failure(self):
         """Retain the stop-on-failure fence, with P1's deliberate exception.
 
-Preparation errors and failures of any other priority still stop progress.
+Preparation or automation errors and product failures of any other priority still stop progress.
 Ignoring P1 here never changes its separate or full-run verdict.
 """
         for entry in self.data['passes'].values():
-            if entry.get('preparation_error') or any(
+            if entry.get('preparation_error') or entry.get('automation_failure') or any(
                     result['status'] != 'pass'
                     for key, result in entry['results'].items()
                     if entry['required'][key].get('priority', entry.get('priority')) != 'P1'):
@@ -670,16 +1013,33 @@ their observations are never retroactively relabeled as P0 coverage.
     def verdict(self, entry):
         """Missing, invalidated or skipped checks cannot become a release pass."""
         results = entry['results']
+        failure = entry.get('automation_failure', {})
+        if failure.get('check_id') == 'native-preflight' or failure.get('check_id') in entry['required']:
+            return 'could not run' if failure.get('status') == 'could-not-run' else 'fail'
         if any(v['status'] == 'fail' for v in results.values()):
             return 'fail'
         if entry.get('preparation_error') or set(results) != set(entry['required']):
             return 'could not run'
+        if self.data.get('gui_backend') == 'guest-native':
+            preflight = entry.get('native_preflight', {})
+            if not preflight.get('sha256'):
+                return 'could not run'
+            try:
+                if any(hashlib.sha256(artifact(self.directory, ref, limit=96 * 1024 * 1024)
+                                      if ref == preflight.get('native', {}).get('events')
+                                      else artifact(self.directory, ref)).hexdigest() != digest
+                       for ref, digest in preflight['sha256'].items()):
+                    return 'could not run'
+            except (OSError, ValueError, RuntimeError, tarfile.TarError):
+                return 'could not run'
         for check_id, result in results.items():
             if result['status'] != 'pass':
                 return 'could not run'
             try:
                 for ref, digest in result['sha256'].items():
-                    if hashlib.sha256(artifact(self.directory, ref)).hexdigest() != digest:
+                    raw = (artifact(self.directory, ref, limit=96 * 1024 * 1024)
+                           if ref == result.get('native', {}).get('events') else artifact(self.directory, ref))
+                    if hashlib.sha256(raw).hexdigest() != digest:
                         return 'could not run'
                 if 'continuity' in result:
                     continuity_chain(self.directory, entry, check_id)
@@ -712,6 +1072,19 @@ of its fixture's full verdict but excluded from P0's projections.
         verdicts = [v['verdict'] for v in output['passes'].values()]
         outcome = 'fail' if 'fail' in verdicts else 'pass' if all(v == 'pass' for v in verdicts) else 'could not run'
         output['verdict'] = outcome if self.data['kind'] == 'release' else 'fixture smoke: ' + outcome
+        if self.data.get('gui_backend') == 'guest-native':
+            failures = {key: entry['automation_failure'] for key, entry in self.data['passes'].items()
+                        if entry.get('automation_failure', {}).get('kind') == 'harness-failure'}
+            output['automation'] = {'verdict': 'fail' if failures else 'no failure observed', 'failures': failures}
+            # An aborted turn cannot prove a product failure, but losing turn
+            # completion must not relabel its observed break as harmless setup.
+            claims = [{ 'pass_id': key, 'check_id': entry['tester']['check_id'],
+                        'detail': entry['tester']['observation']['detail']}
+                      for key, entry in self.data['passes'].items()
+                      if entry.get('tester', {}).get('check_id') != 'native-preflight'
+                      and (entry.get('tester', {}).get('observation') or {}).get('status') == 'fail']
+            output['unverified_product_failures'] = claims
+            output['promotion_blocked_pending_review'] = bool(claims)
         if self.data['kind'] == 'release':
             p0_ids = self.data['plan'].get('p0_sequence', [])
             p0_verdicts = [self.verdict(priority_entry(self.selected(key), 'P0')) for key in p0_ids]
@@ -720,6 +1093,10 @@ of its fixture's full verdict but excluded from P0's projections.
                                        'fail' if 'fail' in p0_verdicts else
                                        'pass' if all(v == 'pass' for v in p0_verdicts) else 'could not run'),
                             'passes': p0_ids}
+            if self.data.get('gui_backend') == 'guest-native':
+                output['p0']['unverified_product_failures'] = [
+                    value for value in output['unverified_product_failures'] if value['pass_id'] in p0_ids
+                    and self.selected(value['pass_id'])['required'][value['check_id']].get('priority', 'P0') == 'P0']
             if p0_ids:
                 # Publish the user's five questions, including separate local
                 # and remote agent results, without weakening prerequisite or
@@ -750,6 +1127,10 @@ of its fixture's full verdict but excluded from P0's projections.
                                        'fail' if 'fail' in p1_verdicts else
                                        'pass' if all(v == 'pass' for v in p1_verdicts) else 'could not run'),
                             'checks': p1_checks}
+            if self.data.get('gui_backend') == 'guest-native':
+                output['p1']['unverified_product_failures'] = [
+                    value for value in output['unverified_product_failures']
+                    if self.selected(value['pass_id'])['required'][value['check_id']].get('priority') == 'P1']
             requested = [output['p0']['verdict'], output['p1']['verdict']]
             if output['scope'] == 'p0-only':
                 output['requested_verdict'] = output['p0']['verdict']
@@ -776,6 +1157,8 @@ require keeping clones alive. Other incomplete/failed pairs need explicit
 discard approval as before; none of these paths delete retained evidence.
 """
         entry = self.selected(pass_id)
+        if entry.get('tester', {}).get('phase') in ('running', 'reconciliation-required'):
+            raise Refused('cannot clean up while the independent guest tester is active')
         p1 = priority_entry(entry, 'P1')
         if p1['required']:
             successful = self.verdict(priority_entry(entry, 'P0')) == 'pass'
@@ -875,13 +1258,15 @@ def main():
             scope.add_argument('--stop-after-p1', action='store_true',
                                help='complete P0 and the feedback P1 check, then stop')
     sub.add_parser('smoke')
-    for name in ('serve', 'status', 'select-update', 'record', 'add-check', 'cleanup', 'stop-after-p0', 'stop-after-p1'):
+    for name in ('serve', 'test', 'reconcile-tester', 'status', 'select-update', 'record', 'add-check', 'cleanup', 'stop-after-p0', 'stop-after-p1'):
         child = sub.add_parser(name)
         child.add_argument('run_dir', type=Path)
         if name not in ('status', 'stop-after-p0', 'stop-after-p1'):
             child.add_argument('pass_id')
         if name == 'serve':
             child.add_argument('--headless', action='store_true')
+        elif name == 'test':
+            child.add_argument('--timeout', type=int, default=1200, help='hard deadline per guest tester turn')
         elif name == 'record':
             child.add_argument('check_id')
             child.add_argument('--status', required=True, choices=('pass', 'fail', 'could-not-run'))
@@ -906,6 +1291,8 @@ def main():
             print(json.dumps(release, indent=2))
             return
     if args.action in ('init', 'smoke'):
+        if args.action == 'init':
+            require_setup(profile, feedback=not args.stop_after_p0)
         root = Path(profile.values['evidence_root'])
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
         run = Run(root / ('brick-' + str(uuid.uuid4())), profile)
@@ -920,6 +1307,16 @@ def main():
                 print(json.dumps(run.report(), indent=2))
         return
     run = Run(args.run_dir, profile)
+    if args.action == 'test':
+        run.test(args.pass_id, timeout=args.timeout)
+        with run.locked():
+            print(json.dumps(run.report(), indent=2))
+        return
+    if args.action == 'reconcile-tester':
+        run.reconcile_tester(args.pass_id)
+        with run.locked():
+            print(json.dumps(run.report(), indent=2))
+        return
     if args.action == 'serve':
         processes = []
         try:

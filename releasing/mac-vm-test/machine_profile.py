@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 
 from control import Refused
+from guest_tester import request as tester_request
 
 
 PROFILE_ENV = 'FARHELM_BRICK_TEST_PROFILE'
@@ -89,6 +90,25 @@ inspection outside Tart's VM directory; an actual replacement is refused later.
     return {'name': name, 'mac_address': mac.lower()}
 
 
+def tester_binding(value, home, relative_to):
+    """Pin guest runtime and private setup authorization without embedding credentials.
+
+Format-one profiles remain readable for historical inspection and cleanup, but
+cannot run the new tester. The configuration's file references belong to the
+operator; actual approval and clean-fixture receipts are checked before testing.
+"""
+    if not isinstance(value, dict) or set(value) != {'settings', 'auth_source', 'authorization', 'fixture_receipt'}:
+        raise Refused('guest_tester requires settings, auth_source, authorization and fixture_receipt')
+    try:
+        tester_request({'format': 1, 'attempt': 'validation', 'run_id': 'validation', 'pass_id': 'validation',
+                        'check_id': 'validation', 'gui': False, 'timeout_seconds': 30,
+                        'settings': value['settings'], 'context': {}, 'instructions': ''})
+    except RuntimeError as error:
+        raise Refused(str(error)) from error
+    return dict(value, **{key: str(expand_path(value[key], home, relative_to))
+                          for key in ('auth_source', 'authorization', 'fixture_receipt')})
+
+
 @dataclass(frozen=True)
 class Profile:
     """Validated private bindings used by every operation in a recorded workflow.
@@ -118,9 +138,13 @@ into the public checkout or interpreted as additional script capabilities.
         fields = {'format', 'mac_base', 'linux_base', 'linux_user', 'tart_home',
                   'journal', 'evidence_root', 'operator_policy', 'resource_limits',
                   'route_via_gateway', 'agents'}
-        if not isinstance(data, dict) or set(data) != fields or type(data['format']) is not int or data['format'] != 1:
+        if isinstance(data, dict) and data.get('format') == 2:
+            fields.add('guest_tester')
+        if not isinstance(data, dict) or set(data) != fields or type(data['format']) is not int or data['format'] not in (1, 2):
             raise Refused('unsupported or incomplete brick-test profile format')
         values = dict(data)
+        if data['format'] == 2:
+            values['guest_tester'] = tester_binding(data['guest_tester'], home, path.parent)
         for role in ('mac', 'linux'):
             values[role + '_base'] = base_binding(data[role + '_base'])
         if values['mac_base']['name'] == values['linux_base']['name']:
@@ -146,7 +170,9 @@ into the public checkout or interpreted as additional script capabilities.
         if repo is not None:
             repo = Path(repo).resolve()
             for private in (path, Path(values['tart_home']), Path(values['journal']),
-                            Path(values['evidence_root']), Path(values['operator_policy'])):
+                            Path(values['evidence_root']), Path(values['operator_policy']),
+                            *[Path(values['guest_tester'][key]) for key in
+                              ('auth_source', 'authorization', 'fixture_receipt') if 'guest_tester' in values]):
                 if private.is_relative_to(repo):
                     raise Refused('profile, VM storage, policy, journal and evidence must stay outside the public checkout')
         return cls(path, values)

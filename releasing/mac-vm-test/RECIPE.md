@@ -3,14 +3,14 @@
 For the standard **`brick test release vX.Y.Z`** request, use [BRICK-TEST.md](BRICK-TEST.md) to discover the private
 machine profile, plan all required version pairs and record the checks below.
 
-Run this as an agent on the **macOS host**, controlling disposable Tart guests. It requires the two prepared base
-images, command and GUI access to the guests, readiness checks, a way to launch the app and capture logs, and lifecycle
-scripts established by [BRING-UP.md](BRING-UP.md) and documented in [OPERATIONS.md](OPERATIONS.md). If any prerequisite
-is missing, resolve it before testing. The script mechanics were exercised on real guests; this procedure still requires
-evidence for every check and every candidate.
+The host coordinates disposable Tart guests; an independent Codex tester **inside the Mac guest** executes this recipe
+through genuine native CUA. It requires the two prepared base images, command and GUI access to the guests, readiness
+checks, a way to launch the app and capture logs, and lifecycle scripts established by [BRING-UP.md](BRING-UP.md) and
+documented in [OPERATIONS.md](OPERATIONS.md). If any prerequisite is missing, resolve it before testing. The script
+mechanics were exercised on real guests; this procedure still requires evidence for every check and every candidate.
 
 Each pass gets a fresh macOS clone and a fresh Linux clone. Install and update Farhelm only in the guests. Leave the
-host's live installation and prepared bases untouched. The bases and clones contain real credentials and must never be
+host's live installation and prepared bases untouched. Working clones contain real credentials and must never be
 published. Store private evidence on the host outside repositories; redact any report you share.
 
 ## Inputs and readiness
@@ -43,6 +43,13 @@ Before each pass, use BRICK-TEST's supervised `serve` sequence, or OPERATIONS.md
 `clone`, supervised `run`, `ready`, and `network.py` sequence. Establish Mac desktop and SSH readiness and verify the
 Linux systemd user manager. Record guest OS/image versions privately. Confirm no Farhelm binaries or state exist in
 either fresh clone. A broken fixture is “could not run,” not a product pass.
+
+Fixture setup resolves OS/CUA permissions, tester installation and credential-copy consent before a release run. During
+actual checks, a permission, login or tool refusal is a harness bug: stop and retain the failed attempt. Never grant
+permissions or request manual approval to rescue that run. Ordinary Farhelm confirmations, including its YOLO launch
+confirmation and per-run workspace trust, are authorized product actions handled by the guest tester. Do not change
+confirmation preferences to suppress them. Use the actual native tool-returned image as GUI evidence; `screencapture`
+can capture a different foreground app and cannot replace that image.
 
 ## P0 checks: install, upgrade and basic agent execution
 
@@ -122,22 +129,21 @@ check does not run in stop-after-P0 scope.
    This is an automated release brick test checking that this release can send feedback; no action is needed.
    ```
 
-   Use the verified guest-only clipboard workaround in OPERATIONS.md: prepare the clipboard through the journaled
-   controller inside the Mac guest, then use the guest's Edit menu and Paste. Keep Tart's shared clipboard disabled and
-   the host clipboard untouched. Inspect the pasted message before proceeding; the first line must be exact so the inbox
-   title is `Feedback: [brick-test] vX.Y.Z`.
+   Use native CUA field entry inside the guest and inspect its reactive value before proceeding. Keep Tart's shared
+   clipboard disabled and the host clipboard untouched. The first line must be exact so the inbox title is
+   `Feedback: [brick-test] vX.Y.Z`.
 2. Leave the contact field blank, clearing any prefilled contact. Inspect the dialog's display of what accompanies the
-   message: the version must name this candidate and the surface must be the desktop app. Save a PNG of the filled
-   dialog before Send. These are fixture premises, not inferred from which installer ran.
+   message: the version must name this candidate and the surface must be the desktop app. Save an actual native PNG or
+   JPEG of the filled dialog before Send. These are fixture premises, not inferred from which installer ran.
 3. Press Send and observe it finish. Pass only if the dialog closes by itself without a failure message. Seeing the
    brief thanks is optional; it lasts only 1.5 seconds. A failure message or a dialog that stays open fails the check.
-   Save another PNG showing the closed dialog (or the thanks, if caught); on failure capture the visible failure state.
-   Retain the agent's actual observation as the result detail. No command success receipt is required: the helm logs
-   only failed sends, and the GUI closing is the success oracle.
-4. Export the two captures with the existing bounded evidence collection and record `p1-feedback-send` on
-   `p0-updater-upgrade`, with GUI evidence and status pass, fail or could-not-run. Inspect `status` and report P1's
-   named result and `p1.verdict` promptly, separate from P0. Retain failure evidence before cleanup; a P1 failure does
-   not change a valid P0 verdict, does not prevent ordinary cleanup of this pair, and does not fence bonus passes.
+   Save another native image showing the closed dialog (or the thanks, if caught); on failure capture the visible
+   failure state. Retain the agent's actual observation as the result detail. No command success receipt is required:
+   the helm logs only failed sends, and the GUI closing is the success oracle.
+4. The guest executor exports its native captures and imports `p1-feedback-send` automatically on `p0-updater-upgrade`,
+   with GUI evidence and status pass, fail or could-not-run. Inspect `status` and report P1's named result and
+   `p1.verdict` promptly, separate from P0. Retain failure evidence before cleanup; a P1 failure does not change a valid
+   P0 verdict, does not prevent ordinary cleanup of this pair, and does not fence bonus passes.
 5. Clean up this pair and wait for its foreground owner to exit. End here for **stop after P1 checks**; otherwise
    continue the bonus passes below. Whether a failed P1 should prevent promotion is the maintainer's decision for that
    release, not a rule this recipe chooses.
