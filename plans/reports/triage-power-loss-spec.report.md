@@ -51,3 +51,37 @@ investigation stayed in the main session under the no-workhorse requirement. Ext
 artifacts are retained in the private galaxy-brain session record; exact reported model attribution, native/main usage
 and some route-at-launch records are unavailable. The report also receives its required native cold read before
 delivery. Neither PR was marked ready or merged by the executor.
+
+### Landing
+
+Landed as #2039 and #2043, first of the round's three spec-only plans; trusted-host-values-spec (#2040, #2042) and
+hand-edited-units-spec (#2041, #2049) landed after it. Main had gained click-to-open-paths (#2034), which rewrote the
+terminal file download text in SPEC.md, plus plan bookkeeping and Mac development-build scripts; none conflicts with
+this decision.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. It confirmed the decision adds no durability requirement,
+keeps the prohibitions on database corruption and bricking an installation, and that no sentence in SPEC.md or
+SPEC_impl.md contradicts it: every durability barrier SPEC_impl.md describes protects the supervisor's own state, and
+"no partial file after failure or interruption" is about partial files, not survival.
+
+#### Fix made while landing
+
+"Downloaded files" could be read as covering release and provisioning downloads, which become the installation itself,
+and "the exemption is limited to downloads and checkouts" could be read as contradicting the existing best-effort rule
+for attachments. The subsection now names files saved by downloading a file path from a session's terminal, says release
+and provisioning downloads are not covered, points to the attachments rule, and names "the installation the installer
+writes" rather than "the installer's state".
+
+#### Left as is
+
+A possible follow-up the reviewer raised: after a power cut, a supervisor's database can still record a managed checkout
+whose directory is gone, and SPEC.md does not say whether that is an expected missing object or the "database
+corruption" it forbids. The plan forbade new requirements, so it is only noted here.
+
+#### Checks
+
+- Run now: `dprint check` on SPEC.md after the fix, and on main after all three plans landed; no conflict markers on
+  main.
+- Not run: anything else; only Markdown changed.
