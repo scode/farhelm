@@ -53,3 +53,8 @@ with in place.
   Git clone fix ends "Farhelm still uses the Git already on the host and works around the bug by turning off one Git
   optimization (the commit-graph) for that clone, so you do not need to upgrade Git." (Proposed during the v0.28.2
   curation and agreed by the maintainer, 2026-10-13.)
+- Do not frame an entry as an instruction to the user. Either say what you can now do, or say what the part of the app
+  does ("clicking X opens Y"). The v0.29.0 draft's "In the desktop app, click the version in the sidebar to check for
+  updates." became "In the desktop app, you can now click the version in the sidebar to check for updates.", and the
+  entries that opened with "Choose", "Mark" or "Give" got the same treatment. (Stated by the maintainer during the
+  v0.29.0 curation, 2026-10-16.)

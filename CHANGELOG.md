@@ -4,31 +4,29 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.29.0 - 2026-10-16
 
-**DRAFT release notes - not yet finalized**
-
 ### 💥 Breaking
 
 - This release *requires* you to update your remote hosts. (#1992, #1995, #2012, #2070)
-- Sessions you start without choosing YOLO now run in Guarded mode, and Farhelm passes each agent's own flags for it (`--permission-mode auto` for Claude and Grok, `-a on-request -s workspace-write` for Codex, `--permission-profile :auto-review` for Muse). These flags override your agent's own permission settings, so if you relied on those, choose YOLO or custom permission flags instead. Cursor still uses its own setting. Sessions started before this release without permission flags count as YOLO until you relaunch them with Clone, Replace with or Restart with. (#1992)
+- The permission choice when you start a session is now **guarded** or **YOLO**, replacing **default** and **YOLO**. Default left permissions to the agent's own configuration, which could itself be set to skip every check. Guarded instead passes each agent the flags for a mode that checks its actions (`--permission-mode auto` for Claude and Grok, `-a on-request -s workspace-write` for Codex, `--permission-profile :auto-review` for Muse), so a guarded session should not be YOLO even if your agent is configured that way. Farhelm cannot guarantee it: these modes can still approve some actions on their own, your agent's own allow rules still apply, and the agent can be switched to another mode after it starts. Sessions started before this release without a permission choice count as YOLO until you relaunch them with Clone, Replace with or Restart with. (#1992)
 
 ### 🚀 Added
 
-- Set up ntfy alerts in settings to get a notification when a session needs you, even away from Farhelm. In the desktop app, keep its window open to get alerts. Anyone who knows an ntfy.sh topic can read its alerts. (#1986, #2098, #2013)
-- Choose **Pin to top** in a session's menu to keep it above your other sessions. Pins are shared by every browser and the desktop app using the same helm, and carry over when you replace a session. (#2064)
-- Mark one template with ⚡ and press Cmd+P on a Mac, or Ctrl+Shift+P elsewhere, to start it without opening the session launcher. (#1994, #2062)
-- Give a template a number key in Templates to start it with Cmd+0–9 in the Mac app, or Ctrl+Shift+0–9 elsewhere. (#2008, #2013)
+- You can now get [ntfy](https://ntfy.sh/) alerts, set up in settings, when a session needs you, even away from Farhelm. In the desktop app, alerts are sent only while its window is open. Anyone who knows an ntfy.sh topic can read its alerts. (#1986, #2098, #2013)
+- You can now keep a session above your other sessions with **Pin to top** in its menu. (#2064)
+- You can now mark one template with ⚡ and start it with Cmd+P on a Mac, or Ctrl+Shift+P elsewhere, without opening the session launcher. (#1994, #2062)
+- You can now give a template a number key in Templates and start it with Cmd+0–9 in the Mac app, or Ctrl+Shift+0–9 elsewhere. (#2008, #2013)
 - You can supply your own permission flags for Claude, Codex, Grok, Muse, Cursor and OMP. Farhelm does not check them and always treats such sessions as YOLO. (#1995, #2163)
-- New, Clone, Replace with and Restart with can start an agent in a conversation you name, including one Farhelm never recorded. Pi and OMP take a session file instead, and new managed checkouts cannot use it. (#2012)
-- In the desktop app, Cmd-click a file path in a terminal (Ctrl-click on Linux) to save it and open it in its default app; only .md and .txt files open. File hovers now show a file icon, a clearer path and a readable size. (#2034, #2085, #2092, #2095)
+- You can now start, restart or clone a session in a specific agent conversation by giving its session ID. This is useful to adopt a session you started outside Farhelm, or when Farhelm had trouble tracking which conversation your agent is in. (#2012)
+- In the desktop app, you can now Cmd-click a file path in a terminal (Ctrl-click on Linux) to save it and open it in its default app; only .md and .txt files open. File hovers now show a file icon, a clearer path and a readable size. (#2034, #2085, #2092, #2095)
 - The session shield now tries to notice when Claude, Grok, Muse or Cursor switches itself into a no-checks mode, and turns to YOLO with the observed mode named on hover. This is best effort. (#2063)
-- Settings can optionally answer Claude's trust question for new managed checkouts. It is off by default, and it edits Claude's own settings file, changing only that folder's trust entry. (#2070, #2089)
+- If you turn it on in Settings, Farhelm answers Claude Code's question about whether you trust the folder for each new managed checkout ahead of time, so Claude does not stop to ask. It is off by default. (#2070, #2089)
 - Settings has a new **skip session confirmations** option, off by default, so delete, replace, restart and closing a shell tab act on the first click. YOLO, host and trash questions still ask. (#1993, #2054)
 - A welcome card points you to Get started and to private feedback the first time you open Farhelm, and once after this update. Dismissing it applies to all your windows; **welcome** in the ? menu brings it back. (#2014, #2015)
-- The ? menu now opens the release notes in your browser. (#2006)
+- The ? menu has a new **release notes** item, which opens the release notes in your browser. (#2006)
 - For hosts that ask for a second factor on every ssh login, **? → ssh needs 2FA?** shows the two commands to start Farhelm's connections yourself. The Add host dialog links to the same help. (#2018)
-- In the desktop app, click the version in the sidebar to check for updates. (#1988)
+- In the desktop app, you can now click the version in the sidebar to check for updates. (#1988)
 - The desktop app shows a failed automatic update beside its version, with the reason on hover, and warns after three days of failed update checks. (#1989, #2105)
-- The Mac app warns when a Farhelm release has been withdrawn, and does not install a withdrawn release as an update. (#2010)
+- The Mac app warns when a Farhelm release has been revoked by the maintainer, and does not install a revoked release as an update. This is intended to minimize the impact if a release ever ships with a serious bug. (#2010)
 
 ### 🔄 Changed
 
@@ -38,18 +36,18 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ### 🔧 Fixes worth highlighting
 
-- An agent on one host can no longer finish creating a session in a managed checkout by reusing an approval you gave to another host's session, including after the helm was recovered with a fresh database. An agent request that was being retried while you upgraded asks for approval again. (#2086, #2172)
-- Emptying the trash now warns that entries Farhelm could not check can be deleted for good, losing any work in them that was never committed or pushed. Before, the confirmation said they would stay in place. (#2080)
 - The helm starts again on a Linux machine with no CA certificates installed. Adding or updating a host still needs them: install the `ca-certificates` package and restart the helm. (#2116)
-- Removing a remote host now finishes on Linux hosts whose basic command-line tools come from uutils or BusyBox, and a removal that was interrupted part-way can be finished with Retry. (#2096, #2100)
 - Dragging across a link or file path in a terminal no longer opens the link or downloads the file when the program in the terminal handles the mouse. (#2078)
-- While one host updates, Settings for your other hosts stays usable. (#2032)
 - Web links that wrap across terminal rows no longer show a false mismatch warning on hover. (#2156)
 
 ### 🩹 Misc fixes
 
 *Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
 
+- An agent on one host can no longer finish creating a session in a managed checkout by reusing an approval you gave to another host's session, including after the helm was recovered with a fresh database. An agent request that was being retried while you upgraded asks for approval again. (#2086, #2172)
+- Emptying the trash now warns that entries Farhelm could not check can be deleted for good, losing any work in them that was never committed or pushed. Before, the confirmation said they would stay in place. (#2080)
+- Removing a remote host now also works, as a best-effort improvement, on Linux hosts whose basic command-line tools come from uutils or BusyBox; BusyBox hosts remain unsupported. A removal that was interrupted part-way can be finished with Retry. (#2096, #2100)
+- While one host updates, Settings for your other hosts stays usable. (#2032)
 - Stopping a session while its managed checkout was still being cloned, or while its post-clone command ran, now shows it as stopped instead of as an error. (#2117)
 - An open notification list no longer closes and marks its entries read when a session's terminal finishes loading in the background. (#2132)
 - In the session launcher, picking a repository in the repository field now clears an earlier `gh:` search so Launch becomes available, and arrow keys keep the highlighted repository in view. (#2161, #2164)
