@@ -11,3 +11,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`template-editor-unsafe-values`](reports/template-editor-unsafe-values.report.md) landed 2026-10-15 in #2087: Template editor shows hidden characters in model and folder, read-only like commands
 - [`codex-guide-hook-warning`](reports/codex-guide-hook-warning.report.md) landed 2026-10-15 in #2091: Codex docs page stops calling the hook warning harmless
 - [`terminal-link-safety`](reports/terminal-link-safety.report.md) landed 2026-10-16 in #2078, #2085, #2092, #2095: Terminal links act only on a real click, on the target the hover honestly shows (four triage outcomes, three complexity gated)
+- [`ntfy-token-server-change`](reports/ntfy-token-server-change.report.md) landed 2026-10-16 in #2098: Waiting alerts: changing the ntfy server's origin drops the saved token, and Settings says so
