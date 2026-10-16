@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`terminal-link-safety`](reports/terminal-link-safety.report.md) landed 2026-10-16 in #2078, #2085, #2092, #2095: Terminal links act only on a real click, on the target the hover honestly shows (four triage outcomes, three complexity gated)
 - [`ntfy-token-server-change`](reports/ntfy-token-server-change.report.md) landed 2026-10-16 in #2098: Waiting alerts: changing the ntfy server's origin drops the saved token, and Settings says so
 - [`remote-uninstall-fixes`](reports/remote-uninstall-fixes.report.md) landed 2026-10-16 in #2096, #2100, #2102: Remote uninstall finishes on hosts with uutils coreutils and after an interrupted run, and its fixture test runs off GNU systems (3 outcomes, each gated)
 - [`update-failure-reporting`](reports/update-failure-reporting.report.md) landed 2026-10-16 in #2105, #2108: The version hover names why an automatic update install failed, and the install guide stops saying failures are only logged (2 outcomes, each gated)
