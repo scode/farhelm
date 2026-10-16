@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`download-long-name-copies`](reports/download-long-name-copies.report.md) landed 2026-10-16 in #2114: A second desktop download of a file with a near-limit name shortens the stem so the numbered copy fits (gated)
 - [`save-template-ime-escape`](reports/save-template-ime-escape.report.md) landed 2026-10-16 in #2115: Escape during input-method composition no longer closes the save-template panel and its draft (gated)
 - [`helm-start-without-ca-bundle`](reports/helm-start-without-ca-bundle.report.md) landed 2026-10-16 in #2116: A Linux helm without CA certificates starts, with downloads refusing, instead of exiting at startup (gated)
 - [`stopped-session-launch-error`](reports/stopped-session-launch-error.report.md) landed 2026-10-16 in #2117: A cached launch error no longer overrides a session's recorded stopped status (gated)
