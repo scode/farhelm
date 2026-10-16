@@ -66,3 +66,52 @@ execution evidence were checked locally; the source reviewers ran no tests. Sepa
 passed after clarifying one description. The preview title retains chore because the plan explicitly assigns that type
 to maintainer tooling. A documentation pass covered every touched file. No scope departure or unresolved source finding
 remains.
+
+### Landing
+
+Landed as #2104, #2106 and #2109, bottom-up, fifth of the round's nine plans, tested stacked with the others on main.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. The preview's release-notes watcher runs only under the
+development server, never in a production build, watches only the changelog and the release-notes data, and cannot
+trigger itself.
+
+#### Fixes made while landing
+
+- The Codex page said Farhelm learns the new conversation after `/clear` "once Codex has finished its next reply". Codex
+  reports it when you send your next prompt, and it becomes resumable once that reply ends; the window in which restart
+  can bring back the earlier conversation runs until that prompt, which can be indefinitely long. The page now says
+  that, and the hook-injection page no longer says "soon after"; it says restart can bring back the earlier conversation
+  until Farhelm has learned of the new one, which for some agents happens only at the next prompt or reply, and
+  reintroduces the term "conversation reporters" that its next sentence uses.
+- The paste paragraph now says escape characters are removed so a paste cannot end early and type the rest as
+  keystrokes, while other control characters such as Ctrl-C still reach the program.
+
+#### Left as is
+
+Follow-up: the Pi page makes the same overstated promise ("After `/new`, restart no longer resumes the old
+conversation"). The preview also restarts the development server when the changelog is saved, which is harmless.
+
+#### Checks
+
+Run on all nine of this round's plans stacked on main (terminal-link-safety, ntfy-token-server-change,
+remote-uninstall-fixes, update-failure-reporting, docs-accuracy-fixes, host-picker-dotted-i,
+setup-advice-state-directory, copy-guidance-resize, brick-test-feedback-evidence), with every landing fix in:
+
+- `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (301 delays, none missing a
+  reason); `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the UI crate's
+  clippy with the desktop feature and `cargo check -p farhelm-desktop`; the brick-test tooling's own test.
+- Through the recorder: the protocol and helm packages in full with pinned tmux, run
+  `6352fad3-a3b1-48dc-9884-3efc17ee03c6`: 1258 passed; the CLI's own unit tests, run
+  `0e1855d7-6f43-4da7-8a9a-495936ae565e`: 171 passed; the UI crate with the desktop feature, run
+  `513addbb-2505-4c54-bc07-2ac2ec06713b`: 655 passed.
+- The JS harness (257 passed) and the website build.
+- The terminal-link-clicks, terminal-links, terminal-files, ntfy-settings, provisioning, settings and tooltip-coverage
+  specs on Chromium and WebKit, run `97a26936-2b7b-42a5-af59-8f0fdb0b9d78`: 208 passed, 2 failed. Both failures were the
+  clipped-disclosure test pinning the refusal's old layering after the quick switcher closed (see terminal-link-safety).
+  After that expectation was fixed, the terminal-link-clicks spec on both engines, run
+  `a698ea79-451d-4dd4-87f5-24ef1d4b1cad`: 16 passed. An intermediate run, `6113fd52-60bf-4730-ae85-5e9dc2e90d46`, failed
+  on WebKit only because the first corrected expectation assumed Chromium's behavior.
+- Not run: the supervisor package and the CLI's end-to-end targets, which no PR in this round changes; other browser
+  specs.
