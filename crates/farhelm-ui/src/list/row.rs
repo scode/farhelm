@@ -1795,7 +1795,11 @@ pub(super) fn SessionRow(
                     // `title` the tooltip replaced was the button's
                     // accessible description instead; the tooltip is not in
                     // the accessibility tree at all.
-                    if compact {
+                    // A managed checkout's mark already carries its root and
+                    // any differing session folder in its own hidden text, so
+                    // only other compact rows add the folder here; otherwise
+                    // screen readers would hear the same path twice.
+                    if compact && session.working_copy.is_none() {
                         span { class: "visually-hidden", "{display_peer(&session.cwd)}" }
                     }
                 }
