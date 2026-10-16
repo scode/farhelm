@@ -3624,7 +3624,8 @@
               // Keep evidence only while the same displayed text remains there.
               if (target?.kind === 'file') fileLinks.hover(event, target.path, null, range, links.linkRowText(term, range));
               else if (target?.kind === 'web') {
-                links.showLinkTarget(event, uri, term.element, links.linkRowText(term, range));
+                const hoverText = links.linkHoverText(term, range);
+                links.showLinkTarget(event, uri, term.element, hoverText.text, hoverText.kind === 'fragment');
               }
             },
             leave() {

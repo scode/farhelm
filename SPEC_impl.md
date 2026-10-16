@@ -1085,18 +1085,31 @@ and document listeners with the mount's copy-on-select listeners, so reconnects 
 
 An OSC 8 link's hover compares the link's underlined text with its target (`linkTextMismatch` in
 `assets/terminal-links.js`) to decide whether the display is the quiet one or the loud mismatch warning. The text is
-what xterm's OSC 8 link provider reports for the hovered ROW only: the provider builds one link per buffer row, its
-public buffer API does not say which cells belong to a link, and agent TUIs wrap with cursor movement rather than
-letting the terminal wrap, so a continuation row is not even marked as one. An honest URL-shaped link whose text wraps
-onto another row is therefore judged on a fragment and gets the loud warning anyway. That false alarm is deliberate,
-decided 2026-09-30: joining rows would need xterm's private internals, and the row-only comparison never lets a URL-like
-fragment count as a match, since a fragment can never equal the full target. Do not "fix" the false alarm by trusting
-partial text or by treating a prefix of the target as a match. The comparison is not complete against a hostile program,
-and the reason must not be overstated: a fragment that is not URL-like on its own (`https:/` on one row,
-`/github.com/login` on the next) is not judged at all, so a program that chooses its own line breaks can keep every row
-of a lookalike quiet. The quiet display still names the real host, which is the safeguard the warning adds to. Within
-one row, the URL-like gate is deliberately generous, and strict parsing then decides: it accepts any scheme spelling,
-looks past leading non-ASCII characters that are not letters or digits and past the Hangul fillers (letters that draw as
+joined by `linkHoverText`, which reads the undocumented `extended.urlId` on the cell returned by the public
+`term.buffer.active.getLine(y).getCell(x)` API. Only consecutive rows carrying the same tag join, with exactly one
+contiguous tagged run per row, at most 128 rows and 8192 characters. Each run is read without trimming; only the ends of
+the joined string are trimmed. One synthetic empty padding cell before a terminal-wrapped wide character is omitted; an
+actual printed space is preserved. Agent cursor moves do not set `isWrapped`, so that flag is not a join condition.
+Whole text is compared normally. An adjacent continuation that exceeds a bound or has ambiguous runs yields Fragment:
+its hovered piece warns whenever it looks like an address, even if that piece happens to equal the target. A single row
+with repeated same-tag links keeps its existing comparison. An unavailable tag yields Unknown and restores the previous
+row-only comparison unchanged, including its false alarms and gaps.
+
+Decided 2026-10-15: accept this read-only private field access, superseding the 2026-09-30 decision to accept
+wrapped-link false alarms. The bundle stays byte-identical to upstream. The field can change at a manual xterm upgrade;
+a browser test against the vendored bundle pins its presence and shared tag for both agent layouts. Losing it falls back
+to today's row comparison, never a quieter partial-match rule. That old rule is incomplete: `https://git` followed by
+`hub.com/login` targeting `https://hub.com/login` was quiet on the second row, which alone equals the target.
+
+The tagged cells, read row by row, must spell the target for a quiet URL-like comparison; this does not certify all text
+the reader sees. Untagged decoy text is outside the comparison. Nor is the join complete against a hostile program, and
+the reason must not be overstated: pieces that are not joined are still judged one by one, so `https:/` and
+`/github.com/login` emitted as two hyperlinks with different tags (or on non-adjacent rows, or as a join refused for an
+ambiguous run) are each not URL-like and both stay quiet. `https://good.example` followed by `.evil.test/` targeting
+`https://good.example.evil.test/` is quiet, just as the same tagged text on one row is. Position proves nothing because
+agents can break before the edge. The quiet display still names the real host, which is the safeguard the warning adds
+to. The URL-like gate is deliberately generous, and strict parsing then decides: it accepts any scheme spelling, looks
+past leading non-ASCII characters that are not letters or digits and past the Hangul fillers (letters that draw as
 blanks), and reads lookalike colons, slashes and dots as their ASCII originals. So a lookalike scheme (`httрs` with a
 Cyrillic letter), invisible leading characters, or a `ː` posing as `:` warn rather than pass. Only the start of the text
 is examined: link text that is prose containing an address is not judged. A dotted host counts only when its last label
