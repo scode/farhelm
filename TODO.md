@@ -137,6 +137,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through the public buffer API. Nothing has been filed upstream; filing is the maintainer's call. Farhelm vendors
   xterm.js unmodified, so an upstream fix arrives only with a stable release.
 
+- **Escape the session name in "save as template".** The template editor now shows invisible and direction-changing
+  characters in a template's model and folder as visible escapes (#2087), but a session name copied from a cloned remote
+  session into "save as template" is still shown raw in the editor.
+
+- **Make input-method guards work in WebKit.** Escape or Enter that ends an input-method composition should only end the
+  composition, but WebKit (the Mac app and Safari) ends composition before the keydown of the key that ends it, so that
+  key arrives with `isComposing` false and acts as a normal key (WebKit bug 165004). The usual extra check, key code
+  229, is not available through Dioxus on the desktop renderer. So the template panel's composing-Escape fix (#2115)
+  very likely does nothing in the Mac app, and the same gap affects about 25 other input-method guards across the UI,
+  including that panel's earlier composing-Enter fix. Dig into a WebKit-proof approach and apply it everywhere. Browser
+  tests that fake a keydown with `isComposing: true` do not show the Mac app is fixed, because real WebKit never sends
+  one.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
