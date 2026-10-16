@@ -1051,7 +1051,8 @@ impl Engine {
         }
         tracing::info!("updater: installing {latest} (installed: {baseline})");
         self.set_current(Activity::Installing(latest.clone()));
-        if let Err(error) = (self.deps.install)(&latest) {
+        let install_error = (self.deps.install)(&latest).err();
+        if let Some(error) = install_error.as_ref() {
             if error.downcast_ref::<UnverifiableRelease>().is_some() {
                 // Nothing was run. Kept, and published whether or not a
                 // user is watching: an app that cannot verify its updates
@@ -1085,11 +1086,45 @@ impl Engine {
                 CheckResult::Success(Activity::UpToDate(latest))
             }
         } else {
-            CheckResult::InstallFailed(format!(
-                "installing Farhelm {latest} did not finish (the app's log says why)"
-            ))
+            CheckResult::InstallFailed(install_failure_message(&latest, install_error.as_ref()))
         }
     }
+}
+
+/// Keep the install's stage and cause in the hover instead of sending the user
+/// to the log. The installed record still decides success before this is used.
+/// Whitespace becomes spaces and the whole message is capped at 512 Unicode
+/// characters, including an ellipsis when truncated, so a child error cannot
+/// turn the version hover into an unbounded transcript.
+fn install_failure_message(latest: &str, error: Option<&anyhow::Error>) -> String {
+    // The installer's own output still goes only to the app's log, so a
+    // failure keeps pointing there; the pointer is appended after the cap so a
+    // long cause can never cut it off.
+    const LOG_POINTER: &str = " (the app's log has the details)";
+    let (message, suffix) = match error {
+        Some(error) => (
+            format!("installing Farhelm {latest} failed: {error:#}"),
+            LOG_POINTER,
+        ),
+        None => (
+            format!("the installer finished without installing Farhelm {latest}"),
+            "",
+        ),
+    };
+    let budget = 512 - suffix.chars().count();
+    let mut characters = message
+        .chars()
+        .map(|ch| if ch.is_whitespace() { ' ' } else { ch });
+    let mut bounded: String = characters.by_ref().take(budget - 1).collect();
+    if let Some(next) = characters.next() {
+        if characters.next().is_some() {
+            bounded.push('…');
+        } else {
+            bounded.push(next);
+        }
+    }
+    bounded.push_str(suffix);
+    bounded
 }
 
 impl Engine {
@@ -2313,10 +2348,9 @@ mod tests {
     /// does one that verifies and installs. An ordinary install failure (a
     /// failed download) neither sets nor clears it.
     ///
-    /// Why: an app that cannot verify its updates has stopped updating, and
-    /// an automatic check's failures otherwise go only to the log, so this
-    /// is the one failure the user must see without asking (SPEC.md,
-    /// "Installation and updates"). A notice that never cleared would cry
+    /// Why: an app that cannot verify its updates has stopped updating, so it
+    /// needs persistent reinstall advice beyond an ordinary failed-check
+    /// notice (SPEC.md, "Installation and updates"). A notice that never cleared would cry
     /// wolf after a fixed release; one a network blip set would be wrong.
     #[farhelm_testtrace::test]
     fn an_unverifiable_release_leaves_a_lasting_reinstall_notice() {
@@ -2472,7 +2506,7 @@ mod tests {
         assert!(
             readout(&failure)
                 .tooltip
-                .contains("installing Farhelm 1.1.0 did not finish")
+                .contains("installing Farhelm 1.1.0 failed: download failed")
         );
         assert_eq!(
             *rig.streak.lock().unwrap(),
@@ -2492,6 +2526,54 @@ mod tests {
             2,
             "a later qualifying failure is a new notice"
         );
+    }
+
+    /// An ordinary install error must expose its context chain, including on
+    /// automatic checks. A successful exit with an unchanged Installed record
+    /// needs a different diagnosis; neither case may claim an update is ready.
+    #[farhelm_testtrace::test]
+    fn install_failures_show_the_cause_or_the_unchanged_record() {
+        for requested in [false, true] {
+            for failed in [false, true] {
+                let mut rig = make_rig("1.0.0", Some("1.0.0"), Some("1.1.0"), false);
+                rig.engine.deps.install = Box::new(move |_| {
+                    if failed {
+                        Err(anyhow::anyhow!("HTTP 404")).context("fetching release archive")
+                    } else {
+                        Ok(())
+                    }
+                });
+                if requested {
+                    rig.shared.check_now();
+                }
+                assert_eq!(rig.installed.lock().unwrap().as_deref(), Some("1.0.0"));
+                rig.engine.wake_once();
+                let state = rig.published();
+                assert!(!state.update_ready());
+                let expected = if failed {
+                    "installing Farhelm 1.1.0 failed: fetching release archive: HTTP 404 (the app's log has the details)"
+                } else {
+                    "the installer finished without installing Farhelm 1.1.0"
+                };
+                assert_eq!(state.activity, Activity::Failed(expected.to_string()));
+                assert!(readout(&state).tooltip.contains(expected));
+            }
+        }
+    }
+
+    /// Long, multiline child diagnostics must remain a bounded single hover
+    /// line without cutting a multibyte character or dropping the stage prefix.
+    #[farhelm_testtrace::test]
+    fn install_failure_hover_is_one_line_and_bounded() {
+        let error =
+            anyhow::anyhow!("HTTP 404\n{}\r\nend", "日".repeat(600)).context("fetching archive");
+        let message = install_failure_message("1.1.0", Some(&error));
+        assert!(
+            message.starts_with("installing Farhelm 1.1.0 failed: fetching archive: HTTP 404 ")
+        );
+        assert_eq!(message.chars().count(), 512);
+        assert!(message.ends_with("… (the app's log has the details)"));
+        assert!(!message.chars().any(|ch| ch.is_whitespace() && ch != ' '));
     }
 
     /// Only actual automatic probe failures start the clock. Exact elapsed
