@@ -14967,7 +14967,8 @@
   `stat`, and permission or I/O failures still refuse. New regression tests cover the uutils and BusyBox absence
   spellings and a uutils non-absence refusal; the existing uninstall test still passes. Remove TODO.md's "Remote
   uninstall and uutils stat" entry in the same change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/remote-uninstall-fixes.md`.
+- Execution: complete in change `svymzwtxzwunmrnxuuwrmlxwlkrynvzs`, bookmark
+  `plan/remote-uninstall-fixes/01-stat-absence`; [PR #2096](https://github.com/scode/farhelm/pull/2096/changes).
 
 ## trash-host-totals-exclude-unchecked-archives.md
 

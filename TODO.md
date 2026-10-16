@@ -176,12 +176,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Tricky bugs
 
-- **Remote uninstall and uutils stat.** The absent-private-socket cleanup uses a GNU `stat` diagnostic pattern that
-  misses uutils coreutils 0.8.0's added `(os error 2)` suffix. An uninstall can therefore refuse after stopping the
-  supervisor even though the socket is absent. The existing provisioning test failed on Ubuntu 26.04 and passed on GNU
-  coreutils 9.4 in the exact four-test retry; evidence is in FLAKES.md's 2026-10-14 entry. Accept the precise
-  missing-path form without mistaking permission or I/O errors for absence.
-
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
   `include a SPEC.md` to a prompt quickly made the display show `include a SPE` followed by another line containing
   scattered fragments such as `COMMI`, `PR`, and repeated `SPEC` text, with large gaps between them, before submission.
