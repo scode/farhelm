@@ -2047,3 +2047,27 @@ Timeout: 5000ms
 Class: unknown
 
 Cause: unknown
+
+## 2026-10-15 — `plain Replace keeps a newer row's retry key after an older YOLO cancellation` (e2e/tests/replace.spec.ts)
+
+The full browser phase of deflake sweep `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` failed this test in WebKit, recorder run
+`038d6b7f-5ad7-407a-a20a-db485b857dd8`: the actions panel did not finish measuring against its own toggle within five
+seconds. All three isolated classification selections passed unchanged: `71a8b63e-df1d-4f98-b3a9-4d3dd65e0ef1`,
+`120f57ad-3897-4fd2-9c1c-a6b5feee84bd`, and `501877d8-a0d5-4bf3-bb60-1e967bdad165`. Other composer and button failures,
+plus permission-tooltip and notification-bell flakes, occurred in the same battery; a shared cause is not established.
+The tested tree was clean at `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`, Linux x86_64, with the browser suite on both
+engines excluding known flakes, one worker and zero retries. Classification selected only this test. Recorded tmux was
+3.7c, executable SHA256 `9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`; locale was `C.UTF-8`.
+Ambient `FARHELM_*` names were scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and
+`FARHELM_TEST_TRACE_DIR` were supplied. Concurrent machine load and the unfinished measurement's cause were not
+established. Retained evidence is private temporary recorder data and may expire. Disposition: open in TODO.md and
+excluded from future deflake sweeps; no additional reproductions or fix were attempted.
+
+```text
+Error: waiting for the actions panel to finish measuring against its own toggle
+Timeout 5000ms exceeded while waiting on the predicate
+```
+
+Class: unknown
+
+Cause: unknown

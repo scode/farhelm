@@ -16,3 +16,4 @@ playwright terminal-reconnect.spec.ts view-changes-do-not-postpone-a-recovery  #
 playwright terminal-reconnect.spec.ts a-rolled-back-helm-gets-no-automatic-attach  # rollback-browser-test-sees-skew-before-first-retry
 playwright guarded-permissions.spec.ts guarded choices explain each agent and Cursor keeps its own setting  # guarded-permission-tooltip-stays-hidden
 playwright notifications.spec.ts closing notifications quiets the bell under a build mismatch  # notification-bell-entry-missing-under-build-mismatch
+playwright replace.spec.ts plain Replace keeps a newer row's retry key after an older YOLO cancellation  # replace-actions-panel-measurement-window
