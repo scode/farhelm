@@ -15250,7 +15250,8 @@
   Complexity gate: confined to `menu_panel.rs` and the menu wiring in the rows that use it; if it needs a new
   cross-component focus mechanism or regresses the burst behaviour, stop and return the item. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/menu-arrows-follow-focus.md`.
+- Execution: complete in jj change `nurzyvxqoxvrqszsxwuuwrpokmkptlqr`, bookmark
+  `plan/menu-arrows-follow-focus/01-focus-landing`, [PR #2176](https://github.com/scode/farhelm/pull/2176/changes).
 
 ## checkout-retry-reuses-fresh-helm-host-namespace.md
 

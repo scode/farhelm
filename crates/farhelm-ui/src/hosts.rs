@@ -68,7 +68,7 @@ use crate::icons::{HostMark, LocalHostIcon};
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
     closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
-    measurement_outcome, remember_menu_item, session_menu_placement_style,
+    measurement_outcome, record_menu_item_focus, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
 use crate::ops::{ConfirmSlot, OpGuard, OpLock, use_confirm_slot};
@@ -2855,8 +2855,8 @@ fn HostRow(
     // `MenuWiring::requested`'s own doc for why this has to exist
     // separately from `menu_focus` (F5/COR-FOCUS-BURST follow-up: an older
     // in-flight focus request's `onfocusin` can land after a newer press
-    // already moved `menu_focus` on, and only a signal DOM events never
-    // touch survives that). Cleared alongside `menu_focus` wherever the
+    // already moved `menu_focus` on). Item focus acknowledges the latest
+    // target without discarding it for an older landing. Cleared wherever the
     // menu opens or closes, below, and wherever the toggle takes focus
     // (`forget_menu_focus`), and NOT reconciled against a mid-open
     // item-set change the way `menu_focus` is: `next_menu_focus`'s existing
@@ -3211,7 +3211,7 @@ fn HostRow(
                                         remember_menu_item(menu_wiring, HostMenuAction::Retry, element.data())
                                     },
                                     onfocusin: move |_| {
-                                        menu_focus.set(menu_order.position(HostMenuAction::Retry));
+                                        record_menu_item_focus(menu_wiring, HostMenuAction::Retry);
                                     },
                                     onfocusout: move |_| menu_focus.set(None),
                                     onkeydown: move |evt| {
@@ -3246,7 +3246,7 @@ fn HostRow(
                                             remember_menu_item(menu_wiring, HostMenuAction::Adopt, element.data())
                                         },
                                         onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(HostMenuAction::Adopt));
+                                            record_menu_item_focus(menu_wiring, HostMenuAction::Adopt);
                                         },
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| {
@@ -3290,7 +3290,7 @@ fn HostRow(
                                             remember_menu_item(menu_wiring, HostMenuAction::Rerun, element.data())
                                         },
                                         onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(HostMenuAction::Rerun));
+                                            record_menu_item_focus(menu_wiring, HostMenuAction::Rerun);
                                         },
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| {
@@ -3344,7 +3344,7 @@ fn HostRow(
                                             )
                                         },
                                         onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(HostMenuAction::AutomaticSetup));
+                                            record_menu_item_focus(menu_wiring, HostMenuAction::AutomaticSetup);
                                         },
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| {
@@ -3386,7 +3386,7 @@ fn HostRow(
                                             remember_menu_item(menu_wiring, HostMenuAction::Update, element.data())
                                         },
                                         onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(HostMenuAction::Update));
+                                            record_menu_item_focus(menu_wiring, HostMenuAction::Update);
                                         },
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| {
@@ -3440,7 +3440,7 @@ fn HostRow(
                                     onmounted: move |element| {
                                         remember_menu_item(menu_wiring, HostMenuAction::Settings, element.data())
                                     },
-                                    onfocusin: move |_| menu_focus.set(menu_order.position(HostMenuAction::Settings)),
+                                    onfocusin: move |_| record_menu_item_focus(menu_wiring, HostMenuAction::Settings),
                                     onfocusout: move |_| menu_focus.set(None),
                                     onkeydown: move |evt| {
                                         handle_menu_key(&evt, menu_order.position(HostMenuAction::Settings), menu_wiring, &id);
@@ -3480,7 +3480,7 @@ fn HostRow(
                                                 remember_menu_item(menu_wiring, HostMenuAction::Uninstall, element.data())
                                             },
                                             onfocusin: move |_| {
-                                                menu_focus.set(menu_order.position(HostMenuAction::Uninstall));
+                                                record_menu_item_focus(menu_wiring, HostMenuAction::Uninstall);
                                             },
                                             onfocusout: move |_| menu_focus.set(None),
                                             onkeydown: move |evt| {
@@ -3524,7 +3524,7 @@ fn HostRow(
                                             remember_menu_item(menu_wiring, HostMenuAction::Remove, element.data())
                                         },
                                         onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(HostMenuAction::Remove));
+                                            record_menu_item_focus(menu_wiring, HostMenuAction::Remove);
                                         },
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| {
