@@ -14227,7 +14227,8 @@
 - Completion criteria: a failure during the helper's setup, or during route registration, leaves no session from this
   test running. Successful runs are unchanged. Validate with the retarget test (and a couple of other helper callers) on
   Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `xpzqwnsyuvqmwrorswkxpnpqkqmwlyqv`, bookmark
+  `plan/browser-test-cleanup/13-tab-ownership`, [PR #2151](https://github.com/scode/farhelm/pull/2151/changes).
 
 ## custom-permission-model-choice-erases-draft.md
 
