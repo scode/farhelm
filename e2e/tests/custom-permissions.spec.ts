@@ -3,6 +3,7 @@
  * these tests never confirm a launch into an installed vendor agent.
  */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page } from "@playwright/test";
 import { agentLaunchRow, listHosts, localHostId, openRowMenu, SESSION_LISTING, setLocalYoloWithoutAsking } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
@@ -155,7 +156,8 @@ test("custom permission words reach the real YOLO refusal with their own explana
 
 /** Stored template words must reappear as editable quoted text, then clear
  * when a later permission template overrides them. A template with words but
- * no Custom declaration is refused at the actual save endpoint.
+ * no Custom declaration is refused at the actual save endpoint. Each template
+ * deletion is independent so a refused cleanup cannot pollute later catalog tests.
  */
 test("custom template words round trip into the launcher and clear on a stacked permission", async ({ page, request }) => {
   const name = `e2e-custom-${Date.now()}`;
@@ -163,6 +165,7 @@ test("custom template words round trip into the launcher and clear on a stacked 
   const other = `${name}-other`;
   const otherWords = ["--mode", "second template words"];
   const fields = { kind: "agent", agent: "claude", permissions: "custom", permission_flags: ["--mode", "ask me", "$HOME"] };
+  let bodyFailed = false;
   try {
     expect((await request.put(`/api/templates/${name}`, { data: fields })).ok()).toBe(true);
     expect((await request.put(`/api/templates/${other}`, { data: { ...fields, permission_flags: otherWords } })).ok()).toBe(true);
@@ -225,10 +228,15 @@ test("custom template words round trip into the launcher and clear on a stacked 
     await dialog.locator(".templates-discard").click();
     await expect(flags).toHaveValue("--mode 'edited template words'");
     await expect(dialog.locator(".custom-permission-choice [role=alert]")).toHaveCount(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    for (const template of [name, later, other, `${name}-invalid`]) {
-      const response = await request.delete(`/api/templates/${template}`);
-      expect(response.ok() || response.status() === 404).toBe(true);
-    }
+    await cleanupOwnedSteps(bodyFailed, [name, later, other, `${name}-invalid`].map(
+      (template): [string, () => Promise<void>] => [template, async () => {
+        const response = await request.delete(`/api/templates/${template}`);
+        expect(response.ok() || response.status() === 404).toBe(true);
+      }],
+    ));
   }
 });

@@ -3,6 +3,7 @@
  * catalog is controlled only to make cross-agent model choices deterministic.
  */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Locator } from "@playwright/test";
 import { patchPreferences, readPreferences } from "./helpers/fleet";
 
@@ -102,10 +103,12 @@ test("OMP defaults to Guarded and escalation Undo restores the pre-switch draft"
 /** A template is one transaction. Its explicit permission overrides the
  * intermediate harness fallback, while an omitted mode is still automatic.
  * Undo must also restore the name and destination that transaction replaced.
+ * Both owned templates must be released even if one deletion fails.
  */
 test("template permissions are compared after the complete template transaction", async ({ page, request }) => {
   const prefix = `permission-template-${Date.now()}`;
   const names = [`${prefix}-automatic`, `${prefix}-explicit`];
+  let bodyFailed = false;
   try {
     for (const [index, name] of names.entries()) {
       const response = await request.put(`/api/templates/${name}`, { data: {
@@ -143,11 +146,14 @@ test("template permissions are compared after the complete template transaction"
     await expect(name).toHaveValue("template name");
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Pi", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(banner).toHaveCount(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    for (const name of names) {
+    await cleanupOwnedSteps(bodyFailed, names.map((name): [string, () => Promise<void>] => [name, async () => {
       const response = await request.delete(`/api/templates/${name}`);
       expect(response.ok() || response.status() === 404).toBe(true);
-    }
+    }]));
   }
 });
 
