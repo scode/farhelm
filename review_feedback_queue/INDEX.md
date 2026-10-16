@@ -52,9 +52,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`pin-test-skips-owned-session-cleanup.md`](pin-test-skips-owned-session-cleanup.md) — A failed pin browser test can
-  skip its owned session cleanup and leave agents running for later tests.
-
 - [`claude-trust-settings-misses-invalidation.md`](claude-trust-settings-misses-invalidation.md) — Already-open Settings
   can retain old trust choices after a shared change; the multi-GUI qualifier needs triage.
 

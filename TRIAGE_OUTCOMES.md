@@ -14521,7 +14521,8 @@
   stays the primary failure, and cleanup failures are reported alongside it. The pin test still passes on Chromium and
   WebKit. A one-off local injection of an early cleanup failure (not committed) shows both session deletions still run.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `zmoosvonyxqlynnkwqwpklmksmzxprup`, bookmark
+  `plan/browser-test-cleanup/01-pin-cleanup`, [PR #2138](https://github.com/scode/farhelm/pull/2138/changes).
 
 ## number-shortcut-test-skips-session-cleanup.md
 

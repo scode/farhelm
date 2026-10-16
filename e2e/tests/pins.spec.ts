@@ -1,19 +1,23 @@
 // A real menu write and a second client prove shared pins; DOM positions
 // prove the sidebar partition rather than a changed helm/quick-switcher sort.
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { cleanupSession, createSession, listSessions, openRowMenu, resetPreferences } from "./helpers/fleet";
 
 /** Pin/unpin must survive a second client, and pinned rows move to the top once the pointer is off the list.
  *
  * This does not exercise the pointer hold itself: closing the last row's menu
  * leaves the pointer below the list, so the hold is already released by then.
- * sort.spec.ts's hold tests cover keeping rows still under the pointer. */
+ * sort.spec.ts's hold tests cover keeping rows still under the pointer.
+ * Each owned release is independent, so an observer or preference failure
+ * cannot leave this test's sessions running for later tests. */
 test("pin from the menu groups the sidebar and unpin restores title order", async ({ page, request, context }, testInfo) => {
   const stamp = Date.now();
   const created: string[] = [];
   const other = await context.newPage();
   // The sort choice below is a helm-wide preference every later spec shares.
   await resetPreferences(request);
+  let bodyFailed = false;
   try {
     const first = await createSession(request, { title: `a-pin-${stamp}` });
     created.push(first.id);
@@ -58,9 +62,17 @@ test("pin from the menu groups the sidebar and unpin restores title order", asyn
     await expect.poll(async () => (await order()).indexOf(first.id) < (await order()).indexOf(last.id)).toBe(true);
     await expect(page.locator(".session-pin-separator")).toHaveCount(0);
     await expect(shared).toHaveAttribute("data-session-pinned", "false", { timeout: 20_000 });
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await resetPreferences(request);
-    await other.close();
-    for (const id of created.reverse()) await cleanupSession(request, id);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["preferences", () => resetPreferences(request)],
+      ["observer page", () => other.close()],
+      ...created.reverse().map((id): [string, () => Promise<void>] => [
+        `session ${id}`,
+        () => cleanupSession(request, id),
+      ]),
+    ]);
   }
 });
