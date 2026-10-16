@@ -13907,7 +13907,8 @@
   cannot be used there, stop and return the item.
 - Completion criteria: the refusal reply carries the helm's stamp, the test asserts the absence of the mismatch notice,
   and the selected spec passes on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `wmulrmturroopoqyvwtswrouvrpkorkx`, bookmark
+  `plan/browser-test-cleanup/20-host-refusal-stamp`, [PR #2159](https://github.com/scode/farhelm/pull/2159/changes).
 
 ## paste-regression-loses-session-cleanup-ownership.md
 

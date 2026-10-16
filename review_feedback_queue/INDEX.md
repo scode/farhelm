@@ -81,10 +81,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`repository-picker-selection-moves-offscreen.md`](repository-picker-selection-moves-offscreen.md) — When repository
   suggestions overflow, keyboard users cannot see which repository Enter will select.
 
-- [`host-picker-refusal-fixture-enters-version-mismatch.md`](host-picker-refusal-fixture-enters-version-mismatch.md) —
-  The new browser test checks recovery from a failed launch with ordinary background refresh disabled, weakening its
-  evidence for normal launcher behavior.
-
 - [`agent-checkout-test-compares-lexical-tmp.md`](agent-checkout-test-compares-lexical-tmp.md) — New agent checkout
   tests compare canonical destinations with lexical /tmp paths and fail on macOS.
 

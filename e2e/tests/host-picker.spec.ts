@@ -2,7 +2,7 @@ import { type APIRequestContext, type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { cleanupSession, createSession } from "./helpers/fleet";
 import { chooseLauncherHost, launcherHostOptions } from "./helpers/host-picker";
-import { installTerminalSuiteHooks } from "./helpers/terminal-suite";
+import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
 // Host invalidations can start route.fetch during the final assertion. The
 // shared teardown drains those handlers before browser disposal, and resets
@@ -178,7 +178,8 @@ test("host picker retains the empty value until hosts arrive", async ({ page }) 
 });
 
 /** Closed Enter keeps the existing launch behavior; the whole create round
- * trip disables the target and cannot resurrect a menu after its refusal. */
+ * trip disables the target and cannot resurrect a menu after its refusal.
+ * The refusal stays on the same build, so ordinary refresh remains enabled. */
 test("host picker closed Enter launches and remains disabled during the write", async ({ page, request }) => {
   const { local } = await identityFleet(page, request);
   let release!: () => void;
@@ -188,7 +189,7 @@ test("host picker closed Enter launches and remains disabled during the write", 
     if (route.request().method() !== "POST") return route.continue();
     posts.push(route.request().postDataJSON());
     await held;
-    await route.fulfill({ status: 500, body: "host-picker fixture refuses launch" });
+    await fulfillAsHelm(route, { status: 500, contentType: "text/plain", body: "host-picker fixture refuses launch" });
   });
   try {
     await page.goto("/");
@@ -206,6 +207,7 @@ test("host picker closed Enter launches and remains disabled during the write", 
     await expect(page.locator("#launcher-host-options")).toHaveCount(0);
     release();
     await expect(form.locator(".create-session-error")).toContainText("host-picker fixture refuses launch");
+    await expect(page.locator(".build-skew")).toHaveCount(0);
     await expect(host).toBeEnabled();
     await expect(host).toHaveAttribute("aria-expanded", "false");
   } finally { release(); }
