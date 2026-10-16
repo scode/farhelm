@@ -14182,7 +14182,8 @@
 - Completion criteria: the cleanup selects and deletes this fixture's trash records whether or not the stack's `/tmp`
   path is a symlink, and the existing `removed` equality assertion still holds. Validate with the affected spec on
   Linux; a macOS run is a bonus. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `qwslzplyzymzrqpyyokoppmvtmsrsnvp`, bookmark
+  `plan/browser-test-cleanup/18-canonical-trash-root`, [PR #2157](https://github.com/scode/farhelm/pull/2157/changes).
 
 ## checkout-composer-test-skips-configuration-restoration.md
 

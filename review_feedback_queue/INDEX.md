@@ -85,10 +85,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   The new browser test checks recovery from a failed launch with ordinary background refresh disabled, weakening its
   evidence for normal launcher behavior.
 
-- [`trash-fixture-cleanup-compares-lexical-root.md`](trash-fixture-cleanup-compares-lexical-root.md) — On macOS,
-  checkout tests can remove their fixture folders while leaving their trash records behind, contaminating later trash
-  listings.
-
 - [`agent-checkout-test-compares-lexical-tmp.md`](agent-checkout-test-compares-lexical-tmp.md) — New agent checkout
   tests compare canonical destinations with lexical /tmp paths and fail on macOS.
 
