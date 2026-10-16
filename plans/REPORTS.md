@@ -16,3 +16,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`update-failure-reporting`](reports/update-failure-reporting.report.md) landed 2026-10-16 in #2105, #2108: The version hover names why an automatic update install failed, and the install guide stops saying failures are only logged (2 outcomes, each gated)
 - [`docs-accuracy-fixes`](reports/docs-accuracy-fixes.report.md) landed 2026-10-16 in #2104, #2106, #2109: The paste guide and resume docs stop overpromising, and the docs preview refreshes release notes on edit (3 outcomes, each gated)
 - [`host-picker-dotted-i`](reports/host-picker-dotted-i.report.md) landed 2026-10-16 in #2107: Typing İ repeatedly in the host picker cycles through hosts whose names start with it (gated)
+- [`setup-advice-state-directory`](reports/setup-advice-state-directory.report.md) landed 2026-10-16 in #2110: Setup's sign-in advice names the state directory when it came from the environment (gated)
