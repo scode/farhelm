@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 65c0d1] `terminal-link-safety.md` — Terminal links act only on a real click, on the target the hover honestly shows (four triage outcomes, three complexity gated)
 - [landing 65c0d2] `ntfy-token-server-change.md` — Waiting alerts: changing the ntfy server's origin drops the saved token, and Settings says so
 - [pending] `browser-test-cleanup.md` — Browser tests clean up their sessions, templates, preferences and fixtures even when an earlier step fails (20 triage outcomes, each gated)
 - [complete] `rust-test-portability.md` — Rust tests stop failing on macOS temp paths and APFS names, wait for real completion, keep Git config out of fixtures, and the test-state sweep cannot hang (6 outcomes, each gated)
