@@ -37,6 +37,8 @@ installTerminalSuiteHooks();
  * Enter on an already-selected choice is a retry, not a new launch intent.
  * Losing a successful reply distinguishes server deduplication from merely
  * sending two requests that happened to fail before creating anything.
+ * Codex's explicit Guarded choice stays selected across both attempts, so
+ * permission normalization cannot turn the retry into an edited launch.
  */
 test("Enter on an unchanged permission retries a lost reply with one key and one session", async ({ page, request }) => {
   const title = `intent-choice-retry-${Date.now()}`;
@@ -58,7 +60,7 @@ test("Enter on an unchanged permission retries a lost reply with one key and one
     await form.getByRole("button", { name: "Codex", exact: true }).click();
     await form.getByLabel("folder", { exact: true }).fill("/tmp");
     await form.getByLabel("name (optional)").fill(title);
-    const choice = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true });
+    const choice = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true });
     await choice.click();
     await expect(choice).toHaveAttribute("aria-pressed", "true");
     await form.locator(".create-session-submit").click();
