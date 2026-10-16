@@ -105,9 +105,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   checkout tests can remove their fixture folders while leaving their trash records behind, contaminating later trash
   listings.
 
-- [`download-regression-fixtures-arm-cleanup-too-late.md`](download-regression-fixtures-arm-cleanup-too-late.md) — A
-  failed test setup can leave its agent session running and listed for subsequent browser tests.
-
 - [`sound-tests-skip-remaining-cleanup-and-preferences.md`](sound-tests-skip-remaining-cleanup-and-preferences.md) — A
   failed browser-test cleanup can leave sessions and shared preferences behind, contaminating later tests.
 

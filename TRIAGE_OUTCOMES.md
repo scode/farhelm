@@ -14909,7 +14909,8 @@
 - Completion criteria: in every test in the file, no fallible await sits between a successful `createSession` and its
   cleanup scope. The file passes on Chromium and WebKit. Remove the feedback file and its index entry (which also holds
   the redraw/OSC-label scope).
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `quwmqrmkztopruzossvwvumnrvnourxq`, bookmark
+  `plan/browser-test-cleanup/05-download-ownership`, [PR #2142](https://github.com/scode/farhelm/pull/2142/changes).
 
 ## header-regression-fixtures-escape-cleanup.md
 
