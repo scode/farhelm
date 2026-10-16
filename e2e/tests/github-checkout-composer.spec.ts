@@ -130,6 +130,15 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
     farhelm: string; state: string;
   };
   const run = promisify(execFile);
+  // A Git hook can pass repository selectors that override -C. Keep these
+  // children inside the owned clone and independent of ambient Git config.
+  const gitEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+    !name.startsWith("GIT_") && !name.startsWith("FARHELM_")
+  ));
+  Object.assign(gitEnv, {
+    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_SYSTEM: "/dev/null", GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_COUNT: "0", GIT_TERMINAL_PROMPT: "0",
+  });
   const cli = (...args: string[]) => run(stack.farhelm,
     ["helm", "checkout-config", ...args, "--state-dir", stack.state],
     { timeout: 10_000, maxBuffer: 64 * 1024 });
@@ -151,9 +160,9 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
     expect((await cli("show", "--host", String(host.id))).stdout).toMatch(/^root: unset$/m);
     const clone = path.join(root, "local-clone");
     await mkdir(clone);
-    await run("git", ["-C", clone, "init", "--quiet"]);
-    await run("git", ["-C", clone, "remote", "add", "origin", "https://github.com/acme/bar.git"]);
-    expect((await run("git", ["-C", clone, "config", "--get", "remote.origin.url"])).stdout.trim())
+    await run("git", ["-C", clone, "init", "--quiet"], { env: gitEnv });
+    await run("git", ["-C", clone, "remote", "add", "origin", "https://github.com/acme/bar.git"], { env: gitEnv });
+    expect((await run("git", ["-C", clone, "config", "--get", "remote.origin.url"], { env: gitEnv })).stdout.trim())
       .toBe("https://github.com/acme/bar.git");
     const feed = await stubFeed(page);
     feed.notifyOnConnect(1);

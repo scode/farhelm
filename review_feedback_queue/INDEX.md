@@ -115,9 +115,5 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-screenshot-implies-deletion-needs-save.md`](template-screenshot-implies-deletion-needs-save.md) — A reader
   could delete a saved template and close the dialog believing the deletion was never committed.
 
-- [`browser-git-fixture-can-change-caller-repository.md`](browser-git-fixture-can-change-caller-repository.md) — Running
-  the new browser test with an inherited Git repository selector can change a developer’s repository instead of its
-  temporary fixture.
-
 - [`introduction-promises-universal-reboot-resume.md`](introduction-promises-universal-reboot-resume.md) — The
   introduction promises conversation recovery after reboot for sessions without Resume reporting.

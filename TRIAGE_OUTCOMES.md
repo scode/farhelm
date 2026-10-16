@@ -14287,7 +14287,8 @@
 - Completion criteria: with `GIT_DIR` pointing at another repository, the fixture's git commands act only on the
   temporary clone. The test still passes normally. A quick check with an inherited `GIT_DIR` is good evidence; otherwise
   run the spec. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `xnsvnzlulwkvpyztmpwktstwropltrrt`, bookmark
+  `plan/browser-test-cleanup/19-git-isolation`, [PR #2158](https://github.com/scode/farhelm/pull/2158/changes).
 
 ## default-approval-reset-renews-retry-key.md
 
