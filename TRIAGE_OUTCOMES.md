@@ -14551,7 +14551,8 @@
 - Completion criteria: the source session is owned by cleanup from creation, and every owned cleanup is attempted
   independently. The tests still pass on Chromium and WebKit. A one-off local injection of a route-registration or
   early-cleanup failure shows the source is still deleted. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `wmutuyrxqxtztntovtwmqwyvwospzvxl`, bookmark
+  `plan/browser-test-cleanup/09-shortcut-ownership`, [PR #2146](https://github.com/scode/farhelm/pull/2146/changes).
 
 ## live-sibling-test-returns-before-reap-completion.md
 
