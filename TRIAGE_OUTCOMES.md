@@ -14325,7 +14325,8 @@
   unit test on the shared selection helper or a focused browser route fixture: a null-reset OMP or Goose template
   completes YOLO consent with one request key, and a null-reset guarded-default template keeps its key across an
   unchanged retry. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-fixes.md`.
+- Execution: complete in jj change `xuwwmqtpspxsvzomkullwxwrswtnxypx`, bookmark `plan/launcher-fixes/01-retry-key`,
+  [PR #2160](https://github.com/scode/farhelm/pull/2160/changes).
 
 ## custom-permission-test-skips-template-cleanup.md
 

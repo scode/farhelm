@@ -11,6 +11,8 @@ import { expect, test } from "./helpers/evidence";
 import { type Locator } from "@playwright/test";
 import { fillCreateForm } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { listHosts, localHostId, setLocalYoloWithoutAsking } from "./helpers/fleet";
 import {
   cleanUpSessionsTitled,
   FAKE_AGENT_INVOCATION,
@@ -32,6 +34,92 @@ async function sessionIdFor(row: Locator, timeout = 20_000): Promise<string> {
 }
 
 installTerminalSuiteHooks();
+
+for (const harness of ["goose", "codex"]) {
+  /** Null permissions are a real template reset, not a visible permission click.
+   * Drop an admitted reply to prove that the mint re-read and the next submit
+   * retain one identity. Goose also has to carry its consent through that retry.
+   */
+  test(`a null-permission ${harness} template retains consent and one session after a lost reply`, async ({ page, request }) => {
+    const title = `reset-retry-${harness}-${Date.now()}`;
+    const local = await localHostId(request);
+    const previousYolo = (await listHosts(request)).find(host => host.id === local)!.yolo_without_asking;
+    const bodies: { intent_key: string; confirm_yolo?: boolean; launch: { harness: string; permissions: string } }[] = [];
+    const statuses: number[] = [];
+    let dropped = false;
+    let bodyFailed = false;
+    try {
+      await setLocalYoloWithoutAsking(request, false);
+      expect((await request.put(`/api/templates/${title}`, { data: {
+        kind: "agent", agent: harness, permissions: null, destination: { folder: "/tmp" },
+      } })).ok()).toBe(true);
+      const stored = await request.get("/api/templates");
+      expect(stored.ok()).toBe(true);
+      expect((await stored.json()).templates.find((template: { name: string }) => template.name === title).fields)
+        .toMatchObject({ agent: harness, permissions: null });
+      await page.route("**/api/sessions", async route => {
+        if (route.request().method() !== "POST") return route.continue();
+        bodies.push(route.request().postDataJSON());
+        const response = await route.fetch();
+        statuses.push(response.status());
+        if (response.ok() && !dropped) {
+          dropped = true;
+          await route.abort();
+        } else await route.fulfill({ response });
+      });
+      await page.goto("/");
+      await page.locator(".new-session-button").click();
+      const form = page.locator(".create-session-form");
+      await expect(form).toHaveAttribute("data-initial-templates-ready", "true");
+      const agent = form.locator(".launch-composer-harness-choice").getByRole("button", { name: harness === "goose" ? "Goose" : "Codex", exact: true });
+      await agent.click();
+      const permissions = form.locator(".launch-composer-permissions-choice");
+      const opposite = permissions.getByRole("button", { name: harness === "goose" ? "approve" : "yolo", exact: true });
+      await opposite.click();
+      await expect(opposite, "premise: only the template reset can change this explicit choice").toHaveAttribute("aria-pressed", "true");
+      const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts" });
+      await search.fill(`tl:${title}`);
+      await search.press("Enter");
+      await expect(search).toHaveValue("");
+      await expect(agent).toHaveAttribute("aria-pressed", "true");
+      await expect(opposite).toHaveAttribute("aria-pressed", "false");
+      await expect(permissions.getByRole("button", { name: harness === "goose" ? "yolo" : "guarded", exact: true }))
+        .toHaveAttribute("aria-pressed", "true");
+      await form.getByLabel("name (optional)").fill(title);
+      await form.locator(".create-session-submit").click();
+      if (harness === "goose") {
+        const confirmation = form.locator(".yolo-confirmation");
+        await expect(confirmation).toBeVisible();
+        expect(statuses).toEqual([409]);
+        await confirmation.locator(".yolo-confirm").click();
+      }
+      await expect(form.locator(".create-session-error")).toBeVisible();
+      expect(dropped, "premise: the lost response followed an admitted create").toBe(true);
+      expect(statuses).toEqual(harness === "goose" ? [409, 200] : [200]);
+      await form.locator(".create-session-submit").click();
+      const id = await sessionIdFor(rowByTitle(page, title));
+      await waitForSessionRevealed(page, id);
+      expect(bodies).toHaveLength(harness === "goose" ? 3 : 2);
+      expect(bodies[0].intent_key).toBeTruthy();
+      expect(new Set(bodies.map(body => body.intent_key)).size).toBe(1);
+      for (const body of bodies) expect(body.launch).toMatchObject({ harness, permissions: harness === "goose" ? "yolo" : "guarded" });
+      expect(bodies.map(body => body.confirm_yolo ?? false)).toEqual(harness === "goose" ? [false, true, true] : [false, false]);
+      expect((await (await request.get("/api/sessions")).json()).sessions.filter((session: any) => session.title === title)).toHaveLength(1);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        // Admission can outlive a failing assertion. Settle it before looking
+        // up sessions, so a late successful create cannot escape deletion.
+        ["pending creates", () => page.unrouteAll({ behavior: "wait" })],
+        ["sessions", () => cleanUpSessionsTitled(request, title)],
+        ["template", async () => { expect((await request.delete(`/api/templates/${title}`)).ok()).toBe(true); }],
+        ["host consent setting", () => setLocalYoloWithoutAsking(request, previousYolo)],
+      ]);
+    }
+  });
+}
 
 /**
  * Enter on an already-selected choice is a retry, not a new launch intent.
