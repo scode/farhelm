@@ -6,6 +6,8 @@ import { patchPreferences } from "./helpers/fleet";
  * drives the real signal handlers because a pure reconciliation test cannot
  * catch the original failure where handlers discarded the returned
  * permission while applying the returned model and effort.
+ * Only pressed-state buttons are modes; the permission help button remains
+ * available without changing Pi's single-choice contract.
  */
 test("Goose and Pi permission transitions update the rendered draft", async ({ page, request }) => {
   await patchPreferences(request, { remembered_permissions: "smart_approve" });
@@ -24,7 +26,7 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
   await expect(form.locator(".launch-composer-summary")).toContainText("permissions: smart approve");
 
   await harnesses.getByRole("button", { name: "Pi", exact: true }).click();
-  await expect(permissions.getByRole("button")).toHaveCount(1);
+  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["yolo"]);
   await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -51,7 +53,7 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill("Pi");
   await form.getByRole("option", { name: "Harness: Pi", exact: true }).click();
-  await expect(permissions.getByRole("button")).toHaveCount(1);
+  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["yolo"]);
   await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -70,7 +72,7 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
     "aria-pressed",
     "true",
   );
-  await expect(permissions.getByRole("button")).toHaveCount(1);
+  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["yolo"]);
   await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
