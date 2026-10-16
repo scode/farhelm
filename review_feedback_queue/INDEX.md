@@ -32,9 +32,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`host-plans-cannot-receive-keyboard-scroll-focus.md`](host-plans-cannot-receive-keyboard-scroll-focus.md) — Desktop
   keyboard users may be unable to scroll through setup and uninstall plans before approving them.
 
-- [`missing-ca-bundle-blocks-helm-start.md`](missing-ca-bundle-blocks-helm-start.md) — A Linux helm with no usable CA
-  bundle exits during startup, even when it would use local payloads.
-
 - [`replace-retry-key-splits-across-controls.md`](replace-retry-key-splits-across-controls.md) — Retrying an unanswered
   Replace through the other control can start another replacement agent.
 
