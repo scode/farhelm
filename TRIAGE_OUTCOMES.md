@@ -13526,7 +13526,8 @@
   transfers or opens a file; a plain click still does. Regression coverage drives a mouse-reporting program in both
   browser engines. If the fix turns out large or very complex, stop and return the item to the user rather than build
   it. Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-link-safety.md`.
+- Execution: jj change `pwnymqroxtxwzlxowsmkxyxntsulzznq`, bookmark `plan/terminal-link-safety/01-drag-click`,
+  [PR #2078](https://github.com/scode/farhelm/pull/2078/changes).
 
 ## wrapped-file-link-partial-redraw-keeps-old-target.md
 

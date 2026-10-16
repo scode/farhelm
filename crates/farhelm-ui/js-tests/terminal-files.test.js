@@ -90,6 +90,21 @@ test('modifier opening is native-only and save outcomes survive opener refusal',
   success.addon.dispose();
 });
 
+/** A ready lookup and a native modifier cannot authorize a drag. The common
+ * gesture gate must stop before either download or default-app dispatch.
+ */
+test('file transfers refuse gestures the terminal did not admit as clicks', async () => {
+  for (const native of [false, true]) {
+    const fixture = noticeFixture(native, true, false, true);
+    fixture.addon.isClick = () => false;
+    let requests = 0;
+    fixture.addon.request = async () => { requests++; throw new Error('unexpected transfer'); };
+    await fixture.addon.download('report.pdf', { metaKey: true });
+    assert.equal(requests, 0);
+    fixture.addon.dispose();
+  }
+});
+
 /** The positive/negative table pins prose boundaries and the existing URL policy. */
 test('paths exclude diagnostic locations, prose punctuation, URLs and versions', () => {
   for (const [input, path] of [
@@ -168,7 +183,7 @@ function hoverFixture(native = false, isMac = false) {
     }),
   });
   vm.runInContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
-  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, ...clock });
+  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, isClick: () => true, ...clock });
   addon.activate({ element: { querySelector: selector => selector.endsWith('.terminal-file-target') ? display : null, removeEventListener() {} },
     registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '' });
   addon.show = (_event, lines, checking = false) => { display.hidden = false; shown.push({ lines: [...lines], checking }); };
@@ -417,7 +432,7 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
     URL: { createObjectURL: () => 'blob:owned', revokeObjectURL() {} },
   });
   vm.runInContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
-  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, ...(defaultTimers ? {} : clock) });
+  const addon = new context.window.farhelmTerminalFiles.FileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, isClick: () => true, ...(defaultTimers ? {} : clock) });
   const term = { element: opened ? root : undefined, registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '' };
   addon.activate(term);
   addon.hovered = { path: 'report.pdf', info: { status: 'ready', path: '/output/report.pdf' }, controller: new AbortController() };

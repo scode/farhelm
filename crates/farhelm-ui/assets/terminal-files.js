@@ -150,7 +150,7 @@
    * reopens the disclosed canonical path; that still is not a file snapshot.
    */
   class FileLinksAddon {
-    constructor({ endpoint, secret, native, isMac = false,
+    constructor({ endpoint, secret, native, isMac = false, isClick = () => false,
       // Browser timers require their global receiver. Wrappers keep the
       // defaults out of the addon's method-call context while allowing clocks.
       setTimeout: schedule = (callback, delay) => setTimeout(callback, delay),
@@ -159,6 +159,9 @@
       this.secret = secret;
       this.native = native;
       this.isMac = isMac;
+      // The terminal owns primary-gesture admission across all link providers.
+      // A standalone addon without that evidence cannot authorize a transfer.
+      this.isClick = isClick;
       this.hovered = null;
       this.transfers = new Set();
       this.schedule = schedule;
@@ -390,7 +393,7 @@
      */
     async download(path, event = {}) {
       const state = this.hovered;
-      if (!state || state.leaving || state.path !== path || state.info?.status !== 'ready' || this.term.getSelection()) return;
+      if (!this.isClick(event) || !state || state.leaving || state.path !== path || state.info?.status !== 'ready' || this.term.getSelection()) return;
       const controller = new AbortController();
       this.transfers.add(controller);
       this.message('downloading…');

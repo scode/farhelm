@@ -3532,11 +3532,13 @@
         }
         // The addon owns file lookups/transfers for the retained terminal,
         // not for a particular WebSocket attachment or tab render.
+        const linkGesture = window.farhelmTerminalLinks.createLinkGesture();
         const fileLinks = new window.farhelmTerminalFiles.FileLinksAddon({
           endpoint: baseUrl + spec.path.split('/term')[0] + '/files',
           secret: deviceSecret,
           native: typeof window[WEBVIEW_DEVICE_SECRET] === 'string',
           isMac: IS_MAC,
+          isClick: event => linkGesture.isClick(event),
         });
         // Both link providers identify the web target currently under the pointer.
         // A file hover never qualifies for withholding program input.
@@ -3600,10 +3602,9 @@
           linkHandler: {
             allowNonHttpProtocols: true,
             activate(event, uri) {
-              // A selection means this release finished a drag, just as in
-              // the plain-link adapter below. Neither navigation nor a file
-              // download belongs to a gesture made to copy terminal text.
-              if (term.getSelection()) return;
+              // The gesture gate also covers mouse-reporting programs, which
+              // can consume a drag without creating any local selection.
+              if (!linkGesture.isClick(event) || term.getSelection()) return;
               const target = window.farhelmTerminalFiles.oscTarget(uri);
               if (target?.kind === 'web' && linkClickMode() !== 'program') window.farhelmTerminalLinks.openTerminalUrl(uri);
               // Both OSC and prose paths use the addon's native modifier rule.
@@ -3679,25 +3680,15 @@
         // absolute-URL-with-host validation, wrapped-line reconstruction),
         // and this file keeps it rather than substituting a custom regex.
         // The callback below is
-        // the activation-time half — a selection guard plus the shared
+        // the activation-time half — gesture/selection guards plus the shared
         // opener's allowlist — and it runs synchronously inside the click,
         // with no fetch, lookup, or confirmation.
         term.loadAddon(
-          new WebLinksAddon.WebLinksAddon((_event, uri) => {
-            // A drag that starts AND ends inside one long URL reaches this
-            // callback: xterm's Linkifier activates on matching
-            // press/release link identity with no selection guard of its
-            // own (checked against the vendored core's `_handleMouseUp`),
-            // and the addon adds none either. So a non-empty selection at
-            // activation time means "that was a drag, not a click", and
-            // opening would both navigate away from selected text the user
-            // was trying to copy and open a URL they never clicked. A
-            // plain click never trips this — mousedown clears the old
-            // selection before mouseup runs — so clicking a link right
-            // after selecting text still opens. Both halves are pinned by
-            // e2e/tests/terminal-links.spec.ts, in both engines. OSC 8
-            // activation applies the same guard before web/file dispatch.
-            if (term.getSelection() || linkClickMode() === 'program') return;
+          new WebLinksAddon.WebLinksAddon((event, uri) => {
+            // xterm checks link identity at press/release, not movement. Keep
+            // both guards: mouse reporting suppresses local selection, while
+            // a plain click clears an old selection before this release.
+            if (!linkGesture.isClick(event) || term.getSelection() || linkClickMode() === 'program') return;
             // The second boundary (the addon's default matcher is the
             // first): http(s) with a host, or nothing opens — printed
             // `javascript:`/`data:`/`file:` text is never clickable (see
@@ -5436,6 +5427,7 @@
         // resets eventPhase after dispatch, whereas a capture-listener microtask
         // can run before the later bubble listener and is too early a boundary.
         const captureLinkMouseEvent = (event) => {
+          linkGesture.observe(event, !!event.target?.closest?.('.xterm-screen') && term.element.contains(event.target));
           const withheld = withheldPrimary && (event.type === 'mouseup'
             ? event.button === 0
             : event.type === 'mousemove' && !!(event.buttons & 1));
