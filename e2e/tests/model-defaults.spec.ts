@@ -4,12 +4,13 @@ import { patchPreferences } from "./helpers/fleet";
 /** The composer must serialize an omitted model for every harness whose CLI
  * can use a configured default. The helm compiler tests pin the corresponding
  * argv, while these cases catch a disabled Launch button or an invented model
- * before the request reaches the helm. */
-for (const [label, harness] of [
-  ["OpenCode", "open_code"],
-  ["Goose", "goose"],
-  ["Pi", "pi"],
-  ["OMP", "omp"],
+ * before the request reaches the helm. Model omission is independent of the
+ * permission default: OMP starts Guarded, while the other cases start YOLO. */
+for (const [label, harness, permission] of [
+  ["OpenCode", "open_code", "yolo"],
+  ["Goose", "goose", "yolo"],
+  ["Pi", "pi", "yolo"],
+  ["OMP", "omp", "guarded"],
 ] as const) {
   test(`${label} can launch with its configured model`, async ({ page, request }) => {
     const catalog = await request.get("/api/launch-catalog");
@@ -31,7 +32,7 @@ for (const [label, harness] of [
     await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue("harness default");
     const permissions = form.locator(".launch-composer-permissions-choice");
     await expect(permissions.getByRole("button", { name: "default", exact: true })).toHaveCount(0);
-    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(permissions.getByRole("button", { name: permission, exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
 
     await page.route("**/api/sessions", async (route) => {
@@ -42,7 +43,7 @@ for (const [label, harness] of [
       new URL(entry.url()).pathname === "/api/sessions" && entry.method() === "POST"
     );
     await form.locator(".create-session-submit").click();
-    expect((await submitted).postDataJSON().launch).toMatchObject({ harness, model: null, permissions: "yolo" });
+    expect((await submitted).postDataJSON().launch).toMatchObject({ harness, model: null, permissions: permission });
     await expect(form).toContainText("fixture captured launch");
   });
 }
