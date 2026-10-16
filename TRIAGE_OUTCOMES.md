@@ -15225,7 +15225,8 @@
   regression test showing that a stale band's submit after replacement deletes nothing. Complexity gate: if binding
   needs anything beyond the trash dialog (helm or supervisor changes), stop and return the item. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/trash-confirm-binds-answer.md`.
+- Execution: complete in jj change `vwvollykwmwyqomzrwzunuqsosoozqzn`, bookmark
+  `plan/trash-confirm-binds-answer/01-bound-answer`, [PR #2171](https://github.com/scode/farhelm/pull/2171/changes).
 
 ## menu-request-overrides-independent-focus.md
 

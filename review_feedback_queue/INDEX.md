@@ -11,9 +11,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`claude-trust-publish-after-lock-takeover.md`](claude-trust-publish-after-lock-takeover.md) — A paused trust writer
   may overwrite newer vendor configuration after stale-lock takeover; the vendor interleaving remains unverified.
 
-- [`trash-confirmation-answer-consumes-new-selection.md`](trash-confirmation-answer-consumes-new-selection.md) — If an
-  old confirmation event survives a change of pending selection, it could delete the newly selected host’s archives.
-
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 

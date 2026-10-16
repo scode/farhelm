@@ -56,6 +56,13 @@ struct Confirmation {
     targets: Vec<Target>,
 }
 
+/// Accept only an answer to the confirmation that is still displayed.
+/// A queued answer from a replaced band must not authorize the new selection,
+/// even if both bands refer to the same host with different archive IDs.
+fn answered_targets(current: Option<&Confirmation>, answered: Confirmation) -> Option<Vec<Target>> {
+    (current == Some(&answered)).then_some(answered.targets)
+}
+
 /// A run keeps its original denominator until every host has answered.
 /// Presence means at least one pending host: success and failure both remove
 /// their host, and the final reply clears this state before releasing the gate.
@@ -259,7 +266,7 @@ fn ConfirmBand(
     busy: bool,
     submit_disabled: bool,
     oncancel: EventHandler<()>,
-    onsubmit: EventHandler<()>,
+    onsubmit: EventHandler<Confirmation>,
 ) -> Element {
     let count: usize = confirm.targets.iter().map(|target| target.count).sum();
     let unchecked: usize = confirm.targets.iter().map(|target| target.unchecked).sum();
@@ -293,7 +300,7 @@ fn ConfirmBand(
         if unchecked > 0 { p { "Attempt cleanup of {unchecked} unchecked {unchecked_noun} on {unchecked_names}. Farhelm deletes any of these it can verify when cleanup runs; work in them that was never committed or pushed is lost permanently. The rest stay in place and may be forgotten from the trash." } }
         div { class: "checkout-trash-actions",
             button { class: "btn btn-neutral trash-confirm-cancel", disabled: busy, onclick: move |_| oncancel.call(()), "cancel" }
-            button { class: "btn btn-danger trash-confirm-submit", disabled: submit_disabled, onkeydown: crate::guard_confirmation_enter, onclick: move |_| onsubmit.call(()), "delete permanently" }
+            button { class: "btn btn-danger trash-confirm-submit", disabled: submit_disabled, onkeydown: crate::guard_confirmation_enter, onclick: move |_| onsubmit.call(confirm.clone()), "delete permanently" }
         }
     } }
 }
@@ -516,10 +523,10 @@ pub(super) fn TrashControl(
             });
         }
     });
-    let submit = use_callback(move |_: ()| {
-        let confirmed = confirmation.peek().clone();
-        if let Some(confirm) = confirmed {
-            dispatch.call(confirm.targets);
+    let submit = use_callback(move |answered: Confirmation| {
+        let targets = answered_targets(confirmation.peek().as_ref(), answered);
+        if let Some(targets) = targets {
+            dispatch.call(targets);
         }
     });
     let mut close = move |_| {
@@ -782,6 +789,48 @@ mod tests {
                 "build_version": "0.0.0", "refresh": { "status": "ok", "sessions": 0 } },
         }))
         .expect("connected host fixture")
+    }
+
+    /// A stale affirmative answer must never borrow a replacement band's
+    /// authority. Only an unchanged host/global choice and its frozen targets
+    /// authorize deletion; cancellation and changed IDs or incarnations refuse it.
+    #[farhelm_testtrace::test]
+    fn confirmation_answer_deletes_only_its_unchanged_selection() {
+        let selected = Target {
+            host: 1,
+            incarnation: 7,
+            name: "first host".into(),
+            ids: vec!["archive-a".into()],
+            count: 1,
+            unchecked: 0,
+            bytes: 4096,
+            partial: false,
+        };
+        let answered = Confirmation {
+            host: Some(selected.host),
+            targets: vec![selected.clone()],
+        };
+        assert!(answered_targets(None, answered.clone()).is_none());
+        assert!(
+            answered_targets(Some(&answered), answered.clone()) == Some(vec![selected.clone()])
+        );
+
+        let mut other_host = answered.clone();
+        other_host.host = Some(2);
+        other_host.targets[0].host = 2;
+        other_host.targets[0].name = "second host".into();
+        let global = Confirmation {
+            host: None,
+            targets: vec![selected, other_host.targets[0].clone()],
+        };
+        let mut other_ids = answered.clone();
+        other_ids.targets[0].ids = vec!["archive-b".into()];
+        let mut reconnected = answered.clone();
+        reconnected.targets[0].incarnation += 1;
+        for replacement in [other_host, global.clone(), other_ids, reconnected] {
+            assert!(answered_targets(Some(&replacement), answered.clone()).is_none());
+        }
+        assert!(answered_targets(Some(&global), global.clone()) == Some(global.targets.clone()));
     }
 
     /// Host summaries must not present uninspectable archives as an exact zero.
