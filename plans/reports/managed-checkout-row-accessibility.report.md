@@ -53,3 +53,44 @@ The required fresh-context external gpt-6.1-sol reviewer at high effort found no
 and checked against the diff, including the complexity gate and full test-authoring checklist. It performed static
 review only; runtime validation was local. A separate gpt-6.1-sol medium wording cold read passed. The documentation
 pass covered the changed component and browser helper. No unresolved finding or scope departure remains.
+
+### Landing
+
+Landed as #2113, the first of the round's seven plans; all seven were tested stacked on main. Their only overlap was the
+review feedback index, where each removed its own entry; all removals were kept.
+
+#### Review
+
+An independent fresh-context review found nothing blocking: the hidden text is built only from escaped peer values, full
+rows do not repeat the visible repository, and no browser test pinned a managed row's accessible name. The mark itself
+was already released, so a "fixed" changelog entry is right.
+
+#### Fix made while landing
+
+Compact rows already add a hidden copy of the session folder, and the mark's new text adds the checkout root and any
+differing session folder, so a compact managed row read the same path twice (three times for a borrower). The compact
+copy is now added only for rows without a managed checkout, with a comment saying why. The changelog fragment now says
+"normal and compact" rather than "both list densities".
+
+#### Left as is
+
+The long trash sentence is now in every managed row's accessible name, which makes rows long to listen to; an accessible
+description was the triage's suggestion, and hidden text was explicitly allowed. SPEC_impl.md still describes the
+location and lifetime as tooltip text only.
+
+#### Checks
+
+Run on all seven of this round's plans stacked on main (managed-checkout-row-accessibility, download-long-name-copies,
+save-template-ime-escape, helm-start-without-ca-bundle, stopped-session-launch-error, trash-totals-unchecked,
+checkout-override-error-wording), with every landing fix in:
+
+- `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (301 delays, none missing a
+  reason); `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the UI crate's
+  clippy with the desktop feature and `cargo check -p farhelm-desktop`.
+- Through the recorder, after rebuilding the CLI: the protocol, helm and supervisor packages in full with pinned tmux,
+  run `4256456b-4340-4e64-86a5-85aa71206a7a`: 2395 passed; the UI crate with the desktop feature, run
+  `5d0c7c3a-4d29-4a92-a8e2-a1eba6893786`: 656 passed.
+- The JS harness (257 passed) and the website build.
+- The github-checkouts, templates, trash-dialog, sidebar, provisioning and tooltip-coverage specs on Chromium and
+  WebKit, run `7f4cef76-eea8-4b05-9a31-1260bb14498a`: 456 passed.
+- Not run: the CLI's end-to-end targets and other browser specs; no PR in this round changes them.
