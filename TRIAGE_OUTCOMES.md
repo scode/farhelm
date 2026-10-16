@@ -14698,7 +14698,8 @@
   or stop and return the item to the maintainer.
 - Completion criteria: a composing Escape keydown leaves the panel open with its draft. A non-composing Escape still
   returns to the launcher (SPEC.md launcher Escape behavior). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/save-template-ime-escape.md`.
+- Execution: complete in change `mzrorkoklyuv`, bookmark `plan/save-template-ime-escape/01-ime-escape`.
+  [PR #2115](https://github.com/scode/farhelm/pull/2115/changes).
 
 ## missing-ca-bundle-blocks-helm-start.md
 

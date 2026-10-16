@@ -148,6 +148,8 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
 /// An inline save surface with its own keys and guarded asynchronous write.
 /// The parent holds `saving` too, preventing an accepted save from losing its
 /// future to launcher cancellation or a competing launch.
+/// While an input method is composing, its Enter and Escape keys belong to
+/// candidate editing rather than saving or discarding this panel's draft.
 #[component]
 pub(super) fn SaveTemplatePanel(
     candidate: Candidate,
@@ -208,8 +210,13 @@ pub(super) fn SaveTemplatePanel(
         section { class: "save-template-panel", aria_label: "save as template",
             onkeydown: move |event| {
                 if event.key() == Key::Escape {
-                    event.prevent_default(); event.stop_propagation();
-                    if !saving() { on_cancel.call(()); }
+                    // The launcher also handles Escape. Keep the IME's key
+                    // inside this panel without cancelling its default action.
+                    event.stop_propagation();
+                    if !event.is_composing() {
+                        event.prevent_default();
+                        if !saving() { on_cancel.call(()); }
+                    }
                 }
             },
             label { "template name"
