@@ -14344,7 +14344,8 @@
   visible without masking the body's own failure. A focused failure-injection check (one DELETE refused) is desirable
   but optional given the trivial shape; at least run both specs on Chromium and WebKit. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `twmskpytzkmsynzwovppuxnppyvxlkvq`, bookmark
+  `plan/browser-test-cleanup/02-template-cleanup`, [PR #2139](https://github.com/scode/farhelm/pull/2139/changes).
 
 ## uninstall-command-fixture-requires-gnu-stat.md
 
