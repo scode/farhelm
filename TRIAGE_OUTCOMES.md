@@ -15225,7 +15225,7 @@
   regression test showing that a stale band's submit after replacement deletes nothing. Complexity gate: if binding
   needs anything beyond the trash dialog (helm or supervisor changes), stop and return the item. Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/trash-confirm-binds-answer.md`.
 
 ## menu-request-overrides-independent-focus.md
 
@@ -15249,7 +15249,7 @@
   Complexity gate: confined to `menu_panel.rs` and the menu wiring in the rows that use it; if it needs a new
   cross-component focus mechanism or regresses the burst behaviour, stop and return the item. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/menu-arrows-follow-focus.md`.
 
 ## checkout-retry-reuses-fresh-helm-host-namespace.md
 
@@ -15283,4 +15283,7 @@
   assertions, and add a regression test showing that the same row ID, session ID, raw key and request under two
   different helm databases produce different scoped keys. Complexity gate: if this needs supervisor or wire changes, or
   changes how approvals follow a host entry, stop and return the item. Remove the feedback file and its index entry.
-- Execution: pending.
+  Superseded in part, later on 2026-10-16: while scheduling, the user chose to give every helm database a namespace,
+  existing ones included, instead of the optional null-namespace path above, preferring the simpler end-state code and
+  accepting that keyed retries in flight across the upgrade are treated as new requests once.
+- Execution: planned in `plans/queue/checkout-retry-helm-namespace.md`.
