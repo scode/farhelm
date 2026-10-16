@@ -11,4 +11,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing 66a0b4] `helm-start-without-ca-bundle.md` — A Linux helm without CA certificates starts, with downloads refusing, instead of exiting at startup (gated)
 - [landing 66a0b5] `stopped-session-launch-error.md` — A cached launch error no longer overrides a session's recorded stopped status (gated)
 - [landing 66a0b6] `trash-totals-unchecked.md` — A host's trash totals are marked partial or unknown when unchecked entries exist, instead of showing 0 B (gated)
-- [complete] `checkout-override-error-wording.md` — A checkout failure caused by a per-host folder override names that override instead of pointing at Settings (gated)
+- [landing 66a0b7] `checkout-override-error-wording.md` — A checkout failure caused by a per-host folder override names that override instead of pointing at Settings (gated)
