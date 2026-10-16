@@ -3566,6 +3566,9 @@ printf 'AGENT-RAN\n'
             std::fs::create_dir(&config_dir).unwrap();
             let config = config_dir.join(".claude.json");
             std::fs::write(&config, content).unwrap();
+            // The launch record resolves symlinked temp roots, as on macOS.
+            // Establish that expected spelling before the child edits the file.
+            let canonical_config = std::fs::canonicalize(&config).unwrap();
             let (report, terminal, status) = fixture.run_shim_in_child_with(
                 None,
                 &[
@@ -3594,7 +3597,7 @@ printf 'AGENT-RAN\n'
                     document["projects"][path.to_str().unwrap()]["hasTrustDialogAccepted"],
                     true
                 );
-                assert_eq!(record.claude_trust.unwrap().config_path, config);
+                assert_eq!(record.claude_trust.unwrap().config_path, canonical_config);
             } else {
                 assert_eq!(std::fs::read_to_string(&config).unwrap(), content);
                 if enabled {

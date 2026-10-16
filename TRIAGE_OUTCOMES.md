@@ -13832,7 +13832,8 @@
   If more than canonicalizing fixture paths is needed, stop and return the item.
 - Completion criteria: both tests pass whether or not the temporary root is a symlink, and each states the canonical
   premise before the trust operation. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/rust-test-portability.md`.
+- Execution: complete in jj change `rqyruxnvkowv`, bookmark `plan/rust-test-portability/01-trust-paths`,
+  [PR #2093](https://github.com/scode/farhelm/pull/2093/changes).
 
 ## host-picker-folded-letter-cycling-misses-dotted-i.md
 
