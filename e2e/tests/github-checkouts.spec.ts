@@ -2,6 +2,7 @@
  * Only the vendor agent is fake. An exact private Git URL rewrite and a
  * file-only transport policy keep repository traffic inside the owned stack. */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
@@ -230,8 +231,11 @@ async function checkoutFixture(repoName: string) {
 test("agent managed checkout approval and keyed recovery", async ({ page, context, request }) => {
   const fixture = await checkoutFixture("agent-checkout");
   const ids: string[] = [];
-  const driver = await context.newPage();
+  let driverPage: Page | undefined;
+  let bodyFailed = false;
   try {
+    const driver = await context.newPage();
+    driverPage = driver;
     await setLocalYoloWithoutAsking(request, true);
     await setLocalCommandsWithoutAsking(request, false);
     const stack = JSON.parse(await fs.readFile(path.resolve(__dirname, "../.stack-info.json"), "utf8"));
@@ -295,12 +299,19 @@ test("agent managed checkout approval and keyed recovery", async ({ page, contex
     await expect(page.locator(".approval-card")).toHaveCount(0);
     expect(await fs.readFile(path.join(cwd, "hook-count"), "utf8")).toBe("once\n");
     expect(await fs.readFile(path.join(cwd, "retry-proof"), "utf8")).toBe("keep work\n");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await driver.close();
-    for (const id of ids.reverse()) await cleanupSession(request, id);
-    await setLocalCommandsWithoutAsking(request, false);
-    await setLocalYoloWithoutAsking(request, false);
-    await fixture.close(request);
+    // Session deletion archives checkout content, so fixture closure remains
+    // last even when an earlier release or preference reset fails.
+    await cleanupOwnedSteps(bodyFailed, [
+      ["driver page", () => driverPage?.close()],
+      ...ids.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+      ["command approval preference", () => setLocalCommandsWithoutAsking(request, false)],
+      ["YOLO approval preference", () => setLocalYoloWithoutAsking(request, false)],
+      ["checkout fixture", () => fixture.close(request)],
+    ]);
   }
 });
 
@@ -1284,6 +1295,7 @@ test("single trash delete removes one real archive and preserves its neighbour",
   test.setTimeout(90_000);
   const fixture = await checkoutFixture("browser-trash-single");
   const ids: string[] = [];
+  let bodyFailed = false;
   try {
     const first = await contextlessTrashSession(request, fixture, ids, "selected");
     const neighbour = await contextlessTrashSession(request, fixture, ids, "neighbour");
@@ -1315,9 +1327,14 @@ test("single trash delete removes one real archive and preserves its neighbour",
     await expect.poll(() => fs.stat(first).then(() => "present", (error: NodeJS.ErrnoException) => error.code)).toBe("ENOENT");
     expect(await contents(neighbour)).toEqual(before);
     expect(await fs.readFile(path.join(neighbour, "uncommitted-work"), "utf8")).toBe("retain this work\n");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    for (const id of ids.reverse()) await cleanupSession(request, id);
-    await fixture.close(request);
+    await cleanupOwnedSteps(bodyFailed, [
+      ...ids.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+      ["checkout fixture", () => fixture.close(request)],
+    ]);
   }
 });
 
