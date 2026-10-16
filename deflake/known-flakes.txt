@@ -14,3 +14,4 @@ playwright github-checkouts.spec.ts borrowers retain the checkout until the fina
 nextest farhelm::e2e terminal_backpressure::shallow_pause_resumes_without_reset_or_replay  # shallow-pause-resets-under-load
 playwright terminal-reconnect.spec.ts view-changes-do-not-postpone-a-recovery  # reconnect-recovery-misses-its-window-under-load
 playwright terminal-reconnect.spec.ts a-rolled-back-helm-gets-no-automatic-attach  # rollback-browser-test-sees-skew-before-first-retry
+playwright guarded-permissions.spec.ts guarded choices explain each agent and Cursor keeps its own setting  # guarded-permission-tooltip-stays-hidden

@@ -190,6 +190,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Guarded permission tooltip stays hidden.** `guarded choices explain each agent and Cursor keeps its own setting` in
+  `e2e/tests/guarded-permissions.spec.ts` timed out waiting for `body > .farhelm-tooltip` in Chromium during sweep
+  `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` (failed browser run `038d6b7f-5ad7-407a-a20a-db485b857dd8`). The tooltip held
+  the expected Codex explanation but remained hidden. Exact-test classification runs
+  `880d8bb1-7fa3-4ded-a739-9cf48eb8c6cf`, `d92ab76c-7c69-4210-9e60-3061a1c57a50`, and
+  `6c7b79a1-4741-4036-a125-11662bb71031` all passed. Cause unknown; inspect the retained pointer/focus and tooltip
+  transition evidence before changing timing or assertions (FLAKES.md, 2026-10-15).
+
 - **Browser stack parent-SIGTERM cleanup.** `scripts/test-start-stack-cleanup.sh` left the stack serving, with state and
   processes intact, after killing its spawner with SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`. The isolated
   repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45` passed unchanged. Leading hypothesis (2026-10-01 review, not
