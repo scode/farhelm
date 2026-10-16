@@ -6,6 +6,8 @@ import { expect, test } from "./helpers/evidence";
  * a hidden-state transition wired to the wrong control. The test starts with
  * explicit Codex values, switches through the searchable Grok row, and checks
  * both the visible controls and the serialized request that crosses the API.
+ * The final launch uses explicit Guarded permissions; explanatory buttons
+ * must not be counted as additional permission choices.
  */
 test("the Grok composer clears and hides unsupported model and effort choices", async ({ page, request }) => {
   const response = await request.get("/api/launch-catalog");
@@ -49,8 +51,10 @@ test("the Grok composer clears and hides unsupported model and effort choices", 
   await expect(form.locator(".launch-composer-model-choice")).toHaveCount(0);
   await expect(form.locator(".launch-composer-effort-choice")).toHaveCount(0);
   const permissions = form.locator(".launch-composer-permissions-choice");
-  await expect(permissions.getByRole("button")).toHaveCount(2);
-  await permissions.getByRole("button", { name: "default", exact: true }).click();
+  await expect(permissions.locator("button[aria-pressed]")).toHaveText([
+    "guarded", "yolo", "custom",
+  ]);
+  await permissions.getByRole("button", { name: "guarded", exact: true }).click();
 
   await form.getByLabel("folder", { exact: true }).fill("/tmp");
   await page.route("**/api/sessions", async (route) => {
@@ -69,7 +73,7 @@ test("the Grok composer clears and hides unsupported model and effort choices", 
     harness: "grok",
     model: null,
     effort: null,
-    permissions: null,
+    permissions: "guarded",
   });
   await expect(form).toContainText("fixture captured launch");
 });
