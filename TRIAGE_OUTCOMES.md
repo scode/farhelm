@@ -14844,7 +14844,9 @@
 - Completion criteria: with the preview running, saving `CHANGELOG.md`, or adding, editing or deleting a release
   screenshot JSON, updates the Release notes page on reload without restarting the server. `bun run build` and
   `dprint check` still pass. Remove the feedback file and its index entry (which also holds the screenshot-list scope).
-- Execution: planned in `plans/queue/docs-accuracy-fixes.md`.
+- Execution: complete in change `kxsxnwpw`, bookmark `plan/docs-accuracy-fixes/03-release-notes-watch`; the dev server
+  watches both release-note inputs and regenerates the page on source saves.
+  [PR #2109](https://github.com/scode/farhelm/pull/2109/changes).
 
 ## appearance-test-restoration-skips-session-cleanup.md
 

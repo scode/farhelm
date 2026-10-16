@@ -115,10 +115,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`live-sibling-test-returns-before-reap-completion.md`](live-sibling-test-returns-before-reap-completion.md) — The
   regression test can pass before cleanup finishes, weakening its assurance that another terminal survives.
 
-- [`docs-preview-does-not-watch-external-changelog.md`](docs-preview-does-not-watch-external-changelog.md) — Editing
-  release notes while the docs preview runs can leave reviewers seeing the previous text until the server restarts.
-  Production builds regenerate correctly.
-
 - [`link-click-tests-skip-preference-restoration.md`](link-click-tests-skip-preference-restoration.md) — A failed test
   can leave “program only” enabled for the shared test helm, causing subsequent link-opening tests to fail misleadingly.
   No shipped-product regression was confirmed.

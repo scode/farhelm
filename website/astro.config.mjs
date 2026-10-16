@@ -1,7 +1,8 @@
 import starlight from '@astrojs/starlight';
 import starlightLinksValidator from 'starlight-links-validator';
 import { defineConfig } from 'astro/config';
-import { changelogPath, writeReleaseNotes } from './scripts/release-notes.mjs';
+import { dirname, extname, resolve } from 'node:path';
+import { changelogPath, screenshotsDir, writeReleaseNotes } from './scripts/release-notes.mjs';
 
 // The published site is one Astro project that will eventually carry the
 // farhelm.io landing pages as well as the documentation. Starlight owns the
@@ -40,13 +41,31 @@ export default defineConfig({
     // The Release notes page is generated from the repository's CHANGELOG.md
     // before anything else reads the content collection, for `astro dev` and
     // `astro build` alike; scripts/release-notes.mjs says why and what it
-    // writes. Watching the changelog restarts the dev server when it changes.
+    // writes. addWatchFile marks the changelog as a restart input, but does
+    // not subscribe the dev watcher to files outside the website root. The
+    // server hook subscribes both sources and rewrites the generated page;
+    // the content collection then picks up that page's changes as usual.
     {
       name: 'farhelm-release-notes',
       hooks: {
         'astro:config:setup': ({ addWatchFile }) => {
           writeReleaseNotes();
           addWatchFile(changelogPath);
+        },
+        'astro:server:setup': ({ server, logger }) => {
+          server.watcher.add([changelogPath, screenshotsDir]);
+          const refresh = (changed) => {
+            const path = resolve(changed);
+            if (path !== changelogPath && !(dirname(path) === screenshotsDir && extname(path) === '.json')) return;
+            // A half-written or invalid screenshot list should report its
+            // error without killing the preview that the next save can fix.
+            try {
+              writeReleaseNotes();
+            } catch (error) {
+              logger.error(error instanceof Error ? error.message : String(error));
+            }
+          };
+          for (const event of ['add', 'change', 'unlink']) server.watcher.on(event, refresh);
         },
       },
     },
