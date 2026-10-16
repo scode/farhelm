@@ -3,6 +3,8 @@ import { expect, test } from "./helpers/evidence";
 /**
  * Cursor's launch UI must disclose the missing tracking integration while
  * preserving a literal model and permission choice in the create request.
+ * Its permission choices are own setting, YOLO, and custom; explanatory
+ * controls are not permission modes and must not affect that inventory.
  * Intercepting POST avoids requiring Cursor installation or authentication;
  * the helm unit test independently covers argv and Generic/no-Resume behavior.
  */
@@ -19,7 +21,11 @@ test("Cursor launches without claiming session tracking", async ({ page, request
   await expect(form).toContainText("Cursor session tracking and Resume are not supported.");
   await expect(form.locator(".launch-composer-effort-choice")).toHaveCount(0);
   const permissions = form.locator(".launch-composer-permissions-choice");
-  await expect(permissions.getByRole("button")).toHaveCount(2);
+  // Only mode choices have pressed state. The adjacent help button is
+  // independently reachable, but does not add another permission mode.
+  await expect(permissions.locator("button[aria-pressed]")).toHaveText([
+    "agent's own setting", "yolo", "custom",
+  ]);
   await permissions.getByRole("button", { name: "yolo", exact: true }).click();
   await form.getByRole("combobox", { name: "model", exact: true }).fill("composer-2.5");
   await form.getByRole("option", { name: "composer-2.5", exact: true }).click();
