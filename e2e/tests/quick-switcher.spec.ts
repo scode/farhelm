@@ -1,5 +1,6 @@
 /** Keyboard navigation must cross the modal boundary before terminal focus. */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page } from "@playwright/test";
 import {
   cleanupSession, createSession, listHosts, listSessions, localHostId,
@@ -31,20 +32,23 @@ test.afterEach(async ({ request }) => { await resetPreferences(request); });
 /** A switcher-known template is unavailable, not deleted, if the launcher's separate catalog read fails. */
 test("opening a template reports the launcher's catalog read failure", async ({ page, request }) => {
   const name = `switch-template-read-failure-${Date.now()}`;
-  const stored = await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: { kind: "agent", agent: "codex" } });
-  expect(stored.ok()).toBe(true);
-  // This fixture fails only the catalog read, not the helm's build identity.
-  const templatesReply = await request.get("/api/templates");
-  expect(templatesReply.ok()).toBe(true);
-  const helmBuild = templatesReply.headers()["x-farhelm-build"];
-  expect(helmBuild).toBeTruthy();
-  let reads = 0;
-  await page.route("**/api/templates", async (route) => {
-    if (route.request().method() !== "GET") return route.continue();
-    if (++reads === 1) await route.continue();
-    else await route.fulfill({ status: 503, contentType: "text/plain", headers: { "x-farhelm-build": helmBuild }, body: "launcher template list unavailable" });
-  });
+  let bodyFailed = false;
+  // Own the catalog name before PUT so failed header or route setup cannot
+  // leave a template behind for the next spec on the shared helm.
   try {
+    const stored = await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: { kind: "agent", agent: "codex" } });
+    expect(stored.ok()).toBe(true);
+    // This fixture fails only the catalog read, not the helm's build identity.
+    const templatesReply = await request.get("/api/templates");
+    expect(templatesReply.ok()).toBe(true);
+    const helmBuild = templatesReply.headers()["x-farhelm-build"];
+    expect(helmBuild).toBeTruthy();
+    let reads = 0;
+    await page.route("**/api/templates", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      if (++reads === 1) await route.continue();
+      else await route.fulfill({ status: 503, contentType: "text/plain", headers: { "x-farhelm-build": helmBuild }, body: "launcher template list unavailable" });
+    });
     await page.goto("/");
     const dialog = await openSwitcher(page);
     await dialog.getByRole("combobox").fill(`tl:${name}`);
@@ -60,9 +64,17 @@ test("opening a template reports the launcher's catalog read failure", async ({ 
     await expect(error).not.toContainText("deleted");
     expect(reads).toBe(2);
     await expect(form.getByLabel("name (optional)")).toBeEnabled();
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await page.unroute("**/api/templates");
-    expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["template route", () => page.unroute("**/api/templates")],
+      ["template", async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }],
+    ]);
   }
 });
 

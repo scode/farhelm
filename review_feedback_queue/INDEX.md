@@ -116,9 +116,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`single-trash-test-skips-configuration-restoration.md`](single-trash-test-skips-configuration-restoration.md) —
   Failed session cleanup can leave the single-checkout trash test's configuration and Git rewrite in place.
 
-- [`template-regression-fixtures-arm-cleanup-too-late.md`](template-regression-fixtures-arm-cleanup-too-late.md) —
-  Template regression tests can fail after storing fixtures but before acquiring cleanup ownership.
-
 - [`update-check-replacement-loses-focus.md`](update-check-replacement-loses-focus.md) — Installing an update replaces
   the keyboard-focused check button without transferring focus to the restart control.
 
