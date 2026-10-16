@@ -69,3 +69,60 @@ results above were executed separately by the executor.
 A fresh medium-effort wording reader accepted the commit/PR text. Private review evidence records the actual Opus model
 and cumulative counters; native-reader and executor usage are unavailable. A fresh native report reader checks this
 report before delivery.
+
+### Landing
+
+Landed on its own in round 68, as #2156. Nothing but queue bookkeeping reached main between this plan's base and its
+landing. The base already held the earlier terminal-link safety work and the Rust test-portability changes from
+round 67. That link work covered the drag check, the stale-link recheck, the refusal when link details are clipped, and
+hidden-character escaping. I read the PR against that code, and a fresh-context reviewer did the same independently.
+Neither found an interaction. File-link hover, link clicking and the drag check are unchanged; only the web-link hover
+display changed.
+
+#### Fix made during the landing: the spec overstated the new protection
+
+The PR rewrote the specification's hover-warning paragraph to say that "a split lookalike still warns", and it dropped
+the older caveat that a program choosing its own line breaks can still keep a lookalike quiet. That caveat still holds.
+The fix only joins consecutive rows of one hyperlink. A program can print `https:/` and `/github.com/login` as two
+separate hyperlinks, on non-adjacent rows, or with the same link appearing twice on one row, which the fix treats as
+ambiguous and does not join. Each piece is then judged alone, neither looks like a web address on its own, and both
+hover quietly. I confirmed this against the address pattern the warning uses. The code is not affected, and such a split
+lookalike was already quiet before this plan, so nothing got weaker; the quiet display still names the real host. Only
+the wording was wrong.
+
+The landing reworded SPEC.md to say that a lookalike split across rows of one hyperlink is judged on its whole text, and
+restored the caveat. It also added the same caveat, with the example, to the matching SPEC_impl.md paragraph, so a later
+change does not overstate the protection again. No code changed.
+
+One sentence in the executor's report needs the same correction. "Split lookalikes still warn" holds only for a
+lookalike split across consecutive rows of one hyperlink, not for one a program prints as separate pieces. The changelog
+fragment's "Links whose text names a different destination still warn" was left as is: it is accurate for the wrapped
+links this plan is about, and the release curation should not widen it into a general promise.
+
+#### A possible follow-up
+
+The reviewer noted, without verifying it, that a program reusing one link tag for the same address on two consecutive
+rows would have the rows joined into a doubled address and see a false warning. That can only add a warning, never
+remove one. It is a note for a future look, not something this plan needed to settle.
+
+#### Checks
+
+The executor's last full run of the terminal-links browser spec had six failures. Those failures led to its final fix,
+and afterwards it re-ran only the 16 comparison cases. The spec's other cases (clicking, dragging, and activating
+wrapped and scrolled links) also pass through the changed web-link hover. For a change to a security warning, they
+needed to pass on the final code before it landed.
+
+- Run now, at the rebased tip, after fresh `cargo build` and web release builds: the terminal-links and
+  terminal-link-clicks browser specs in full, on Chromium and WebKit, through the test recorder with the pinned tmux,
+  one worker and no retries: `npx playwright test terminal-links.spec.ts terminal-link-clicks.spec.ts`. 60 of 60 passed
+  with no skips, run `2633fd0c-7362-432b-b985-67b48c86132f`.
+- Run now, directly rather than through the recorder: the UI JavaScript harness, `node --test`, 261 of 261 passed. The
+  executor's recorded run of the same harness on identical code is in the report.
+- Run now: `dprint check` on SPEC.md and SPEC_impl.md after the landing's rewording, clean.
+- Reused: the executor's test-sleep, changelog-format, dprint (its changed Markdown and TypeScript) and
+  `git diff --check` results, from its head `6b385219`. The landing changed only spec prose on top of identical code,
+  and main gained only queue bookkeeping in between.
+- Skipped: Rust test runs, since no Rust code changed, and the other browser specs, which do not exercise web-link
+  hover.
+
+The rest of the executor's report still holds, including its description of the spec change, with the caveat restored.

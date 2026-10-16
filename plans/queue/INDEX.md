@@ -4,4 +4,3 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight d8413a] `browser-test-cleanup.md` — Browser tests clean up their sessions, templates, preferences and fixtures even when an earlier step fails (20 triage outcomes, each gated)
 - [pending] `launcher-fixes.md` — New-session dialog fixes: retry key after a template resets permissions, Launch after a repository pick, the setup field after the folder is cleared, custom flags kept on a model choice, and the active repository suggestion kept visible (5 outcomes, each gated)
-- [landing 310241] `wrapped-link-warning.md` — Honest web links that agents wrap onto another line stop triggering the link mismatch warning, by reading the terminal library's per-cell link tag
