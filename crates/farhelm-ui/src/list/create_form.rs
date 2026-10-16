@@ -4161,6 +4161,10 @@ pub(super) fn CreateSessionForm(
             browse_error,
         );
         remembered_destination.set(None);
+        // This explicit choice completes repository selection, even if an
+        // earlier gh: query still owns the composer's discovery search.
+        composer_search.set(String::new());
+        composer_search_open.set(false);
         destination_draft.set(DestinationDraft::github(repo));
         preview_revision
             .with_mut(|value| *value = value.checked_add(1).expect("preview revision exhausted"));

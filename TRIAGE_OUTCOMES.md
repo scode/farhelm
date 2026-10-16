@@ -14099,7 +14099,8 @@
   enabled once the preview is ready. An unselected or invalid gh: search still cannot launch. Add a regression covering
   the sequence (a UI unit test, or a targeted browser test if no unit seam exists). Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/launcher-fixes.md`.
+- Execution: complete in jj change `nuozwxzrqwtynvvwsrvvsosvmmxnvtom`, bookmark
+  `plan/launcher-fixes/02-repository-selection`, [PR #2161](https://github.com/scode/farhelm/pull/2161/changes).
 
 ## inline-checkout-setup-retains-stale-config-eligibility.md
 

@@ -353,7 +353,15 @@ test("destination type keeps unselected repositories separate from the folder", 
   await expect(form.locator(".launch-composer-repository-note")).toHaveCount(1);
   await expect(form.locator(".launch-composer-repository-note")).toContainText("fixture scan unavailable");
   await expect(form.locator(".launch-composer-destination .launch-composer-repository-note")).toHaveCount(0);
-  await search.fill("");
+  await expect(form.locator(".create-session-submit")).toBeDisabled();
+  // A deliberate field selection retires the older global gh: query. The
+  // ready preview alone must not leave the launcher blocked on hidden search.
+  await repository.fill("acme/bar");
+  await expect(form.getByRole("listbox", { name: "repositories" }).getByRole("option", { name: "acme/bar", exact: true })).toBeVisible();
+  await repository.press("Enter");
+  await expect(search).toHaveValue("");
+  await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "ready");
+  await expect(form.locator(".create-session-submit")).toBeEnabled();
   await repository.fill("");
   await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toBeDisabled();

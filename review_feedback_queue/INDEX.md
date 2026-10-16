@@ -52,10 +52,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`claude-trust-settings-misses-invalidation.md`](claude-trust-settings-misses-invalidation.md) — Already-open Settings
   can retain old trust choices after a shared change; the multi-GUI qualifier needs triage.
 
-- [`repository-selection-keeps-global-search-launch-block.md`](repository-selection-keeps-global-search-launch-block.md)
-  — Choosing a valid repository in the new destination field can leave Launch disabled despite a successful checkout
-  preview.
-
 - [`file-recognition-rejects-digit-leading-extensions.md`](file-recognition-rejects-digit-leading-extensions.md) —
   Printed filenames such as backup.7z cannot be hovered or downloaded unless the program includes a directory prefix.
 
