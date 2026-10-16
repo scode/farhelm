@@ -14573,7 +14573,8 @@
 - Completion criteria: both tests assert survival, or return, only after every close has released its lifecycle claim.
   Both pass in a focused recorded nextest run, and the sleep checker passes. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/rust-test-portability.md`.
+- Execution: complete in jj change `qysppwqlwzpv`, bookmark `plan/rust-test-portability/05-reap-completion`,
+  [PR #2101](https://github.com/scode/farhelm/pull/2101/changes).
 
 ## managed-checkout-row-hides-accessible-directory.md
 

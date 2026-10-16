@@ -2614,6 +2614,8 @@ mod tests {
     /// reap would pass a single-corpse test while leaving simultaneous exits
     /// behind. Plain exited commands keep this coverage portable; the Linux
     /// daemon-sweep test below checks detached descendants separately.
+    /// The live sibling is checked after the close tasks release their claims,
+    /// so their marker sweep and detach are included in the survival guarantee.
     #[farhelm_testtrace::test]
     async fn dead_tab_panes_are_reaped_by_the_tick_and_live_tabs_survive() {
         let state = StateDir::new();
@@ -2679,11 +2681,11 @@ mod tests {
         // One close owns the session claim at a time. Drive later ticks until
         // both siblings disappear rather than confusing start with completion.
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        let states = loop {
+        loop {
             sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
             let states = sup.tmux.pane_states().await.expect("pane states");
             if !states.contains_key(&dead_a) && !states.contains_key(&dead_b) {
-                break states;
+                break;
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
@@ -2692,7 +2694,15 @@ mod tests {
             );
             // sleep-ok: later passes are the stimulus for sibling closes deferred by the session's claim.
             tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
-        };
+        }
+        // Windows disappear before the close's marker sweep and detach. Observe
+        // the released lifecycle claims before checking the live sibling.
+        wait_for_reaped_panes(&sup, &[dead_a.clone(), dead_b.clone()]).await;
+        let states = sup
+            .tmux
+            .pane_states()
+            .await
+            .expect("pane states after reap");
         assert!(
             !states.contains_key(&dead_a) && !states.contains_key(&dead_b),
             "every dead tab's window must eventually be gone, not just the first"
@@ -2765,7 +2775,8 @@ mod tests {
     /// the tick interval set far beyond the wait below, a live tab survives
     /// until its shell exits, and is then closed well before any tick could
     /// have run. The first tick is a full interval out, so only the wakeup
-    /// can explain the reap.
+    /// can explain the reap. Wait for the close's lifecycle claim to be released
+    /// before tearing down the fixture; pane absence alone is an earlier boundary.
     #[farhelm_testtrace::test]
     async fn a_tab_is_reaped_on_pane_death_without_waiting_for_a_tick() {
         let state = StateDir::new();
@@ -2837,6 +2848,7 @@ mod tests {
             // sleep-ok: waits for the wakeup's reap to remove the pane; bounded by TEST_DEADLINE, far below the 600 s tick.
             tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
         }
+        wait_for_reaped_panes(&sup, &[pane]).await;
         ticker.shutdown().await;
     }
 

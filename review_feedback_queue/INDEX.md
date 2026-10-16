@@ -90,9 +90,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-body-lacks-keyboard-scroll-focus.md`](trash-body-lacks-keyboard-scroll-focus.md) — Keyboard-only users can
   lose access to offscreen host information when all trash actions are disabled.
 
-- [`live-sibling-test-returns-before-reap-completion.md`](live-sibling-test-returns-before-reap-completion.md) — The
-  regression test can pass before cleanup finishes, weakening its assurance that another terminal survives.
-
 - [`link-click-tests-skip-preference-restoration.md`](link-click-tests-skip-preference-restoration.md) — A failed test
   can leave “program only” enabled for the shared test helm, causing subsequent link-opening tests to fail misleadingly.
   No shipped-product regression was confirmed.
