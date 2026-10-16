@@ -165,3 +165,52 @@ documentation pass, and executed the runtime checks itself.
 Private galaxy-brain accounting retains raw CLI usage. Structured records are incomplete for the first nine outcomes;
 native-reader and executor usage and exact reported model attribution are unavailable. No total cost or token claim is
 made. A native report cold read checks this report before delivery.
+
+### Landing
+
+Landed on its own in round 69, as twenty PRs (#2138 to #2159, without #2147 and #2156, which belong to other work). All
+twenty merged bottom-up, unchanged from what the report describes. They change browser tests, two shared test helpers
+and the review-feedback bookkeeping that records these outcomes as done; no product code, specification or packaging
+changed.
+
+#### What landed since the stack was based, and whether it interacted
+
+The executor had already rebased the stack onto main as it stood after round 68. The only change to main after that,
+before the landing, was the delivery of this plan's own report. So the landing rebase changed nothing outside `plans/`,
+and the landed tree is identical outside `plans/` to the stack tip the executor delivered. The landing rebase met no
+conflicts; the three review-feedback index conflicts the report mentions were resolved by the executor before delivery.
+
+I reviewed the stack against what was already on main, and a fresh-context reviewer did the same independently. Neither
+found an interaction. The areas worth a look:
+
+- The wrapped web-link fix that landed in round 68 (#2156, which stopped false warnings when hovering a web link that
+  wraps across terminal lines) changed the link hover that the link-click browser tests pass through. The
+  link-preference PR here (#2144) only moves that spec's setup inside its cleanup scope; no assertion changed, and
+  nothing in it checks the hover warning. The executor also re-ran that spec after rebasing onto #2156, with fresh
+  builds, and it passed.
+- Within the stack, the shared cleanup helper is created once and never changed afterwards. The one change to the shared
+  session-fixture helper (#2143) adds cleanup only when a new session never becomes ready, and leaves the success path
+  untouched, so specs tested before that PR still exercise the same code.
+- Three spec files are edited by two PRs each. In settings, #2141 and #2154 change different tests. In the checkout
+  composer, #2153 changes the teardown and #2158 isolates the test's git commands, in separate parts of one test. In the
+  checkout trash spec, #2155 makes sure the checkout fixture is closed last and #2157 fixes how that step matches trash
+  records. Because the stack is linear, the report's run for the later PR in each pair (the settings run, the combined
+  trash run, and the final composer and host-picker run) had the earlier edit beneath it.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+- Run now: none. The landed tree outside `plans/` is byte-identical to the stack tip the executor delivered, where it
+  ran the builds, the post-rebase link-click run and the static checks, so no new runtime run would add evidence.
+- Reused: every passing browser run the report lists, at the revisions it records, including the post-rebase link-click
+  run `b8981cd6-1115-4d9b-a069-d73549cb2c0f` and the final checkout composer and host-picker run
+  `2308cf39-c815-4486-ad40-fe94e16ac245`; the report explains why its earlier runs still apply after its rebase. Also
+  reused: the executor's builds, test-sleep check, agent-instruction check, `dprint` on the bookkeeping files and
+  `git diff --check`, all at the delivered tip. The report's retained failures are failures, not evidence of a pass.
+- Skipped: broader Rust, JavaScript, desktop, installer and browser runs, for the reasons the report gives; nothing at
+  landing changed that assessment.
+
+Nothing in the executor's report became untrue at landing.
