@@ -132,9 +132,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-regression-fixtures-arm-cleanup-too-late.md`](template-regression-fixtures-arm-cleanup-too-late.md) —
   Template regression tests can fail after storing fixtures but before acquiring cleanup ownership.
 
-- [`header-regression-fixtures-escape-cleanup.md`](header-regression-fixtures-escape-cleanup.md) — A header regression
-  test can lose session ownership during readiness or skip its replacement's cleanup after another cleanup failure.
-
 - [`update-check-replacement-loses-focus.md`](update-check-replacement-loses-focus.md) — Installing an update replaces
   the keyboard-focused check button without transferring focus to the restart control.
 
