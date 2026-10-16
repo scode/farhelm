@@ -275,8 +275,8 @@ Before reading the monitor's status, read these in full:
 - `AGENTS.md`, "Talking to the user" and "TODO.md and FLAKES.md" (root)
 - the `scode-snippets` and `jjstack` skills
 
-Fence: run it in its own checkout, never in an executor's or the monitor's; an unticked report without a comment is left
-for later, never a follow-up or a rejection.
+Fence: do its work in a checkout of its own, never in an executor's or the monitor's (any session may run it, the
+monitoring session included); an unticked report without a comment is left for later, never a follow-up or a rejection.
 
 ### Release plan ("release plan X")
 
