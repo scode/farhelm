@@ -2141,3 +2141,36 @@ may expire. Disposition: fixed in #2134, with the TODO entry and sweep exclusion
 Class: fixture-premise
 
 Cause: established
+
+## 2026-10-16 — `client-helm-skew-prompts-reload` (e2e/tests/terminal-reconnect.spec.ts)
+
+The deflake sweep's browser battery failed this test in WebKit (`webkit-terminal-reconnect`) in run
+`b8635849-b577-4ec0-a8df-315fbdb4e5de`: its API route handler fetched a response, then `route.fulfill` rejected it as
+already handled. This was the battery's only failure; Chromium passed the same test. All three isolated classification
+reruns passed both engines unchanged: `77619451-124d-4eee-85cf-44670a49c415`, `22f0678e-5f74-4319-add5-782956071cf1`,
+and `69c22916-c5ad-4c91-81e7-1fc670825542`. The failing WebKit execution took 2.927 seconds; the first passing WebKit
+rerun took 3.321 seconds, so this was not a test deadline expiring. The cause is unknown. Disposition: open, recorded in
+TODO.md and excluded from subsequent sweeps; no extra reproductions or fix were attempted.
+
+```text
+Error: route.fulfill: Route is already handled!
+
+  2189 |   await page.route("**/api/**", async (route) => {
+  2190 |     const response = await route.fetch();
+> 2191 |     await route.fulfill({
+       |                 ^
+```
+
+Evidence: sweep `6833bc66-2ff8-4b3e-a8bc-46032e676243`, clean tested commit `991835f826b25bc93eb088f6d3984477a9dc2fab`,
+Linux x86_64 kernel 6.8.0-146-generic, Node 26.12.0, Playwright 1.64.0. Selection: `browser suite, both engines`,
+narrowed to this exact test for classification; one browser worker, zero retries. The full battery reported 1,851
+passes, one failure and 14 skips; each rerun reported two passes and no skips. Pinned tmux 3.7c executable SHA256
+`9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`, locale `C.UTF-8`. Ambient `FARHELM_AGENT_ID`,
+`FARHELM_SESSION_ID`, `FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK` and `FARHELM_TMUX` were scrubbed; only
+recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` were supplied. Other machine load, compiler
+and browser build identities are unavailable. No earlier entry for this test was found. The quoted excerpt and manifests
+remain in the private recorder directories identified above and may expire.
+
+Class: unknown
+
+Cause: unknown
