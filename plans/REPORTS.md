@@ -17,3 +17,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`docs-accuracy-fixes`](reports/docs-accuracy-fixes.report.md) landed 2026-10-16 in #2104, #2106, #2109: The paste guide and resume docs stop overpromising, and the docs preview refreshes release notes on edit (3 outcomes, each gated)
 - [`host-picker-dotted-i`](reports/host-picker-dotted-i.report.md) landed 2026-10-16 in #2107: Typing İ repeatedly in the host picker cycles through hosts whose names start with it (gated)
 - [`setup-advice-state-directory`](reports/setup-advice-state-directory.report.md) landed 2026-10-16 in #2110: Setup's sign-in advice names the state directory when it came from the environment (gated)
+- [`copy-guidance-resize`](reports/copy-guidance-resize.report.md) landed 2026-10-16 in #2111: The "this drag did not copy" notice is measured at its origin so narrowing the window does not collapse it (gated)
