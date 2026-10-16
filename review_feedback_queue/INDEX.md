@@ -162,9 +162,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`native-download-quit-leaves-partial-files.md`](native-download-quit-leaves-partial-files.md) — Desktop Quit leaves
   hidden partial downloads with no recovery owner.
 
-- [`teststate-socket-probe-blocks-sweep.md`](teststate-socket-probe-blocks-sweep.md) — A full Unix-socket backlog can
-  block the fixture cleanup probe before either cleanup deadline applies.
-
 - [`custom-permission-model-choice-erases-draft.md`](custom-permission-model-choice-erases-draft.md) — Choosing a model
   or re-selecting the same agent can erase unfinished custom permission flags.
 
