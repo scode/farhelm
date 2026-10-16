@@ -14627,7 +14627,8 @@
 - Completion criteria: a second save of a file with a 251-byte stem plus `.pdf` publishes as a truncated stem with
   ` (1).pdf` within 255 bytes. Ordinary names keep `name (n).ext` unchanged. Multi-byte names are never split inside a
   character. Unit tests cover these cases. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/download-long-name-copies.md`.
+- Execution: jj change `rqvntlwpoovrykqzlvqyolzzvouunlzq`, bookmark `plan/download-long-name-copies/01-name-limit`;
+  [PR #2114](https://github.com/scode/farhelm/pull/2114/changes).
 
 ## listing-regression-fixtures-escape-cleanup.md
 
