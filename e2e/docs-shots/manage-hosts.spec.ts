@@ -111,11 +111,13 @@ test("remove dialog", async ({ page, request }) => {
 });
 
 test("app settings", async ({ page, request }) => {
-  // Tall enough that every section fits without scrolling: Settings scrolls
-  // its sections under a fixed heading and close button, so at a shorter
-  // height the sounds section sits below the fold and its callout would
-  // point at the close button instead. The terminal links section pushed
-  // sounds past a height of 1500.
+  // Tall enough that every section the callouts explain fits without
+  // scrolling: Settings scrolls its sections under a fixed heading and close
+  // button, so a section below the fold would leave its callout pointing at
+  // the close button or at nothing. The sections added since (sessions,
+  // Claude's trust question, ntfy alerts) pushed sounds so far down that
+  // showing it would take a viewport far taller than this one, so this shot no
+  // longer explains it; the page's text links to where sounds are covered.
   await page.setViewportSize({ width: 1600, height: 1900 });
   const { director } = await open(page, request);
   await page.locator(".app-settings-toggle").click();
@@ -123,8 +125,10 @@ test("app settings", async ({ page, request }) => {
   await expect(dialog).toBeVisible();
   // Down the left of the dialog, one per part, each level with what it
   // explains; the dialog's own help text says the rest.
+  // The hosts section's first switch, not the dialog's first: the sessions
+  // section above it has a switch of its own.
   await director.callout(
-    dialog.locator(".app-settings-choice").first(),
+    dialog.getByRole("region", { name: "hosts" }).locator(".app-settings-choice").first(),
     "Both questions Farhelm asks about hosts can be turned off, or back on, here.",
     { side: "left" },
   );
@@ -141,11 +145,6 @@ test("app settings", async ({ page, request }) => {
   await director.callout(
     dialog.locator(".checkout-post-clone-field"),
     "A command to run in each new managed checkout before its agent starts, on every host.",
-    { side: "left" },
-  );
-  await director.callout(
-    dialog.locator("section[aria-label=sounds]"),
-    "Sounds for when a session needs you, on this device only.",
     { side: "left" },
   );
   await shot(page, `${PAGE}/app-settings`, [dialog, page.locator(".app-settings-toggle")], { maxWidth: 930 });

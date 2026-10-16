@@ -62,6 +62,16 @@ export interface CropOptions {
    * it instead.
    */
   keepPointer?: boolean;
+  /**
+   * Take the picture with CSS animations left running. By default the
+   * screenshot fast-forwards finite animations to their end, so a shot never
+   * catches a dialog mid-slide. That end is wrong for something whose
+   * animation is its lifetime, such as the session launcher's permission
+   * warning, which removes itself when its animation ends: fast-forwarded, it
+   * would be gone from the picture. Such a shot keeps the animation running
+   * (and paused, the way a reader pausing it would) instead.
+   */
+  keepAnimations?: boolean;
 }
 
 /**
@@ -100,7 +110,7 @@ export async function shot(page: Page, name: string, regions: Locator[], options
   await page.screenshot({
     path: output,
     clip: { x: left, y: top, width: right - left, height: bottom - top },
-    animations: "disabled",
+    animations: options.keepAnimations ? "allow" : "disabled",
   });
   console.log(`docs shot written to ${output}`);
   return output;
