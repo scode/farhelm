@@ -2,6 +2,7 @@
  * session absent. Hold both that old reply and its successor so selection
  * cannot be silently repaired before the test observes the stale boundary. */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { cleanupSession, createSession, observeFeedReaders, openRowMenu, pinAutoSelect, stubFeed, waitForFeedReadersSettled } from "./helpers/fleet";
 import { fillCreateForm } from "./helpers/term";
 import { routeGate } from "./helpers/route-gate";
@@ -14,30 +15,33 @@ for (const operation of ["create", "replace"] as const) {
     let newId: string | undefined;
     const old = routeGate();
     const fresh = routeGate();
-    await observeFeedReaders(page);
-    const feed = await stubFeed(page);
-    // A connected socket is not a healthy feed until greeted. Retire that
-    // handshake's reads before arming the deliberately old mutation snapshot.
-    feed.notifyOnConnect(1);
-    let armed = false;
-    let oldCaptured = false;
-    let freshCaptured = false;
-    await page.route((url) => url.pathname === "/api/sessions", async (route) => {
-      if (route.request().method() !== "GET" || !armed) return route.continue();
-      const response = await route.fetch();
-      const body = await response.json();
-      if (!oldCaptured) {
-        expect(body.sessions.some((session: { id: string }) => session.id === source.id)).toBe(true);
-        oldCaptured = true;
-        await old.wait();
-      } else {
-        expect(body.sessions.some((session: { id: string }) => session.id === newId)).toBe(true);
-        freshCaptured = true;
-        await fresh.wait();
-      }
-      await route.fulfill({ response, json: body });
-    });
+    let bodyFailed = false;
+    // The live source belongs to teardown before any feed or route setup can
+    // fail; the create variant intentionally keeps that agent running.
     try {
+      await observeFeedReaders(page);
+      const feed = await stubFeed(page);
+      // A connected socket is not a healthy feed until greeted. Retire that
+      // handshake's reads before arming the deliberately old mutation snapshot.
+      feed.notifyOnConnect(1);
+      let armed = false;
+      let oldCaptured = false;
+      let freshCaptured = false;
+      await page.route((url) => url.pathname === "/api/sessions", async (route) => {
+        if (route.request().method() !== "GET" || !armed) return route.continue();
+        const response = await route.fetch();
+        const body = await response.json();
+        if (!oldCaptured) {
+          expect(body.sessions.some((session: { id: string }) => session.id === source.id)).toBe(true);
+          oldCaptured = true;
+          await old.wait();
+        } else {
+          expect(body.sessions.some((session: { id: string }) => session.id === newId)).toBe(true);
+          freshCaptured = true;
+          await fresh.wait();
+        }
+        await route.fulfill({ response, json: body });
+      });
       await pinAutoSelect(page, source.id);
       await page.goto("/");
       await feed.waitForConnection(1);
@@ -76,11 +80,16 @@ for (const operation of ["create", "replace"] as const) {
       fresh.release();
       const created = page.locator(`[data-session-id="${newId}"]`);
       await expect(created).toHaveAttribute("data-session-selected", "true");
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
     } finally {
-      old.release();
-      fresh.release();
-      if (newId) await cleanupSession(request, newId);
-      await cleanupSession(request, source.id);
+      await cleanupOwnedSteps(bodyFailed, [
+        ["old listing gate", () => old.release()],
+        ["fresh listing gate", () => fresh.release()],
+        ["new session", () => newId && cleanupSession(request, newId)],
+        ["source session", () => cleanupSession(request, source.id)],
+      ]);
     }
   });
 }

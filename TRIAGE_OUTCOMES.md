@@ -14661,7 +14661,8 @@
   stop and return the item to the maintainer.
 - Completion criteria: the source is owned by cleanup from creation, and a failing first cleanup does not skip the
   second. Both variants pass on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `lvnoptuvnpmtrkvozttklswqronwxkty`, bookmark
+  `plan/browser-test-cleanup/10-listing-ownership`, [PR #2148](https://github.com/scode/farhelm/pull/2148/changes).
 
 ## template-regression-fixtures-arm-cleanup-too-late.md
 
