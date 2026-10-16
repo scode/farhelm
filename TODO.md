@@ -44,6 +44,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Let agents delete sessions.** Agents can currently stop sessions but cannot delete them. Add session deletion to the
+  CLI and agent instructions so an agent can remove a session rather than only stopping it.
+
+- **Supply an initial prompt when creating a session.** Allow an initial prompt to be injected when creating a session
+  through the CLI, and document it in the agent instructions. Consider initial-prompt support in the launcher GUI as
+  well. The separate "Inject commands into agents" item covers commands sent to sessions that are already running.
+
 - Follow up on the recent quick launch system so an agent can populate the templates.
 
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
