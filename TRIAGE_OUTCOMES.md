@@ -14409,7 +14409,8 @@
 - Completion criteria: a failing session cleanup or preference reset no longer skips `fixture.close`. Cleanup errors
   remain visible without masking the body's failure. The two named tests (and any converted siblings) pass on Chromium
   and WebKit. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `orrstumrspzumylqzputowzmqvovuqyw`, bookmark
+  `plan/browser-test-cleanup/17-trash-restoration`, [PR #2155](https://github.com/scode/farhelm/pull/2155/changes).
 
 ## confirmation-test-optout-survives-cleanup-failure.md
 
