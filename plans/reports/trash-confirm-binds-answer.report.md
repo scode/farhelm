@@ -44,3 +44,50 @@ None required for this fix. Browser delivery of the hypothetical old event remai
 A fresh gpt-6.1-sol reviewer at high effort found no correctness, design, idiomaticity, scope, or test-quality issues.
 The full test-authoring checklist was supplied. A separate fresh gpt-6.1-sol reader at medium effort understood the
 commit and PR wording without revision. The documentation pass covered the changed helper, callback, and regression.
+
+### Landing
+
+Landed on its own in round 71, as #2171, unchanged from what the report describes.
+
+#### What landed since the PR was based, and whether it interacted
+
+Three documentation changes reached main between this PR's base and its landing, all from the maintainer's plan review:
+a clarification of the instructions for reviewing landed plans, two near-term TODO entries, and a SPEC.md sentence
+saying that file-path detection in terminal output does not try to support file names containing whitespace. I read them
+against this PR, and a fresh-context reviewer did the same independently. Neither found an interaction. The trash code
+this PR changes is identical on main to the PR's base, and every earlier trash change, including the unchecked-entry
+wording and totals fixes, was already in the base. The rebase was clean.
+
+The reviewer also checked that the fix cannot refuse a legitimate answer. The pending confirmation is only ever replaced
+whole, never edited in place, so an answer to an unchanged confirmation always matches. The single-checkout delete,
+which asks no confirmation, is unaffected.
+
+#### Fixes made during the landing
+
+None. The trash has already shipped (it appears under v0.26.1 in the changelog), so recording this as a fix there is
+right.
+
+#### A possible follow-up
+
+SPEC.md's rule that a destructive confirmation authorizes only what its prompt said (confirmed 2026-10-01) lists only
+session actions. The trash section says its confirmations name the hosts, checkout count and size, but does not say the
+answer applies only to what was named; this fix implements exactly that. Nothing contradicts, but one clause extending
+the rule to permanent trash deletion would make the spec say what the code now does.
+
+#### Checks
+
+The executor ran the trash unit tests, including the new stale-answer regression, but no browser run. A comparison that
+is too strict would refuse legitimate trash confirmations, which the unit tests did not exercise and a real dialog would
+show. So that needed a browser run before landing.
+
+- Run now, at the rebased tip, after fresh `cargo build` and web release builds: the trash dialog and checkout trash
+  browser specs in full, on Chromium and WebKit, through the test recorder with the pinned tmux, one worker and no
+  retries: `npx playwright test trash-dialog.spec.ts github-checkouts.spec.ts`. 50 of 50 passed with no skips, run
+  `4e655722-0494-485f-bc38-77c45198701a`.
+- Reused: the executor's recorded trash unit run `203d1e50-4cf3-4e3d-9384-9e94ac1ffd53`, its clippy, desktop compile,
+  formatting, targeted `dprint`, changelog, agent-instruction and test-sleep checks. The rebase crossed only
+  documentation, so the code they tested is what landed.
+- Skipped: broader Rust, desktop and other browser runs, since nothing outside the trash dialog changed.
+
+As the report says, the stale answer itself was found by reading the code and has not been reproduced in a browser.
+Nothing in the executor's report became untrue at landing.
