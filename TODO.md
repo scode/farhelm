@@ -190,6 +190,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Replace actions panel misses its measurement window.**
+  `plain Replace keeps a newer row's retry key after an older YOLO cancellation` in `e2e/tests/replace.spec.ts` timed
+  out waiting for the actions panel to finish measuring against its toggle in WebKit during sweep
+  `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` (browser run `038d6b7f-5ad7-407a-a20a-db485b857dd8`). Exact-test classification
+  runs `71a8b63e-df1d-4f98-b3a9-4d3dd65e0ef1`, `120f57ad-3897-4fd2-9c1c-a6b5feee84bd`, and
+  `501877d8-a0d5-4bf3-bb60-1e967bdad165` all passed. Cause unknown; inspect the retained menu-layout evidence before
+  changing the five-second wait (FLAKES.md, 2026-10-15).
+
 - **Notification bell entry missing under build mismatch.**
   `closing notifications quiets the bell under a build mismatch` in `e2e/tests/notifications.spec.ts` expected one
   `.session-bell-entry` but found none in Chromium during sweep `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` (browser run
