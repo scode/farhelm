@@ -10799,7 +10799,7 @@ mod tests {
                 state_dir.path(),
                 version,
                 super::release_payloads::test_support::test_ring(),
-                super::release_payloads::test_support::test_client(),
+                || Ok(super::release_payloads::test_support::test_client()),
             )
             .unwrap();
             (state_dir, payloads)
@@ -11002,7 +11002,7 @@ mod tests {
             // Production settings plus `no_proxy()`: without it an ambient
             // proxy variable would route this loopback fixture request off
             // the machine, which no test here may do.
-            super::release_payloads::test_support::test_client(),
+            || Ok(super::release_payloads::test_support::test_client()),
         )
         .unwrap();
         let service = service_with_payloads(&harness, backend.clone(), root.path(), payloads);

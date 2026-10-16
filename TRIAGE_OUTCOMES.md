@@ -14734,7 +14734,8 @@
   a download source reports the client-build error. `--payload-dir` and developer builds never attempt the build. Add a
   focused unit test that injects a failing client result and checks both the refusing source and the non-downloading
   arms. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/helm-start-without-ca-bundle.md`.
+- Execution: jj change `ypquprnnrvsqlrpsvvlnvtrutrxvplto`, bookmark `plan/helm-start-without-ca-bundle/01-lazy-client`;
+  draft PR https://github.com/scode/farhelm/pull/2116/changes.
 
 ## resume-docs-promise-newest-conversation.md
 

@@ -1,12 +1,14 @@
 //! Host-architecture-specific payload sources own release retrieval and
 //! materialization so the provisioning executor does not.
 //!
-//! Four sources exist: [`NoPayloads`] for an ordinary developer build
+//! Sources include [`NoPayloads`] for an ordinary developer build
 //! (D13), [`UnreleasedPayloads`] for a release-shaped build of main, which
 //! has no release to download (SPEC_impl.md "Version and skew"),
 //! [`DirectoryPayloads`] for an operator-staged directory
 //! (`--payload-dir`), and [`ReleasePayloadSource`] — a verified download
-//! over HTTP, which is what a release build uses by default (D2).
+//! over HTTP, which is what a release build uses by default (D2). If its HTTP
+//! client cannot be built, [`UnavailableReleasePayloads`] refuses provisioning
+//! when used without preventing the helm from serving its other operations.
 //! [`production_payloads`] is the one place that turns a
 //! [`PayloadSelection`] plus D13's release-build fact into the
 //! `Arc<dyn PayloadSource>` the rest of provisioning drives.
@@ -61,7 +63,7 @@ static ACTIVE_DIRECTORY_MATERIALIZATIONS: OnceLock<Mutex<HashMap<PathBuf, usize>
 /// provisioning to how they are obtained.
 ///
 /// `async` (D16): the download source performs network I/O and awaits a
-/// per-asset lock, and every source — including the two here that touch
+/// per-asset lock, and every source — including refusals that touch
 /// neither — implements the same signature so `prepare_payloads` never has
 /// to know which kind of source it is holding.
 ///
@@ -143,6 +145,27 @@ impl PayloadSource for UnreleasedPayloads {
              same commit",
             self.version
         )
+    }
+}
+
+/// Keep a download-client setup failure local to provisioning, not helm startup.
+/// The complete contextual error is retained for each later payload request;
+/// no alternate TLS policy or client is substituted after construction fails.
+struct UnavailableReleasePayloads {
+    reason: String,
+}
+
+impl std::fmt::Debug for UnavailableReleasePayloads {
+    /// Report the source identity; payload requests own the retained diagnostic.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("UnavailableReleasePayloads")
+    }
+}
+
+#[async_trait]
+impl PayloadSource for UnavailableReleasePayloads {
+    async fn path(&self, _payload: PayloadKind, _arch: PayloadArch) -> anyhow::Result<PathBuf> {
+        bail!("{}", self.reason)
     }
 }
 
@@ -1105,6 +1128,9 @@ pub(super) fn release_client() -> anyhow::Result<reqwest::Client> {
 /// `--release-base-url` selects a download source on either kind of build
 /// so tests, mirrors, and prerelease checks have a way in that does not
 /// require faking a release build.
+/// Client construction happens only for a download source. If it fails (a
+/// missing CA bundle, for example), the source refuses when provisioning uses
+/// it, so an unavailable outbound capability cannot take the whole helm down.
 ///
 /// `cwd` (F1, review round 3) is the directory a relative `--payload-dir`
 /// is spelled against — production wiring passes the real
@@ -1130,7 +1156,7 @@ pub(super) fn production_payloads(
         // could get wrong and stop shipping `CARGO_PKG_VERSION`.
         release_payloads::VERSION,
         RELEASE_KEY_RING,
-        release_client()?,
+        release_client,
     )
 }
 
@@ -1146,12 +1172,14 @@ pub(super) fn production_payloads(
 ///   test can produce a signature [`RELEASE_KEY_RING`] accepts. That the
 ///   shipped binary passes the real ring is covered separately, by the
 ///   ring's own oracle test.
-/// - `client`, because reqwest honours the ambient proxy variables: a
+/// - `client`, a factory because reqwest honours the ambient proxy variables: a
 ///   loopback fixture URL alone does not guarantee the socket stays on this
 ///   machine, and no test in this repository may mutate the environment to
-///   arrange that. Tests pass `release_client_builder().no_proxy()`;
+///   arrange that. Tests build through `release_client_builder().no_proxy()`;
 ///   production passes [`release_client`], and everything else about the
-///   client is shared so the two cannot drift.
+///   client is shared so the two cannot drift. The factory is called only after
+///   selecting a download source; its failure produces a refusing source rather
+///   than a startup error. Non-downloading sources never call it.
 ///
 /// `cwd` means exactly what it does on [`production_payloads`]; it is
 /// threaded through unchanged.
@@ -1171,7 +1199,7 @@ pub(super) fn production_payloads_with_key(
     cwd: &Path,
     version: impl Into<String>,
     ring: &'static [&'static str],
-    client: reqwest::Client,
+    client: impl FnOnce() -> anyhow::Result<reqwest::Client>,
 ) -> anyhow::Result<Arc<dyn PayloadSource>> {
     let version = version.into();
     // Only `Directory` can collide with the retired embedded-payloads cache,
@@ -1215,6 +1243,17 @@ pub(super) fn production_payloads_with_key(
         PayloadSelection::Release { base_url } => base_url,
         PayloadSelection::Default => default_release_base_url(&version)?,
     };
+    let client = match client() {
+        Ok(client) => client,
+        Err(error) => {
+            // Like the feedback and ntfy clients, say so at startup rather
+            // than staying silent until the first host is added or updated.
+            warn!(error = %format!("{error:#}"), "release downloads unavailable; adding or updating hosts will be refused until the helm restarts with CA certificates");
+            return Ok(Arc::new(UnavailableReleasePayloads {
+                reason: format!("{error:#}"),
+            }));
+        }
+    };
     // All release sources share one cache parent; `ReleasePayloadSource`
     // then keys a directory below it by version and base URL, so a fixture
     // or mirror URL can never read what a real release wrote.
@@ -1225,4 +1264,100 @@ pub(super) fn production_payloads_with_key(
         ring,
         client,
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Local and developer selections must not depend on TLS being available.
+    /// A panicking factory distinguishes lazy selection from a swallowed client
+    /// failure, including an explicit directory on a release-shaped build.
+    #[farhelm_testtrace::test]
+    fn non_downloading_sources_never_construct_the_release_client() {
+        let state = tempfile::tempdir().unwrap();
+        for (selection, release_build, version, expected) in [
+            (
+                PayloadSelection::Directory(state.path().join("local")),
+                false,
+                "1.2.3",
+                "DirectoryPayloads",
+            ),
+            (
+                PayloadSelection::Directory(state.path().join("local")),
+                true,
+                "1.2.3",
+                "DirectoryPayloads",
+            ),
+            (PayloadSelection::Default, false, "1.2.3", "NoPayloads"),
+            (
+                PayloadSelection::Default,
+                true,
+                "0.0.0-unreleased",
+                "UnreleasedPayloads",
+            ),
+        ] {
+            let source = production_payloads_with_key(
+                selection,
+                state.path(),
+                release_build,
+                state.path(),
+                version,
+                RELEASE_KEY_RING,
+                || panic!("a non-downloading source must not construct an HTTP client"),
+            )
+            .unwrap();
+            assert!(format!("{source:?}").starts_with(expected), "{source:?}");
+        }
+    }
+
+    /// A missing outbound capability cannot make payload wiring fail startup.
+    /// Both release selection paths instead retain the contextual refusal for
+    /// provisioning, with no second construction attempt on later requests.
+    #[farhelm_testtrace::test]
+    async fn release_client_failure_is_deferred_to_payload_requests() {
+        let state = tempfile::tempdir().unwrap();
+        for (selection, release_build) in [
+            (PayloadSelection::Default, true),
+            (
+                PayloadSelection::Release {
+                    base_url: "https://downloads.invalid/".parse().unwrap(),
+                },
+                false,
+            ),
+            (
+                PayloadSelection::Release {
+                    base_url: "https://downloads.invalid/".parse().unwrap(),
+                },
+                true,
+            ),
+        ] {
+            let attempts = std::cell::Cell::new(0);
+            let source = production_payloads_with_key(
+                selection,
+                state.path(),
+                release_build,
+                state.path(),
+                "1.2.3",
+                RELEASE_KEY_RING,
+                || {
+                    attempts.set(attempts.get() + 1);
+                    Err(anyhow::anyhow!("missing CA sentinel")
+                        .context("building the release download HTTP client"))
+                },
+            )
+            .expect("an unavailable download client must not prevent helm startup");
+            for _ in 0..2 {
+                let error = source
+                    .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+                    .await
+                    .unwrap_err();
+                assert_eq!(
+                    format!("{error:#}"),
+                    "building the release download HTTP client: missing CA sentinel"
+                );
+            }
+            assert_eq!(attempts.get(), 1);
+        }
+    }
 }
