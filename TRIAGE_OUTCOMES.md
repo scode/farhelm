@@ -14006,7 +14006,8 @@
   variables from the child `Command` only, never from the test process. If more is needed, stop and return the item.
 - Completion criteria: fixture Git children never inherit `GIT_CONFIG`, so the include fixture writes only to its own
   repository's config, and the existing discovery tests pass. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/rust-test-portability.md`.
+- Execution: complete in jj change `wrplolpstqpz`, bookmark `plan/rust-test-portability/04-git-fixtures`,
+  [PR #2099](https://github.com/scode/farhelm/pull/2099/changes).
 
 ## setup-advice-omits-environment-selected-state-directory.md
 
