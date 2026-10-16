@@ -5867,7 +5867,8 @@ mod tests {
     /// keeps it, removes an unmarked one, and skips an absent one; `stop`
     /// stops a running unit before private socket cleanup, and still cleans
     /// up tmux for an inactive unit. Exact absence is a skip, other tmux
-    /// errors fail, and an absent socket needs no client binary; `disable` passes
+    /// errors fail, an accepted stop removes its socket, and an absent socket
+    /// needs no client binary; `disable` passes
     /// `--runtime` exactly when the backend links
     /// units for this boot only; `remove_directory` refuses a path that is
     /// itself a symlink and leaves both the link and its target, removes the
@@ -6103,9 +6104,6 @@ mod tests {
         // remote shell with exact diagnostics, including a path that itself
         // contains the tolerated phrase, so substring matching cannot pass.
         let socket = root.path().join("no server running on fixture.sock");
-        tokio::fs::write(&socket, b"fixture socket placeholder")
-            .await
-            .unwrap();
         let tmux = lib.join("tmux");
         for (diagnostic, absent) in [
             (format!("no server running on {}", socket.display()), true),
@@ -6124,6 +6122,11 @@ mod tests {
                 false,
             ),
         ] {
+            // Every case must reach the client branch independently: a prior
+            // accepted stop now removes the socket instead of leaving it stale.
+            tokio::fs::write(&socket, b"fixture socket placeholder")
+                .await
+                .unwrap();
             write_fake_tool(
                 &lib,
                 "tmux",
@@ -6138,8 +6141,16 @@ mod tests {
                 .await;
             if absent {
                 assert!(matches!(result.unwrap(), ActionOutcome::Skipped(_)));
+                assert!(
+                    !socket.exists(),
+                    "an excused stop must remove its stale socket"
+                );
             } else {
                 assert!(result.unwrap_err().rendered().contains("Permission denied"));
+                assert!(
+                    socket.exists(),
+                    "an unexcused failure must preserve its socket"
+                );
             }
         }
         tokio::fs::write(&active, "active\n").await.unwrap();
@@ -6172,7 +6183,7 @@ mod tests {
                 "private-tmux-kill",
             ]
         );
-        tokio::fs::remove_file(&socket).await.unwrap();
+        assert!(!socket.exists(), "a successful stop must remove its socket");
         tokio::fs::remove_file(&tmux).await.unwrap();
         tokio::fs::write(&active, "inactive\n").await.unwrap();
         assert!(
@@ -8949,7 +8960,9 @@ mod tests {
     /// An inactive process-only service can leave its ended pane alive even
     /// after its unit is removed. Retry must end that private server through
     /// the production SSH stop path before teardown, then tolerate another
-    /// retry with no server or private executable left.
+    /// retry with no server or private executable left. Observe the server's
+    /// process as well as its socket: unlinking the socket alone must not hide
+    /// a server that never exited.
     #[farhelm_testtrace::test]
     async fn uninstall_retry_ends_tmux_after_systemd_forgets_the_inactive_unit() {
         if !user_manager_available().await || !ssh_available("localhost").await {
@@ -9064,20 +9077,41 @@ mod tests {
             pane.stdout, b"1\n",
             "the retained ended pane must survive process-only stop and reload"
         );
+        let pid = tokio::process::Command::new(&tmux)
+            .arg("-S")
+            .arg(&socket)
+            .args(["display-message", "-p", "#{pid}"])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            pid.status.success(),
+            "fixture server must report its PID: {pid:?}"
+        );
+        let pid: i32 = std::str::from_utf8(&pid.stdout)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(
+            pid > 0 && alive(pid),
+            "fixture server must still be alive before stop"
+        );
         assert!(matches!(
             backend.stop(&target, &unit, &tmux, &socket).await.unwrap(),
             ActionOutcome::Completed
         ));
-        wait_private_tmux_gone(&tmux, &socket).await;
-        // tmux can leave a stale socket; use the real client for that repeat,
-        // then remove only this fixture's socket to model a lib-gone retry.
+        wait_for_exit(pid, "uninstall must end its owned private tmux process").await;
+        assert!(
+            !socket.exists(),
+            "stop must remove the stale socket before lib removal"
+        );
+        // No manual socket removal: a retry must work after the step which
+        // deletes the private client, even if the helm restarted in between.
         assert!(matches!(
             backend.stop(&target, &unit, &tmux, &socket).await.unwrap(),
             ActionOutcome::Skipped(_)
         ));
-        if socket.exists() {
-            tokio::fs::remove_file(&socket).await.unwrap();
-        }
         assert!(matches!(
             backend
                 .stop(&target, &unit, &root.path().join("removed-tmux"), &socket)
