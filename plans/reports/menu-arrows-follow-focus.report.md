@@ -84,3 +84,46 @@ supplied the complete task and passed.
 The fresh wording reader passed after replacing vague rapid-arrow wording with a concrete explanation. Implementation
 stayed local; only the required reviews were delegated. Private accounting retains external per-turn counters, with
 exact model attribution from those counters, native-review usage and executor usage unavailable.
+
+### Landing
+
+Landed on its own in round 73, as #2176, unchanged from what the report describes.
+
+#### What landed since the PR was based, and whether it interacted
+
+Nothing outside the plan queue reached main between this PR's base and its landing, so the landing rebase was clean and
+the PR's files are byte-identical to the ones the executor tested and reviewed. The plans landed earlier on 2026-10-16
+were already in its base: the trash confirmation fix, a set of fixes to the new-session dialog, and the helm retry
+change. I read the PR against them, and a fresh-context reviewer did the same independently. None of them touches menu
+focus, and neither review found an interaction.
+
+The reviewer also confirmed that all four menus (session row, host row, app bar, templates) now go through the new focus
+rule, with no menu left on the old one. Fast arrow presses stay protected, because only the latest pending arrow
+destination is remembered, and the fix forgets it only once focus has landed there. The fix matches the narrower one the
+maintainer accepted and claims no more: the code, the commit message and the changelog entry all scope it to after
+keyboard navigation has settled.
+
+#### Fixes made during the landing
+
+None.
+
+#### Something the report states that is not yet true
+
+The report says the broader design, for focus moved while arrow presses are still landing, "is already tracked
+separately as a near-term TODO". The maintainer asked for that entry when answering this plan's question, and it was
+written, but at this landing it is still a draft PR, [#2175](https://github.com/scode/farhelm/pull/2175/changes), which
+adds only that TODO entry and lands once the maintainer approves it. Until then the remaining case is recorded in the
+plan's Decisions, the code comments and this report, since this PR removed the review feedback item.
+
+#### Checks
+
+- Run now: none. Main gained only plan-queue bookkeeping since the base.
+- Reused: the menu unit run `d6265463-62c1-4ca2-b616-8a920c182f2e` and the browser run of the menu keyboard cases on
+  Chromium and WebKit `cf7036ff-d842-4fe4-8ad6-725f209eac06` (34 passed), plus the executor's clippy, desktop compile,
+  builds, formatting, test-sleep, changelog, agent-instruction and Markdown checks. The runtime runs were recorded
+  before the executor rebased onto the trash confirmation and helm retry changes. The menu files have not changed since,
+  and neither review found that those changes touch menu focus, so the runs still cover this change.
+- Skipped: everything the report skipped (the full browser and workspace suites, desktop runtime, installer and
+  provisioning checks, CI), for the reasons it gives.
+
+Apart from the TODO statement above, nothing in the executor's report became untrue at landing.
