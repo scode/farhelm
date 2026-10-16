@@ -2,8 +2,11 @@
  * is insufficient evidence: the program may receive the same click and open
  * its own tab. The real fake-agent input scanner acknowledges completed mouse
  * reports after an ordered sync cue, avoiding an absence-by-sleep assertion.
+ * Preference restoration is armed before writes and independent of session
+ * cleanup, since every later spec in the stack observes the same link policy.
  */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import type { Page } from "@playwright/test";
 import path from "node:path";
 import { createSession, cleanupSession, patchPreferences, readPreferences } from "./helpers/fleet";
@@ -32,17 +35,20 @@ test("mouse-reporting drags never open web or file links", async ({ page, reques
     (window as any).__linkOpens = [];
     window.open = ((url: string) => { (window as any).__linkOpens.push(String(url)); return null; }) as typeof window.open;
   });
-  await patchPreferences(request, { terminal_link_click: "both" });
-  const session = await createSession(request, { title: `link-drag-${Date.now()}`, cwd: "/tmp", invocation });
+  let sessionId: string | undefined;
+  let bodyFailed = false;
   let transfers = 0;
-  await page.route(`**/api/sessions/${session.id}/files/stat`, route => route.fulfill({
-    json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
-  }));
-  await page.route(`**/api/sessions/${session.id}/files/download`, route => {
-    transfers++;
-    return route.fulfill({ status: 403, body: "fixture transfer observed" });
-  });
   try {
+    await patchPreferences(request, { terminal_link_click: "both" });
+    const session = await createSession(request, { title: `link-drag-${Date.now()}`, cwd: "/tmp", invocation });
+    sessionId = session.id;
+    await page.route(`**/api/sessions/${session.id}/files/stat`, route => route.fulfill({
+      json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
+    }));
+    await page.route(`**/api/sessions/${session.id}/files/download`, route => {
+      transfers++;
+      return route.fulfill({ status: 403, body: "fixture transfer observed" });
+    });
     await page.goto("/");
     await attachSession(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
@@ -89,11 +95,16 @@ test("mouse-reporting drags never open web or file links", async ({ page, reques
       await page.evaluate(() => { (window as any).__linkOpens = []; });
       transfers = 0;
     }
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await page.mouse.up();
-    await page.keyboard.up("Control");
-    await cleanupSession(request, session.id);
-    await patchPreferences(request, { terminal_link_click: null });
+    await cleanupOwnedSteps(bodyFailed, [
+      ["mouse button", () => page.mouse.up()],
+      ["Control key", () => page.keyboard.up("Control")],
+      ["session", () => sessionId && cleanupSession(request, sessionId)],
+      ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+    ]);
   }
 });
 
@@ -313,9 +324,12 @@ test("terminal link ownership opens once and preserves program clicks in all mou
     (window as any).__linkOpens = [];
     window.open = ((url: string) => { (window as any).__linkOpens.push(String(url)); return null; }) as typeof window.open;
   });
-  await patchPreferences(request, { terminal_link_click: null });
-  const session = await createSession(request, { title: `link-ownership-${Date.now()}`, cwd: "/tmp", invocation });
+  let sessionId: string | undefined;
+  let bodyFailed = false;
   try {
+    await patchPreferences(request, { terminal_link_click: null });
+    const session = await createSession(request, { title: `link-ownership-${Date.now()}`, cwd: "/tmp", invocation });
+    sessionId = session.id;
     await page.goto("/");
     await attachSession(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
@@ -390,9 +404,14 @@ test("terminal link ownership opens once and preserves program clicks in all mou
     // Reload seeds the shared choice again, rather than retaining a device copy.
     await page.reload();
     await expect.poll(() => page.evaluate(() => (window as any).farhelmTerminalLinkClickMode)).toBe("program");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await cleanupSession(request, session.id);
-    await patchPreferences(request, { terminal_link_click: null });
+    await cleanupOwnedSteps(bodyFailed, [
+      ["session", () => sessionId && cleanupSession(request, sessionId)],
+      ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+    ]);
   }
 });
 
@@ -405,9 +424,12 @@ test("link interception keeps forced selection and withheld drags local", async 
     (window as any).__linkOpenCount = 0;
     window.open = (() => { (window as any).__linkOpenCount++; return null; }) as typeof window.open;
   });
-  await patchPreferences(request, { terminal_link_click: null });
-  const session = await createSession(request, { title: `link-drag-${Date.now()}`, cwd: "/tmp", invocation });
+  let sessionId: string | undefined;
+  let bodyFailed = false;
   try {
+    await patchPreferences(request, { terminal_link_click: null });
+    const session = await createSession(request, { title: `link-drag-${Date.now()}`, cwd: "/tmp", invocation });
+    sessionId = session.id;
     await page.goto("/");
     await attachSession(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
@@ -459,8 +481,14 @@ test("link interception keeps forced selection and withheld drags local", async 
     await page.keyboard.up("Shift");
     await expect.poll(() => page.evaluate(() => (window as any).__farhelmTerm.getSelection())).not.toBe("");
     expect(await reports()).toBe(programReports);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await cleanupSession(request, session.id);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["session", () => sessionId && cleanupSession(request, sessionId)],
+      ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+    ]);
   }
 });
 
@@ -475,9 +503,12 @@ for (const mode of ["drag", "legacy"] as const) {
     await page.addInitScript(() => {
       window.open = (() => null) as typeof window.open;
     });
-    await patchPreferences(request, { terminal_link_click: null });
-    const session = await createSession(request, { title: `link-overlap-${Date.now()}`, cwd: "/tmp", invocation });
+    let sessionId: string | undefined;
+    let bodyFailed = false;
     try {
+      await patchPreferences(request, { terminal_link_click: null });
+      const session = await createSession(request, { title: `link-overlap-${Date.now()}`, cwd: "/tmp", invocation });
+      sessionId = session.id;
       await page.goto("/");
       await attachSession(page, session.id);
       await waitForTermText(page, "FAKE-AGENT READY");
@@ -521,10 +552,16 @@ for (const mode of ["drag", "legacy"] as const) {
       const finalOrdinary = await cell(page, "PLAIN", false);
       await page.mouse.click(finalOrdinary.x, finalOrdinary.y);
       expect(await reports()).toBe(beforeOverlap + 4);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
     } finally {
-      await page.mouse.up({ button: "left" });
-      await page.mouse.up({ button: "right" });
-      await cleanupSession(request, session.id);
+      await cleanupOwnedSteps(bodyFailed, [
+        ["left button", () => page.mouse.up({ button: "left" })],
+        ["right button", () => page.mouse.up({ button: "right" })],
+        ["session", () => sessionId && cleanupSession(request, sessionId)],
+        ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+      ]);
     }
   });
 }
@@ -537,9 +574,12 @@ test("program-only link clicks do nothing without mouse reporting", async ({ pag
     (window as any).__linkOpenCount = 0;
     window.open = (() => { (window as any).__linkOpenCount++; return null; }) as typeof window.open;
   });
-  await patchPreferences(request, { terminal_link_click: "program" });
-  const session = await createSession(request, { title: `link-no-mouse-${Date.now()}`, cwd: "/tmp", invocation });
+  let sessionId: string | undefined;
+  let bodyFailed = false;
   try {
+    await patchPreferences(request, { terminal_link_click: "program" });
+    const session = await createSession(request, { title: `link-no-mouse-${Date.now()}`, cwd: "/tmp", invocation });
+    sessionId = session.id;
     await page.goto("/");
     await attachSession(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
@@ -557,8 +597,13 @@ test("program-only link clicks do nothing without mouse reporting", async ({ pag
       expect(await reports()).toBe(0);
       expect(await page.evaluate(() => (window as any).__linkOpenCount)).toBe(count);
     }
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await cleanupSession(request, session.id);
-    await patchPreferences(request, { terminal_link_click: null });
+    await cleanupOwnedSteps(bodyFailed, [
+      ["session", () => sessionId && cleanupSession(request, sessionId)],
+      ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+    ]);
   }
 });

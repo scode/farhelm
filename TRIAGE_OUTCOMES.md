@@ -15089,7 +15089,8 @@
 - Completion criteria: in every test in this spec that changes `terminal_link_click`, a failure in session creation or
   cleanup still restores the preference, and cleanup errors are still reported. Run the changed spec on Chromium and
   WebKit through the recorder. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `oytwxrnplotrtsrpztkyzllmossyqyqv`, bookmark
+  `plan/browser-test-cleanup/07-link-preferences`, [PR #2144](https://github.com/scode/farhelm/pull/2144/changes).
 
 ## repository-picker-selection-moves-offscreen.md
 
