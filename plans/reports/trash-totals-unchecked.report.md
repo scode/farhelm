@@ -52,3 +52,42 @@ full artifact was read and checked against the implementation and relevant speci
 validation was performed separately by the executor. The reviewer received the full outcome and test-authoring
 checklist. A separate gpt-6.1-sol medium wording cold read passed. The documentation pass covers evidence versus
 deletion authority, distinct diagnostic counting and the regression's purpose. No unresolved finding remains.
+
+### Landing
+
+Landed as #2118, the sixth of the round's seven plans, tested stacked with the others on main.
+
+#### Review
+
+An independent fresh-context review found nothing blocking: every mix of checked, unchecked and unsized entries reads
+accurately, unavailable hosts are unchanged, the delete confirmation stays consistent with the permanent-loss warning
+from #2080, and no browser test pinned the old totals.
+
+#### Fixes made while landing
+
+The triage ledger's Execution field gained its "complete" state and a linked PR, like the other entries, and the
+changelog fragment now reads: each host's summary counts the archives Farhelm could not check and marks its size as
+partial.
+
+#### Left as is
+
+Possible follow-ups outside the plan's limits: the global header total does not reuse the new shared sum, so on a host
+over the 10,000-entry limit unchecked entries would not mark it partial; the trash button's tooltip says "empty" when
+the only entries are unchecked ones.
+
+#### Checks
+
+Run on all seven of this round's plans stacked on main (managed-checkout-row-accessibility, download-long-name-copies,
+save-template-ime-escape, helm-start-without-ca-bundle, stopped-session-launch-error, trash-totals-unchecked,
+checkout-override-error-wording), with every landing fix in:
+
+- `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (301 delays, none missing a
+  reason); `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the UI crate's
+  clippy with the desktop feature and `cargo check -p farhelm-desktop`.
+- Through the recorder, after rebuilding the CLI: the protocol, helm and supervisor packages in full with pinned tmux,
+  run `4256456b-4340-4e64-86a5-85aa71206a7a`: 2395 passed; the UI crate with the desktop feature, run
+  `5d0c7c3a-4d29-4a92-a8e2-a1eba6893786`: 656 passed.
+- The JS harness (257 passed) and the website build.
+- The github-checkouts, templates, trash-dialog, sidebar, provisioning and tooltip-coverage specs on Chromium and
+  WebKit, run `7f4cef76-eea8-4b05-9a31-1260bb14498a`: 456 passed.
+- Not run: the CLI's end-to-end targets and other browser specs; no PR in this round changes them.

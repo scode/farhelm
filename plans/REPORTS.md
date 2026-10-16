@@ -24,3 +24,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`save-template-ime-escape`](reports/save-template-ime-escape.report.md) landed 2026-10-16 in #2115: Escape during input-method composition no longer closes the save-template panel and its draft (gated)
 - [`helm-start-without-ca-bundle`](reports/helm-start-without-ca-bundle.report.md) landed 2026-10-16 in #2116: A Linux helm without CA certificates starts, with downloads refusing, instead of exiting at startup (gated)
 - [`stopped-session-launch-error`](reports/stopped-session-launch-error.report.md) landed 2026-10-16 in #2117: A cached launch error no longer overrides a session's recorded stopped status (gated)
+- [`trash-totals-unchecked`](reports/trash-totals-unchecked.report.md) landed 2026-10-16 in #2118: A host's trash totals are marked partial or unknown when unchecked entries exist, instead of showing 0 B (gated)
