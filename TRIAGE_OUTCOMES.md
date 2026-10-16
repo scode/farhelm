@@ -15144,7 +15144,8 @@
 - Completion criteria: one failing cleanup no longer skips the other session's deletion or the preference reset, and the
   failure is still reported. Run `sounds.spec.ts` on Chromium and WebKit through the recorder. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `zpqrstxpxkrunlruotvstvsrnoyqzzsu`, bookmark
+  `plan/browser-test-cleanup/08-sound-cleanup`, [PR #2145](https://github.com/scode/farhelm/pull/2145/changes).
 
 ## token-rotation-test-invalid-apfs-name.md
 
