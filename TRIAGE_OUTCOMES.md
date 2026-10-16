@@ -15206,3 +15206,81 @@
   no judgement about the finding.
 - Completion criteria: remove this feedback file and its index entry.
 - Execution: complete; feedback file and index entry removed in the same change that recorded this entry.
+
+## trash-confirmation-answer-consumes-new-selection.md
+
+- Outcome: `fix code`.
+- Assessment: mechanism confirmed on current main; reachability of the event sequence unverified. In the trash dialog,
+  each confirmation band's "delete permanently" calls one shared submit handler that takes no argument and deletes
+  whatever confirmation is current when it runs (`crates/farhelm-ui/src/list/trash.rs`, `ConfirmBand` and `submit`).
+  Opening another host's "delete all on …" or the global "delete all" replaces that current confirmation. So a click
+  delivered to an old band after the confirmation was replaced would delete the new selection, which the user never
+  confirmed. Nobody has shown a browser or desktop event sequence that delivers such a stale click; the replaced band
+  unmounts on the next render. SPEC.md (trash dialog) requires per-host and global delete to ask once, naming the
+  confirmed hosts, so deleting a different set than the one named is outside the specification.
+- Decision: on 2026-10-16 the user asked to triage this as `fix code` if it can be fixed easily at the GUI level, which
+  it can: bind the answer to the confirmation it was shown for.
+- Completion criteria: a confirmation band's submit carries the confirmation it rendered, and the handler deletes only
+  when that still equals the current confirmation (otherwise does nothing). GUI-only change in `trash.rs`, with a
+  regression test showing that a stale band's submit after replacement deletes nothing. Complexity gate: if binding
+  needs anything beyond the trash dialog (helm or supervisor changes), stop and return the item. Remove the feedback
+  file and its index entry.
+- Execution: pending.
+
+## menu-request-overrides-independent-focus.md
+
+- Outcome: `fix code`.
+- Assessment: mechanism confirmed on current main; the trigger was not reproduced. When an arrow key is pressed in an
+  open session row menu, the next item is computed from the position of the last keyboard step the menu itself
+  requested, ahead of the actually focused item (`crates/farhelm-ui/src/menu_panel.rs`, `menu_step_origin`). The item
+  focus handlers (`crates/farhelm-ui/src/list/row.rs`) update only the focused position and never clear that request. So
+  if focus moves inside the open menu without a keyboard step (a pointer press that focuses an item without activating
+  it, or a screen reader moving focus), the next arrow steps from the old position, not from the focused item. That can
+  move focus to Delete unexpectedly; deleting still needs Enter or Space on it. The request precedence exists to fix a
+  real race (an older in-flight focus request landing after a newer key press), so the fix must keep that. SPEC_impl.md
+  (row menu "Keyboard") says arrows step from the current command, so this is outside the specification.
+- Decision: on 2026-10-16 the user asked to triage this as `fix code` if it can be fixed easily at the GUI level. It
+  can, but not as trivially as the trash item: the fix has to tell apart the menu's own delayed focus results from
+  independent focus moves.
+- Completion criteria: after focus moves to a menu item independently (not as the result of a request the menu itself
+  made), the next arrow steps from that item; a burst of arrow presses still advances once per press. Candidate
+  approaches: clear the pending request on a pointer press inside the panel, and/or on a focus-in at a position the menu
+  has no in-flight request for. Regression tests for both the independent-move case and the existing burst race.
+  Complexity gate: confined to `menu_panel.rs` and the menu wiring in the rows that use it; if it needs a new
+  cross-component focus mechanism or regresses the burst behaviour, stop and return the item. Remove the feedback file
+  and its index entry.
+- Execution: pending.
+
+## checkout-retry-reuses-fresh-helm-host-namespace.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed from code on current main; not reproduced end to end. When an agent asks for a new session in a
+  fresh managed checkout on another host, the helm derives the retry key it sends to the target supervisor from the
+  asking host's numeric registry row ID, the asking session ID and the agent's raw key
+  (`crates/farhelm-helm/src/agent_requests.rs`, `asker_scoped_intent_key`). The target stores a permanent reservation
+  under that opaque key and checks only the key and the request digest; it knows nothing about which helm or host asked
+  (`crates/farhelm-supervisor/src/service/core.rs`). Row IDs are SQLite AUTOINCREMENT values local to one database, and
+  the helm has no durable identity of its own. So after the registry is lost and the target is re-registered with a
+  fresh one (SPEC.md, "Topology"), a different host given the same row ID can present A's exact key, session ID and
+  request, and get A's earlier answer back. If A's approved attempt was interrupted before its session started, it can
+  instead relaunch A's approved launch on the target with no new approval. The helm does not verify the forwarded
+  session ID, but session IDs are random UUIDs, so this needs a lying or compromised supervisor on B that knows A's
+  tuple, not an honest collision. B cannot choose new launch contents. SPEC.md limits the managed-checkout retry
+  exemption to "the session, on the host, that asked"; nothing accepts the cross-registry case. The related
+  `checkout-recovery-requester-not-bound-to-host.md` outcome fixed collisions within one registry only. Bucket note: the
+  narrow preconditions and the small gain make `highest` debatable, but the outcome does not depend on the bucket.
+  Unverified: whether the target's display name after recovery matches the original host name in the request digest, and
+  that re-provisioning leaves the target's reservations untouched (reasoned from the specification, not traced).
+- Decision: on 2026-10-16 the user asked to triage this as `fix code` if it is clearly a bug that needs no judgement and
+  is reasonably straightforward to fix. It is: the replay breaks a rule SPEC.md states, and the fix is small and
+  confined to the helm.
+- Completion criteria: give each helm database a durable random namespace and include it in the scoped retry key, so
+  keys minted by different registries never match. Helm-only; no wire-protocol or supervisor change, since the target
+  treats the key as opaque. A helm.db schema migration adds the namespace. To avoid re-asking for in-flight retries
+  after upgrade, existing databases may keep a null namespace (hashing as today), with only newly created databases
+  minting one; a recovered registry is always a new database. Do not swap the row ID for the host's install identity:
+  approvals deliberately follow the host entry across adoption (SPEC.md). Update the key unit test and expected-key
+  assertions, and add a regression test showing that the same row ID, session ID, raw key and request under two
+  different helm databases produce different scoped keys. Complexity gate: if this needs supervisor or wire changes, or
+  changes how approvals follow a host entry, stop and return the item. Remove the feedback file and its index entry.
+- Execution: pending.
