@@ -51,8 +51,10 @@ impl Default for Settings {
     }
 }
 
-/// One explicit save. Null/omitted token preserves it; empty clears it; any
-/// other string replaces it. Debug is deliberately absent from secret-bearing types.
+/// One explicit save. A null/omitted token preserves it only when the server's
+/// scheme, host and effective port stay the same; changing origin clears it.
+/// Empty clears it and any other string replaces it regardless of origin.
+/// Debug is deliberately absent from secret-bearing types.
 #[derive(Clone, Deserialize, Serialize)]
 pub struct SaveSettings {
     pub enabled: bool,

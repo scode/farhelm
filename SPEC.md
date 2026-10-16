@@ -1191,24 +1191,25 @@ they reload, like the host choices. Sounds has three device switches (see Status
 has an off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (min,
 low, default, high, urgent; default default). These are explicitly saved helm configuration, shared by every client,
 outside the preference row. Save refusals appear inline. The stored token is never returned: the form shows whether one
-exists and allows replacing or clearing it. **Send test** uses the saved configuration, even while disabled, and reports
-success or failure inline. The dialog also holds the explicitly saved all-hosts checkout folder and, below it, a
-monospace multi-line post-clone command field (see [Managed checkouts](#managed-checkouts)). The folder's help explains
-expansion on each host, first-use folder creation, and that command-line host overrides keep their folder. The command's
-help explains that it runs in each new checkout on its host, after cloning and before the agent starts, that changes
-affect future checkouts only, and that command-line host overrides keep their command. The installed desktop app's
-dialog also has a switch for installing updates automatically (see
-[Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of that app
-installation, kept with the app rather than by the helm, and a browser never shows it. The two host confirmation choices
-apply to every host and client of this helm; existing controls with a natural place in the main UI stay there. No client
-keeps its own copy: every client reads the helm's preference once after authenticating and writes it on change, so a
-browser tab and the desktop app open in the same order and on the same session. Per-client persistence — browser
-storage, a desktop state file, anything that lets two clients remember different answers — is not wanted for these
-shared preferences, including welcome-card dismissal (sidebar width, terminal text size and sound switches, by contrast,
-are deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm for no
-particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by
-the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
-`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
+exists and allows replacing or clearing it. Changing to another server clears a saved token unless a new one is entered,
+and the form says so before saving. **Send test** uses the saved configuration, even while disabled, and reports success
+or failure inline. The dialog also holds the explicitly saved all-hosts checkout folder and, below it, a monospace
+multi-line post-clone command field (see [Managed checkouts](#managed-checkouts)). The folder's help explains expansion
+on each host, first-use folder creation, and that command-line host overrides keep their folder. The command's help
+explains that it runs in each new checkout on its host, after cloning and before the agent starts, that changes affect
+future checkouts only, and that command-line host overrides keep their command. The installed desktop app's dialog also
+has a switch for installing updates automatically (see [Installation and updates](#installation-and-updates)); unlike
+the host choices it is a setting of that app installation, kept with the app rather than by the helm, and a browser
+never shows it. The two host confirmation choices apply to every host and client of this helm; existing controls with a
+natural place in the main UI stay there. No client keeps its own copy: every client reads the helm's preference once
+after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on the
+same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients remember
+different answers — is not wanted for these shared preferences, including welcome-card dismissal (sidebar width,
+terminal text size and sound switches, by contrast, are deliberately per device; see Session list, Terminal experience
+and Status). A client that asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions
+may carry an optional parent reference usable by the API, but parentage does not nest the list and implies nothing about
+VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create`
+and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 240px and 600px, with 340px as the default. Double-click
 the edge to reset it, or focus the separator and use Left and Right to step by 10px. Its width is remembered per device,
