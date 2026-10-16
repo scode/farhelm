@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`brick-test-feedback-evidence`](reports/brick-test-feedback-evidence.report.md) landed 2026-10-16 in #2112: The release brick test keeps the final guest when failed feedback checks' exported evidence is missing (gated)
 - [`managed-checkout-row-accessibility`](reports/managed-checkout-row-accessibility.report.md) landed 2026-10-16 in #2113: Full-size session rows for managed checkouts expose the working folder and trash note to screen readers (gated)
 - [`download-long-name-copies`](reports/download-long-name-copies.report.md) landed 2026-10-16 in #2114: A second desktop download of a file with a near-limit name shortens the stem so the numbered copy fits (gated)
 - [`save-template-ime-escape`](reports/save-template-ime-escape.report.md) landed 2026-10-16 in #2115: Escape during input-method composition no longer closes the save-template panel and its draft (gated)
