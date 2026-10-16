@@ -14461,7 +14461,8 @@
   evidence a failed P1 still cleans up normally. Extend the lost-evidence regression to the failed and unavailable
   statuses; run `python3 releasing/mac-vm-test/test_brick_test.py` (the affected cases). Remove the feedback file and
   its index entry.
-- Execution: planned in `plans/queue/brick-test-feedback-evidence.md`.
+- Execution: jj change `vynsvqowvysxmsplpwkupkxkuutwnvxm`, bookmark
+  `plan/brick-test-feedback-evidence/01-evidence-check`, [PR #2112](https://github.com/scode/farhelm/pull/2112/changes).
 
 ## paste-guide-overstates-control-byte-protection.md
 

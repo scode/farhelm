@@ -200,10 +200,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`custom-permission-model-choice-erases-draft.md`](custom-permission-model-choice-erases-draft.md) — Choosing a model
   or re-selecting the same agent can erase unfinished custom permission flags.
 
-- [`failed-feedback-cleanup-loses-evidence.md`](failed-feedback-cleanup-loses-evidence.md) — Cleanup can delete the
-  final test guest after failed feedback checks even when its exported evidence is missing; live evidence loss remains
-  conditional.
-
 - [`save-template-composing-escape-discards-draft.md`](save-template-composing-escape-discards-draft.md) — Cancelling an
   input-method candidate can close the save-template panel and lose its unsaved name and checkbox choices.
 
