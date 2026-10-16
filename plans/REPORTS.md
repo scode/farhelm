@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`stopped-session-launch-error`](reports/stopped-session-launch-error.report.md) landed 2026-10-16 in #2117: A cached launch error no longer overrides a session's recorded stopped status (gated)
 - [`trash-totals-unchecked`](reports/trash-totals-unchecked.report.md) landed 2026-10-16 in #2118: A host's trash totals are marked partial or unknown when unchecked entries exist, instead of showing 0 B (gated)
 - [`checkout-override-error-wording`](reports/checkout-override-error-wording.report.md) landed 2026-10-16 in #2119: A checkout failure caused by a per-host folder override names that override instead of pointing at Settings (gated)
 - [`rust-test-portability`](reports/rust-test-portability.report.md) landed 2026-10-16 in #2093, #2094, #2097, #2099, #2101, #2103: Rust tests stop failing on macOS temp paths and APFS names, wait for real completion, keep Git config out of fixtures, and the test-state sweep cannot hang (6 outcomes, each gated)
