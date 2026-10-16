@@ -45,3 +45,37 @@ The required fresh-context gpt-6.1-sol high source review reported no findings. 
 complexity gate and test-authoring contract, and separately passed both focused cleanup regressions. The commit and PR
 wording passed its independent cold read. A separate report cold read checks this report before delivery. Implementation
 and investigation stayed with the executor; no workhorse was used.
+
+### Landing
+
+Landed as #2112, last of the round's nine plans, tested stacked with the others on main.
+
+#### Review
+
+An independent fresh-context review found nothing blocking. The evidence-hash check moved into a shared helper with the
+same exceptions and limits; cleanup now counts a failed or unavailable feedback check as retained only when its recorded
+hashes still match, refusing before any guest is touched otherwise. Every recorded result has carried hashes since
+before this check existed, and the test fails without the fix.
+
+#### Checks
+
+Run on all nine of this round's plans stacked on main (terminal-link-safety, ntfy-token-server-change,
+remote-uninstall-fixes, update-failure-reporting, docs-accuracy-fixes, host-picker-dotted-i,
+setup-advice-state-directory, copy-guidance-resize, brick-test-feedback-evidence), with every landing fix in:
+
+- `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (301 delays, none missing a
+  reason); `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the UI crate's
+  clippy with the desktop feature and `cargo check -p farhelm-desktop`; the brick-test tooling's own test.
+- Through the recorder: the protocol and helm packages in full with pinned tmux, run
+  `6352fad3-a3b1-48dc-9884-3efc17ee03c6`: 1258 passed; the CLI's own unit tests, run
+  `0e1855d7-6f43-4da7-8a9a-495936ae565e`: 171 passed; the UI crate with the desktop feature, run
+  `513addbb-2505-4c54-bc07-2ac2ec06713b`: 655 passed.
+- The JS harness (257 passed) and the website build.
+- The terminal-link-clicks, terminal-links, terminal-files, ntfy-settings, provisioning, settings and tooltip-coverage
+  specs on Chromium and WebKit, run `97a26936-2b7b-42a5-af59-8f0fdb0b9d78`: 208 passed, 2 failed. Both failures were the
+  clipped-disclosure test pinning the refusal's old layering after the quick switcher closed (see terminal-link-safety).
+  After that expectation was fixed, the terminal-link-clicks spec on both engines, run
+  `a698ea79-451d-4dd4-87f5-24ef1d4b1cad`: 16 passed. An intermediate run, `6113fd52-60bf-4730-ae85-5e9dc2e90d46`, failed
+  on WebKit only because the first corrected expectation assumed Chromium's behavior.
+- Not run: the supervisor package and the CLI's end-to-end targets, which no PR in this round changes; other browser
+  specs.
