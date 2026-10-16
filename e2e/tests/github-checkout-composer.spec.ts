@@ -122,7 +122,9 @@ async function unaccepted(route: Route) {
 /** Inline setup must refresh the same launcher's discovery and failed preview.
  * The real supervisor scans a local Git fixture; a greeted, unchanging feed
  * prevents the revision watcher from supplying the refresh under test. No
- * launch or network clone is performed. A command-line host override then
+ * launch or network clone is performed. A later notification exposes an
+ * external clear to the same open launcher. Title edits must keep configured
+ * discovery idle. A command-line host override then
  * proves the field follows effective host configuration, not the global GET. */
 test("inline checkout folder setup refreshes discovery and preview and respects host overrides", async ({ page, request }, testInfo) => {
   const host = await localHost(request);
@@ -148,8 +150,10 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
   const root = await mkdtemp(path.join(stack.state, "inline-checkouts-"));
   let overrideSet = false;
   let submittedSave: Request | undefined;
+  let discoveryRequests = 0;
   let bodyFailed = false;
   page.on("request", (outgoing) => {
+    if (outgoing.url().endsWith("/api/github-repositories")) discoveryRequests += 1;
     if (outgoing.url().endsWith("/api/checkout-root") && outgoing.method() === "PUT") {
       submittedSave = outgoing;
     }
@@ -211,6 +215,32 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
       await page.setViewportSize({ width, height: 900 });
       await form.screenshot({ path: testInfo.outputPath(`inline-checkout-ready-${width}.png`) });
     }
+    // A new title needs a new preview, but the accepted folder observation
+    // remains valid until configuration changes. No rescan should start.
+    const scansBeforeTitle = discoveryRequests;
+    await form.getByLabel("name (optional)", { exact: true }).fill("edited title");
+    await expect(preview).toContainText("bar-edited-title");
+    await expect(preview).toHaveAttribute("data-preview-state", "ready");
+    // sleep-ok: observe beyond discovery's 150ms debounce; a title-triggered scan must stay absent.
+    await page.waitForTimeout(300);
+    expect(discoveryRequests).toBe(scansBeforeTitle);
+
+    const beforeClear = await request.get(`/api/launch-history?host=${host.id}`);
+    expect(beforeClear.ok(), await beforeClear.text()).toBe(true);
+    const configuredRevision = (await beforeClear.json()).checkout_config_revision;
+    await cli("clear-root");
+    expect((await cli("show", "--host", String(host.id))).stdout).toMatch(/^root: unset$/m);
+    const afterClear = await request.get(`/api/launch-history?host=${host.id}`);
+    expect(afterClear.ok(), await afterClear.text()).toBe(true);
+    expect((await afterClear.json()).checkout_config_revision).toBeGreaterThan(configuredRevision);
+    // The stub intentionally withheld earlier invalidations to isolate save's
+    // explicit refresh. Deliver this external edit only after proving it exists.
+    expect(feed.openSockets()).toBeGreaterThan(0);
+    feed.notify(2);
+    await expect(folder).toBeEditable();
+    await expect(folder).toHaveValue("");
+    await expect(preview).toHaveAttribute("data-preview-state", "failed");
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
     await form.getByRole("button", { name: "cancel", exact: true }).click();
 
     overrideSet = true;

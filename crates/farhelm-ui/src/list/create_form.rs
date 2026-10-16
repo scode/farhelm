@@ -3848,22 +3848,24 @@ pub(super) fn CreateSessionForm(
     let mut repository_generation = use_signal(|| 0_u64);
     // A selected repository still needs its host's first setup check, including
     // when Clone or a template supplies the selection before discovery runs.
-    // Retain both answers for the exact host connection/installation: false
-    // lets ordinary selected-repository discovery stop, while true keeps the
-    // remedy visible and allows its explicit save to refresh discovery.
-    let mut checkout_root_observation = use_signal(|| None::<(RepositoryAuthority, bool)>);
+    // Retain both answers for the exact host connection/installation and the
+    // observed configuration epoch: false stops ordinary selected-repository
+    // discovery, while true keeps setup visible. A newer epoch must check
+    // again, since the effective folder may have been cleared elsewhere.
+    let mut checkout_root_observation = use_signal(|| None::<(RepositoryAuthority, i64, bool)>);
     let observed_root_required = checkout_root_observation
         .read()
         .as_ref()
-        .filter(|(claim, _)| {
-            hosts.iter().any(|host| {
-                Some(host.id) == selected
-                    && host.id == claim.host
-                    && host.connection == claim.incarnation
-                    && host.identity.as_deref() == Some(claim.installation_identity.as_str())
-            })
+        .filter(|(claim, revision, _)| {
+            *revision == observed_checkout_revision()
+                && hosts.iter().any(|host| {
+                    Some(host.id) == selected
+                        && host.id == claim.host
+                        && host.connection == claim.incarnation
+                        && host.identity.as_deref() == Some(claim.installation_identity.as_str())
+                })
         })
-        .map(|(_, required)| *required);
+        .map(|(_, _, required)| *required);
     let needs_checkout_root = observed_root_required == Some(true);
     // Unknown eligibility keeps the same discovery worker alive until the helm
     // answers. Query and destination authority still reject obsolete replies;
@@ -3937,10 +3939,13 @@ pub(super) fn CreateSessionForm(
                 }
             });
     if let Some(Ok(reply)) = &repository_result {
-        let observation = live_repository_authority
-            .peek()
-            .clone()
-            .map(|claim| (claim, reply.needs_checkout_root));
+        let observation = live_repository_authority.peek().clone().map(|claim| {
+            (
+                claim,
+                observed_checkout_revision(),
+                reply.needs_checkout_root,
+            )
+        });
         if *checkout_root_observation.peek() != observation {
             checkout_root_observation.set(observation);
         }
@@ -5997,9 +6002,9 @@ pub(super) fn CreateSessionForm(
                                 crate::checkout_root::CheckoutRootField {
                                     note: "Managed checkouts use this folder on every host. ~ means each host's home folder. You can change it later in Settings. Hosts with a command-line folder keep it.",
                                     on_saved: move |_| {
-                                        // Configuration history feeds only preview authority;
-                                        // it does not restart discovery. Explicit setup must
-                                        // make both usable without reopening this launcher.
+                                        // Refresh both immediately after explicit setup,
+                                        // without waiting for history's next configuration
+                                        // notification to make this launcher usable.
                                         repository_response.restart();
                                         preview_revision.with_mut(|revision| *revision = revision.wrapping_add(1));
                                     },

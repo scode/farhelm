@@ -14132,7 +14132,8 @@
   brings the inline setup field back without reopening the launcher. Title edits still do not restart a configured scan.
   Add a regression, preferably extending the existing `github-checkout-composer.spec.ts` inline-setup test or a UI unit
   seam. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-fixes.md`.
+- Execution: complete in jj change `szomszzllotqotosxuxvsrusnqrmuxnr`, bookmark `plan/launcher-fixes/03-checkout-setup`,
+  [PR #2162](https://github.com/scode/farhelm/pull/2162/changes).
 
 ## copy-guidance-measures-stale-resize-position.md
 
