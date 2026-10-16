@@ -14069,7 +14069,8 @@
   deletes every created session and attempts every preference and setting restoration, and reports the failures. The
   test body's assertions are unchanged. Validate with this spec on Chromium and WebKit; a failure-injection check is
   optional. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `qsrllvvxllpnxykkspsnxonqsvkrpuzm`, bookmark
+  `plan/browser-test-cleanup/14-trust-ownership`, [PR #2152](https://github.com/scode/farhelm/pull/2152/changes).
 
 ## repository-selection-keeps-global-search-launch-block.md
 

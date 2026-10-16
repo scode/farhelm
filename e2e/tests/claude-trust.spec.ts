@@ -1,4 +1,5 @@
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { cleanupSession, createSession, patchPreferences, readPreferences, resetPreferences } from "./helpers/fleet";
 import { attachSession } from "./helpers/term";
 
@@ -7,36 +8,44 @@ import { attachSession } from "./helpers/term";
  * Claude process, vendor login or trust edit is involved in this browser proof.
  * A borrower has no github_repo provenance, so membership alone must suffice. */
 test("Claude trust hint preserves the terminal and opens the opt-in caveats", async ({ page, request, context }, testInfo) => {
-  await resetPreferences(request);
-  expect((await request.put("/api/checkout-claude-trust", { data: { enabled: false } })).ok()).toBe(true);
-  const session = await createSession(request, { title: `trust-hint-${Date.now()}` });
-  const neighbor = await createSession(request, { title: `trust-neighbor-${Date.now()}` });
-  let prompt = false;
-  const seed = (row: Record<string, unknown>) => row.id === session.id
-    ? {
-      ...row,
-      claude_trust_prompt: prompt,
-      github_repo: null,
-      working_copy: {
-        id: "browser-checkout", repo: { owner: "example", name: "project" }, canonical_path: "/tmp",
-        origin_session_id: "another-session",
-      },
-    }
-    : row;
-  const installSeed = async (target: typeof page) => {
-    await target.route((url) => url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${session.id}`, async (route) => {
-      if (route.request().method() !== "GET") return route.continue();
-      const response = await route.fetch();
-      if (!response.ok()) return route.fulfill({ response });
-      const body = await response.json();
-      await route.fulfill({ response, json: Array.isArray(body.sessions) ? { ...body, sessions: body.sessions.map(seed) } : seed(body) });
-    });
-  };
-  // An ordinary saved-setting invalidation asks mounted readers to fetch the
-  // newly seeded observation; no model-driven timing or terminal input is used.
-  const nudge = async () => expect((await request.put("/api/checkout-claude-trust", { data: { enabled: false } })).ok()).toBe(true);
-  const other = await context.newPage();
+  const created: string[] = [];
+  let observer: typeof page | undefined;
+  let bodyFailed = false;
+  // Shared settings and each successful acquisition are owned before the
+  // next await; a second create or observer failure must release the first.
   try {
+    await resetPreferences(request);
+    expect((await request.put("/api/checkout-claude-trust", { data: { enabled: false } })).ok()).toBe(true);
+    const session = await createSession(request, { title: `trust-hint-${Date.now()}` });
+    created.push(session.id);
+    const neighbor = await createSession(request, { title: `trust-neighbor-${Date.now()}` });
+    created.push(neighbor.id);
+    let prompt = false;
+    const seed = (row: Record<string, unknown>) => row.id === session.id
+      ? {
+        ...row,
+        claude_trust_prompt: prompt,
+        github_repo: null,
+        working_copy: {
+          id: "browser-checkout", repo: { owner: "example", name: "project" }, canonical_path: "/tmp",
+          origin_session_id: "another-session",
+        },
+      }
+      : row;
+    const installSeed = async (target: typeof page) => {
+      await target.route((url) => url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${session.id}`, async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        const response = await route.fetch();
+        if (!response.ok()) return route.fulfill({ response });
+        const body = await response.json();
+        await route.fulfill({ response, json: Array.isArray(body.sessions) ? { ...body, sessions: body.sessions.map(seed) } : seed(body) });
+      });
+    };
+    // An ordinary saved-setting invalidation asks mounted readers to fetch the
+    // newly seeded observation; no model-driven timing or terminal input is used.
+    const nudge = async () => expect((await request.put("/api/checkout-claude-trust", { data: { enabled: false } })).ok()).toBe(true);
+    const other = await context.newPage();
+    observer = other;
     await installSeed(page);
     await installSeed(other);
     await page.goto("/");
@@ -128,11 +137,21 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
     await dialog.getByRole("button", { name: "close", exact: true }).click();
     await expect(band).toBeVisible();
     await expect(other.locator(".claude-trust-band")).toBeVisible();
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await other.close();
-    await patchPreferences(request, { claude_trust_hint_dismissed: null });
-    expect((await request.put("/api/checkout-claude-trust", { data: { enabled: false } })).ok()).toBe(true);
-    await cleanupSession(request, session.id);
-    await cleanupSession(request, neighbor.id);
+    await cleanupOwnedSteps(bodyFailed, [
+      // Shared-state cleanup triggers fresh reads. Remove interceptors and
+      // settle their current handlers before either page's context can close.
+      ["main page routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["observer page routes", () => observer?.unrouteAll({ behavior: "wait" })],
+      ["observer page", () => observer?.close()],
+      ["trust hint preference", () => patchPreferences(request, { claude_trust_hint_dismissed: null })],
+      ["checkout trust", async () => {
+        expect((await request.put("/api/checkout-claude-trust", { data: { enabled: false } })).ok()).toBe(true);
+      }],
+      ...created.map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+    ]);
   }
 });
