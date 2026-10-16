@@ -2,6 +2,7 @@
  * on success. Real input and API replies distinguish an invisible launch from
  * a shortcut that also types into the old terminal or quietly retries a refusal. */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import type { APIRequestContext, Page, Route } from "@playwright/test";
 import {
   cleanupSession,
@@ -518,15 +519,16 @@ test("the quick switcher row launches through the fresh direct path", async ({ p
   const created: string[] = [];
   const gate = routeGate();
   let posts = 0;
-  await page.route("**/api/sessions", async (route) => {
-    if (route.request().method() !== "POST") return route.continue();
-    posts++;
-    await gate.wait();
-    const response = await route.fetch();
-    if (response.ok()) created.push((await response.json()).id);
-    await route.fulfill({ response });
-  });
+  let bodyFailed = false;
   try {
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      posts++;
+      await gate.wait();
+      const response = await route.fetch();
+      if (response.ok()) created.push((await response.json()).id);
+      await route.fulfill({ response });
+    });
     await commandTemplate(request, name);
     await pinAutoSelect(page, source.id);
     await page.goto("/");
@@ -547,12 +549,22 @@ test("the quick switcher row launches through the fresh direct path", async ({ p
     await expect.poll(() => created.length).toBe(1);
     await expect(page.locator(`[data-session-id="${created[0]}"]`)).toHaveAttribute("data-session-selected", "true");
     await expect(page.locator(".create-session-form")).toHaveCount(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    gate.release();
-    await page.unroute("**/api/sessions");
-    for (const id of created) await cleanupSession(request, id);
-    await cleanupSession(request, source.id);
-    expect((await request.delete(`/api/templates/${name}`)).ok()).toBe(true);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["launch gate", () => gate.release()],
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      // Draining the released route first lets an in-flight create publish
+      // its ID before this callback enumerates the sessions it must release.
+      ["created sessions", () => cleanupOwnedSteps(false, created.map((id) => [id, () => cleanupSession(request, id)]))],
+      ["source session", () => cleanupSession(request, source.id)],
+      ["template", async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }],
+    ]);
   }
 });
 
@@ -566,24 +578,25 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
     const name = `quick-direct-${Date.now()}`;
     const created: string[] = [];
     const binary: Buffer[] = [];
-    page.on("websocket", (socket) => {
-      if (new URL(socket.url()).pathname.endsWith("/term")) {
-        socket.on("framesent", ({ payload }) => {
-          if (Buffer.isBuffer(payload)) binary.push(payload);
-        });
-      }
-    });
     const gate = routeGate();
     const bodies: any[] = [];
-    await page.route("**/api/sessions", async (route) => {
-      if (route.request().method() !== "POST") return route.continue();
-      bodies.push(route.request().postDataJSON());
-      await gate.wait();
-      const response = await route.fetch();
-      if (response.ok()) created.push((await response.json()).id);
-      await route.fulfill({ response });
-    });
+    let bodyFailed = false;
     try {
+      page.on("websocket", (socket) => {
+        if (new URL(socket.url()).pathname.endsWith("/term")) {
+          socket.on("framesent", ({ payload }) => {
+            if (Buffer.isBuffer(payload)) binary.push(payload);
+          });
+        }
+      });
+      await page.route("**/api/sessions", async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        bodies.push(route.request().postDataJSON());
+        await gate.wait();
+        const response = await route.fetch();
+        if (response.ok()) created.push((await response.json()).id);
+        await route.fulfill({ response });
+      });
       await commandTemplate(request, name);
       await pinAutoSelect(page, source.id);
       await page.goto("/");
@@ -635,15 +648,25 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
       expect(Buffer.concat(binary).toString()).toBe(`${probe}\r`);
       expect(await page.evaluate(() => (window as unknown as { quickLauncherPainted: boolean }).quickLauncherPainted))
         .toBe(false);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
     } finally {
-      gate.release();
-      await page.unroute("**/api/sessions");
-      await page.evaluate(() =>
-        (window as unknown as { quickPaintObserver?: MutationObserver }).quickPaintObserver?.disconnect()
-      );
-      for (const id of created) await cleanupSession(request, id);
-      await cleanupSession(request, source.id);
-      expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
+      await cleanupOwnedSteps(bodyFailed, [
+        ["launch gate", () => gate.release()],
+        ["routes", () => page.unrouteAll({ behavior: "wait" })],
+        ["paint observer", () => page.evaluate(() =>
+          (window as unknown as { quickPaintObserver?: MutationObserver }).quickPaintObserver?.disconnect()
+        )],
+        // Enumerate after route draining; a released create can still add
+        // its session ID while teardown is waiting on that handler.
+        ["created sessions", () => cleanupOwnedSteps(false, created.map((id) => [id, () => cleanupSession(request, id)]))],
+        ["source session", () => cleanupSession(request, source.id)],
+        ["template", async () => {
+          const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+          expect(removed.ok() || removed.status() === 404).toBe(true);
+        }],
+      ]);
     }
   });
 }

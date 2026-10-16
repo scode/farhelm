@@ -58,9 +58,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`claude-trust-browser-fixtures-escape-cleanup.md`](claude-trust-browser-fixtures-escape-cleanup.md) — A failed
   trust-hint browser test can leave agents or shared preferences behind.
 
-- [`number-shortcut-test-skips-session-cleanup.md`](number-shortcut-test-skips-session-cleanup.md) — A failed expanded
-  shortcut test can leave its agent sessions running for subsequent tests.
-
 - [`repository-selection-keeps-global-search-launch-block.md`](repository-selection-keeps-global-search-launch-block.md)
   — Choosing a valid repository in the new destination field can leave Launch disabled despite a successful checkout
   preview.
