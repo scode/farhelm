@@ -192,9 +192,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`update-check-replacement-loses-focus.md`](update-check-replacement-loses-focus.md) — Installing an update replaces
   the keyboard-focused check button without transferring focus to the restart control.
 
-- [`installation-guide-hides-update-failures.md`](installation-guide-hides-update-failures.md) — The installation guide
-  still says automatic update failures are only logged.
-
 - [`tab-retarget-fixture-escapes-cleanup.md`](tab-retarget-fixture-escapes-cleanup.md) — Failure during the new
   tab-retarget test's setup can leave its agent and tabs running.
 

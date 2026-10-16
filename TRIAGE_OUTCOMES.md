@@ -13950,7 +13950,8 @@
   spec edit, stop and return the item.
 - Completion criteria: the guide's update section agrees with SPEC.md on when failures are visible and how to check on
   demand, and `dprint check` passes. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/update-failure-reporting.md`.
+- Execution: jj change `xqqtmywmrvsqsvkqmnwqtlpqmunpxxmq`, bookmark `plan/update-failure-reporting/02-update-guide`,
+  [PR #2108](https://github.com/scode/farhelm/pull/2108/changes).
 
 ## teststate-socket-probe-blocks-sweep.md
 
