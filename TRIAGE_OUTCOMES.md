@@ -15136,7 +15136,8 @@
   overflowing list. A browser regression in `e2e/tests/github-checkout-composer.spec.ts` (or beside it) supplies enough
   suggestions to overflow, presses ArrowUp to wrap, and asserts the active option is within the list's visible area; run
   on Chromium and WebKit through the recorder. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-fixes.md`.
+- Execution: complete in jj change `runovpsryyyltxytmurzwnyoswmzrtxx`, bookmark
+  `plan/launcher-fixes/05-repository-scroll`, [PR #2164](https://github.com/scode/farhelm/pull/2164/changes).
 
 ## sound-tests-skip-remaining-cleanup-and-preferences.md
 

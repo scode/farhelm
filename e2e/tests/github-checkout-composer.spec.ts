@@ -119,6 +119,52 @@ async function unaccepted(route: Route) {
     json: { error: "fixture preview conflict" } });
 }
 
+/** Arrow navigation must reveal the row Enter would choose in an overflowing
+ * repository list. Both wrap directions and forward movement keep browser
+ * focus on the input; a selected-but-clipped option is not usable feedback.
+ */
+test("repository keyboard navigation keeps the active suggestion visible through wrapping", async ({ page, request }) => {
+  const host = await localHost(request);
+  const repos = Array.from({ length: 24 }, (_, index) => ({ owner: "acme", name: `repo-${String(index).padStart(2, "0")}` }));
+  await page.route("**/api/github-repositories", async (route) => {
+    const input = route.request().postDataJSON() as { host: number; expected_incarnation: number };
+    expect(input.host).toBe(host.id);
+    await fulfill(route, { json: {
+      host: String(host.id), incarnation: input.expected_incarnation, installation_identity: host.identity,
+      repos, truncated: false, scan_error: null, needs_checkout_root: false,
+    } });
+  });
+  const form = await openComposer(page, host);
+  await form.getByRole("group", { name: "destination type", exact: true })
+    .getByRole("button", { name: "managed checkout", exact: true }).click();
+  const repository = form.getByRole("combobox", { name: "repository", exact: true });
+  await repository.focus();
+  await expect(repository).toBeFocused();
+  const list = form.getByRole("listbox", { name: "repositories", exact: true });
+  await expect(list.getByRole("option")).toHaveCount(repos.length);
+  expect(await list.evaluate((element) => element.scrollHeight > element.clientHeight), "fixture suggestions must overflow").toBe(true);
+
+  /** Selection alone is insufficient: require the entire active row inside
+   * the list's viewport after the post-render scroll has had a chance to run. */
+  async function expectVisibleActive(name: string) {
+    const active = list.getByRole("option", { selected: true });
+    await expect(active).toHaveText(name);
+    await expect.poll(() => active.evaluate((element) => {
+      const row = element.getBoundingClientRect();
+      const viewport = element.parentElement!.getBoundingClientRect();
+      return row.top >= viewport.top && row.bottom <= viewport.bottom;
+    })).toBe(true);
+    await expect(repository).toBeFocused();
+  }
+  await expectVisibleActive("acme/repo-00");
+  await repository.press("ArrowUp");
+  await expectVisibleActive("acme/repo-23");
+  await repository.press("ArrowDown");
+  await expectVisibleActive("acme/repo-00");
+  for (let index = 0; index < 12; index++) await repository.press("ArrowDown");
+  await expectVisibleActive("acme/repo-12");
+});
+
 /** Inline setup must refresh the same launcher's discovery and failed preview.
  * The real supervisor scans a local Git fixture; a greeted, unchanging feed
  * prevents the revision watcher from supplying the refresh under test. No
