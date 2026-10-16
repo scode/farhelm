@@ -308,19 +308,12 @@
    * `https://good.example.evil.test`) is a mismatch, as is URL-like text
    * that does not parse.
    *
-   * `text` is the hovered row's part of the link only: a link whose text
-   * wraps onto another row is judged on a fragment. A URL-like fragment
-   * never equals the whole target, so an honest wrapped URL gets a false
-   * warning. That is intentional. Joining the rows would need xterm's
-   * private internals (its public buffer API does not say which cells
-   * belong to a link), and agent TUIs wrap with cursor movement, so the next
-   * row is not even marked as a continuation. Erring loud keeps a fragment
-   * from ever being judged a MATCH. It does not make the check complete: a
-   * fragment that is not URL-like on its own (`https:/` on one row,
-   * `/github.com/login` on the next) is not judged at all, so a program that
-   * chooses its own line breaks can keep every row of a lookalike on the
-   * quiet display. That display still names the real host, which is the
-   * safeguard this warning adds to rather than replaces.
+   * Web hover normally supplies the complete tagged text via linkHoverText.
+   * If xterm's private tag is unavailable, hover falls back to the row-only
+   * comparison. An incomplete join is handled separately by showLinkTarget:
+   * a fragment that happens to equal the target must not authorize quietness.
+   * Untagged text around a link is outside this comparison; the quiet display
+   * still names the real host and never certifies all surrounding output.
    *
    * @param {string | null | undefined} text
    * @param {string} uri
@@ -375,9 +368,10 @@
    *
    * `range` is what xterm's OSC 8 link provider passes as the third hover
    * argument: 1-based cell coordinates of the link on one buffer row (the
-   * provider builds one link per row; see `linkTextMismatch` for what that
-   * means for wrapped links). Returns null when there is no range or the
-   * row is gone, so the caller falls back to the quiet display.
+   * provider builds one link per row). File hover uses this only as an identity
+   * snapshot; web hover uses linkHoverText to join tagged rows. Returns null
+   * when there is no range or the row is gone, so the caller falls back to the
+   * quiet display.
    *
    * @param {{buffer: {active: {getLine(y: number): any}}}} term
    * @param {{start: {x: number, y: number}, end: {x: number, y: number}} | undefined} range
@@ -392,6 +386,86 @@
     // provider that spans rows rather than something seen today.
     const end = range.end.y === range.start.y ? range.end.x : line.length;
     return line.translateToString(true, range.start.x - 1, end);
+  }
+
+  /** Join consecutive rows carrying this OSC 8 tag, including agent-drawn wraps.
+   * Agents often move the cursor instead of letting xterm wrap, so isWrapped
+   * cannot establish the link's extent. The public getCell returns an internal
+   * cell whose undocumented extended.urlId is read-only here. A real-bundle
+   * browser test pins it; losing the field restores the old row comparison.
+   *
+   * Only one run per row may join. Bounds or ambiguous runs produce a fragment
+   * only when an adjacent row carries the tag: repeated links on a single row
+   * must retain their ordinary hover behavior. Spaces within each tagged run
+   * survive joining, since a space at a row edge can change the named target.
+   * Only xterm's empty pad before a terminal-wrapped wide character is omitted.
+   * No text outside the tagged cells is evidence for a match.
+   * @param {{buffer: {active: {getLine(y: number): any}}}} term
+   * @param {{start: {x: number, y: number}, end: {x: number, y: number}} | undefined} range
+   * @returns {{kind: 'whole' | 'fragment' | 'unknown', text: string | null}}
+   */
+  function linkHoverText(term, range) {
+    const fragment = linkRowText(term, range);
+    const unknown = { kind: 'unknown', text: fragment };
+    if (fragment === null) return unknown;
+    const buffer = term.buffer.active;
+    const y = range.start.y - 1;
+    const line = buffer.getLine(y);
+    const cell = line?.getCell?.(range.start.x - 1);
+    const tag = cell?.extended?.urlId;
+    if (!Number.isInteger(tag) || tag <= 0) return unknown;
+
+    // xterm only replaces extended when a cell has extended attributes. Reusing
+    // a cell would carry the preceding link's tag into unlinked indentation.
+    // Fresh snapshots avoid that stale private value without writing attributes
+    // that may be owned by the buffer itself.
+    // A repeated id within one row is legal OSC 8 output, but cannot establish
+    // which run continues. Count all runs before extracting any joined text.
+    const readRow = (row) => {
+      const source = buffer.getLine(row);
+      if (!source) return { runs: 0, text: '' };
+      let runs = 0;
+      let from = -1;
+      let to = 0;
+      let inside = false;
+      for (let x = 0; x < source.length; x++) {
+        const tagged = source.getCell(x)?.extended?.urlId === tag;
+        if (tagged && !inside) {
+          runs++;
+          if (from < 0) from = x;
+        }
+        if (tagged) to = x + 1;
+        inside = tagged;
+      }
+      // A wide character that cannot fit at the edge moves to a wrapped row.
+      // xterm tags its empty padding cell too. Drop only that synthetic pad;
+      // an actual printed space has getChars() === ' ' and must survive.
+      const next = buffer.getLine(row + 1);
+      if (runs === 1 && to === source.length && next?.isWrapped &&
+          source.getCell(to - 1)?.getChars?.() === '' && next.getCell(0)?.getWidth?.() === 2) to--;
+      return { runs, text: runs === 1 ? source.translateToString(false, from, to) : '' };
+    };
+    const above = readRow(y - 1);
+    const below = readRow(y + 1);
+    if (!above.runs && !below.runs) return { kind: 'whole', text: fragment };
+    const incomplete = { kind: 'fragment', text: fragment };
+    const center = readRow(y);
+    if (center.runs !== 1) return incomplete;
+    const rows = [center.text];
+    let characters = center.text.length;
+    if (characters > 8192) return incomplete;
+    for (const direction of [-1, 1]) {
+      for (let row = y + direction; row >= 0; row += direction) {
+        const run = readRow(row);
+        if (!run.runs) break;
+        if (run.runs !== 1 || rows.length >= 128) return incomplete;
+        characters += run.text.length;
+        if (characters > 8192) return incomplete;
+        if (direction < 0) rows.unshift(run.text);
+        else rows.push(run.text);
+      }
+    }
+    return { kind: 'whole', text: rows.join('').trim() };
   }
 
   /** Snapshot every cell of a file link, including its wrapped continuation.
@@ -432,7 +506,7 @@
    * when it has no host); the second is the target, shortened in the middle
    * when it is very long.
    *
-   * When `text`, the link's underlined text on the hovered row, is URL-like
+   * When `text`, the link's tagged text, is URL-like
    * and names somewhere else (`linkTextMismatch`), the display becomes a
    * loud warning instead: danger-styled and larger, led by a line saying
    * the text does not match where the link goes, and showing the text
@@ -442,8 +516,10 @@
    * @param {string} uri
    * @param {HTMLElement} owner
    * @param {string | null} [text]
+   * @param {boolean} [fragment] an adjacent tagged row could not be joined;
+   * URL-like pieces always warn, even if that piece alone equals the target.
    */
-  function showLinkTarget(event, uri, owner, text) {
+  function showLinkTarget(event, uri, owner, text, fragment = false) {
     // Files share visual CSS only; their async evidence owns another element.
     let display = owner.querySelector(':scope > .terminal-link-target:not(.terminal-file-target)');
     if (!display) {
@@ -455,7 +531,7 @@
     }
     const parts = linkTargetParts(uri);
     const hostPart = parts.find((part) => part.host);
-    const mismatch = linkTextMismatch(text, uri);
+    const mismatch = fragment ? claimsAddress((text || '').trim()) : linkTextMismatch(text, uri);
     display.classList.toggle('terminal-link-target-mismatch', mismatch);
     const lines = [];
     if (mismatch) {
@@ -523,6 +599,7 @@
     linkTargetParts,
     linkTextMismatch,
     linkRowText,
+    linkHoverText,
     linkRangeText,
     visibleFormatCharacters,
     shortenedTarget,

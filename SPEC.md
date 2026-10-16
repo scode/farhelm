@@ -1624,11 +1624,16 @@ whatever the agent renders is what you see. There is no composer, no message abs
   itself a web address (it has a scheme, starts with `www.`, or is a dotted host ending in a name of two or more letters
   followed by `/`) and names a different place, ignoring only a trailing slash, the display becomes a prominent warning
   that shows the text beside the real target. Link text that is not a web address, such as a file name or "click here",
-  keeps the ordinary display. Only the part of a link on the hovered line is compared, so a long web address that wraps
-  onto another line gets the warning even when it is honest; that false alarm is accepted (see SPEC_impl.md). The
-  warning is an aid, not a guarantee: a program that chooses its own line breaks can split a lookalike so that no single
-  line looks like a web address, and the ordinary display, which always names the real host, is what remains. The hover
-  display is the whole safeguard. Plain URLs printed as text need no such display, because what is shown is what opens.
+  keeps the ordinary display. Consecutive rows of the same hyperlink are compared together, including links an agent
+  continues after indentation with cursor movement. An honest wrapped web address keeps the ordinary display, and a
+  lookalike split across rows of one hyperlink is judged on its whole text. If an adjacent continuation cannot be joined
+  unambiguously within the bounds, a piece that looks like a web address warns rather than counting as a match. If the
+  terminal library's link tag cannot be read, the previous hovered-line comparison applies (see SPEC_impl.md). The
+  warning is an aid, not a guarantee: unlinked text around the hyperlink is outside the comparison, a program that
+  chooses its own line breaks can still split a lookalike into pieces that are not joined (separate hyperlinks, say) and
+  that do not look like web addresses on their own, and the ordinary display, which always names the real host, is what
+  remains. The hover display is the whole safeguard. Plain URLs printed as text need no such display, because what is
+  shown is what opens.
 
 - File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
   paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;

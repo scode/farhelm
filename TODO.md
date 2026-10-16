@@ -126,17 +126,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the shield toward YOLO, for safety. Discuss the details first, including Claude's plan mode (which keeps the last
   reading) and Cursor (which shows no label when its mode is off), then decide whether to make it one-way.
 
-- **Assess fixing the link warning for links that wrap.** Hovering a link a program printed shows a loud warning when
-  the link's text looks like a web address but names a different place than the link goes. An honest link whose text
-  wraps onto a second line gets that warning anyway, because only the hovered line's part of the text is compared. This
-  false alarm was accepted on 2026-09-30 as too hard to fix, for reasons SPEC_impl.md records next to
-  `linkTextMismatch`: the terminal library reports such a link one row at a time, its public interface does not say
-  which cells belong to a link, and agent TUIs wrap lines by moving the cursor, so a continuation row is not even marked
-  as one. Joining the rows would mean relying on the library's private internals. Assess whether that is still true (a
-  newer version of the library may expose what is needed) and what a fix would cost, without trusting partial text or
-  treating a prefix of the target as a match, which SPEC_impl.md rules out. Related: the in-flight
-  `plans/queue/terminal-link-safety.md` changes the same hover code for a different wrapped-link bug. Plan:
-  `plans/queue/wrapped-link-warning.md`.
+- **Consider an upstream xterm.js API for links spanning agent-drawn rows.** Farhelm's `linkHoverText` in
+  `crates/farhelm-ui/assets/terminal-links.js` reads the undocumented `extended.urlId` from the cell returned by
+  `getCell`, joining consecutive hyperlink rows for the hover mismatch warning (SPEC_impl.md's paragraph beginning "An
+  OSC 8 link's hover compares"). A public API would retire this private read and its browser pinning test. Consider
+  extending the OSC 8 provider's `_getRangeWithLineWrap` in the 6.1.0 betas: it currently joins only while `isWrapped`
+  holds and the urlId matches, but agent TUIs produce consecutive same-tag rows without that flag. Claude closes the
+  link at the edge and reopens the same id and URI after indentation; Codex holds an id-less link open across a cursor
+  move past indentation, sometimes before the edge. Alternatively expose a cell's link id or a link's full extent
+  through the public buffer API. Nothing has been filed upstream; filing is the maintainer's call. Farhelm vendors
+  xterm.js unmodified, so an upstream fix arrives only with a stable release.
 
 ## Doc todo
 

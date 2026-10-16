@@ -34,6 +34,7 @@ const {
   displayedTarget,
   linkTextMismatch,
   linkRowText,
+  linkHoverText,
   linkRangeText,
   visibleFormatCharacters,
 } = require("../assets/terminal-links.js");
@@ -404,6 +405,106 @@ test("linkRowText reads the underlined cells of the hovered row", () => {
   assert.equal(linkRowText(term, { start: { x: 6, y: 1 }, end: { x: 3, y: 2 } }), "https://example.com/x tail");
   assert.equal(linkRowText(term, undefined), null);
   assert.equal(linkRowText(term, { start: { x: 1, y: 9 }, end: { x: 4, y: 9 } }), null);
+});
+
+/** Fabricate the public buffer API while preserving the private tag's ownership.
+ * Frozen extended attributes catch accidental writes to buffer-owned objects.
+ * As in xterm, loading an untagged cell leaves a reused object's extended
+ * attributes untouched; indentation must not borrow the preceding link's tag.
+ */
+function taggedTerminal(rows, missingTag = false) {
+  return { buffer: { active: { getLine(y) {
+    const runs = rows[y];
+    if (!runs) return undefined;
+    const text = runs.map(([text]) => text).join('');
+    const tags = runs.flatMap(([text, tag]) => Array(text.length).fill(tag));
+    return {
+      length: text.length,
+      getCell(x, cell = { extended: Object.freeze(missingTag ? {} : { urlId: 0 }) }) {
+        if (!missingTag && tags[x]) cell.extended = Object.freeze({ urlId: tags[x] });
+        return cell;
+      },
+      translateToString(trim, from, to) {
+        const result = text.slice(from, to);
+        return trim ? result.trimEnd() : result;
+      },
+    };
+  } } } };
+}
+
+/** A cursor-moved continuation and a terminal wrap have the same tag contract.
+ * Hovering either part must compare the complete address, including a short
+ * first row; isWrapped and right-edge position are deliberately absent.
+ */
+test('tagged link rows join from either hover, preserving edge spaces', () => {
+  const range = y => ({ start: { x: y === 1 ? 1 : 6, y }, end: { x: y === 1 ? 14 : 19, y } });
+  const term = taggedTerminal([[['https://examp', 7]], [['     ', 0], ['le.com/a', 7]]]);
+  const reused = term.buffer.active.getLine(0).getCell(0);
+  assert.equal(term.buffer.active.getLine(1).getCell(0, reused).extended.urlId, 7,
+    'premise: a reused xterm cell retains its tag while loading unlinked indentation');
+  for (const y of [1, 2]) {
+    const result = linkHoverText(term, range(y));
+    assert.deepEqual(result, { kind: 'whole', text: 'https://example.com/a' });
+    assert.equal(linkTextMismatch(result.text, 'https://example.com/a'), false);
+  }
+  const spaced = taggedTerminal([[['https://example.com/a ', 7]], [['b', 7]]]);
+  assert.equal(linkHoverText(spaced, range(1)).text, 'https://example.com/a b');
+  const wrapped = taggedTerminal([[['https://examp', 7]], [['le.com/a', 7]]]);
+  assert.equal(linkHoverText(wrapped, range(1)).text, 'https://example.com/a');
+});
+
+/** A split host must not let the second row alone impersonate the target.
+ * Joining also preserves the ordinary one-row policy for the good.example
+ * plus .evil.test shape; the tagged text spells that full target.
+ */
+test('whole split lookalikes are compared from either row', () => {
+  const rows = [[['https://git', 8]], [['hub.com/login', 8]]];
+  for (const y of [1, 2]) {
+    const range = { start: { x: 1, y }, end: { x: rows[y - 1][0][0].length, y } };
+    const result = linkHoverText(taggedTerminal(rows), range);
+    assert.equal(result.kind, 'whole');
+    assert.equal(linkTextMismatch(result.text, 'https://hub.com/login'), true);
+    const old = linkHoverText(taggedTerminal(rows, true), range);
+    assert.equal(old.kind, 'unknown');
+    assert.equal(old.text, rows[y - 1][0][0]);
+    assert.equal(linkTextMismatch(old.text, 'https://hub.com/login'), y === 1);
+  }
+  const decoy = taggedTerminal([[['https://good.example', 8]], [['.evil.test/', 8]]]);
+  const result = linkHoverText(decoy, { start: { x: 1, y: 1 }, end: { x: 20, y: 1 } });
+  assert.equal(linkTextMismatch(result.text, 'https://good.example.evil.test/'), false);
+});
+
+/** Plain output cannot become evidence for a link, even with a long history.
+ * A stale tag would join a prompt above a forgery (hiding the URL-like prefix),
+ * or hit the row bound above an honest single-row link and warn falsely.
+ */
+test('untagged rows and inline prefixes stay outside the link', () => {
+  const target = 'https://example.com/';
+  const plain = [['$ prompt', 0]];
+  const rows = [...Array.from({ length: 130 }, () => plain), [['see ', 0], [target, 8]]];
+  const range = { start: { x: 5, y: 131 }, end: { x: 4 + target.length, y: 131 } };
+  const result = linkHoverText(taggedTerminal(rows), range);
+  assert.deepEqual(result, { kind: 'whole', text: target });
+  assert.equal(linkTextMismatch(result.text, target), false);
+  assert.equal(linkTextMismatch(result.text, 'https://elsewhere.example/'), true);
+});
+
+/** Incomplete adjacent runs cannot be accepted from a matching fragment.
+ * Repeated same-tag links on just one row are independent hover runs, while
+ * ambiguity on any joined row and either size bound must fail conservatively.
+ */
+test('ambiguous and bounded continuations stay fragments', () => {
+  const range = { start: { x: 1, y: 1 }, end: { x: 20, y: 1 } };
+  const duplicate = [['https://example.com/', 7], [' ', 0], ['https://example.com/', 7]];
+  assert.equal(linkHoverText(taggedTerminal([duplicate]), range).kind, 'whole');
+  for (const rows of [
+    [[['https://example.com/', 7]], duplicate],
+    [duplicate, [['continued', 7]]],
+    Array.from({ length: 129 }, () => [['x', 7]]),
+    [[['x'.repeat(8192), 7]], [['x', 7]]],
+  ]) assert.equal(linkHoverText(taggedTerminal(rows), range).kind, 'fragment');
+  const atBound = Array.from({ length: 128 }, () => [['x', 7]]);
+  assert.equal(linkHoverText(taggedTerminal(atBound), range).kind, 'whole');
 });
 
 /** HTML disclosures must not conceal controls or confuse real characters
