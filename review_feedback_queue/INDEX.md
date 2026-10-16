@@ -17,6 +17,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 
+- [`checkout-retry-reuses-fresh-helm-host-namespace.md`](checkout-retry-reuses-fresh-helm-host-namespace.md) — A fresh
+  helm registry can reuse another host's checkout approval namespace; end-to-end recovery remains unverified.
+
 ## High priority: material UX degradation
 
 - [`claude-trust-cleanup-delays-desktop-start.md`](claude-trust-cleanup-delays-desktop-start.md) — Retrying trust
@@ -96,3 +99,33 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`introduction-promises-universal-reboot-resume.md`](introduction-promises-universal-reboot-resume.md) — The
   introduction promises conversation recovery after reboot for sessions without Resume reporting.
+
+- [`restored-terminal-snapshot-rejects-link-clicks.md`](restored-terminal-snapshot-rejects-link-clicks.md) — Restored
+  terminal snapshots can retain hover effects while rejecting every web or file link click.
+
+- [`repeated-terminal-links-acquire-mismatch-warning.md`](repeated-terminal-links-acquire-mismatch-warning.md) —
+  Repeating one honest hyperlink on adjacent rows can produce a false destination-mismatch warning.
+
+- [`repository-discovery-inherits-bare-git-config.md`](repository-discovery-inherits-bare-git-config.md) — An inherited
+  Git configuration selector can prevent repositories from appearing as launcher suggestions.
+
+- [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
+  — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
+
+- [`trash-sidebar-calls-unchecked-archives-empty.md`](trash-sidebar-calls-unchecked-archives-empty.md) — The trash
+  button can advertise an empty collection while unchecked archives remain.
+
+- [`over-limit-trash-total-loses-partial-size.md`](over-limit-trash-total-loses-partial-size.md) — A successful listing
+  above the deletion limit can lose the global partial-size warning.
+
+- [`instruction-check-allows-claude-local-shadowing.md`](instruction-check-allows-claude-local-shadowing.md) — The
+  instruction checker permits local Claude files that suppress default repository-rule loading.
+
+- [`instruction-check-misses-mixed-case-spec-typo.md`](instruction-check-misses-mixed-case-spec-typo.md) — The
+  instruction checker misses the mixed-case specification typo its own contract promises to reject.
+
+- [`unselected-repository-keeps-stale-setup-eligibility.md`](unselected-repository-keeps-stale-setup-eligibility.md) —
+  Checkout setup eligibility can remain stale while no repository is selected.
+
+- [`checkout-config-refresh-erases-setup-draft.md`](checkout-config-refresh-erases-setup-draft.md) — An unrelated
+  configuration refresh can unmount the launcher's checkout-folder editor and erase its unfinished entry.
