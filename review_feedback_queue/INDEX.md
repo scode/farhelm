@@ -47,9 +47,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-listing-exceeds-control-frame.md`](trash-listing-exceeds-control-frame.md) — An oversized trash listing
   disables both listing and individual cleanup, even below the batch's entry limit.
 
-- [`default-approval-reset-renews-retry-key.md`](default-approval-reset-renews-retry-key.md) — Default-approval
-  templates repeatedly renew launch keys, defeating confirmation and unanswered retries; pre-existing.
-
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`claude-trust-settings-misses-invalidation.md`](claude-trust-settings-misses-invalidation.md) — Already-open Settings

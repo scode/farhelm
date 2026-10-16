@@ -38,6 +38,30 @@ const MINT_ATTEMPTS: usize = 3;
 /// destination correction can retire only this refusal, not an unrelated error.
 const REMEMBERED_DESTINATION_CHANGED: &str = "the remembered folder belongs to a different installation; choose the host or folder again before launching";
 
+/// Snapshot a structured request identically before and after key minting.
+/// A template can reset permission to `None`; both reads must resolve that
+/// default alike or an unchanged retry acquires a new key and loses consent.
+fn submitted_structured_selection(
+    harness: LaunchHarness,
+    model: Option<String>,
+    effort: Option<LaunchEffort>,
+    permissions: Option<LaunchPermission>,
+    permission_flags: &str,
+    workspace_trust: Option<bool>,
+) -> LaunchSelection {
+    LaunchSelection {
+        harness,
+        model,
+        effort,
+        permissions: crate::launch_composer::normalized_permissions(harness, permissions),
+        permission_flags: crate::launch_composer::permission_words(permissions, permission_flags),
+        workspace_trust: crate::launch_composer::normalized_workspace_trust(
+            harness,
+            workspace_trust,
+        ),
+    }
+}
+
 /// The first unmet launch prerequisite, shared by the button and its refusal.
 ///
 /// These are presentation inputs, not admission authority: submit still checks
@@ -4585,19 +4609,13 @@ pub(super) fn CreateSessionForm(
                         ops.release();
                         return;
                     };
-                    let mut selection = LaunchSelection {
-                        permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
+                    let selection = submitted_structured_selection(
                         harness,
-                        model: structured_model.peek().clone(),
-                        effort: *structured_effort.peek(),
-                        permissions: *structured_permissions.peek(),
-                        workspace_trust: crate::launch_composer::normalized_workspace_trust(
-                            harness, *structured_workspace_trust.peek(),
-                        ),
-                    };
-                    selection.permissions = crate::launch_composer::normalized_permissions(
-                        harness,
-                        selection.permissions,
+                        structured_model.peek().clone(),
+                        *structured_effort.peek(),
+                        *structured_permissions.peek(),
+                        &structured_permission_flags(),
+                        *structured_workspace_trust.peek(),
                     );
                     LaunchIntent::Structured(selection)
                 } else {
@@ -4919,16 +4937,14 @@ pub(super) fn CreateSessionForm(
                                 ops.release();
                                 return;
                             };
-                            let selection = LaunchSelection {
-                                permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
+                            let selection = submitted_structured_selection(
                                 harness,
-                                model: structured_model.peek().clone(),
-                                effort: *structured_effort.peek(),
-                                permissions: *structured_permissions.peek(),
-                                workspace_trust: crate::launch_composer::normalized_workspace_trust(
-                                    harness, *structured_workspace_trust.peek(),
-                                ),
-                            };
+                                structured_model.peek().clone(),
+                                *structured_effort.peek(),
+                                *structured_permissions.peek(),
+                                &structured_permission_flags(),
+                                *structured_workspace_trust.peek(),
+                            );
                             if *launch_tab.peek() != LaunchTab::Agent
                                 || !crate::launch_composer::selection_fits_catalog(
                                     &selection,
