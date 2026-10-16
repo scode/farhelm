@@ -22,7 +22,7 @@ An entry's key is its bold handle (`- **Handle.** ...`) when it has one, and oth
 since several buckets hold entries without handles. Keys only need to be stable between `skeleton` and `serve`.
 
 The port defaults to 14003 because the maintainer asked for a fixed, memorable URL to keep open in a browser. That is
-the same exception `website/scripts/preview.sh` makes; it is not a test harness, so root CLAUDE.md's rule against fixed
+the same exception `website/scripts/preview.sh` makes; it is not a test harness, so the root AGENTS.md rule against fixed
 ports in harnesses does not apply. When the port is taken the script refuses rather than picking another one, because a
 silently different URL would leave the maintainer looking at a stale page. It binds loopback only and serves nothing but
 the one page.

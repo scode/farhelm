@@ -1516,8 +1516,8 @@ impl AgentKind {
     /// The single source of these facts for every place that explains a
     /// `not_captured` restart offer while the agent may still report: the
     /// app's Restart tooltip and Restart with reason, the supervisor's
-    /// refusal, and the agent instructions (root `AGENTS.md`
-    /// "Harness-specific code"; the map in `farhelm-supervisor`'s
+    /// refusal, and the agent instructions (`AGENTS.md`,
+    /// "Code rules"; the map in `farhelm-supervisor`'s
     /// `agent_kind` module lists this place). It states what normally
     /// happens, not what will: a report can also be missing because the
     /// agent was set up not to report or because Farhelm refused it, and

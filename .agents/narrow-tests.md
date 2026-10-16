@@ -1,8 +1,8 @@
 # Narrow test runs
 
-How to reproduce a test failure without paying for a whole battery. The full lists in AGENTS.md — the "Finishing work"
-commands and the Playwright merge gate — are unchanged and still decide when work is done; this page is about the loop
-before that. When you are chasing one failure, one flake, or one behavior change, start with the narrowest run that
+How to reproduce a test failure without paying for a whole battery. The full lists in `.agents/validation.md` — the
+check inventory and the Playwright merge gate — are unchanged and still decide when work is done; this page is about the
+loop before that. When you are chasing one failure, one flake, or one behavior change, start with the narrowest run that
 could reproduce it and widen only when the narrow run will not.
 
 NOTE: a flake first seen in a full-battery run is not evidence that only the full battery can reproduce it. Most of this

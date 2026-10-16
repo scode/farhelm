@@ -5,7 +5,7 @@ A stable tag is pushed while the maintainer is still reviewing the release notes
 opens with the draft notice and dist copies that draft into the GitHub release body. Once the approved wording has
 landed on main, this script swaps it in. It touches only the notes block of the body, between dist's `## Release Notes`
 heading and the first top-level `# ` heading of the download tables that follow, and leaves the release's name and
-assets alone. `releasing/AGENTS.md`, "Cutting a stable release", step 3, is the procedure around it.
+assets alone. `releasing/.agents/stable.md`, "Cutting a stable release", step 3, is the procedure around it.
 
 The swap is checked rather than trusted, because the body is public and a bad edit replaces it for everyone:
 

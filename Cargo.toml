@@ -13,8 +13,8 @@ members = [
   "crates/farhelm-ui",
 ]
 # Application and ordinary library members, excluding `farhelm-desktop`, so that a bare `cargo
-# build`/`test`/`clippy --all-targets` — the workspace checks CLAUDE.md's
-# "Finishing work" list runs on every change, and CI runs on an ordinary
+# build`/`test`/`clippy --all-targets` — the workspace checks the
+# inventory in .agents/validation.md runs on every change, and CI runs on an ordinary
 # runner — never compiles WebKit. `farhelm-desktop` unconditionally enables
 # `farhelm-ui`'s `desktop` feature, which pulls in wry and needs the
 # webkit2gtk/gtk development packages; only the `desktop` CI job installs

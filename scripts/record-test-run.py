@@ -271,7 +271,7 @@ def default_output_root(environment: dict[str, str]) -> pathlib.Path:
 
     `<tmp>` is the environment's `TMPDIR` when that is an absolute path, and
     `/tmp` otherwise, so on an ordinary Linux machine this is the
-    `/tmp/farhelm-tmp` tree AGENTS.md's "Agent scratch space" names. Evidence
+    `/tmp/farhelm-tmp` tree `AGENTS.md`, "Agent scratch space", names. Evidence
     used to accumulate under `~/.local/state/farhelm-test-runs`, which nothing
     pruned: thousands of runs from many concurrent agents, Playwright
     artifacts and trace archives included, grew it to roughly ten gigabytes in

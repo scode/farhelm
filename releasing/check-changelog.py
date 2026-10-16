@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """The changelog's three mechanical checks: file format, fragment coverage, and what dist will publish.
 
-`releasing/AGENTS.md` describes the changelog process; this script is the part of it that a machine can hold. It
-exists because the curated `CHANGELOG.md` is read by cargo-dist at tag time and copied into the GitHub release, and a
-file that looks right to a human can still be one dist parses into nothing or into the wrong section. Nothing here
+`releasing/.agents/changelog.md` describes the changelog process; this script is the part of it that a machine can
+hold. It exists because the curated `CHANGELOG.md` is read by cargo-dist at tag time and copied into the GitHub release,
+and a file that looks right to a human can still be one dist parses into nothing or into the wrong section. Nothing here
 writes to the repository; every mode reports and exits non-zero on a problem.
 
 ## The three modes
@@ -57,8 +57,9 @@ CHANGELOG_NAME = "CHANGELOG.md"
 FRAGMENTS_DIR = Path("releasing") / "changelog.d"
 FRAGMENT_README = "README.md"
 
-# The category table IS the format: names, emoji, and order are all fixed here and nowhere else. `releasing/AGENTS.md`
-# repeats it in prose for humans; if the two ever disagree, this table is what the gate enforces.
+# The category table IS the format: names, emoji, and order are all fixed here and nowhere else.
+# `releasing/.agents/changelog.md`, "Format", repeats it in prose for humans; if the two ever disagree, this table is
+# what the gate enforces.
 #
 # Fixes come in two categories. Fixes worth highlighting holds the ones a reader should not miss; Misc fixes is the long
 # tail most projects would collapse into one "various bug fixes" line, listed in full for transparency. Misc fixes sits
@@ -192,9 +193,9 @@ def _version_tuple(version: str) -> tuple[int, int, int]:
 def check_changelog_format(text: str) -> list[str]:
     """Return every format violation in `CHANGELOG.md`, as one line each; an empty list is a pass.
 
-    The rules encode the layout `releasing/AGENTS.md` stipulates. They are stricter than dist needs so the file stays
-    uniform across releases: dist only cares that a release heading starts with the version, but a reader scanning
-    twenty releases cares that every one of them is shaped the same way.
+    The rules encode the layout `releasing/.agents/changelog.md`, "Format", stipulates. They are stricter than dist
+    needs so the file stays uniform across releases: dist only cares that a release heading starts with the version,
+    but a reader scanning twenty releases cares that every one of them is shaped the same way.
     """
     problems: list[str] = []
     preamble, releases = parse_changelog(text)

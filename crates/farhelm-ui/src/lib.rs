@@ -278,7 +278,7 @@ pub enum SessionAgentKind {
 
 /// The browser's per-agent-kind decisions, each answered by an exhaustive
 /// match so a new kind is a compile error here rather than silently taking
-/// another kind's behavior (root `AGENTS.md` "Harness-specific code"; the
+/// another kind's behavior (`AGENTS.md`, "Code rules"; the
 /// map in `farhelm-supervisor/src/agent_kind/mod.rs` lists this place).
 #[warn(clippy::wildcard_enum_match_arm)]
 impl SessionAgentKind {

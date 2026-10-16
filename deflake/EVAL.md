@@ -10,24 +10,26 @@ A separate, low-power agent that has never seen this tooling is given only "star
 instructions, and must: start the driver, block on `wait` without polling, record a planted flake in `TODO.md`,
 `FLAKES.md` and `deflake/known-flakes.txt`, fix a planted wrong assertion as its own commit, and reach `wait` exit 4. It
 was first run on 2026-09-12 with a Sonnet-class model; the first two passes each found a real bug in the driver, the
-third passed. That history is why the agent's report format below asks for every event verbatim: the report is the
-evidence, and a low-power model's confusions are exactly the instruction gaps the eval exists to catch.
+third passed. That history is why the agent's report format (`deflake/EVAL.md`, "Delegate prompt") asks for every event
+verbatim: the report is the evidence, and a low-power model's confusions are exactly the instruction gaps the eval
+exists to catch.
 
 ## Procedure
 
 1. From your checkout, with the driver and instructions you want to test committed on the current working-copy parent,
-   run `deflake/eval-setup.sh <empty dir>`, with the directory inside your scratch directory (root AGENTS.md, "Agent
+   run `deflake/eval-setup.sh <empty dir>`, with the directory inside your scratch directory (`AGENTS.md`, "Agent
    scratch space"). It prints the eval checkout path. It clones your checkout, points `origin` at a local bare
    repository so nothing reaches GitHub, initializes jj, and commits two fixtures on that clone's `main`: a
    farhelm-proto unit test that fails once per marker file and a JS test with a wrong assertion.
 2. Make sure no sweep is running on the machine (`deflake/bin/deflake status` in your checkout); the daemon lock allows
    one at a time.
 3. Delegate the run to a fresh, low-power agent (a Sonnet-class model at medium effort is the intended calibration: the
-   instructions have to be unambiguous for it, not just for you), with the prompt below. Do not coach it further.
+   instructions have to be unambiguous for it, not just for you), with the prompt in `deflake/EVAL.md`, "Delegate
+   prompt". Do not coach it further.
 4. Read its report against the expected outcome. Anything it found ambiguous is an instruction bug; anything the driver
    did that the report describes as unexpected is a driver bug. Fix, re-run `eval-setup.sh` into a fresh directory (the
    old clone carries the old driver), and repeat until a pass is clean.
-5. Check that the driver deleted the eval worktree's build outputs: `target/` under the sweep worktree (below) must be
+5. Check that the driver deleted the eval worktree's build outputs: `target/` under the sweep worktree (step 6) must be
    gone once `wait` has returned 4.
 6. Clean up: delete the eval directory, the sweep worktree the driver made for it under
    `/tmp/farhelm-tmp/deflake/workspaces/<key>` (its `status.json` under `runs/<uuid>/` names the path) with the
@@ -50,8 +52,9 @@ you is:
 
 "start a deflake run"
 
-Read that checkout's AGENTS.md section "Deflake runs", then deflake/SPEC.md and deflake/AGENTS.md, and follow
-deflake/AGENTS.md exactly, with ONLY these deviations because this is an evaluation of the tooling:
+Read that checkout's AGENTS.md (unless your harness already loaded it), then deflake/AGENTS.md and every file its
+reading list for running a deflake run names, and follow deflake/AGENTS.md exactly, with ONLY these deviations because
+this is an evaluation of the tooling:
 
 1. Start the driver with `deflake/bin/deflake start --profile eval`. Everything else about the protocol is unchanged.
 2. For waiting: run `deflake/bin/deflake wait` in the background with your harness's largest tool timeout and do

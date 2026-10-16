@@ -11339,7 +11339,7 @@ mod tests {
     /// construct a genuinely relative selection without ever calling
     /// `std::env::set_current_dir` — mutating this test process's actual
     /// working directory would race every other test in the same binary,
-    /// and CLAUDE.md rules that out for the equivalent case of environment
+    /// and .agents/test-authoring.md rules that out for the equivalent case of environment
     /// variables for the same reason. Anchoring the returned path at
     /// `base` — which the caller always passes as the REAL, unmodified
     /// `std::env::current_dir()` — means ordinary filesystem calls made by

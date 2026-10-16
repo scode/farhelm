@@ -1,7 +1,47 @@
 # Deflake run: agent instructions
 
-Read `deflake/SPEC.md` first; it says what this is for and what the rules below protect. This file is the protocol.
-"Start a deflake run" and "start a deflake run and repeat until I say stop" both mean exactly this procedure.
+Read `deflake/SPEC.md` first; it says what this is for and what the rules in this file protect. This file is the
+protocol. "Start a deflake run" and "start a deflake run and repeat until I say stop" both mean exactly this procedure.
+`deflake/SPEC.md` holds the requirements, chiefly that the agent never polls and only takes a turn when
+`deflake/bin/deflake wait` returns.
+
+After a compaction or resume, re-read every file in your role's reading list before your next action. Do that reading in
+the turn you already have: the one the compaction or resume happened in, or the next one a returning `wait` gives you.
+Never end a `wait` early, call `status` or `events`, or take an extra turn to make room for it; re-reading is never a
+reason for an extra wake.
+
+## Reading lists
+
+### Running a deflake run ("start a deflake run", "start a deflake run and repeat until I say stop")
+
+Before running `deflake/bin/deflake start`, read these in full:
+
+- `deflake/AGENTS.md`
+- `deflake/SPEC.md`
+- `AGENTS.md`, "TODO.md and FLAKES.md" and "Conventional Commits" (root, already in context for agents started at the
+  checkout root)
+- the header of `FLAKES.md`, and `.agents/test-evidence.md` for its entry format
+- the `jjstack` skill
+
+Phase files: on deciding to make a fix PR for a `deterministic` failure, read `AGENTS.md`, "Tests and validation" and
+"Changelog fragments", and `.agents/validation.md`, before the fix; if the fix changes tests, also
+`.agents/test-authoring.md`.
+
+Keep a working log at `farhelm-deflake-log-<checkout>.md` in the parent directory of the checkout, next to it and out of
+the repository, where `<checkout>` is the checkout directory's name. It records that a deflake run is the active flow
+(and whether in repeat mode), this reading list, the session's scratch directory, the events acknowledged and the PRs
+made so far. After any compaction or resume, read it first. Update it in the same turn that handles each event, before
+calling `wait` again; never take an extra turn just to write it. It is never committed.
+
+Fence: act only when `deflake/bin/deflake wait` returns; never poll; no narrow reproduction for a classified flake;
+never open a PR for review or merge one.
+
+### Changing the deflake tooling (before changing `deflake/bin/deflake`, `deflake/AGENTS.md`, or the recorder interfaces the driver depends on)
+
+A change to the driver or to `deflake/AGENTS.md` is validated with the end-to-end procedure in `deflake/EVAL.md`, a few
+minutes with a low-power delegate. Read `deflake/EVAL.md` and `deflake/SPEC.md` in full before making the change.
+
+Fence: validate such a change with `deflake/EVAL.md` before calling it done.
 
 ## Before starting
 
@@ -28,8 +68,8 @@ otherwise spend a turn until `wait` returns. How to block depends on the harness
 
 - If the harness can run a command in the background and notify you when it exits (Claude Code's `run_in_background`),
   run `wait` that way and do nothing until the notification arrives. If that notification contains only the exit code,
-  read the completed command's output once to receive its event text. The prohibition above applies while `wait` is
-  still running; a completed command's event output is what the loop handles next.
+  read the completed command's output once to receive its event text. The prohibition in `deflake/AGENTS.md`, "The
+  loop", applies while `wait` is still running; a completed command's event output is what the loop handles next.
 - Otherwise run `wait` in the foreground with the largest tool timeout the harness allows.
 
 Either way, set the harness's tool timeout to its maximum and leave `--max-wait` at its default of 540 seconds, which
@@ -78,12 +118,12 @@ battery to classify that: read the phase log's tail, and treat it as an environm
 user, not as a flake to record.
 
 **`failure` on a `phase` id of a monolithic battery** (doctests, install.sh, CentOS, desktop smoke, JS). The whole
-battery was rerun three times, so the verdict means what it does for a test, and the flake and deterministic rules above
-apply unchanged: when the excerpt names the failing test or scenario, record or fix that. Two extra outcomes are
-specific to whole batteries. A deterministic failure is often an environment problem (a missing package, a tool below
-its floor); when it is, tell the user what is missing rather than filing a PR. And a battery that cannot run on this
-host at all can be kept out of every sweep with a `phase <name>` line in `deflake/known-flakes.txt`, paired with a
-TODO.md entry like any other exclusion.
+battery was rerun three times, so the verdict means what it does for a test, and the flake and deterministic rules in
+`deflake/AGENTS.md`, "Handling an event", apply unchanged: when the excerpt names the failing test or scenario, record
+or fix that. Two extra outcomes are specific to whole batteries. A deterministic failure is often an environment problem
+(a missing package, a tool below its floor); when it is, tell the user what is missing rather than filing a PR. And a
+battery that cannot run on this host at all can be kept out of every sweep with a `phase <name>` line in
+`deflake/known-flakes.txt`, paired with a TODO.md entry like any other exclusion.
 
 **`stalled`.** No output for the stall window. Look at the named log's tail once. If it is a legitimately long step (a
 cold cargo build, the CentOS musl build, a 20 minute e2e module), ack and wait. If it is wedged, `stop` the run, tell

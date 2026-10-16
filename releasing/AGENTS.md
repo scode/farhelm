@@ -1,13 +1,30 @@
 # Releasing Farhelm
 
-Everything an agent needs to cut a release or to feed the changelog, in one place. The root `AGENTS.md` points here and
-keeps only the one rule every PR has to follow (leave a changelog fragment). `dist-workspace.toml`'s header explains the
-release machinery itself and why it is shaped the way it is; this file is the procedure that drives it.
+The index for cutting releases, publishing release advisories, curating the changelog and changing the release workflow:
+the rules every release follows, then one reading list per role. The procedures themselves are in `releasing/.agents/`.
+`dist-workspace.toml`'s header explains the release machinery itself and why it is shaped the way it is; these files are
+the procedure that drives it. The rule every PR follows (leave a changelog fragment) is in `AGENTS.md`, "Changelog
+fragments", not here.
+
+After a compaction or resume, re-read every file in your role's reading list before your next action.
+
+A release session is long-running. Keep its working log in the parent directory of the checkout, named
+`farhelm-release-log-<checkout>.md` (`<checkout>` is the checkout directory's name), and record in it the active flow,
+the release version, the reading list you are following, the step you are on, and the session's scratch directory. After
+any compaction or resume, read that log first.
+
+> NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
+> propose to the maintainer follows `AGENTS.md`, "Unattended runs".
+
+## Rules for every release
 
 Three kinds of release exist. A stable release `X.Y.Z` is cut from main, gets curated release notes, and is what
 `https://get.farhelm.io/latest` names and the installer installs by default. An RC `X.Y.Z-rc.N` and a dev release
 `X.Y.Z-dev.N` are prereleases for trying a build on a real machine; they carry no curated notes. The tag, not any merge,
 triggers the release workflow.
+
+No release tag is pushed before its base and its version are settled with the maintainer per the procedure for its kind,
+a tag name is never reused, and a tag is never deleted.
 
 The workflow builds the release, validates it, and publishes its archives on a GitHub release. It signs nothing: CI
 never sees a signing key. A release reaches users only once the maintainer has signed its `SHA256SUMS` (the six payloads
@@ -16,6 +33,11 @@ outside this repository; agents do not author, run, or replace that step. Until 
 and the helm read get.farhelm.io only. `dist-workspace.toml`'s header and SPEC_impl.md's "Verification chain (D3)" say
 why.
 
+The installed app also reads `https://get.farhelm.io/advisories` and `advisories.minisig` on each update check. This is
+a separate, mutable publication; changing `/latest` or a release's signed checksums is not a substitute. The
+maintainer's external publishing tooling needs to support it. Agents do not author or run that tooling, sign with
+release keys, or publish either file.
+
 Main's version is always `0.0.0-unreleased`, in both the root `Cargo.toml` and `packaging/farhelm-desktop/dist.toml`.
 Every kind of release sets its real version in a release commit that lives only under its tag: a stable one on its
 `release-X.Y.Z` branch, an RC or dev one in a bump PR that is closed without merging. Never merge a release commit into
@@ -23,680 +45,201 @@ main, and never let a bump ride into main inside another PR (a squash merge of a
 exactly that). Anything built from main then says plainly that it is not a release; the root `Cargo.toml` explains what
 a release number on main would break.
 
-## Publishing release advisories
-
-The installed app also reads `https://get.farhelm.io/advisories` and `advisories.minisig` on each update check. This is
-a separate, mutable publication; changing `/latest` or a release's signed checksums is not a substitute. The
-maintainer's external publishing tooling needs to support it. Agents do not author or run that tooling, sign with
-release keys, or publish either file. Nothing is live merely because a client or these instructions shipped; an absent
-advisories file means nothing to say.
-
-Write UTF-8, starting with exactly `farhelm advisories`, then one withdrawal per line:
-
-```text
-farhelm advisories
-revoked v1.2.3 short plain-text explanation
-```
-
-Use stable release tags, one ASCII space after `revoked` and after the tag, then a reason. Keep each line at most 4096
-bytes, each reason at most 240 Unicode characters and the whole file at most 64 KiB. Control characters are removed from
-displayed reasons; blank reasons and malformed known directives are ignored with a log line. Last valid duplicate wins.
-Unknown directives are ignored permanently by older clients, so additions must use new directives and preserve this
-header and the meaning of existing ones. CRLF and a last line without newline are accepted. The signature covers the
-whole file, including ignored content.
-
-On the trusted signing host, use a key that installed clients already trust and a **prehashed** minisign signature with
-trusted comment exactly `farhelm advisories`. With the maintainer's signing-key path supplied, the signing operation is
-`minisign -S -s <key-path> -m advisories -x advisories.minisig -t 'farhelm advisories'`. The external tooling must
-verify the resulting body/signature pair against the intended public ring and exact comment before publication, enforce
-the caps (signature at most 4 KiB), and publish both files. Rotation constraints still apply: a client without the
-signer in its ring ignores that publication. Do not use a release's `farhelm vX.Y.Z` comment. Publishing a temporarily
-mismatched pair is a failed fetch, not a partial accepted withdrawal; clients retain their last verified in-run snapshot
-until a matching pair arrives.
-
-To lift a withdrawal, remove its line and sign/publish the complete replacement. A header-only signed file lifts all
-withdrawals. Deleting the files does not lift a withdrawal already learned during a running app's lifetime. Body 404 is
-quiet; other failures are logged as no new information. There is no disk cache or replay protection beyond D3's existing
-trust boundary: the site can withhold or replay authenticated information.
-
-A withdrawn running release is warned about, and update checks refuse withdrawn targets. A withdrawn update already
-installed and waiting for restart requires manual recovery: the client removes Restart to update and installs nothing
-over it, even on demand. An ordinary relaunch may still open that withdrawn version. Do not promise automatic recovery
-or choose an older replacement on the strength of an old/missing Running record; a newer supervisor may have migrated
-state before failing startup. The follow-up in TODO.md covers stronger attempted-version evidence. The standalone
-installer, helm and remote hosts do not read advisories.
-
-# The changelog
-
-`CHANGELOG.md` at the repository root holds one section per stable release, newest first. cargo-dist finds the file on
-its own (`CHANGELOG*` at the workspace root; the `auto-includes = false` setting only governs archive contents), takes
-the section whose heading names the tagged version, and puts it in the GitHub release body above the download tables. It
-also uses the heading text as the release's name. `releasing/check-changelog.py` holds the mechanical rules below, and
-the release gate runs it, so a file dist would misread fails the tag build instead of publishing a release with the
-wrong notes.
-
-The docs website's Release notes page is built from the same file, every release section in it, by
-`website/scripts/release-notes.mjs` on each website build. Nothing extra is needed for a release to appear there, but a
-release heading the generator cannot read (anything at the `##` level other than the format below) fails the website
-build. Screenshots for a release live on the website only (`website/AGENTS.md`, "Release notes"), never in this file;
-step 4 of the stable procedure below has them added for each release.
-
-Curated release sections are historical records. Once the maintainer has approved a section, do not rewrite it to adopt
-a later layout rule, wording convention, or category set. A section that still opens with the draft notice (see the
-format) has not been approved yet, even though its tag may already be public, and replacing it with the approved text is
-the procedure working as intended, not a rewrite. The same goes for a stable re-cut putting the notice back on a section
-it extends ("Re-cutting a stable release"): the approved entries in it stay word for word. More generally, a published
-release's section is never part of a change by default, a sweep or a rename included; it changes only as a correction a
-task specifically targets. A change to this process applies to sections curated after the change; the checker must
-retain compatibility with older sections so a release in flight does not require retroactive edits. When a new format is
-introduced, update the checker and its fixtures to recognize both the new format and the older formats that remain in
-the file.
-
-The current compatibility registry preserves the Highlights layout in `v0.12.0` and `v0.13.0`, and the single
-`### 🔧 Fixed` category in every section up to and including `v0.25.0`. It is a record of already-curated sections, not
-permission to use those layouts in a new release.
-
-## Format
-
-The layout below is the current format for new sections. It is a curation guide, not a migration instruction for older
-sections; the checker accepts the historical formats that are already present.
-
-- The file opens with `# Changelog` and a short paragraph of prose. Nothing else sits above the first release.
-- Each release is `## vX.Y.Z - YYYY-MM-DD`: the version first, with its `v`, then the date the section was written.
-  dist's parser accepts nothing before the version except a `v`, `Version`, or `Release` prefix, so an emoji or any
-  other word there hides the section from it, and everything after the version becomes part of the GitHub release name.
-  There is no `Unreleased` section; pending changes live in fragments (below), which is what keeps a prerelease tag from
-  picking up half-written notes.
-- While the maintainer is still reviewing a section's wording, its first line, directly under the heading, is exactly
-  `**DRAFT release notes - not yet finalized**`. The stable tag is pushed with that draft (see "Cutting a stable
-  release"), and the notice travels with it into the GitHub release, so anyone who reads the release page before it is
-  finalized knows the text will change. Only the newest section may carry it, and the approved text never does. The
-  checker holds the canonical copy.
-- Inside a release, categories appear in this order and with these emoji, each omitted when it has nothing:
-
-  | Heading                           | Holds                                                                       |
-  | --------------------------------- | --------------------------------------------------------------------------- |
-  | `### 💥 Breaking`                 | `feat!` and any other type marked `!`; anything a user must act on          |
-  | `### 🚀 Added`                    | `feat`                                                                      |
-  | `### 🔄 Changed`                  | `style`, and `feat` or `perf` that alters existing behavior                 |
-  | `### 🔧 Fixes worth highlighting` | the fixes a reader should not miss (see below)                              |
-  | `### 🗑️ Removed`                  | removals that are not breaking in practice; breaking ones go under Breaking |
-  | `### 🩹 Misc fixes`               | every other fix                                                             |
-
-  Why these emoji: 💥 rather than 🔥 for Breaking because 🔥 is the common mark for removed code, 🔄 rather than ♻️ for
-  Changed because recycling reads as refactoring, and 🩹 for Misc fixes because a bandage reads as a small repair.
-  Category headings sit below the release level, so the parser never looks at them and the emoji stay out of the release
-  name.
-- Fixes are split in two. Fixes worth highlighting holds a fix (a `fix`, or a `perf` that fixes a performance problem)
-  when a non-trivial share of users is likely to notice it, meaning user-facing behavior on a path people commonly take
-  rather than an obscure corner, or when it fixes a genuinely serious bug: lost or corrupted state or sessions, killed
-  agents, a helm or host that will not start or connect, a security problem. A serious bug that only an extremely rare
-  edge case could ever hit does not qualify. Everything else goes under Misc fixes, which is the kind of thing most
-  projects sum up as one "various bug fixes" bullet; the maintainer wants the complete list published anyway, for
-  transparency. The curating agent makes the initial split on its own judgment and the maintainer reviews it with the
-  rest of the draft. Fragments do not decide it: `kind: fixed` covers both categories, because whether a fix stands out
-  depends on the rest of the release.
-- Misc fixes always opens with exactly this paragraph, then its bullets, and like every category it is omitted when it
-  has nothing:
-
-  ```
-  *Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
-  ```
-
-  The wording is fixed so that it is not one more thing to review per release; the checker holds the canonical copy.
-- Every category is bullets, after Misc fixes' fixed opening paragraph: one `-` item per entry, one paragraph, ending in
-  its PR reference as `(#N)` or `(#N, #M)`.
-- One paragraph per physical line, however long. `CHANGELOG.md` and the fragments are excluded from dprint in
-  `dprint.json` for this reason: GitHub renders a release body the way it renders a comment, with every newline as a
-  line break, so a section hard-wrapped at 120 columns shows up ragged on the release page. The checker tolerates
-  indented continuation lines as part of an item, but do not write them.
-- A Breaking entry says what the user must do about it (update both halves together, re-run provisioning, drop a flag),
-  not only what changed.
-- That a release cannot be downgraded from is not Breaking, and it gets no entry at all. Most releases upgrade the
-  helm's or the supervisor's database, so an older build refusing to open it afterwards is the normal case, not news.
-  The maintainer ruled this on 2026-10-07. The risk report's downgrade check still tells the maintainer, who is the one
-  reader that needs it. Sections up to and including `v0.23.0` carry such entries; like every curated section, they stay
-  as they are.
-- A release that changes the helm–supervisor protocol version opens its Breaking category with exactly this entry, and a
-  release that does not change it never carries it:
-
-  ```
-  - This release *requires* you to update your remote hosts. (#N, #M)
-  ```
-
-  The references are the PRs that changed the protocol version, in merge order. Nothing else varies: no explanation of
-  the change, no reworded variant, and no second entry saying the same thing in other words. Builds on different
-  protocol versions refuse to connect to each other (SPEC.md's compatibility rules), so every such release strands the
-  hosts left on the old version at `needs update`. The fixed wording and the rule that it appears every time are the
-  point: a reader who does not find the line can rely on its absence to mean their hosts keep working unchanged, which
-  holds only while no release omits it. Sections up to and including `v0.16.0` predate the rule, and several of them
-  changed the protocol without saying so; their silence means nothing, and like every curated section they stay as they
-  are.
-- Entries are written for someone running Farhelm. Name the feature as the UI or CLI names it, say what changed for
-  them, and leave out module names, internal mechanisms, and the reason a simpler fix was rejected. Caveats and
-  limitations belong in the entry ("launch only; no conversation tracking"), since the alternative is the user finding
-  them.
-
-## What gets an entry
-
-Every commit on main whose Conventional Commit type is `feat`, `fix`, `perf`, `style`, or `revert`, and every commit of
-any type marked `!`, is expected in the changelog of the next stable release. `style` is on the list because in this
-repository it means UI styling, which users see. `docs`, `refactor`, `test`, `chore`, and `ci` are not expected; add one
-by hand during curation when it matters to a user (a tmux pin change, say). A `revert` of something that shipped in a
-stable release is an entry; a revert of something that never shipped only removes the original's fragment.
-
-The rule of thumb is exactly that: if a required commit turns out to have nothing user-facing, the maintainer excludes
-it at curation time and nothing else has to happen.
-
-## Fragments: what a PR leaves behind
-
-`releasing/changelog.d/` holds one file per pending change. A PR whose title has a required type adds one in the same
-commit as the change, without asking; the agent writes it. A PR of any other type adds one when its change has a
-user-facing effect, and otherwise nothing. A `fix` or `feat` that amends work not yet released (a follow-up to an
-unreleased PR) edits that PR's fragment instead of adding a second entry; the sweep counts an edited fragment as
-coverage. The file name is a free mnemonic (`cursor-launch.md`, `fix-detach-notification.md`), nothing parses it, and
-`README.md` there is not a fragment.
-
-```
----
-kind: added
----
-
-Cursor is a harness choice in the session launcher. This is launch only: Farhelm does not track a Cursor session's
-conversation and cannot resume one.
-```
-
-The front matter is a leading `---` block, YAML-style, because a `---` line directly under text is a setext heading to
-Markdown (the first draft of this format had dprint rewrite `kind: added` over a `---` into `## kind: added`); a leading
-block is the one shape every Markdown tool treats as metadata. `kind:` is one of `breaking`, `added`, `changed`,
-`fixed`, `removed`, or `none`, naming the category the entry lands in (`fixed` lands in one of the two fix categories,
-chosen at curation). `none` records a required commit that was considered and has nothing user-facing; its body says
-why, so curation can tell an omission from a decision. An optional `pr: 123` (or `pr: 123, 456`) line claims PR numbers
-when the fragment is written after its change merged, or covers several PRs at once; a fragment added in the change's
-own commit needs no `pr:` because the sweep pairs it with the commit that added it.
-
-The body is a draft in user-facing voice, written after reading `releasing/EDITORIAL_GUIDANCE.md`, the maintainer's
-accumulated wording rules: the first paragraph is the entry candidate, and further paragraphs supply context for
-curation. Err toward including caveats, except that the release cannot be downgraded from, which no entry mentions (see
-the format). It is not reviewed at PR time and it is not the final text; curation rewrites it. When the draft rests on a
-guess (a PR with no description, say), say so in the body so the curator verifies it.
-
-## The checker
-
-`releasing/check-changelog.py` has three modes and a `--self-test`; none of them writes anything.
-
-- `format` lints `CHANGELOG.md` and every fragment against the current rules plus the historical section formats the
-  checker still supports, including the draft notice on the newest section. It checks structure and references; it does
-  not rewrite, normalize, or migrate curated release text. The release gate runs it on every tag, and it belongs in the
-  validation of any PR that touches either.
-- `fragments` walks the commits since the merge base with the last stable `vX.Y.Z` tag (stable releases are tagged on a
-  release branch that never merges, so the merge base is the honest "since"), reports each required commit as covered by
-  a fragment it added or changed, or one that claims its PR, or as `MISSING`, and lists `STALE` fragments whose adding
-  commit predates the range. A stale fragment means a change that shipped without notes: either a previous curation
-  forgot to consume it, or its PR merged between the changelog PR and the release branch cut (which step 5 below exists
-  to prevent). Bring it to the user; it is not automatically material for the next release. It needs the tags fetched.
-- `announce --tag vX.Y.Z` compares what dist computes for the tag (`announcement_title` and `announcement_changelog` in
-  its manifest, obtained by running `dist plan` locally or read from `--manifest`/`--manifest-env` in the gate) with the
-  checker's own reading of the file. A stable tag must land on the newest section exactly; a prerelease must land on
-  nothing, or on its own version's stable section when that already exists, which is dist's fallback and is tolerated.
-  This is the check that catches a misparse before a release exists, and it only works once the workspace version
-  matches the tag, so it runs after the version bump.
-
-# Cutting a stable release
-
-A stable release is cut from main. The changelog section lands on main FIRST, as its own PR; the release branch is cut
-after it merges, so the bump commit keeps its three-file shape and main is the only place the notes ever live. The
-section lands as a draft, and the procedure does not wait for the maintainer to approve its wording: the tag builds, and
-the release can be signed and brick tested, while they review it. The approved text then replaces the draft on main and
-on the GitHub release (step 3). The maintainer asked for this on 2026-10-13. Nothing that ships reads the notes (the
-app's What's new item opens the docs website, which builds from main), so what the wait bought was that the GitHub
-release and the tag's own copy of `CHANGELOG.md` never held a draft. The draft notice covers the release page (and the
-notification GitHub sends repository watchers) until finalization; the tag's copy keeps the draft for good, which
-nothing reads. Main holds the draft too until finalization, so a docs website deployed in that window shows it on the
-Release notes page, which is where the app's What's new item lands. When asked to deploy the website while the notes are
-still a draft, say so before deploying.
-
-1. Fetch tags, then run `python3 releasing/check-changelog.py fragments`. Go through its report with the user: every
-   required commit since the last stable release is included unless the user explicitly excludes it, `MISSING` ones get
-   an entry written now from the commit and PR, `kind: none` fragments are shown to the user as proposed exclusions (the
-   fragment author's judgment is not the user's decision), and `STALE` ones are raised as described under the checker.
-   This is the sweep the fragment rule exists to make cheap.
-
-   In the same step, ALWAYS check whether the helm–supervisor protocol version changed since the last stable release,
-   and tell the user the answer either way. Compare `PROTOCOL_VERSION` in `crates/farhelm-proto/src/lib.rs` at the merge
-   base the sweep uses and at the release base, and list the commits that changed it:
-
-   ```
-   base=$(git merge-base vPREV origin/main)
-   git log --oneline -G 'PROTOCOL_VERSION: u32 = [0-9]+' "$base"..origin/main -- crates/farhelm-proto/src/lib.rs
-   ```
-
-   (`vPREV` is the last stable tag.) Neither the sweep nor the fragments can be trusted to surface this: a bump often
-   rides in a `refactor`, which needs no fragment, or inside a feature whose fragment is about something else. When the
-   version changed, the section carries the fixed remote-hosts entry described under the format, citing those commits'
-   PRs; when it did not, it carries no such entry.
-
-   Start the risk report ("The release risk report" below) now too. It must reach the maintainer before the tag is
-   pushed in step 7.
-2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments and from whatever the user and the
-   agent agree on in conversation, following that guidance. Sort every fix into Fixes worth highlighting or Misc fixes
-   by the criteria under the format; the split is the agent's first call and the maintainer's to change. Keep the whole
-   proposed `## vX.Y.Z - YYYY-MM-DD` section in a Markdown file in your scratch directory, written exactly as it will go
-   into `CHANGELOG.md`, and publish it to the maintainer as a snippet with the `scode-snippets` skill, giving them its
-   link. If you do not know what the `scode-snippets` skill is, stop and tell the maintainer; do not substitute another
-   way of showing the draft. The maintainer asked for snippets on 2026-10-13, replacing a local file they edited by
-   hand. They review the snippet and give their changes in conversation. Apply them to the scratch file and update the
-   same snippet after each round, until the maintainer approves the text. The scratch file and the snippet hold the
-   section as it will read once approved, without the draft notice; `CHANGELOG.md` gets the notice added in step 4.
-
-   Do not wait for approval: go on to step 4 as soon as the first snippet is published, and keep the review going
-   alongside the rest of the procedure. Step 3 says how the approved text lands.
-
-   Treat any wording the maintainer supplies as authoritative. Reproduce it exactly: do not summarize, paraphrase,
-   polish, reorder, or silently correct it. When the maintainer gives edits to the agent's proposed wording, apply
-   precisely those edits, without interpreting them as permission for other changes. An explicit request to write or
-   rewrite text grants that latitude only for the requested text. Ask when an instruction is ambiguous. Format or
-   checker problems must be brought back to the maintainer rather than silently changing reviewed wording. When
-   transferring the approved section into `CHANGELOG.md`, copy the scratch file verbatim, including headings, blank
-   lines, and every word; add only the separation needed between the section and the surrounding changelog sections.
-   Verify the copy by comparing it against the scratch file. Do not run a formatter over the approved section.
-3. While iterating, watch for feedback that generalizes beyond the entry it was given on: a word the maintainer calls
-   internal jargon, a shape of sentence they keep rewriting, a kind of detail they keep cutting or adding. Two ways a
-   rule gets into `releasing/EDITORIAL_GUIDANCE.md`, and only two: the maintainer states it as a rule in so many words
-   ("X is internal jargon, use Y"), in which case record it; or the agent infers a generalization from the edits, in
-   which case ASK, naming the rule it would write, and record it only on a yes. Never write an inferred rule on the
-   agent's own judgment; the file is the maintainer's opinions, and a guessed one would steer every future draft. Record
-   each rule in the PR that lands the approved text (the finalization PR below, or the changelog PR in step 4 when
-   approval came first), with the example that prompted it. Feedback that only fixes the one entry is applied and not
-   recorded.
-
-   When the maintainer approves the text, finalize it. This usually happens somewhere between step 4 and step 8, and the
-   steps in between do not wait for it.
-   - Make a finalization PR on the latest main, titled as `docs:` (it is not a `fix`, and needs no fragment), that
-     replaces the `## vX.Y.Z` section of `CHANGELOG.md` with the scratch file, copied verbatim as step 2 describes, so
-     the draft notice goes away. The heading must stay exactly as step 4 landed it, date included, because dist named
-     the GitHub release after it; step 4 keeps the scratch file's heading in step with it. Add any guidance recorded
-     above and run `python3 releasing/check-changelog.py format`. When the tag's GitHub release already exists, also run
-     `python3 releasing/finalize-release-notes.py --tag vX.Y.Z --ref <the PR's head commit> --dry-run` before merging,
-     so a heading or notice slip shows up while it is still one PR to fix rather than two. Then merge it as part of this
-     procedure. It goes to main only, never to the release branch, which keeps the draft the tag was built from.
-   - Once that has merged and the tag's GitHub release exists (step 7), fetch and run
-     `python3 releasing/finalize-release-notes.py --tag vX.Y.Z`. It replaces the draft notes in the release body with
-     the section now on main, leaves the download tables and the release name alone, and refuses when the body is not
-     what dist wrote. Run it again when in doubt; once finalized, it reports so and changes nothing. A GitHub release
-     that is deleted and recreated (the recovery procedure in `dist-workspace.toml`) comes back with the tag's draft, so
-     run it again after that.
-   - If the approval changed which entries exist or which PRs they cite, bring the screenshot work from step 4 up to
-     date the way "Re-cutting a stable release" describes.
-
-   If the maintainer approves before the changelog PR in step 4 merges, that PR carries the approved section without the
-   notice instead, and there is nothing to finalize.
-4. Make the changelog PR: the drafted `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, with the draft notice
-   on the first line under the heading followed by the scratch file's categories, every fragment under
-   `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), `dprint fmt`, and
-   `python3 releasing/check-changelog.py format` passing. If `<today>` differs from the date in the scratch file's
-   heading, update the scratch file's heading to match what this PR lands, and the snippet with it, so that the
-   finalization copy keeps the heading the release is named after. Merge it before going on.
-
-   The moment it merges, start a subagent to give the release's notes their screenshots on the docs website, and go on
-   to step 5 without waiting for it. The maintainer asked for this on 2026-10-13: the screenshot work used to start only
-   once the release was ready to sign, which left a separate wait for it after everything else was done. Started here,
-   it runs while the tag builds and the release is signed and brick tested, so its draft PR is ready by the time the
-   release is promoted. The notes' text is already on the website, built from the changelog section this step merged
-   (still the draft, which step 3 replaces); what the subagent adds is screenshots of the release's visible changes,
-   following `website/AGENTS.md`, "Release notes", and `website/EDITORIAL_RULES.md`. Give it this, in so many words:
-   - Work in a new jj workspace based on the latest `main`, under a subdirectory of your scratch directory, never in the
-     release checkout, which is busy with the release branch. Do not run `cargo clean` or touch tags, the release
-     branch, or anything on get.farhelm.io.
-   - Read the `## vX.Y.Z` section of `CHANGELOG.md` and decide which entries change something a reader would see: a new
-     dialog or control, or a redesign. Most entries do not, and a release with none gets no PR; say so and stop.
-   - For each that does, add a shot to `e2e/docs-shots/release-notes.spec.ts` and an item to
-     `website/src/release-notes/vX.Y.Z.json`, run the full capture (`scripts/docs-screenshots.sh`, no `--only`), look at
-     every image it prints and fix placement, then run `scripts/publish-docs-shots.sh` and confirm the website builds.
-   - Open the result as a draft PR per the `jjstack` skill, with its commit message cold-read per the
-     `scode-commit-msg-reviewer` skill, and do not merge it. It starts no preview server, being unattended.
-
-   The PR stays a draft until the maintainer asks for it to land; nothing in this procedure merges it. Pass its link on
-   to the maintainer when the subagent reports it, with a note that the website changes only when someone deploys it.
-   The subagent's result holds up no step of the release.
-5. Start a `release-X.Y.Z` branch at the changelog PR's merge commit EXACTLY, not at whatever main has become since:
-   anything merged after it would ship in X.Y.Z without notes and leave its fragment behind as `STALE`. Confirm
-   `releasing/changelog.d/` holds only `README.md` at that commit. Then bump the version to `X.Y.Z` in the root
-   `Cargo.toml`'s `[workspace.package]` and `packaging/farhelm-desktop/dist.toml`, refresh `Cargo.lock`
-   (`cargo metadata` suffices), and commit exactly those three files as `chore: release X.Y.Z`.
-6. Before tagging: `cargo clean` (see "Build outputs" below), then the version-parity tests
-   (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'` through the recorder),
-   `dist plan --tag vX.Y.Z` naming BOTH packages under the version (a mismatch makes the desktop archive silently
-   vanish), and `python3 releasing/check-changelog.py announce --tag vX.Y.Z`, which must print that dist's announcement
-   matches.
-7. Push the tag `vX.Y.Z` at the bump commit and watch the workflow to completion. Then verify the GitHub release: every
-   asset the release contract names present and NO `SHA256SUMS` or `SHA256SUMS.minisig` (those belong on get.farhelm.io;
-   the workflow refuses them), the release NOT marked prerelease, and the release page showing the changelog section
-   above the download tables with the heading text as its name. Tell the maintainer it is ready to sign and publish at
-   its version path, and hand them exactly this line, with the version filled in, to run from their release management
-   location (outside this repository; agents never run it):
-
-   ```
-   ./bin/publish-release.sh vX.Y.Z && ./bin/deploy.sh
-   ```
-
-   It publishes the release at its version path without moving `/latest`. The maintainer asked for this one line on
-   2026-10-10, for convenience. Once they have run it, check get.farhelm.io (read-only):
-   `https://get.farhelm.io/vX.Y.Z/SHA256SUMS`, its `.minisig` and `install.sh` answer, and
-   `https://get.farhelm.io/latest` still names the previous stable release.
-
-   If the screenshot subagent from step 4 has reported by now, include its PR link (or its finding that the release
-   needs no screenshots) when telling the maintainer the release is ready to sign. Also say whether the notes are
-   finalized (step 3). If they are not, the maintainer decides whether to sign now or after; the agent does not hold the
-   signing line back.
-8. Stop for the brick test. The release is now staged: anyone can install it by naming its version, and nothing installs
-   it by default. Tell the maintainer it is ready to brick test, and give them the line to hand the agent on the Mac
-   test host: `brick test release vX.Y.Z` (`releasing/mac-vm-test/BRICK-TEST.md`). That test runs on the maintainer's
-   Mac, in Tart VMs, so this session does not run it; it installs the staged release and upgrades the previous stable
-   releases to it, which is the check that the release does not brick existing installations (SPEC.md, "Upgrade
-   compatibility and client scale"). Give the maintainer the risk report's ranked risks and manual checks as material
-   for the test's per-release addendum. The result names P0's install/upgrade/agent checks, P1's live feedback send and
-   bonus coverage separately; bring those results to the maintainer without deciding whether a P1 failure blocks
-   promotion. If the notes are not finalized yet, say so in the same message, since a pass leads straight to promotion.
-   Then wait for the maintainer's verdict; do not treat silence, or a test that could not run, as a pass.
-   - Pass: the maintainer moves `/latest`, which no agent does. If the notes are still not finalized when they report
-     the pass, remind them before they move it, since promoting would send every ordinary install to a release whose
-     page still reads DRAFT. Once they say it has moved, check that `https://get.farhelm.io/latest` names `vX.Y.Z`, and
-     go on.
-   - Fail: `/latest` stays on the previous release and the release is never promoted. Fix forward ("Fixing forward"
-     below) and cut the next patch version. Whether to take the staged version off get.farhelm.io is the maintainer's
-     call.
-   - Could not run: ask the maintainer whether to fix the test environment and run it again, or to promote without it.
-     Only the maintainer decides to skip the test.
-9. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
-10. `cargo clean` again (see "Build outputs" below).
-
-The procedure is not finished until step 3's finalization has run, or the maintainer has said to leave it for later.
-When everything else is done and the notes are still a draft, say so plainly in the final report rather than reporting
-the release as complete.
-
-A failure anywhere in this procedure, from the pre-tag checks through the brick test, is fixed forward without asking
-("Fixing forward" below). A failed tag build publishes nothing, and a release that failed its brick test was signed and
-staged but never promoted; either way its tag name is spent and the next attempt is the next patch version. The
-abandoned release branch is left as it is, like the earlier ones.
-
-# Cutting an RC release
-
-An RC exists so the maintainer can `curl | sh` a candidate onto a real machine before anything merges. The TAG, not any
-merge, is what triggers the release workflow, so an RC can be cut from the tip of an unmerged PR stack — that is a
-normal move here, not a trick (v0.2.1-rc.1 and rc.2 shipped this way on 2026-09-01, trialing the Farhelm.app bundle and
-the clipboard fix before either landed).
-
-An RC carries no curated notes. Its tag finds no `## vX.Y.Z` section (the section is written when the stable release is
-cut), so dist publishes the download tables alone. The one exception is an RC cut after the stable section for the same
-version has already landed on main: dist then falls back to that section and titles it with the RC version, which the
-`announce` check reports as a note rather than a failure.
-
-When asked for an RC, settle TWO choices first. Ask about each unless the request states it explicitly or the version
-default below applies; guessing wrong publishes the wrong binaries or version to a real, public prerelease:
-
-- The BASE: cut from main, or from the current in-flight PR stack's tip? "cut an rc with this stack" is explicit; "cut
-  an rc" is not.
-- The VERSION: is this the next attempt at the SAME candidate — a previous `X.Y.Z-rc.N` exists for the target version
-  and this continues it, so it is `X.Y.Z-rc.N+1` — or the FIRST rc of a new target version? If the latter, which
-  component bumps is the maintainer's semantic call, not something to infer from the diff: patch (`X.Y.Z+1-rc.1`), minor
-  (`X.Y+1.0-rc.1`), or major. The default below makes that call "minor" unless the request names another version.
-
-An explicit request for an RC release without a version has a default, decided by the most recently published release.
-Check published releases including prereleases, ordered by publication time; GitHub's `releases/latest` endpoint
-excludes prereleases and cannot answer this question.
-
-- If the most recent release is `X.Y.Z-rc.N`, the request continues that candidate: `X.Y.Z-rc.N+1`. Do not fall back to
-  an older RC.
-- Otherwise (the most recent release is stable, a dev release, or anything other than an RC), the request starts a new
-  minor candidate. Take the most recent stable `vA.B.C` and cut `A.B+1.0-rc.1`. The maintainer asked for this default on
-  2026-09-29 so that starting a new candidate does not stop to ask for a version in the common case.
-
-Announce the exact version and proceed without asking about it. Stop and ask instead when there is no published stable
-release to bump from, or when the default's tag already exists (a dev release published after an RC can make the
-"otherwise" branch land on a version that was already cut). An explicit version always wins, so a patch or major
-candidate is requested by naming it. The base still needs to be stated or confirmed, and an existing tag must never be
-reused.
-
-With both settled, the process is:
-
-- Start the risk report ("The release risk report" below) and let it run while the rest of this list proceeds; it does
-  not hold up the tag.
-- Bump the version to `X.Y.Z-rc.N` (N increments per attempt; never reuse a tag name) in the root `Cargo.toml`'s
-  `[workspace.package]` and `packaging/farhelm-desktop/dist.toml`, and refresh `Cargo.lock` (running `cargo metadata`
-  suffices). The release commit is exactly those three files with the message `chore: release X.Y.Z-rc.N` — the shape
-  every release commit here has (#304, #311, #314).
-- Before tagging, run `cargo clean` (see "Build outputs" below), then sanity-check the announce: the version-parity
-  tests (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`, through the recorder) and
-  `dist plan` naming the rc version with BOTH packages under it — a version mismatch makes the desktop archive silently
-  vanish from the release. Also `python3 releasing/check-changelog.py format`: the build gate lints every fragment on
-  every tag, so a malformed fragment anywhere in the stack fails the rc build and costs an `rc.N`.
-- Give the bump its own PR like any other commit (stacked on the stack tip, or based on main), but do not merge anything
-  for the release's sake: push the tag `vX.Y.Z-rc.N` at the bump commit and the workflow runs from the tag. Its build
-  gate runs the retained Rust targets, pinned shutdown regression, JS, CentOS, and native desktop checks while excluding
-  the tmux e2e suite (see "Finishing work" in the root `AGENTS.md`); that gate is the release's validation, so local
-  slow-battery reruns are not a prerequisite for tagging.
-- Watch the workflow run to completion rather than fire-and-forgetting it, then verify the GitHub release: every asset
-  the release contract names present, no `SHA256SUMS` or `SHA256SUMS.minisig`, and the release marked prerelease
-  (cargo-dist does that for `-rc.N` versions on its own).
-- Hand the maintainer one copy-paste line that signs and publishes the release and then installs it. The signing half is
-  `./bin/dev-release.sh vX.Y.Z-rc.N`, the maintainer's signing tooling (outside this repository, run on their trusted
-  host from that tooling's own directory, never by an agent), which exits 0 once the release is signed and published at
-  its version path on get.farhelm.io. The install half runs only after that succeeds, and uses the installer
-  get.farhelm.io serves FOR THAT TAG (the one signed with the release) with the version pinned on the far side of the
-  pipe:
-
-  ```
-  ./bin/dev-release.sh vX.Y.Z-rc.N && curl -fsSL https://get.farhelm.io/vX.Y.Z-rc.N/install.sh | FARHELM_VERSION=vX.Y.Z-rc.N sh
-  ```
-
-  The maintainer asked for this one line on 2026-10-07 so that trying an RC costs them only running it in the right
-  directory and supplying the signing key's passphrase. Remind the maintainer that it runs from the signing tooling's
-  directory, and to quit the desktop app before running it and relaunch after.
-- Once the maintainer reports that it ran, check that `https://get.farhelm.io/vX.Y.Z-rc.N/SHA256SUMS`, its `.minisig`
-  and `install.sh` answer, and that `https://get.farhelm.io/latest` still names the last stable release, so ordinary
-  installs are unaffected. Then close the version-bump PR without merging it. The tag preserves the release commit; the
-  PR does not need to stay open for the RC to remain available. Keep the tag and published release intact.
-- Then `cargo clean` again (see "Build outputs" below).
-- A failed tag build publishes nothing; fix forward ("Fixing forward" below) and cut `rc.N+1`. The stale tag stays (tags
-  are never deleted; the incomplete-release recovery below deletes only a GitHub release, and keeps the tag).
-- Close the version-bump PR without merging when its release attempt is permanently abandoned, including when a fix
-  requires another RC and a new version-bump PR will supersede it. A temporary pause or a recoverable workflow rerun is
-  not permanent abandonment; keep the PR open while that same release attempt remains active.
-- One jj side effect to expect: once the rc tag is fetched, jj treats every commit under it as immutable, so a later
-  mid-stack rewrite of those commits (a fixup round after the trial, say) needs `--ignore-immutable`. That is safe —
-  rewriting creates new commits and the tag keeps pointing at what it tagged — but it will otherwise refuse with
-  "immutable commits are used to protect shared history" at exactly the moment a trial's feedback wants applying.
-
-# Cutting a dev release
-
-A dev release is an RC under another name: `X.Y.Z-dev.N`, tagged `vX.Y.Z-dev.N`, cut by exactly the procedure above with
-`dev` in place of `rc` everywhere — the bump commit is `chore: release X.Y.Z-dev.N`, N increments per attempt and a tag
-name is never reused, the workflow runs from the tag and marks the release a prerelease (any semver prerelease suffix
-does; get.farhelm.io's `latest` still names the last stable), and `scripts/install.sh` accepts
-`FARHELM_VERSION=vX.Y.Z-dev.N` the same way it accepts an `-rc.N`. Settle the same two choices first, base and version,
-and ask when the request does not state them (a follow-up attempt after fixing forward already has both); the RC version
-default above does not apply to dev releases. The `-dev.N` and `-rc.N` counters are independent, so `0.3.0-dev.2` and
-`0.3.0-rc.1` can both exist. The name is the whole difference: it tells whoever reads the tag list later that the build
-was a trial of work in progress, not a claim that this is what will ship as `X.Y.Z`.
-
-# Fixing forward
-
-When a release attempt of any kind, stable, RC or dev, turns up a problem, the default is to fix forward without
-stopping to ask: fix it on a branch off the latest main, land the fix on main, and cut the next attempt from main's new
-tip. That covers every way an attempt fails: a pre-tag check (the version-parity tests, `dist plan`, the changelog
-checks), the tag build's gate, the brick test, or a problem the maintainer hits trying an RC or dev release. Whatever
-else landed on main in the meantime rides along. That is fine, and it is not a reason to cut from an older commit or to
-ask first. The maintainer set this default for prereleases on 2026-10-10 and extended it to stable releases on
-2026-10-11: release attempts exist to flush out exactly this kind of problem and to smoke test the real release
-artifacts, so a fix that keeps the next attempt moving is the point, and waiting on the maintainer for one only stalls
-them.
-
-The release request is the authorization: open the fix as a PR, mark it ready and merge it as part of landing it, after
-the validation the fix itself calls for ("Finishing work" in the root `AGENTS.md`). This covers fixes that are
-reasonably straightforward and unambiguous. A fix that needs a design decision or a redesign, grows in scope beyond the
-failure it fixes, changes product behavior in a way the specs do not already settle, or has more than one reasonable
-answer is still the maintainer's: describe it and ask. An explicit instruction otherwise (cut the next attempt from a
-stack, hold the fix for review, stop after a failure) overrides the default.
-
-The next attempt's base is therefore settled (latest main), and so is its version, so neither needs asking about again:
-
-- Once a tag has been pushed its name is spent, whether or not its build succeeded. An RC or dev release cuts `rc.N+1`
-  or `dev.N+1`, and a stable release cuts the next patch version. The stale tag stays (tags are never deleted).
-- A failure before any tag was pushed spends nothing, and the next attempt keeps the version.
-
-Every attempt gets its own risk report ("The release risk report" below). For a stable re-cut it still reaches the
-maintainer before the tag is pushed, but the agent does not wait for a reply to it.
-
-## Re-cutting a stable release
-
-A stable re-cut cannot reuse the old release branch: its notes have to cover what now rides along. Re-run step 1's sweep
-and protocol check against the new base, then make another changelog PR as in step 4. It renames the `## vX.Y.Z` section
-when the version changed (a stable `announce` fails unless the newest section names the tag exactly), adds entries for
-the fix and for every required commit that landed since, and deletes the fragments. Entries the maintainer already
-approved stay word for word. The new ones are not held for the maintainer's approval: draft them from the fragments (or,
-for a `MISSING` commit, from the commit and its PR) following `releasing/EDITORIAL_GUIDANCE.md`, sort them into
-categories as step 2 does, and add the fixed remote-hosts entry if the protocol version changed in the new commits.
-Leave out `kind: none` fragments and `STALE` ones rather than stopping to ask about them. The maintainer chose this on
-2026-10-11, over stopping for wording review and over cutting from the old base with only the fix cherry-picked.
-
-The re-cut's section is therefore a draft again, whether or not the previous attempt's notes were finalized: it opens
-with the draft notice in `CHANGELOG.md`, and its review and finalization follow steps 2 and 3. The scratch file and the
-snippet still hold the section without the notice, as step 2 says: update both with the re-cut's entries rather than
-starting new ones, and in the message that hands the maintainer the updated snippet, list every entry added without
-their review and every fragment left out.
-
-Then continue from step 5 at the new changelog PR's merge commit. A `release-X.Y.Z` branch from an attempt that never
-pushed a tag is replaced, since nothing points at it; one whose tag was pushed is left as it is. A GitHub release from
-an earlier attempt keeps whatever notes it had; only the attempt being promoted gets finalized.
-
-The screenshot work from step 4 follows the notes it was based on. When the re-cut's changelog PR merges, bring it up to
-date in the same way step 4 starts it: continue the screenshot subagent if it is still working, or start a new one with
-step 4's instructions that updates the existing draft PR (or opens one, if there was none) rather than opening a second.
-Tell it what changed: a new version means renaming `website/src/release-notes/vX.Y.Z.json` and the shots' version, and
-new entries need the same decision about whether a reader would see them. Then continue from step 5 as above without
-waiting for it.
-
-# The release risk report
-
-Every release attempt, stable, RC or dev, comes with a risk report for the maintainer, delivered without being asked. It
-answers two questions: which of the changes going out are most likely to break the release badly, and whether the
-release blocks a downgrade. The maintainer asked for it as a default on 2026-10-02, after requesting it by hand for
-v0.22.0-rc.1 and v0.22.0-rc.2.
-
-NOTE: The report is research done by reading diffs, not validation. It does not replace the tag's build gate, and it
-does not gate an RC or dev tag: start it as soon as the base and version are settled, let it run alongside the bump and
-the pre-tag checks, and deliver it when it is ready. A stable release is different only in timing: have the report in
-front of the maintainer before pushing the tag (step 7 of the stable procedure), since a stable tag reaches every
-ordinary install.
-
-## Which commits
-
-The report covers what is new since the previous published release of any kind, prereleases included (the same lookup
-the RC version default uses). A continued candidate therefore reports only what landed since the last `rc.N`, and a
-first candidate or a stable release cut right after a stable one covers everything since that stable release. Release
-commits live only under their tags, and an RC may have come from an unmerged stack, so take the range from the merge
-base rather than from the tag itself:
-
-```
-git log --oneline "$(git merge-base vPREV BASE)"..BASE
-```
-
-`vPREV` is the previous published release's tag and `BASE` is the commit the release is cut from. Docs-only commits get
-a quick `git diff --stat` to confirm they touch nothing shipped, and nothing more.
-
-## Downgrade check
-
-Compare against the last stable release, because that is what an ordinary install falls back to, and also against the
-previous published release when that is a different one. Report the numbers either way, including when nothing moved:
-
-```
-for rev in vPREV BASE; do
-  git show "$rev:crates/farhelm-helm/src/store.rs" | grep 'const SCHEMA_VERSION'
-  git show "$rev:crates/farhelm-supervisor/src/store.rs" | grep 'const SCHEMA_VERSION'
-  git show "$rev:crates/farhelm-proto/src/lib.rs" | grep 'PROTOCOL_VERSION: u32'
-done
-```
-
-The two schema versions are what actually block a downgrade. The helm and the supervisor each migrate their database
-forward when they open it, and each refuses to open a database whose version is newer than its own ("refusing to open it
-rather than risk misreading it"). So once a build with a higher number has run against a state directory, an older build
-cannot use that directory, and the half whose number moved cannot be downgraded in place. A protocol version change
-blocks nothing on its own, but builds on different protocol versions refuse to connect to each other, so a downgrade has
-to take the helm and every host it talks to back together, and hosts left on the other side sit at `needs update`. For a
-stable release this is the same protocol question step 1 already asks; answer it once and use it for both.
-
-The constants do not cover every persisted format. Read the diff for anything else an older build would fail to read: a
-versioned state file whose version moved, a new variant in an enum that is stored rather than only sent over the wire, a
-renamed or relocated file. Say what was checked and what was not.
-
-## Risk review
-
-Rank the changes most likely to significantly break the release: the helm or a supervisor failing to start or refusing
-to connect, adding, installing, updating or provisioning hosts breaking, the desktop app failing to start or sign in,
-state or sessions lost or corrupted, running agents killed, or the UI wedged across the fleet. Look hardest at code that
-runs unconditionally at startup or on every request, at new refusals and validation that could reject input real
-installs already rely on, and at anything that changes how different versions of the helm and supervisor interact.
-Narrow edge cases with mild failure modes go in the low-risk bucket.
-
-For each ranked risk, give the change and its PR, a concrete failure scenario, what in a real deployment would trigger
-it, how likely that seems, and a manual check the maintainer can run on the release to smoke it out. Close with one line
-naming the rest as low risk. Write it in the terms of "Talking to the user" in the root `AGENTS.md`: what the user sees,
-not internal names.
-
-## Delegating the research
-
-Splitting the commit range across read-only subagents works well and keeps the diffs out of the main context. Tell every
-one of them, in so many words, not to run `git checkout`, `git switch`, `git reset`, `git stash`, any `jj` command, or
-anything else that moves HEAD, the working tree, the index or refs, and to read other revisions only through `git show`,
-`git diff`, `git log` and `git grep <pattern> <rev>`. The release checkout is busy while they work: on 2026-10-02 a
-research agent asked only to read ran `git checkout` to look at another revision, swapped the release checkout's files
-back to the previous release in the middle of the version-parity build, and that run had to be thrown away and repeated
-from `cargo clean`. Verify a delegate's headline claims (a version number, a refusal the review says is new) against the
-code before passing them on.
-
-# Build outputs
-
-Cargo files every workspace crate's build outputs under a hash that includes the package version, and every release
-attempt changes the version. So each attempt's builds land beside the previous attempt's instead of replacing them, and
-nothing ever removes the old ones. A checkout used for releases grew past 100 GB that way in about two weeks: dozens of
-copies of the version-parity test binary with their incremental caches, plus the reproductions of gate failures run
-between attempts. A release attempt therefore starts and ends with `cargo clean` in the checkout it is cut from:
-
-- Right before the version-parity tests, the attempt's first build. This also clears what an earlier attempt left
-  behind, including one whose session ended before its own cleanup. It costs little: the version bump rebuilds every
-  workspace crate regardless, so only the dependencies are rebuilt that would otherwise have been reused.
-- When the attempt is over: the release is published and verified, or the attempt is abandoned. Not while a gate failure
-  is still being reproduced in that checkout, since the reproduction wants its warm build.
-
-`cargo clean` removes the checkout's whole `target/`, including the dx bundle and any earlier development build there.
-The pinned tmux and nextest (`.ci-tmux`, `.ci-nextest`) live outside it and stay.
-
-# The release workflow
-
-`.github/workflows/release.yml` is generated by cargo-dist from `dist-workspace.toml` — never hand-edit it; change the
-config (or `.github/dist-build-setup.yml`) and run `dist init --yes && dprint fmt` to regenerate. It runs on tag pushes
-only (`pr-run-mode = "skip"`, D19), so a PR exercises none of it: the release path is validated when a tag is cut, by
-the gate `.github/dist-build-setup.yml` puts at the top of every build job — the tag-shape assertion, the changelog
-format and announcement checks, then the retained Rust targets, pinned shutdown regression, JS harness, CentOS
-provisioning, desktop unit test, and desktop smoke on the x86_64 Linux one; an Apple CLI compile, standalone uninstall
-validation and desktop unit test on macOS. The tmux-driven e2e suite remains out of the Linux gate until its
-load-sensitive tests are deflaked; TODO.md lists the condition for putting it back. That gate lives inside the build
-jobs rather than in a `plan-jobs` workflow because dist 0.32 lets a failed plan job SKIP the build jobs, and its `host`
-job accepts a skip; a failure inside a build job is the only kind it refuses.
-
-What a change to release plumbing CAN be checked locally is `dist plan` (the config parses and the asset list is what
-you expect), `dist generate --check` (the generated workflow is current), the release scripts' own `--self-test` modes
-(`scripts/check-release-archive.py`, `scripts/check-static-elf.sh`, `scripts/check-desktop-assets.sh`,
-`releasing/check-changelog.py`, `releasing/finalize-release-notes.py`, `releasing/rehearse-release-gate.py`), and
-`shellcheck` over the scripts the workflow calls.
-
-To get the gate's verdict in GitHub without cutting a release, `releasing/rehearse-release-gate.py` derives a throwaway
-workflow from `release.yml` that runs the plan and per-target build jobs on a push to a `rehearsal/release-gate/...`
-branch and publishes nothing; its docstring says what it changes and what a rehearsal therefore does not check (the two
-tag assertions). `.agents/run-all-tests.md` is the procedure that pushes it. The generated file is never merged.
-
-When a tag produces a GitHub release that is incomplete or failed validation, the recovery procedure is in
-`dist-workspace.toml`'s header ("RECOVERY: a GitHub release that is incomplete or failed validation"). It is
-maintainer-run, before anything for that version is signed or published on get.farhelm.io: delete the release, never the
-tag, then re-run the workflow.
+When making a PR whose title type is `feat`, `fix`, `perf`, `style` or `revert`, or carries `!`, or whose change has a
+user-facing effect, read `AGENTS.md`, "Changelog fragments", before committing the change. Fence: the fragment is added
+in the same commit as the change.
+
+Before changing release plumbing (`.github/workflows/release.yml`, `dist-workspace.toml`,
+`.github/dist-build-setup.yml`), read `releasing/.agents/workflow.md` in full, and the rest of `releasing/AGENTS.md`,
+"Release workflow edits", before the first edit. Fence: `release.yml` is generated: never hand-edit it; change the
+config and regenerate. Changing the release workflow means updating the validation inventory in `.agents/validation.md`
+in the same change.
+
+## PR merges these procedures authorize
+
+These are the only merges a release request authorizes. Each is spelled out, with its conditions, in the file cited.
+
+- The stable release's changelog PR, and its finalization PR: `releasing/.agents/stable.md`, "Cutting a stable release",
+  steps 3 and 4.
+- A stable re-cut's changelog PR: `releasing/.agents/stable.md`, "Re-cutting a stable release".
+- A fix forward's PR, marked ready and merged when the fix is straightforward and unambiguous:
+  `releasing/.agents/fixing-forward.md`, "Fixing forward".
+
+Nothing else merges for a release's sake. The release screenshot PR stays a draft until the maintainer asks for it to
+land, an RC or dev bump PR is closed without merging, and a stable release commit never reaches main.
+
+## Reading lists
+
+Every list is complete: read each file it names in full before the first action of that role. Files marked as root
+`AGENTS.md` sections are already in context for an agent started at the checkout root.
+
+### Stable release ("cut a stable release", "release vX.Y.Z")
+
+Before step 1 of `releasing/.agents/stable.md`, "Cutting a stable release" (the fragment sweep), read these in full:
+
+- `releasing/.agents/stable.md`
+- `releasing/.agents/changelog.md`
+- `releasing/EDITORIAL_GUIDANCE.md`
+- `releasing/.agents/risk-report.md`
+- `releasing/.agents/build-outputs.md`
+- `releasing/.agents/fixing-forward.md`
+- `releasing/.agents/workflow.md`
+- `releasing/AGENTS.md`, "Release screenshot subagent (fixed prompt)" (the files you name in that subagent's prompt)
+- `releasing/AGENTS.md`, "Risk-report researchers (fixed prompt)" (when you split the risk report's research)
+- `AGENTS.md`, "Changelog fragments", "Talking to the user" and "Tests and validation" (root)
+- `.agents/validation.md`
+- `.agents/test-evidence.md` and `docs/test-run-evidence.md` (the version-parity tests run through the recorder)
+
+Phase files: on reproducing a failed pre-tag check or gate failure, read `.agents/narrow-tests.md`. On rehearsing the
+release gate, read `.agents/run-all-tests.md`.
+
+Fence: every rule in `releasing/AGENTS.md`, "Rules for every release"; agents never run the maintainer's signing or
+publish line and never move `/latest`; the procedure is not finished until the notes are finalized or the maintainer
+said to leave that for later.
+
+### RC release ("cut an rc", "cut an rc with this stack")
+
+Before settling the base and version, read these in full:
+
+- `releasing/.agents/rc.md`
+- `releasing/.agents/risk-report.md`
+- `releasing/.agents/build-outputs.md`
+- `releasing/.agents/fixing-forward.md` (its pointer to `releasing/.agents/stable.md` applies to stable releases only)
+- `releasing/.agents/workflow.md`
+- `releasing/AGENTS.md`, "Risk-report researchers (fixed prompt)" (when you split the risk report's research)
+- `AGENTS.md`, "Changelog fragments", "Talking to the user" and "Tests and validation" (root)
+- `.agents/validation.md`
+- `.agents/test-evidence.md` and `docs/test-run-evidence.md`
+
+Phase files: on reproducing a failed pre-tag check or gate failure, read `.agents/narrow-tests.md`.
+
+Fence: every rule in `releasing/AGENTS.md`, "Rules for every release"; ask about the base unless the request states it;
+the bump PR is closed without merging; agents never run the signing and install line they hand the maintainer.
+
+### Dev release ("cut a dev release", "cut a dev release with this stack")
+
+A dev release follows the RC procedure, so this list is the RC list plus `dev.md`. Before settling the base and version,
+read these in full:
+
+- `releasing/.agents/dev.md`
+- `releasing/.agents/rc.md`
+- `releasing/.agents/risk-report.md`
+- `releasing/.agents/build-outputs.md`
+- `releasing/.agents/fixing-forward.md` (its pointer to `releasing/.agents/stable.md` applies to stable releases only)
+- `releasing/.agents/workflow.md`
+- `releasing/AGENTS.md`, "Risk-report researchers (fixed prompt)" (when you split the risk report's research)
+- `AGENTS.md`, "Changelog fragments", "Talking to the user" and "Tests and validation" (root)
+- `.agents/validation.md`
+- `.agents/test-evidence.md` and `docs/test-run-evidence.md`
+
+Phase files: on reproducing a failed pre-tag check or gate failure, read `.agents/narrow-tests.md`.
+
+Fence: as for an RC, except that the RC version default does not apply: ask for the base and version unless the request
+states them or a fix forward settled them.
+
+### Fixing forward and stable re-cuts ("fix forward", "re-cut the release")
+
+When a release attempt of any kind fails, before starting the fix, read these in full, on top of the reading list of the
+release kind in progress:
+
+- `releasing/.agents/fixing-forward.md`
+- `AGENTS.md`, "Tests and validation" (root), and `.agents/validation.md`
+- `.agents/test-evidence.md` and `.agents/narrow-tests.md`
+- for a stable release: `releasing/.agents/stable.md` (the next attempt follows `releasing/.agents/stable.md`,
+  "Re-cutting a stable release"), `releasing/.agents/changelog.md`, `releasing/EDITORIAL_GUIDANCE.md` and
+  `releasing/.agents/risk-report.md`
+
+Fence: a fix that needs a design decision, grows in scope, changes product behavior the specs do not settle, or has more
+than one reasonable answer goes to the maintainer; a pushed tag's name is spent and is never reused or deleted.
+
+### Release advisories ("withdraw release vX.Y.Z", "revoke vX.Y.Z", "lift the withdrawal")
+
+Before preparing an advisories file, read these in full:
+
+- `releasing/.agents/advisories.md`
+
+Fence: agents prepare the content only; they do not author or run the publishing tooling, sign with release keys, or
+publish either file.
+
+### Release workflow edits
+
+Before editing `.github/workflows/release.yml`, `dist-workspace.toml` or `.github/dist-build-setup.yml`, read these in
+full:
+
+- `releasing/.agents/workflow.md`
+- `dist-workspace.toml`'s header
+- `AGENTS.md`, "Tests and validation" (root), and `.agents/validation.md`
+- `.agents/run-all-tests.md` (it pushes the gate rehearsal, and its lists change with the workflow)
+
+Fence: `release.yml` is generated: never hand-edit it; change the config and regenerate. The generated rehearsal
+workflow is never merged. A change to the release workflow updates the check inventory in `.agents/validation.md`, and
+`.agents/run-all-tests.md`'s lists where they name the gate, in the same change.
+
+### Changelog curation
+
+Outside a stable release, before editing `CHANGELOG.md`, read these in full:
+
+- `releasing/.agents/changelog.md`
+- `releasing/EDITORIAL_GUIDANCE.md`
+- `releasing/.agents/stable.md` (curation is its steps 1 to 4, and the changelog rules cite it)
+- `AGENTS.md`, "Changelog fragments" (root)
+
+Fence: a published release's section changes only as a correction a task specifically targets; wording the maintainer
+approved is reproduced exactly.
+
+### Release screenshot subagent (fixed prompt)
+
+The stable procedure's step 4 gives this subagent a fixed prompt (`releasing/.agents/stable.md`, "Cutting a stable
+release"). Its prompt also tells it to read these in full before its first action, starting with the root `AGENTS.md`
+when the subagent runs outside a checkout or starts without it:
+
+- `AGENTS.md` (root, in full)
+- `website/AGENTS.md`
+- `website/.agents/release-notes.md` and `website/.agents/screenshots.md`
+- `website/EDITORIAL_RULES.md`
+- `docs/docs-shots/SPEC.md`
+- `docs/readme-hero/SPEC.md` (its staging rules govern the docs shots too)
+- `releasing/AGENTS.md` (it governs `CHANGELOG.md`, which the Release notes page is generated from)
+- `.agents/docs-media.md`
+- `.agents/validation.md` (the website build)
+
+Fence: work in a new jj workspace under the scratch directory, never the release checkout; no `cargo clean`, tags,
+release branch or get.farhelm.io; the PR stays a draft and is never merged; no preview server.
+
+### Risk-report researchers (fixed prompt)
+
+`releasing/.agents/risk-report.md`, "Delegating the research", gives these read-only subagents a fixed instruction.
+Their prompt also tells them to read these in full before their first action, starting with the root `AGENTS.md` when
+the subagent runs outside a checkout or starts without it:
+
+- `AGENTS.md` (root, in full)
+- `releasing/.agents/risk-report.md`
+
+Fence: no `git checkout`, `git switch`, `git reset`, `git stash`, any `jj` command, or anything else that moves HEAD,
+the working tree, the index or refs; other revisions are read only through `git show`, `git diff`, `git log` and
+`git grep <pattern> <rev>`.
+
+### Release tooling edits
+
+Before editing `releasing/check-changelog.py`, `releasing/finalize-release-notes.py`,
+`releasing/rehearse-release-gate.py` or `releasing/EDITORIAL_GUIDANCE.md`, read these in full:
+
+- `releasing/.agents/changelog.md` (the checker must stay compatible with older sections)
+- `releasing/.agents/stable.md` (the steps these scripts serve)
+- `AGENTS.md`, "Tests and validation" (root), and `.agents/validation.md` (their self-tests)
+
+Fence: a change to the changelog process applies to sections curated after it; published sections are never rewritten to
+fit it.
+
+### Mac VM test edits
+
+Before editing anything under `releasing/mac-vm-test/`, read `releasing/mac-vm-test/BRICK-TEST.md` in full, including
+"Validate changes to this coordinator".
+
+### Release brick test ("brick test release vX.Y.Z", "stop after P0 checks", "stop after P1 checks", "did P0 checks succeed?", "did P1 checks succeed?")
+
+When asked for a brick test, read `releasing/mac-vm-test/BRICK-TEST.md` in full before inspecting Tart state, then the
+files `releasing/mac-vm-test/BRICK-TEST.md`, "Release brick tests", names.
+
+Fence: a test request never authorizes publication or release promotion; a permission block during a test is a harness
+bug: stop, and do not approve manually or rescue it through host UI.
