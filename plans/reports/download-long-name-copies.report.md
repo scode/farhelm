@@ -49,3 +49,41 @@ The required fresh-context gpt-6.1-sol high source reviewer reported no findings
 complexity gate and test-authoring contract. It performed static review and did not independently run tests. A separate
 gpt-6.1-sol medium wording cold read passed. Implementation and investigation stayed with the executor; no workhorse was
 used. The report receives its separate native cold read before delivery.
+
+### Landing
+
+Landed as #2114, the second of the round's seven plans, tested stacked with the others on main.
+
+#### Review
+
+An independent fresh-context review found nothing blocking: the stem is shortened against the byte limit without
+splitting a character, the final extension is kept (which opening in the desktop app depends on), every candidate is
+distinct, and a name with no room for a stem fails once instead of looping. The bug shipped, so a "fixed" entry is
+right.
+
+#### Fix made while landing
+
+The changelog fragment now starts from what the user does: clicking a file path in a terminal to download it in the
+desktop app no longer fails when Downloads already has a file with that very long name.
+
+#### Left as is
+
+With an extension that leaves only a few bytes, the stem can shrink to nothing, giving a name that starts with a space;
+legal and very unlikely.
+
+#### Checks
+
+Run on all seven of this round's plans stacked on main (managed-checkout-row-accessibility, download-long-name-copies,
+save-template-ime-escape, helm-start-without-ca-bundle, stopped-session-launch-error, trash-totals-unchecked,
+checkout-override-error-wording), with every landing fix in:
+
+- `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (301 delays, none missing a
+  reason); `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the UI crate's
+  clippy with the desktop feature and `cargo check -p farhelm-desktop`.
+- Through the recorder, after rebuilding the CLI: the protocol, helm and supervisor packages in full with pinned tmux,
+  run `4256456b-4340-4e64-86a5-85aa71206a7a`: 2395 passed; the UI crate with the desktop feature, run
+  `5d0c7c3a-4d29-4a92-a8e2-a1eba6893786`: 656 passed.
+- The JS harness (257 passed) and the website build.
+- The github-checkouts, templates, trash-dialog, sidebar, provisioning and tooltip-coverage specs on Chromium and
+  WebKit, run `7f4cef76-eea8-4b05-9a31-1260bb14498a`: 456 passed.
+- Not run: the CLI's end-to-end targets and other browser specs; no PR in this round changes them.
