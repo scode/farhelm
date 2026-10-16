@@ -84,10 +84,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-body-lacks-keyboard-scroll-focus.md`](trash-body-lacks-keyboard-scroll-focus.md) — Keyboard-only users can
   lose access to offscreen host information when all trash actions are disabled.
 
-- [`link-click-tests-skip-preference-restoration.md`](link-click-tests-skip-preference-restoration.md) — A failed test
-  can leave “program only” enabled for the shared test helm, causing subsequent link-opening tests to fail misleadingly.
-  No shipped-product regression was confirmed.
-
 - [`short-main-pane-hides-approval-requests.md`](short-main-pane-hides-approval-requests.md) — In a sufficiently short
   window, waiting approval requests disappear until the user enlarges the window or changes the selected session.
 
