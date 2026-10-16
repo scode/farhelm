@@ -2182,8 +2182,10 @@ mod tests {
             conn.execute_batch(crate::store::PROFILE_TABLES_V15)
                 .unwrap();
             // Every table a later schema added goes, including schema 38's
-            // `launch_templates`, schema 41's `session_notification_marks`
-            // schema 47's `ntfy_alerts` and schema 52's `session_pins`.
+            // `launch_templates`, schema 41's `session_notification_marks`,
+            // schema 47's `ntfy_alerts`, schema 52's `session_pins` and
+            // schema 54's `registry_namespace`. A new table that is missing
+            // here fails the DDL comparison below, not a migration.
             // Later preference columns also
             // go, including the session-confirmation choice added in schema 48:
             // the test compares the result with the frozen v26 DDL, which
@@ -2195,6 +2197,7 @@ mod tests {
                  DROP TABLE session_notification_marks;
                  DROP TABLE ntfy_alerts;
                  DROP TABLE session_pins;
+                 DROP TABLE registry_namespace;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
