@@ -439,6 +439,11 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
   const folder = field.getByRole("textbox", { name: "checkout folder", exact: true });
   const save = field.getByRole("button", { name: "save", exact: true });
   const chosen = "~/managed-checkouts";
+  const submitted: Request[] = [];
+  let bodyFailed = false;
+  page.on("request", outgoing => {
+    if (outgoing.url().endsWith("/api/checkout-root") && outgoing.method() === "PUT") submitted.push(outgoing);
+  });
   try {
     await expect(folder).toHaveValue(previous.root ?? "");
     await expect(folder).toBeEditable();
@@ -485,10 +490,25 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
     await page.getByRole("button", { name: "settings", exact: true }).click();
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue("");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    const restored = await request.put("/api/checkout-root", { data: previous });
-    expect(restored.ok(), await restored.text()).toBe(true);
-    expect(await read()).toEqual(previous);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["submitted checkout saves", async () => {
+        // A page-owned save can outlive the failed assertion. Its terminal
+        // response (including a transport failure) must precede restoration.
+        for (const outgoing of submitted) {
+          const reply = await outgoing.response().catch(() => null);
+          if (reply) await reply.finished().catch(() => null);
+        }
+      }],
+      ["checkout folder", async () => {
+        const restored = await request.put("/api/checkout-root", { data: previous });
+        expect(restored.ok(), await restored.text()).toBe(true);
+        expect(await read()).toEqual(previous);
+      }],
+    ]);
   }
 });
 

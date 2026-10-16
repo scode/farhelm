@@ -14839,7 +14839,9 @@
   needs a new shared helper, keep it in this file or stop and return the item to the maintainer.
 - Completion criteria: the restoration PUT is never sent while a PUT from the page is unsettled. The test still passes
   on Chromium and WebKit. `python -B scripts/check-test-sleeps.py` passes. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `pzvqtmwvqzqxlppwwympvokrkrtktrys`, bookmark
+  `plan/browser-test-cleanup/16-checkout-save-settlement`,
+  [PR #2154](https://github.com/scode/farhelm/pull/2154/changes).
 
 ## docs-preview-does-not-watch-external-changelog.md
 

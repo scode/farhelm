@@ -65,9 +65,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`download-cancel-retains-pending-admission.md`](download-cancel-retains-pending-admission.md) — Repeatedly cancelling
   downloads before they start leaves a small amount of helm memory retained until the host reconnects.
 
-- [`checkout-settings-test-restores-before-save-settles.md`](checkout-settings-test-restores-before-save-settles.md) — A
-  failed browser test can leave its checkout-folder setting behind and affect later tests.
-
 - [`checkout-folder-save-trims-literal-path.md`](checkout-folder-save-trims-literal-path.md) — Saving an existing
   checkout-folder setting can change which directory it names, even without editing it.
 
