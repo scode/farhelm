@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `trash-confirm-binds-answer.md` — Trash dialog: "delete permanently" deletes only the confirmation it was shown for, never a newer selection (1 outcome)
 - [blocked] `menu-arrows-follow-focus.md` — Popup menus: arrow keys step from the item that actually has focus after a pointer or screen-reader focus move, keeping the fast-burst fix (1 outcome)
-- [in-flight c9fbe4] `checkout-retry-helm-namespace.md` — Agent creates into managed checkouts: retry keys carry a per-helm-database namespace so a rebuilt registry cannot replay another host's approval (1 outcome)
+- [complete] `checkout-retry-helm-namespace.md` — Agent creates into managed checkouts: retry keys carry a per-helm-database namespace so a rebuilt registry cannot replay another host's approval (1 outcome)
