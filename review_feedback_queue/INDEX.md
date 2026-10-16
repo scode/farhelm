@@ -61,10 +61,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`checkout-folder-save-trims-literal-path.md`](checkout-folder-save-trims-literal-path.md) — Saving an existing
   checkout-folder setting can change which directory it names, even without editing it.
 
-- [`inline-checkout-setup-retains-stale-config-eligibility.md`](inline-checkout-setup-retains-stale-config-eligibility.md)
-  — If the checkout folder is cleared while a repository remains selected, the launcher shows a failed preview but does
-  not offer its new setup field.
-
 - [`trash-body-lacks-keyboard-scroll-focus.md`](trash-body-lacks-keyboard-scroll-focus.md) — Keyboard-only users can
   lose access to offscreen host information when all trash actions are disabled.
 
