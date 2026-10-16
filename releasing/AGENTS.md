@@ -24,7 +24,10 @@ Three kinds of release exist. A stable release `X.Y.Z` is cut from main, gets cu
 triggers the release workflow.
 
 No release tag is pushed before its base and its version are settled with the maintainer per the procedure for its kind,
-a tag name is never reused, and a tag is never deleted.
+a tag name is never reused, and a tag is never deleted. Each procedure settles both when the release is requested, by
+its defaults or by asking right then, before any other work. After that, nothing before the tag's build waits for the
+maintainer: the build gate takes the longest and finds the failures to fix forward, so it starts as soon as the pre-tag
+checks pass.
 
 The workflow builds the release, validates it, and publishes its archives on a GitHub release. It signs nothing: CI
 never sees a signing key. A release reaches users only once the maintainer has signed its `SHA256SUMS` (the six payloads

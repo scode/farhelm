@@ -20,11 +20,24 @@ nothing reads. Main holds the draft too until finalization, so a docs website de
 Release notes page, which is where the app's What's new item lands. When asked to deploy the website while the notes are
 still a draft, say so before deploying.
 
-1. Fetch tags, then run `python3 releasing/check-changelog.py fragments`. Go through its report with the user: every
-   required commit since the last stable release is included unless the user explicitly excludes it, `MISSING` ones get
-   an entry written now from the commit and PR, `kind: none` fragments are shown to the user as proposed exclusions (the
-   fragment author's judgment is not the user's decision), and `STALE` ones are raised as described in
-   `releasing/.agents/changelog.md`, "The checker". This is the sweep the fragment rule exists to make cheap.
+The version is settled when the stable release is requested, and from then on nothing waits for the maintainer until the
+tag's build is running. A request that names a version settles it. So does a request that follows a release candidate:
+when the most recent published release, prereleases included and ordered by publication time (the same lookup as
+`releasing/.agents/rc.md`, "Cutting an RC release"), is `X.Y.Z-rc.N` or `X.Y.Z-dev.N` and `vX.Y.Z` does not exist yet,
+the version is `X.Y.Z`. Announce it and carry on. Only when neither applies, or the version's tag already exists, ask
+which version to cut, and ask it in the same reply that acknowledges the request, before any other work; never stop
+later for it. The base is not a question: it is always the changelog PR's merge commit (step 5). The maintainer asked
+for this on 2026-10-16, after the v0.29.0 attempt stopped with every pre-tag check passing to confirm a version that
+rc.3 had already settled. The tag's build gate is the slowest part of a release and the one that turns up the failures
+to fix forward, so it starts the moment the pre-tag checks pass.
+
+1. Fetch tags, then run `python3 releasing/check-changelog.py fragments`. Every required commit since the last stable
+   release is included unless the user explicitly excludes it, and `MISSING` ones get an entry written now from the
+   commit and PR. `kind: none` fragments are left out of the draft and `STALE` ones are not used (see
+   `releasing/.agents/changelog.md`, "The checker"); both are listed for the maintainer, the former as proposed
+   exclusions (the fragment author's judgment is not the user's decision), in the message that hands over the first
+   snippet in step 2. Their answers arrive with the wording review and change the draft like any other edit; nothing in
+   this step waits for them. This is the sweep the fragment rule exists to make cheap.
 
    In the same step, ALWAYS check whether the helm–supervisor protocol version changed since the last stable release,
    and tell the user the answer either way. Compare `PROTOCOL_VERSION` in `crates/farhelm-proto/src/lib.rs` at the merge
@@ -41,7 +54,7 @@ still a draft, say so before deploying.
    "Format", citing those commits' PRs; when it did not, it carries no such entry.
 
    Start the risk report (`releasing/.agents/risk-report.md`, "The release risk report") now too. It must reach the
-   maintainer before the tag is pushed in step 7.
+   maintainer before the tag is pushed in step 7, but the tag does not wait for a reply to it.
 2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments and from whatever the user and the
    agent agree on in conversation, following that guidance. Sort every fix into Fixes worth highlighting or Misc fixes
    by the criteria in `releasing/.agents/changelog.md`, "Format"; the split is the agent's first call and the

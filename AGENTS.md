@@ -283,9 +283,9 @@ Each entry: trigger phrases, the file to read in full before the first action, a
   active operator, delete retained data, force-stop guests or touch unrelated VMs; `/latest` still naming the preceding
   promoted stable is expected, not a blocker.
 - **Releases** (stable, RC or dev releases, fixing forward, advisories, changelog curation): `releasing/AGENTS.md`.
-  Fence: no release tag before its base and version are settled with the maintainer; never reuse or delete a tag; agents
-  never author, run or replace the signing and publication step, publish an advisory file, or move `/latest`; no release
-  bump reaches main.
+  Fence: no release tag before its base and version are settled with the maintainer, which happens when the release is
+  requested, never by stopping later; never reuse or delete a tag; agents never author, run or replace the signing and
+  publication step, publish an advisory file, or move `/latest`; no release bump reaches main.
 - **Careful rebase**: `.agents/careful-rebase.md`. Fence: a rebase that applies cleanly can still be wrong; a conflict
   that needs a design decision is the user's (unattended: a block).
 - **Vercel** ("trigger vercel on main", "deploy the website", "trigger vercel on this PR"): `.agents/vercel.md`. Fence:
