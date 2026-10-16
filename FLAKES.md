@@ -2094,3 +2094,26 @@ Disposition: fixed in #2132, with the TODO entry and sweep exclusion removed.
 Class: product
 
 Cause: established
+
+## 2026-10-15 — resolved: `guarded choices explain each agent and Cursor keeps its own setting` (e2e/tests/guarded-permissions.spec.ts)
+
+The original trace from `038d6b7f-5ad7-407a-a20a-db485b857dd8` shows the launcher retaining scrollTop 346 after its
+phone-width check. Hovering the first form heading moves it to zero, then returning to Guarded restores 346. Ancestor
+scroll intentionally dismisses hover help; that pointer detour could therefore dismiss the tooltip the test was about to
+inspect. Twenty unchanged Chromium repetitions passed in `823950a8-221c-425a-916a-ddafc89cbd54`, so the original timing
+failure was not reproduced. The invalid fixture premise is established separately: asserting that the old hover-away
+heading is fully in view fails with viewport ratio zero in `b8c48db1-8a8c-49ca-87c6-bde5d55a6a37`. The corrected test
+hovers the label beside the permission chip and asserts that label is fully in view first. It passed 10 of 10 exact
+Chromium repetitions in `f388f80c-a805-42d8-bbb9-ca22e10aacf8`, then both engines in the 16-execution focused run
+`10996a40-3c08-4423-8167-05c312193381`. No tooltip behavior, assertion timeout or retry policy changed. Runs used one
+browser worker and zero retries on Linux x86_64 kernel 6.8.0-146-generic, pinned tmux 3.7c executable SHA256
+`f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, locale `C.UTF-8`, with ambient `FARHELM_*` scrubbed
+and recorder-owned `FARHELM_TEST_TRACE_DIR` supplied; the combined run also supplied `FARHELM_PLAYWRIGHT_POLICY_FILE`.
+The base was `bd9cd335ddbab25ac7cb7d44af1ca27b050026e7`, dirty with the three flake corrections in progress; the premise
+probe retained the old heading target. Other machine load, compiler and browser build identities are unavailable.
+Evidence remains in private retained recorder runs and may expire. Disposition: fixed in #2133, with the TODO entry and
+sweep exclusion removed.
+
+Class: fixture-premise
+
+Cause: established

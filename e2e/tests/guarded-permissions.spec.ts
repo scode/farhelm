@@ -32,7 +32,12 @@ test("guarded choices explain each agent and Cursor keeps its own setting", asyn
     await expect(guarded).toHaveAttribute("aria-pressed", "true");
     // A press intentionally dismisses help until the pointer leaves the chip;
     // test the next ordinary hover rather than bypassing that dismissal rule.
-    await form.locator(".launch-composer-section-label").first().hover();
+    // Stay beside the chip: after the phone-width check, the form can retain
+    // a scroll offset. Hovering its first heading would scroll away and back,
+    // and a delayed ancestor scroll is supposed to dismiss this tooltip.
+    const permissionLabel = form.locator(".launch-composer-permissions-choice .launch-composer-section-label");
+    await expect(permissionLabel).toBeInViewport({ ratio: 1 });
+    await permissionLabel.hover();
     await guarded.hover();
     const tooltip = page.locator("body > .farhelm-tooltip");
     await expect(tooltip).toBeVisible();
