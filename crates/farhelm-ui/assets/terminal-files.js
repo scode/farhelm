@@ -4,6 +4,20 @@
 (function () {
   const MAX_BYTES = 100000000;
 
+  /** Transfer permission requires the entire live disclosure to fit. The
+   * noninteractive hover cannot be scrolled, so clipped details cannot count
+   * as evidence the user could inspect. Read dimensions at click time to
+   * cover a window resize after lookup, and fail closed for a hidden hover.
+   */
+  function disclosureFits(display, viewport) {
+    if (!display || display.hidden || display.clientHeight <= 0 || display.clientWidth <= 0 ||
+      display.scrollHeight > display.clientHeight || display.scrollWidth > display.clientWidth) return false;
+    // A resize can move fixed-position details off-screen without changing
+    // xterm's integer grid or overflowing the disclosure's own content box.
+    const rect = display.getBoundingClientRect();
+    return rect.top >= 0 && rect.left >= 0 && rect.bottom <= viewport.innerHeight && rect.right <= viewport.innerWidth;
+  }
+
   /** Decimal units agree with the transfer cap. Rounding never renders a
    * refused file as less than 100 MB; the refusal still names the exact limit.
    */
@@ -327,6 +341,13 @@
       this.hovered = null;
       const display = this.term?.element?.querySelector(':scope > .terminal-file-target');
       if (display) display.hidden = true;
+      // The clipped-hover refusal is raised above its own hover only while that
+      // hover can be showing. Once a new hover starts or the pointer leaves,
+      // drop it to the ordinary failure layer, text kept, so it can cover
+      // neither a new hover whose click is admitted nor the session header's
+      // confirmations below the terminal's top edge.
+      const message = this.term?.element?.querySelector(':scope > .terminal-file-message');
+      if (message?.dataset.outcome === 'disclosure-refusal') message.dataset.outcome = 'failure';
     }
 
     /** Paths travel as JSON data with the current device credential, never as
@@ -376,9 +397,10 @@
         this.term.element.addEventListener('click', this.dismissFailure);
       }
       message.textContent = window.farhelmTerminalLinks.visibleFormatCharacters(text);
+      message.dataset.outcome = outcome;
       message.setAttribute('aria-hidden', 'false');
       message.classList.add('showing');
-      this.failureMessage = outcome === 'failure';
+      this.failureMessage = outcome === 'failure' || outcome === 'disclosure-refusal';
       if (outcome === 'success') {
         this.messageTimer = this.schedule(() => {
           this.messageTimer = null;
@@ -404,6 +426,17 @@
       if (state.link && !bufferLinks(this.term, state.range.start.y).some(current =>
         current.path === path && current.range.start.x === state.range.start.x && current.range.start.y === state.range.start.y &&
         current.range.end.x === state.range.end.x && current.range.end.y === state.range.end.y)) return;
+      if (!disclosureFits(this.term.element.querySelector(':scope > .terminal-file-target'), window)) {
+        // Activation is on mouseup. Showing failure in the next task lets the
+        // click that follows finish before it can dismiss its own explanation.
+        // Reuse the owned notice timer so replacement/disposal cancels it too.
+        this.hideMessage();
+        this.messageTimer = this.schedule(() => {
+          this.messageTimer = null;
+          this.message('cannot download: full file details are not visible; enlarge the window and hover again', 'disclosure-refusal');
+        }, 0);
+        return;
+      }
       const controller = new AbortController();
       this.transfers.add(controller);
       this.message('downloading…');
@@ -454,7 +487,7 @@
     }
   }
 
-  const api = { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, FileLinksAddon, MAX_BYTES };
+  const api = { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, FileLinksAddon, MAX_BYTES };
   if (typeof window !== 'undefined') window.farhelmTerminalFiles = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();
