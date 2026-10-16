@@ -153,9 +153,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   checkout tests can remove their fixture folders while leaving their trash records behind, contaminating later trash
   listings.
 
-- [`uninstall-command-fixture-requires-gnu-stat.md`](uninstall-command-fixture-requires-gnu-stat.md) — The modified
-  uninstall command test can fail on macOS before reaching its cleanup assertions.
-
 - [`native-download-collision-exceeds-filename-limit.md`](native-download-collision-exceeds-filename-limit.md) — The
   desktop cannot download another copy of a file whose name already fills the destination filesystem’s filename limit.
 

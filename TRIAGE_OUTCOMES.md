@@ -14364,7 +14364,8 @@
 - Completion criteria: the test no longer compiles on macOS (or its stop half is Linux-only), with a docstring saying
   why. On Linux it still runs and passes (`cargo nextest` on that one test through the recorder), and
   `cargo clippy --all-targets` stays clean. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/remote-uninstall-fixes.md`.
+- Execution: complete in change `mqwzuwtxtwonvulopzyntusqkkvlzpsy`, bookmark
+  `plan/remote-uninstall-fixes/03-linux-fixture`; [PR #2102](https://github.com/scode/farhelm/pull/2102/changes).
 
 ## single-trash-test-skips-configuration-restoration.md
 
