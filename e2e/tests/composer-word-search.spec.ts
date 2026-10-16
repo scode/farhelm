@@ -57,8 +57,8 @@ async function listedSessions(request: APIRequestContext) {
 }
 
 /**
- * The complete word path applies harness, model, effort, and both permission
- * shorthand choices in sequence, then launches through the ordinary button
+ * The complete word path applies harness, model, effort, and the YOLO and
+ * Guarded permission choices in sequence, then launches through the ordinary button
  * path with the stored selection intact. Each Enter is preceded by an assertion that the intended option
  * is the preselected one: the Enter handler takes whatever row the last
  * render highlighted, so the premise has to hold before the key. The full
@@ -113,11 +113,14 @@ test("composer word search drives a structured launch", async ({ page, request }
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
 
-  await search.fill("perms:default");
-  await expect(form.getByRole("option", { name: "Permissions: default", exact: true, selected: true }))
+  // Guarded is the explicit Codex choice that replaces YOLO. Search no
+  // longer offers the old implicit-default permission; the stored launch
+  // below must retain this explicit choice as well as the model and effort.
+  await search.fill("perms:guarded");
+  await expect(form.getByRole("option", { name: "Permissions: guarded", exact: true, selected: true }))
     .toBeVisible();
   await search.press("Enter");
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }))
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }))
     .toHaveAttribute("aria-pressed", "true");
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
@@ -144,6 +147,7 @@ test("composer word search drives a structured launch", async ({ page, request }
     harness: "codex",
     model: model.id,
     effort,
+    permissions: "guarded",
   });
   expect(created, "the persisted launch must identify the created session").toBeTruthy();
   await cleanupSession(request, created!.id);
