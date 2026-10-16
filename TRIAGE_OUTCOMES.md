@@ -13928,7 +13928,8 @@
   failed open, stop and return the item.
 - Completion criteria: a failure after creation inside the helper deletes that session before the error propagates, and
   the attachment spec passes on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `wymsrxlrqutowrnpswymppttnsrpsznl`, bookmark
+  `plan/browser-test-cleanup/03-attachment-ownership`, [PR #2140](https://github.com/scode/farhelm/pull/2140/changes).
 
 ## installation-guide-hides-update-failures.md
 
