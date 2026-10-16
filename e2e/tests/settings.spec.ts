@@ -3,6 +3,7 @@
  * that changes only its own appearance cannot satisfy the round trip.
  */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import type { APIRequestContext, Request, Route } from "@playwright/test";
 import {
   forceBuildSkew,
@@ -544,10 +545,15 @@ test("a pending checkout folder save survives closing settings", async ({ page, 
   }
 });
 
+/** Host-removal consent can be changed back without reloading the client.
+ * Independent cleanup must restore both host and session consent even when
+ * removing one of the owned hosts fails, since later specs share the helm.
+ */
 test("settings reverses a permanent removal answer without reloading", async ({ page, request }, testInfo) => {
   const previous = await readPreferences(request);
   const owned: number[] = [];
   const names: string[] = [];
+  let bodyFailed = false;
   try {
     // The session opt-out does not answer a host's independent remove question.
     await patchPreferences(request, { skip_host_remove_confirmation: null, skip_session_confirmations: true });
@@ -606,10 +612,15 @@ test("settings reverses a permanent removal answer without reloading", async ({ 
     await third.locator(".host-remove").click();
     await expect(third).toHaveCount(0);
     await expect(removal).toHaveCount(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    for (const id of owned) await request.delete(`/api/hosts/${id}`);
-    await patchPreferences(request, { skip_host_remove_confirmation: previous.skip_host_remove_confirmation ?? null });
-    await patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null });
+    await cleanupOwnedSteps(bodyFailed, [
+      ...owned.map((id): [string, () => Promise<unknown>] => [`host ${id}`, () => request.delete(`/api/hosts/${id}`)]),
+      ["host removal consent", () => patchPreferences(request, { skip_host_remove_confirmation: previous.skip_host_remove_confirmation ?? null })],
+      ["session consent", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
+    ]);
   }
 });
 

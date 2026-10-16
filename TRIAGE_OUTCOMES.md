@@ -14434,7 +14434,9 @@
 - Completion criteria: a failed session or host cleanup no longer leaves `skip_session_confirmations` (or the host
   preference) changed, and setup failures between session creation and `try` no longer leak the session. Cleanup errors
   stay visible. Both specs pass on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `uqytkqurnkvnknooxlkuzptnovkrpotm`, bookmark
+  `plan/browser-test-cleanup/04-confirmation-restoration`,
+  [PR #2141](https://github.com/scode/farhelm/pull/2141/changes).
 
 ## failed-feedback-cleanup-loses-evidence.md
 

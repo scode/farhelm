@@ -144,9 +144,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`tab-retarget-fixture-escapes-cleanup.md`](tab-retarget-fixture-escapes-cleanup.md) — Failure during the new
   tab-retarget test's setup can leave its agent and tabs running.
 
-- [`confirmation-test-optout-survives-cleanup-failure.md`](confirmation-test-optout-survives-cleanup-failure.md) —
-  Failed cleanup can leave session confirmations disabled for later browser tests.
-
 - [`template-discovery-fails-permanently-once-reply-exceeds.md`](template-discovery-fails-permanently-once-reply-exceeds.md)
   — A large valid template catalog permanently disables agent discovery.
 
