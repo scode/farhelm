@@ -22,8 +22,9 @@ specific to Codex.
   restarted; replace it instead.
 - Workspace trust in the session launcher applies to that one launch only: **true** trusts the session's directory and
   **false** marks it untrusted, without changing what Codex has saved about that directory.
-- After `/clear`, restart no longer resumes the old conversation, and it resumes the new one once Codex has finished its
-  next reply.
+- **restart** resumes the conversation Farhelm last learned of. After `/clear`, Farhelm learns of the new conversation
+  when you send your next prompt, and restart can resume it once Codex has finished that reply. Restarting before you
+  send that prompt can bring back the earlier conversation.
 - If you start Codex through a launcher of your own (a [custom command](/docs/agents/custom-commands/)), Farhelm can
   follow its conversation even when the launcher stays running as Codex's parent. It must forward Farhelm's arguments
   and environment, and the native Codex executable must still be named `codex`. Put the launcher in the resume command

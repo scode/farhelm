@@ -14755,7 +14755,9 @@
 - Completion criteria: neither page promises that Restart never returns to the cleared conversation, and both agree with
   SPEC.md's tracking limits. `dprint check` and the website build pass. Name the pages in the report. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/docs-accuracy-fixes.md`.
+- Execution: complete in change `wlkunyqq`, bookmark `plan/docs-accuracy-fixes/02-restart-limit`; the Codex guide and
+  hook-injection introduction describe Restart's last-known-conversation limit.
+  [PR #2106](https://github.com/scode/farhelm/pull/2106/changes).
 
 ## cached-launch-error-overrides-completed-stop.md
 
