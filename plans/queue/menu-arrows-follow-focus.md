@@ -258,41 +258,55 @@ a `## Decisions` section exists, its latest entry must also be satisfied. Then c
 (Executing one plan, steps 11 and 12): deliver its report through the queue script, write a closing entry in its log,
 and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-10-16 (claim 024149).
+### 2026-10-16: answer to a blocked question
 
-### Menu arrows need a scope decision
+The question, as the executor put it:
 
-The session, host, app bar and templates menus remember the destination of the last arrow press. That protects rapid
-arrow presses from delayed focus changes, but the remembered destination can override focus moved by a pointer or screen
-reader. The next arrow can then start from the wrong item, unexpectedly reaching an action such as Delete (activation
-still requires Enter or Space).
+> Blocked on 2026-10-16 (claim 024149).
+>
+> ### Menu arrows need a scope decision
+>
+> The session, host, app bar and templates menus remember the destination of the last arrow press. That protects rapid
+> arrow presses from delayed focus changes, but the remembered destination can override focus moved by a pointer or
+> screen reader. The next arrow can then start from the wrong item, unexpectedly reaching an action such as Delete
+> (activation still requires Enter or Space).
+>
+> Triage authorized an easy GUI fix, with the rapid-arrow protection preserved. The proposed fix clears the remembered
+> destination when the latest keyboard move lands. It fixes independent focus moves after keyboard navigation settles,
+> but source review found that it still ignores independent focus while keyboard moves are pending. For example, press
+> Down twice from the first item, independently focus the fourth before those requests land, then press Down: focus is
+> requested on the fourth again instead of the fifth.
+>
+> The existing focus event does not identify its source. Even remembering the one in-flight keyboard destination cannot
+> always distinguish its delayed arrival from an independent move to that same item. Clearing the remembered destination
+> on every focus event would bring back the rapid-arrow bug. A full guarantee therefore needs a broader focus-source
+> design than the plan's simple acknowledgement rule. That design has not been implemented or validated.
+>
+> ### Decision needed
+>
+> Choose between accepting the narrower fix (independent focus wins after keyboard navigation settles, with the pending
+> window still affected), authorizing a separate design for independent focus during pending keyboard moves as well, or
+> leaving the menus unchanged. The broader option needs revised scope and acceptance checks before implementation; it is
+> not a completed fix waiting for permission to land.
+>
+> I recommend accepting the narrower fix as a bounded improvement if the remaining pending-window behavior is
+> acceptable. Otherwise, authorize the separate design. The full guarantee cannot be claimed for the simple fix.
+>
+> ### Current state
+>
+> No PR was opened and no code was pushed. The prototype is retained privately for a later executor; the feedback item
+> and its triage record remain unchanged. Its tests cover stale and settled focus, not the reviewer's counterexample.
+> Browser validation was deferred because the accepted behavior is unresolved. The plan will resume after this decision
+> is recorded.
 
-Triage authorized an easy GUI fix, with the rapid-arrow protection preserved. The proposed fix clears the remembered
-destination when the latest keyboard move lands. It fixes independent focus moves after keyboard navigation settles, but
-source review found that it still ignores independent focus while keyboard moves are pending. For example, press Down
-twice from the first item, independently focus the fourth before those requests land, then press Down: focus is
-requested on the fourth again instead of the fifth.
+The maintainer's answer:
 
-The existing focus event does not identify its source. Even remembering the one in-flight keyboard destination cannot
-always distinguish its delayed arrival from an independent move to that same item. Clearing the remembered destination
-on every focus event would bring back the rapid-arrow bug. A full guarantee therefore needs a broader focus-source
-design than the plan's simple acknowledgement rule. That design has not been implemented or validated.
+Maintainer's answer (2026-10-16): "(1)", accepting the narrower fix.
 
-### Decision needed
-
-Choose between accepting the narrower fix (independent focus wins after keyboard navigation settles, with the pending
-window still affected), authorizing a separate design for independent focus during pending keyboard moves as well, or
-leaving the menus unchanged. The broader option needs revised scope and acceptance checks before implementation; it is
-not a completed fix waiting for permission to land.
-
-I recommend accepting the narrower fix as a bounded improvement if the remaining pending-window behavior is acceptable.
-Otherwise, authorize the separate design. The full guarantee cannot be claimed for the simple fix.
-
-### Current state
-
-No PR was opened and no code was pushed. The prototype is retained privately for a later executor; the feedback item and
-its triage record remain unchanged. Its tests cover stale and settled focus, not the reviewer's counterexample. Browser
-validation was deferred because the accepted behavior is unresolved. The plan will resume after this decision is
-recorded.
+Agreed restatement: forget the remembered arrow destination once the latest keyboard move lands, keeping the rapid-arrow
+protection. Focus moved by a pointer or screen reader then wins once keyboard navigation has settled. The window while
+arrow presses are still landing stays affected, and that is accepted for this plan; the report states that limit rather
+than claiming the full guarantee. A broader focus-source design that would also cover that window is tracked separately
+as a near-term TODO entry and is not part of this plan.
