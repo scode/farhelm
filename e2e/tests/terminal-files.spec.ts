@@ -1,6 +1,10 @@
 // Real two-host reads, xterm hover admission and browser saves. The request
 // gate deliberately holds only the stat reply; bytes and routing remain real.
+// Once a session exists, its cleanup scope also owns fallible browser setup.
+// Failed cleanup accompanies the original test error. A working directory
+// stays in place if releasing its session fails, since its agent may still run.
 import { expect, test } from './helpers/evidence';
+import { cleanupOwnedSteps } from './helpers/cleanup';
 import { type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -112,15 +116,16 @@ for (const linkKind of ['plain', 'OSC']) {
       });
       const gate = routeGate();
       let statRequests = 0;
-      await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
-        statRequests++;
-        const response = await route.fetch();
-        await gate.wait();
-        // The unfixed reproduction aborts these requests on every redraw.
-        // Late fulfillment is irrelevant; request counts are the independent oracle.
-        try { await route.fulfill({ response }); } catch { /* hover was cancelled */ }
-      });
+      let bodyFailed = false;
       try {
+        await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
+          statRequests++;
+          const response = await route.fetch();
+          await gate.wait();
+          // The unfixed reproduction aborts these requests on every redraw.
+          // Late fulfillment is irrelevant; request counts are the independent oracle.
+          try { await route.fulfill({ response }); } catch { /* hover was cancelled */ }
+        });
         await page.goto('/');
         await attachSession(page, session.id);
         await page.keyboard.press('Enter');
@@ -164,11 +169,16 @@ for (const linkKind of ['plain', 'OSC']) {
         await hoverPath(page, label);
         await expect.poll(() => statRequests).toBe(2);
         await expect(tooltip).toContainText(result);
+      } catch (error) {
+        bodyFailed = true;
+        throw error;
       } finally {
         gate.release();
         await page.evaluate(() => (window as any).__pathRedraw?.dispose()).catch(() => {});
-        await cleanupSession(request, session.id);
-        fs.rmSync(directory, { recursive: true, force: true });
+        await cleanupOwnedSteps(bodyFailed, [["session and working directory", async () => {
+          await cleanupSession(request, session.id);
+          fs.rmSync(directory, { recursive: true, force: true });
+        }]]);
       }
     });
   }
@@ -191,16 +201,17 @@ test('changed OSC display text starts a fresh hover at the same cells', async ({
   let routeDone = false;
   let statRequests = 0;
   page.on('request', req => { if (req.url().endsWith(`/sessions/${session.id}/files/stat`)) statRequests++; });
-  await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
-    const response = await route.fetch();
-    arrived = true;
-    await gate.wait();
-    // The requestfailed event below establishes cancellation independently
-    // of whether Playwright accepts fulfillment after that cancellation.
-    try { await route.fulfill({ response }); } catch { /* old hover cancelled */ }
-    routeDone = true;
-  }, { times: 1 });
+  let bodyFailed = false;
   try {
+    await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
+      const response = await route.fetch();
+      arrived = true;
+      await gate.wait();
+      // The requestfailed event below establishes cancellation independently
+      // of whether Playwright accepts fulfillment after that cancellation.
+      try { await route.fulfill({ response }); } catch { /* old hover cancelled */ }
+      routeDone = true;
+    }, { times: 1 });
     await page.goto('/');
     await attachSession(page, session.id);
     const peer = async () => (await listSessions(request)).sessions.find(row => row.id === session.id);
@@ -222,10 +233,15 @@ test('changed OSC display text starts a fresh hover at the same cells', async ({
     gate.release();
     await expect.poll(() => routeDone).toBe(true);
     await expect(tooltip).toContainText('17 B · click to download');
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
     gate.release();
-    await cleanupSession(request, session.id);
-    fs.rmSync(directory, { recursive: true, force: true });
+    await cleanupOwnedSteps(bodyFailed, [["session and working directory", async () => {
+      await cleanupSession(request, session.id);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }]]);
   }
 });
 
@@ -249,6 +265,7 @@ test('file hover shows decimal size tiers and a red cap refusal', async ({ page,
   }
   const session = await createSession(request, { title: `file-tiers-${Date.now()}`, cwd: directory,
     invocation: `sh -c 'read _gate; printf "${cases.map(([name]) => name).join('\\n')}\\n"; sleep 300'` });
+  let bodyFailed = false;
   try {
     await page.goto('/');
     await attachSession(page, session.id);
@@ -273,9 +290,14 @@ test('file hover shows decimal size tiers and a red cap refusal', async ({ page,
       if (tier === 'danger') await expect(tooltip.locator('.terminal-file-refusal')).toContainText('too large to download');
     }
     await testInfo.attach('file-hover-cap-refusal', { body: await tooltip.screenshot(), contentType: 'image/png' });
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await cleanupSession(request, session.id);
-    fs.rmSync(directory, { recursive: true, force: true });
+    await cleanupOwnedSteps(bodyFailed, [["session and working directory", async () => {
+      await cleanupSession(request, session.id);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }]]);
   }
 });
 
@@ -301,14 +323,15 @@ for (const kind of ['local', 'ssh']) {
     const gate = routeGate();
     let statRequests = 0;
     let received: any;
-    await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
-      statRequests++;
-      const response = await route.fetch();
-      received = await response.json();
-      await gate.wait();
-      await route.fulfill({ response });
-    });
+    let bodyFailed = false;
     try {
+      await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
+        statRequests++;
+        const response = await route.fetch();
+        received = await response.json();
+        await gate.wait();
+        await route.fulfill({ response });
+      });
       await page.goto('/');
       await attachSession(page, session.id);
       await page.keyboard.press('Enter');
@@ -364,10 +387,15 @@ for (const kind of ['local', 'ssh']) {
       const linkedDownload = await linkedSave;
       expect(await linkedDownload.failure()).toBeNull();
       expect(fs.readFileSync((await linkedDownload.path())!, 'utf8')).toBe('symlink parent bytes');
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
     } finally {
       gate.release();
-      await cleanupSession(request, session.id);
-      fs.rmSync(directory, { recursive: true, force: true });
+      await cleanupOwnedSteps(bodyFailed, [["session and working directory", async () => {
+        await cleanupSession(request, session.id);
+        fs.rmSync(directory, { recursive: true, force: true });
+      }]]);
     }
   });
 }
@@ -388,8 +416,9 @@ test('file refusals, OSC file save and forbidden OSC schemes', async ({ page, re
   const script = `printf "missing.txt\\nfolder.dir\\nprivate.txt\\nlarge.bin\\n\\033]8;;file://${directory}/ok.txt\\007OSC-FILE\\033]8;;\\007\\n\\033]8;;javascript:window.__fileSchemeRan=1\\007OSC-JS\\033]8;;\\007\\n\\033]8;;data:text/html,evil\\007OSC-DATA\\033]8;;\\007\\n\\033]8;;https://right.example\\007https://wrong.example\\033]8;;\\007\\n"`;
   const session = await createSession(request, { title: `file-refusals-${Date.now()}`, cwd: directory,
     invocation: `sh -c 'read _gate; ${script}; sleep 300'` });
-  await page.addInitScript(() => { (window as any).__fileOpened = []; window.open = ((uri: string) => { (window as any).__fileOpened.push(uri); return null; }) as any; });
+  let bodyFailed = false;
   try {
+    await page.addInitScript(() => { (window as any).__fileOpened = []; window.open = ((uri: string) => { (window as any).__fileOpened.push(uri); return null; }) as any; });
     await page.goto('/');
     await attachSession(page, session.id);
     await page.keyboard.press('Enter');
@@ -432,9 +461,14 @@ test('file refusals, OSC file save and forbidden OSC schemes', async ({ page, re
     await page.mouse.click(screen.x + screen.width - 2, screen.y + screen.height - 2);
     await expect(notice).toHaveText('');
     await expect(notice).not.toHaveClass(/showing/);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await cleanupSession(request, session.id);
-    fs.rmSync(directory, { recursive: true, force: true });
+    await cleanupOwnedSteps(bodyFailed, [["session and working directory", async () => {
+      await cleanupSession(request, session.id);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }]]);
   }
 });
 
@@ -448,16 +482,17 @@ test('leaving cancels lookup and the next hover checks again', async ({ page, re
   const gate = routeGate();
   let arrived = false;
   let routeDone = false;
-  await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
-    const response = await route.fetch();
-    arrived = true;
-    await gate.wait();
-    // Aborted browser requests may refuse fulfillment. That is the intended
-    // cancellation, established separately by the requestfailed event below.
-    try { await route.fulfill({ response }); } catch { /* already cancelled */ }
-    routeDone = true;
-  }, { times: 1 });
+  let bodyFailed = false;
   try {
+    await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
+      const response = await route.fetch();
+      arrived = true;
+      await gate.wait();
+      // Aborted browser requests may refuse fulfillment. That is the intended
+      // cancellation, established separately by the requestfailed event below.
+      try { await route.fulfill({ response }); } catch { /* already cancelled */ }
+      routeDone = true;
+    }, { times: 1 });
     await page.goto('/');
     await attachSession(page, session.id);
     await page.keyboard.press('Enter');
@@ -477,9 +512,14 @@ test('leaving cancels lookup and the next hover checks again', async ({ page, re
     await hoverPath(page, 'fresh.txt');
     await expect(page.locator('#terminal .terminal-file-target')).toContainText('8 B');
     await expect(page.locator('#terminal .xterm-screen')).toHaveClass(/xterm-cursor-pointer/);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
     gate.release();
-    await cleanupSession(request, session.id);
-    fs.rmSync(directory, { recursive: true, force: true });
+    await cleanupOwnedSteps(bodyFailed, [["session and working directory", async () => {
+      await cleanupSession(request, session.id);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }]]);
   }
 });
