@@ -886,13 +886,18 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
-            structured_permission_flags.set(
-                selection
-                    .permission_flags
-                    .as_ref()
-                    .map(shell_words::join)
-                    .unwrap_or_default(),
-            );
+            // Parsed words cannot preserve an unfinished quote or the user's
+            // spacing. Only replacing their owner or permission choice may
+            // reseed this editable text; reselecting the owner must keep it.
+            if selection.harness != before.harness || selection.permissions != before.permissions {
+                structured_permission_flags.set(
+                    selection
+                        .permission_flags
+                        .as_ref()
+                        .map(shell_words::join)
+                        .unwrap_or_default(),
+                );
+            }
             structured_workspace_trust.set(selection.workspace_trust);
             custom_model_harness.set(owner);
         }
@@ -935,13 +940,17 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
-            structured_permission_flags.set(
-                selection
-                    .permission_flags
-                    .as_ref()
-                    .map(shell_words::join)
-                    .unwrap_or_default(),
-            );
+            // A same-agent model choice leaves the custom editor's raw draft
+            // intact, including malformed quotes that the person can repair.
+            if selection.harness != before.harness || selection.permissions != before.permissions {
+                structured_permission_flags.set(
+                    selection
+                        .permission_flags
+                        .as_ref()
+                        .map(shell_words::join)
+                        .unwrap_or_default(),
+                );
+            }
             structured_workspace_trust.set(selection.workspace_trust);
             custom_model_harness.set(owner);
         }

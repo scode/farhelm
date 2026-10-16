@@ -91,9 +91,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`native-download-quit-leaves-partial-files.md`](native-download-quit-leaves-partial-files.md) — Desktop Quit leaves
   hidden partial downloads with no recovery owner.
 
-- [`custom-permission-model-choice-erases-draft.md`](custom-permission-model-choice-erases-draft.md) — Choosing a model
-  or re-selecting the same agent can erase unfinished custom permission flags.
-
 - [`terminal-right-click-recopies-stale-selection.md`](terminal-right-click-recopies-stale-selection.md) — A right-click
   in a terminal without mouse reporting can replace newer clipboard contents with an old terminal selection.
 

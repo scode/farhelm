@@ -14264,7 +14264,8 @@
   current-harness re-selection byte for byte. A real harness switch still clears them. Add a regression covering both
   arms, as a UI unit test if a seam exists, otherwise a targeted browser test. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/launcher-fixes.md`.
+- Execution: complete in jj change `zouxqynrlrnulpyklwkozpypkptszzws`, bookmark `plan/launcher-fixes/04-custom-drafts`,
+  [PR #2163](https://github.com/scode/farhelm/pull/2163/changes).
 
 ## browser-git-fixture-can-change-caller-repository.md
 

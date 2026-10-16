@@ -48,6 +48,49 @@ test("custom permission search focuses literal words and switching agents clears
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true })).toHaveCount(0);
 });
 
+/** Model search and same-agent selection must not reconstruct the editor from
+ * parsed words: unfinished quotes and intentional spacing are still drafts.
+ * A real agent change retires them because flags belong to that agent's CLI.
+ */
+test("same-agent model and harness search preserve custom permission drafts byte for byte", async ({ page, request }) => {
+  const response = await request.get("/api/launch-catalog");
+  expect(response.ok()).toBe(true);
+  const catalog = await response.json() as { harness: string; id: string }[];
+  const model = catalog.find((entry) => entry.harness === "claude");
+  expect(model, "the owned stack must offer a Claude model for same-agent selection").toBeTruthy();
+  const form = await openNew(page);
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  const custom = form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true });
+  await custom.click();
+  const flags = form.locator(".custom-permission-flags");
+  for (const draft of ["--permission-mode 'ask me", '  --mode "ask me"   \'$HOME\'  ']) {
+    await flags.fill(draft);
+    await expect(flags).toHaveValue(draft);
+    if (draft.startsWith("--permission-mode")) {
+      await expect(form.locator(".custom-permission-choice [role=alert]")).toContainText("invalid permission flags");
+    } else {
+      await expect(form.locator(".custom-permission-words code")).toHaveText(["--mode", "ask me", "$HOME"]);
+    }
+    for (const choice of [
+      { query: `model:${model!.id}`, label: `Model: ${model!.id} (Claude)` },
+      { query: "harness:claude", label: "Harness: Claude" },
+    ]) {
+      await search.fill(choice.query);
+      const option = form.getByRole("option", { name: choice.label, exact: true });
+      await expect(option).toBeVisible();
+      await option.click();
+      await expect(search).toHaveValue("");
+      await expect(custom).toHaveAttribute("aria-pressed", "true");
+      await expect(flags).toHaveValue(draft);
+    }
+  }
+  await search.fill("harness:codex");
+  await form.getByRole("option", { name: "Harness: Codex", exact: true }).click();
+  await expect(flags).toHaveCount(0);
+  await custom.click();
+  await expect(flags).toHaveValue("");
+});
+
 /** Enter on Custom opens its required editor instead of attempting a launch.
  * The focus assertion distinguishes the handoff from a disabled-primary refusal.
  */
