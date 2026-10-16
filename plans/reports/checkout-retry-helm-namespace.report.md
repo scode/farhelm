@@ -61,3 +61,45 @@ A separate fresh native gpt-6.1-sol/medium cold reader understood the commit and
 the diff or convention violation, and the executor accepted it. No corrective source-review round or scope departure was
 needed. External per-turn usage evidence is retained privately; native and main-session usage counters were unavailable,
 and the external JSON did not echo an actual model identity beyond the explicit CLI selection.
+
+### Landing
+
+Landed on its own in round 72, as #2172, unchanged from what the report describes.
+
+#### What landed since the PR was based, and whether it interacted
+
+Four changes reached main between this PR's base and its landing: the trash confirmation fix (#2171), which changes only
+the trash dialog's UI code, and three documentation changes from the maintainer's plan review (#2170, #2173, #2174). I
+read them against this PR, and a fresh-context reviewer did the same independently. Neither found an interaction.
+Nothing in the helm changed on main in that time, and the helm's database schema was still at the version this PR
+migrates from, so its migration collides with no other. The rebase was clean, and the PR's own change is byte-identical
+to what the executor tested.
+
+The reviewer also checked the database change against SPEC.md's upgrade rules. The migration only adds a one-row table
+holding the new random identifier and rewrites no existing data. Upgrades from older releases still work. An older build
+refuses the newer database, as it does after every schema change. The one thing lost on upgrade is a retry still in
+flight: it is asked about again and, if approved, starts a new session or checkout instead of returning the earlier one.
+The maintainer accepted that during triage, and the changelog entry states it.
+
+#### Fixes made during the landing
+
+None.
+
+#### A note for release curation
+
+This fix completes the earlier "bind checkout retries to the requesting host" fix (#2086), which has not shipped in a
+stable release yet. Both changelog entries warn that a retry pending across the upgrade is asked about again; this one
+adds that, if approved, it starts a new session or checkout. This one stays a separate entry because the problem it
+fixes shipped in v0.27.0. When the release notes are curated, the two caveats should become one, and the two entries may
+read better as one as well, since someone upgrading sees a single re-ask.
+
+#### Checks
+
+- Run now: none. Only the trash dialog's UI code and documentation changed on main since the base, nothing the helm
+  depends on, so the executor's results still describe what landed.
+- Reused, from the PR head the report names, which the rebase left byte-identical: the executor's recorded helm run of
+  the agent-request and database tests `d8c37b7b-9065-45f9-bde8-0a082a40f7a1` (222 passed), its clippy and formatting
+  checks, test-sleep check, changelog format and Markdown checks.
+- Skipped: browser, desktop, installer and whole-workspace runs, for the reasons the report gives.
+
+Nothing in the executor's report became untrue at landing.
