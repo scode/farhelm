@@ -1,6 +1,6 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`
+Last reviewed commit: `991835f826b25bc93eb088f6d3984477a9dc2fab`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
@@ -8,57 +8,57 @@ checkpoint reaches `main` only when its review-result PR is merged.
 
 ## Completed review
 
-Reviewed range: `507dbcbbcfa00173ca7e4d24c79f3990025963b6..75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`, 111 commits. Seven
-separate adversarial reviewers read every assigned commit's complete changes, including deleted findings, transient
-plans, reports, and intermediate implementations. Coverage was checked against the full pinned commit list:
+Reviewed range: `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7..991835f826b25bc93eb088f6d3984477a9dc2fab`, 229 commits. The
+tip was fetched and the checkout moved onto it at the scheduled start. Fourteen separate adversarial reviewers read
+every assigned commit's complete patch, including deleted plans, removed findings, intermediate bookkeeping, tests and
+reports. Coverage was checked against the full pinned commit list:
 
 | Scope                                                    | Commits |
 | -------------------------------------------------------- | ------: |
-| Guest-native release-test executor                       |       1 |
-| Terminal file opening and development builds             |       6 |
-| Permission and command-edit safeguards                   |       5 |
-| Session pins and live permission display                 |       2 |
-| Save ordering, host Settings, restart tests, and watcher |       5 |
-| Managed-checkout Claude trust                            |       1 |
-| Documentation and bookkeeping                            |      91 |
+| Landed-plan approvals                                    |      17 |
+| Review records, triage, specifications and new plans     |      39 |
+| Identity, trust, checkout replay, templates and reports  |      60 |
+| Terminal file authorization, ntfy and remote uninstall   |       8 |
+| Updater, documentation, setup and evidence retention     |      25 |
+| Downloads, startup, trash and browser corrections        |      27 |
+| Instruction extraction, loader changes and checker       |       3 |
+| Rust portability, fixture cleanup and notification focus |      12 |
+| Wrapped-link warning                                     |       6 |
+| Browser fixture ownership and restoration                |      23 |
+| Launcher refresh, retry, draft and scrolling changes     |       9 |
 
-No assigned patch content remains unread. Unchanged surrounding code and specifications were read selectively. The
-triage ledger was searched with relevant sections read rather than read end-to-end. External prior-review transcripts
-and private runtime evidence were unavailable; report claims were checked for internal integrity, not independently
-authenticated.
+The large instruction-extraction patch was divided at file boundaries among four reviewers; their segments cover its
+entire 7,659-line patch without gaps. No assigned patch content remains unread. Unchanged surrounding implementations,
+specifications, queue files and the triage ledger were read selectively. Most of the minified terminal bundle was not
+read; relevant complete snippets were inspected. Historical private runtime evidence and external review transcripts
+were unavailable and were not authenticated by this review.
 
-Nine new findings were retained: three conservatively highest-priority records for destructive Git redirection,
-unrelated numeric mutation, and publication after vendor-lock takeover; one high-priority startup-delay record; and five
-other records covering stale Settings, test portability, browser fixture cleanup, and inaccurate Resume docs. Each
-record preserves confidence and unverified premises. The lock-takeover candidate was retained after an independent
-reviewer rejected its proposed concurrent-writer exclusion.
+Eleven new findings were retained. One is conservatively highest priority: a newly created helm registry can reuse a
+previous host's checkout-approval namespace. A separate independent reviewer confirmed the static path and agreed to
+retain it; exploitation still requires an eligible surviving reservation and knowledge of its original request tuple.
+The fresh-registry scenario was not reproduced end to end.
 
-Four existing file-link findings were extended to preserve the native-opening consequence, with the oversized-path
-record narrowed for the new filename-first layout. Fresh independent review required those extensions before
-deduplication. The custom-permission fixture-cleanup record was extended to the permission-switch test. The older folder
-save record was annotated with evidence that its ordinary successful-save trigger is fixed; this recording-only review
-made no triage decision or ledger change.
+Ten other records cover restored-screen link clicks, repeated-link false warnings, production Git configuration
+inheritance, notification fixture cleanup, two trash presentation gaps, two instruction-checker gaps, and two launcher
+setup lifecycle gaps. Several are pre-existing adjacent omissions exposed by the fixes under review. Each record keeps
+its reviewed revision, provenance, confidence, reproduction limits and possible coverage. The restored-screen filter
+question remains explicit for triage rather than being silently settled.
 
-Fresh independent reviews agreed to narrow security-related exclusions for Settings dismissal losing a failed
-confirmation-restoration warning; unknown remote outcomes after abandoned configuration saves; advisory live permission
-readings retaining launch-based authority; malicious same-user guest testers being outside the executor's sandbox claim;
-and the already accepted incomplete-checkout reuse case after killed preparation. The orphan-Git lock lifetime concern
-was not generalized into acceptance of harm to completed checkouts or active sibling work.
+Three fresh independent reviewers agreed to all proposed exclusions involving possible security or user-work loss,
+including repaired file authorization, token-origin binding, identity encoding, numeric preservation, Git fixture
+isolation, no-clobber publication, refusing CA fallback and corrected security documentation. Their decisions were
+limited to each named mechanism. They did not waive the separately queued Claude stale-lock overwrite or the newly
+retained fresh-registry replay issue. Model suggestions were checked against their release-owned catalog source rather
+than treating the general display helper as injective.
 
-The native-file review independently confirmed the historical symlink redirect was fixed within the range, and the
-explicit acceptances for authenticated native opening, absent quarantine, real-state development builds, and
-operator-trusted payloads. No Linux MIME-sniffing bypass was established in the bounded local probes; other MIME
-databases and default applications were not verified. This is uncertainty, not a universal safety claim.
+The independent exclusions also checked the explicit acceptances for OS-trusted proxies, deliberately retargeted local
+symlinks and reserved sockets, scroll-reachable dialog explanations, the recorded development-build Git decision, the
+advisory shield, and the specified limits of whole-tag link comparison. The extracted released-claim reset still forbids
+abandoning unpushed work. These acceptances were not generalized to different triggers or cross-host effects. A residual
+setup-command quoting concern matched the explicit user-configured-path exception. The native input-method caveat and
+unfinished Pi-guide wording remain covered by their exact existing ledger outcomes, not claims of fresh runtime proof.
 
-For Claude trust, independent review accepted the expressly best-effort failed-removal/path-reuse case, the unlocked
-exit-save race, and deliberate managed-path interference. It checked the Ready-restart, Fresh-only, archive-selection,
-and worker-ownership refutations. Vendor lock-alias behavior was checked against the project's recorded observation, not
-a fresh vendor-binary inspection. The locking-writer takeover race and deterministic numeric rewrite remain separate
-retained findings.
-
-Review was primarily static. Isolated scratch Git commands reproduced destruction in a foreign scratch checkout; Linux
-GIO probes did not reproduce the proposed extension-capitalization bypass. A standalone serde_json probe and Node
-comparison confirmed a distinct binary64 value changing during serialization. No live installation, real vendor
-configuration, or guest was changed. Queue formatting, index consistency, and complete commit assignment were checked.
-No product runtime suite was run for this documentation-only result; earlier product-suite claims were not reused as
-current runtime passes. No fixes or triage outcomes were executed.
+Review was static. No product runtime suite, real agent turn, live installation action, guest test or destructive
+reproduction was run. The review-result change contains records and checkpoint bookkeeping only; no fixes or triage
+outcomes were executed. Formatting, queue/index consistency, commit assignment and instruction-pointer checks validate
+the result; previous product-suite claims were not reused as current passes.
