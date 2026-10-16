@@ -2071,3 +2071,26 @@ Timeout 5000ms exceeded while waiting on the predicate
 Class: unknown
 
 Cause: unknown
+
+## 2026-10-15 — resolved: `closing notifications quiets the bell under a build mismatch` (e2e/tests/notifications.spec.ts)
+
+The original trace from `038d6b7f-5ad7-407a-a20a-db485b857dd8` shows the notification panel receiving focus, then losing
+it to the terminal when its initial replay finishes. The normal focus-leave path closes the panel and marks its entries
+read. This was a product focus bug: notification controls were missing from the terminal's keyboard-owner guard. Holding
+replay until the panel owns focus reproduces the premature closure in `78cca022-9a70-4ab9-88e1-b9853b57e240` (one
+selected Chromium test, one failure at the post-reveal focus assertion). Adding the list and its expanded opening bell
+to that guard preserves their focus; the same controlled test passed 10 of 10 Chromium repetitions in
+`bb6253a6-fff2-4782-9403-6afe2126de5d`. Focused combined validation `10996a40-3c08-4423-8167-05c312193381` passed all 16
+executions: the three repaired flakes, the sibling concurrent Replace case, notification clear/ordinary-close cases and
+modal/replay rename-focus cases, each on Chromium and WebKit. These runs used one browser worker, zero retries, Linux
+x86_64 kernel 6.8.0-146-generic, pinned tmux 3.7c with recorded executable SHA256
+`f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, and `C.UTF-8` locale. The tested base was
+`bd9cd335ddbab25ac7cb7d44af1ca27b050026e7`, dirty with this focus correction and the three fixture corrections; the
+negative control omitted the production correction. The recorder scrubbed ambient `FARHELM_*` names and supplied
+`FARHELM_TEST_TRACE_DIR`, plus `FARHELM_PLAYWRIGHT_POLICY_FILE` for the combined run. Other machine load, compiler and
+browser build identities are unavailable. Full evidence is retained privately in the named recorder runs and may expire.
+Disposition: fixed in #2132, with the TODO entry and sweep exclusion removed.
+
+Class: product
+
+Cause: established

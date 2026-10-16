@@ -11,6 +11,7 @@
 import { expect, test } from "./helpers/evidence";
 import { Locator, Page, Route } from "@playwright/test";
 import { cleanupSession, createSession, forceBuildSkew, pinAutoSelect, resetPreferences, stubFeed } from "./helpers/fleet";
+import { replayRecord, waitForReplayReveal, waitForSessionMounted } from "./helpers/terminal-readiness";
 
 interface StubNotification { seq: number; at: number; text: string; resolved?: boolean }
 
@@ -93,11 +94,17 @@ test.describe("session notifications", () => {
 
   /** Closing the list must reconcile its bell even when automatic reads stop.
    * A quiet stub feed prevents an unrelated fleet notice from repairing the
-   * stale listing; the successful write alone must request the new state. */
+   * stale listing; the successful write alone must request the new state.
+   * Hold the initial terminal replay until the list owns focus: a late reveal
+   * used to steal that focus and close the list before the test could read it. */
   test("closing notifications quiets the bell under a build mismatch", async ({ page, request }) => {
     const session = await createSession(request, { title: `read-skew-${Date.now()}` });
     created.push(session.id);
     const stub = new NotificationStub([{ seq: 1, at: NOW, text: "read under the reload notice" }]);
+    await pinAutoSelect(page, session.id);
+    await page.addInitScript(() => {
+      (window as any).__farhelmTestReplay = { holdMarker: true, idleMs: 60_000 };
+    });
     // Route order is the mechanism: the newer notification handlers must
     // win over the broad skew route, while other API replies latch skew.
     await forceBuildSkew(page, "9.9.9-notification-read");
@@ -105,10 +112,20 @@ test.describe("session notifications", () => {
     await stubFeed(page);
     await page.goto("/");
     await expect(page.locator(".build-skew")).toBeVisible();
+    await waitForSessionMounted(page, session.id);
+    await expect.poll(() => replayRecord(page, "terminal"), {
+      message: "the selected terminal must be holding its initial replay before the bell opens",
+    }).toMatchObject({ heldReason: "marker", revealed: false });
     const bell = row(page, session.id).locator(".session-row-bell");
     await expect(bell).toHaveClass(/\bloud\b/);
     await bell.click();
+    const panel = page.locator(".session-bell-panel");
+    await expect(panel).toBeFocused();
     await expect(page.locator(".session-bell-entry")).toHaveCount(1);
+    await page.evaluate(() => (window as any).__farhelmIslands.terminal.test.releaseCatchUp());
+    await waitForReplayReveal(page, "terminal");
+    await expect(panel, "replay completion must leave the notification list's focus intact").toBeFocused();
+    expect(stub.writes, "terminal reveal must not close and mark the list read").toEqual([]);
     await bell.click();
     await expect.poll(() => stub.writes).toEqual([{ session: session.id, route: "read", through: 1 }]);
     await expect(bell).not.toHaveClass(/\bloud\b/);
