@@ -11,6 +11,24 @@ use crate::icons::{HostMark, LocalHostIcon};
 use crate::launch_controls::enter_choice;
 use crate::peer::display_peer;
 
+/// Keep repeated-key cycling distinct from a growing case-insensitive prefix.
+///
+/// `prefix` is the retained lowercase query and `key` is one typed character.
+/// Lowercasing can expand that character (İ becomes i plus a combining dot),
+/// so compare its complete folded spelling. A repeated key keeps one copy
+/// of that spelling and tells the caller to search after the active host;
+/// other keys extend the prefix and search from the beginning as before.
+fn typeahead_query(prefix: &str, key: &str) -> (String, bool) {
+    let letter = key.to_lowercase();
+    let repeated = !prefix.is_empty() && prefix == letter;
+    let query = if repeated {
+        letter
+    } else {
+        format!("{prefix}{letter}")
+    };
+    (query, repeated)
+}
+
 /// A transient menu cannot outlive its launcher or the busy round trip.
 ///
 /// The button owns keyboard focus and names its active option. Option rows
@@ -119,9 +137,7 @@ pub(super) fn HostPicker(
                             let now = Instant::now();
                             let fresh = typed_at().is_none_or(|previous| now.duration_since(previous).as_millis() > 1000) || !showing;
                             let old = if fresh { String::new() } else { prefix() };
-                            let letter = key.to_lowercase();
-                            let repeated = !old.is_empty() && old.chars().all(|ch| letter.starts_with(ch));
-                            let query = if repeated { letter } else { format!("{old}{letter}") };
+                            let (query, repeated) = typeahead_query(&old, &key);
                             // The prefix is at most the longest offered label: longer
                             // input cannot match and need not grow retained UI state.
                             if query.len() <= keys.iter().map(|host| host.label().len()).max().unwrap_or(0) {
@@ -166,5 +182,26 @@ pub(super) fn HostPicker(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::typeahead_query;
+
+    /// A lowercase expansion is still one typed key: the second İ must cycle
+    /// rather than grow an unmatchable doubled query. ASCII repetition keeps
+    /// the same contract, while distinct keys keep building a useful prefix.
+    #[farhelm_testtrace::test]
+    fn typeahead_cycles_complete_folded_keys_and_preserves_prefixes() {
+        let first = typeahead_query("", "İ");
+        assert_eq!(first, ("i\u{307}".into(), false));
+        assert_eq!(typeahead_query(&first.0, "İ"), (first.0.clone(), true));
+
+        let ascii = typeahead_query("", "A");
+        assert_eq!(ascii, ("a".into(), false));
+        assert_eq!(typeahead_query(&ascii.0, "a"), ("a".into(), true));
+        assert_eq!(typeahead_query(&ascii.0, "B"), ("ab".into(), false));
+        assert_eq!(typeahead_query("ab", "a"), ("aba".into(), false));
     }
 }

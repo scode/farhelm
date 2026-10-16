@@ -83,9 +83,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-host-totals-exclude-unchecked-archives.md`](trash-host-totals-exclude-unchecked-archives.md) — A host with
   unreadable archived work can display “0 checkouts · 0 B” instead of an unknown or partial total.
 
-- [`host-picker-folded-letter-cycling-misses-dotted-i.md`](host-picker-folded-letter-cycling-misses-dotted-i.md) —
-  Repeatedly typing İ cannot cycle through hosts whose names begin with that letter.
-
 - [`repository-selection-keeps-global-search-launch-block.md`](repository-selection-keeps-global-search-launch-block.md)
   — Choosing a valid repository in the new destination field can leave Launch disabled despite a successful checkout
   preview.

@@ -13855,7 +13855,8 @@
 - Completion criteria: two İ presses within a second move from the first İ-prefixed host to the next one, and ASCII
   repeat and multi-letter prefixes behave as before. A unit test covers İ, ASCII repetition and a mixed prefix. Remove
   the feedback file and its index entry.
-- Execution: planned in `plans/queue/host-picker-dotted-i.md`.
+- Execution: complete in change `xrpsvmosqwsotsylqmluqltmzvoumwsn`, bookmark `plan/host-picker-dotted-i/01-dotted-i`;
+  [PR #2107](https://github.com/scode/farhelm/pull/2107/changes).
 
 ## automatic-install-warning-omits-cause.md
 
