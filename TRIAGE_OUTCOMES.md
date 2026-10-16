@@ -14799,7 +14799,8 @@
   an observer cached a launch or preparation error for that generation. A cached error still shows for Running,
   StopRequested, unannotated `Exited` and `Interrupted` outcomes. Add a unit test that seeds both the cache and an
   annotated outcome and checks the reply. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/stopped-session-launch-error.md`.
+- Execution: complete in change `zupllqoyrwsp`, bookmark `plan/stopped-session-launch-error/01-stopped-status`.
+  [PR #2117](https://github.com/scode/farhelm/pull/2117/changes).
 
 ## checkout-settings-test-restores-before-save-settles.md
 

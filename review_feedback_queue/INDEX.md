@@ -70,10 +70,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`number-shortcut-test-skips-session-cleanup.md`](number-shortcut-test-skips-session-cleanup.md) — A failed expanded
   shortcut test can leave its agent sessions running for subsequent tests.
 
-- [`cached-launch-error-overrides-completed-stop.md`](cached-launch-error-overrides-completed-stop.md) — A session
-  stopped during checkout preparation can continue showing a launch error instead of its recorded stopped status, even
-  after repeated refreshes.
-
 - [`trash-host-totals-exclude-unchecked-archives.md`](trash-host-totals-exclude-unchecked-archives.md) — A host with
   unreadable archived work can display “0 checkouts · 0 B” instead of an unknown or partial total.
 

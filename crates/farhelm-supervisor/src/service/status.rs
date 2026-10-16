@@ -49,8 +49,9 @@
 //! and 3 define, and the full order is: a durably recorded **error**
 //! outranks everything, including a pane tmux still calls alive (a failed
 //! exec is a fact no probe can discover); then a launch sentinel found
-//! THIS pass, for the same reason, whether or not it could also be
-//! committed; then a live pane, which no non-error stored outcome may
+//! THIS pass, for the same reason, while the recorded outcome still permits
+//! launch evidence (a stop-annotated exit fences it out); then a live pane,
+//! which no non-error stored outcome may
 //! override; then, with no pane to ask, the stored outcome, which beats
 //! the blanket exited-unknown fallback. A pane tmux reports under a name no
 //! session here answers to ([`PaneEvidence::Unattributed`]) sits beside
@@ -396,8 +397,9 @@ pub(super) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
 /// in which fields told the truth.
 ///
 /// A cached launch failure outranks pane-derived status even when recording
-/// was unavailable. Replies read the observer's generation-local mirror and
-/// never touch launch artifacts themselves.
+/// was unavailable, but only while the mirrored outcome could still accept
+/// launch evidence. A completed stop cannot be overwritten by an observer's
+/// now-uncommittable fallback. Replies never touch launch artifacts themselves.
 ///
 /// `pane_states` must be the map the caller's own liveness probe returned;
 /// an empty map is correct only for an entry with no terminal (the restart
@@ -462,13 +464,28 @@ pub(crate) fn entry_info(
             .collect()
         })
         .unwrap_or_default();
-    let (status, annotation) = session_status(entry, pane_states, known);
+    let (mut status, mut annotation) = session_status(entry, pane_states, known);
     let launch_error = entry
         .run
         .launch_error
         .lock()
         .expect("launch-error mutex poisoned")
         .clone();
+    let launch_error = launch_error.filter(|_| {
+        // An observer can publish its cache after Stop has already committed.
+        // Recheck the outcome on the read side instead of relying on cache
+        // cleanup or on the observer's earlier eligibility decision. The
+        // cache mutex has been released before taking this outcome lock.
+        let applicable =
+            sentinel_could_still_apply(&entry.run.outcome.lock().expect("outcome mutex poisoned"));
+        if !applicable {
+            // That fence may have committed after the first status read.
+            // Refresh its status too, so rejecting a stale error cannot lose
+            // the new durable failure or stop annotation. No guard is held.
+            (status, annotation) = session_status(entry, pane_states, known);
+        }
+        applicable
+    });
     // A concurrent observer can retain a fallback after another writer has
     // committed Error. Durable failure still wins, including its stored detail.
     if matches!(status, SessionStatus::Error { .. }) {
@@ -773,6 +790,60 @@ mod tests {
     use crate::agent_kind::screen_reader::QUIET_SAMPLES_BEFORE_IDLE;
     use crate::service::ticker::ActivitySample;
     use farhelm_proto::AgentKind;
+
+    /// A completed Stop fences out preparation errors published late by the
+    /// observer, while unsettled outcomes must still expose a cached failure.
+    /// Exercise the reply builder with both cells already populated: relying
+    /// on observer cleanup would miss the cache-after-commit publication order.
+    #[farhelm_testtrace::test]
+    fn cached_launch_error_respects_committed_outcome_fences() {
+        let cached = "checkout preparation failed";
+        let pending_error = SessionStatus::Error {
+            detail: cached.into(),
+        };
+        let cases = [
+            (LastOutcome::Launching, pending_error.clone(), None),
+            (LastOutcome::Running, pending_error.clone(), None),
+            (LastOutcome::StopRequested, pending_error.clone(), None),
+            (
+                LastOutcome::Exited {
+                    exit_code: Some(1),
+                    annotation: None,
+                },
+                pending_error.clone(),
+                None,
+            ),
+            (LastOutcome::Interrupted, pending_error, None),
+            (
+                LastOutcome::Exited {
+                    exit_code: Some(0),
+                    annotation: Some("stopped by user".into()),
+                },
+                SessionStatus::Exited { exit_code: Some(0) },
+                Some("stopped by user"),
+            ),
+            (
+                LastOutcome::Error {
+                    detail: "durable failure".into(),
+                },
+                SessionStatus::Error {
+                    detail: "durable failure".into(),
+                },
+                None,
+            ),
+        ];
+        for (outcome, expected, annotation) in cases {
+            let entry = entry_with(None, outcome.clone());
+            *entry.run.launch_error.lock().expect("launch-error mutex") = Some(cached.into());
+            let reply = entry_info(&entry, &HashMap::new(), &KnownTmuxNames::default());
+            assert_eq!(reply.status, expected, "recorded outcome: {outcome:?}");
+            assert_eq!(
+                reply.annotation.as_deref(),
+                annotation,
+                "recorded outcome: {outcome:?}"
+            );
+        }
+    }
 
     /// An entry with a live terminal whose sample cell has been filled in
     /// by hand, standing in for whatever the ticker would have written.
