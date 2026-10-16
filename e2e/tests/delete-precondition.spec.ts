@@ -33,6 +33,7 @@
  * prompt; only the delete's reply is stubbed.
  */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import type { APIRequestContext, Page, Route } from "@playwright/test";
 import {
   cleanupSession,
@@ -59,14 +60,17 @@ const REFUSAL = "cannot delete without confirmation: the agent is still running"
  * "delete: <message>" on the row, keeps the row, opens no confirmation, and
  * triggers a listing read. The opt-out case shows an ended agent with an open
  * tab and must send AgentEnded, retaining that narrower consent despite skipping.
+ * Restore consent independently of session deletion so a cleanup refusal cannot
+ * silently disable the confirmations expected by later tests.
  */
 for (const skip of [false, true]) {
 test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precondition and shows the supervisor's refusal`, async ({
   page,
   request,
 }) => {
-  const session = await createSession(request, { title: "delete-precondition" });
   const previous = await readPreferences(request);
+  const session = await createSession(request, { title: "delete-precondition" });
+  let bodyFailed = false;
   try {
     await patchPreferences(request, { skip_session_confirmations: skip });
     if (skip) {
@@ -135,9 +139,14 @@ test(`an ${skip ? "opted-out tabs-only" : "unconfirmed"} delete sends the precon
       .toBeGreaterThan(listingReadsBefore);
 
     await page.unroute(matchesSession, refuse);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await cleanupSession(request, session.id);
-    await patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null });
+    await cleanupOwnedSteps(bodyFailed, [
+      ["session", () => cleanupSession(request, session.id)],
+      ["session confirmations", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
+    ]);
   }
 });
 }
