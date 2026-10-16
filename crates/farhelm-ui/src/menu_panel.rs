@@ -426,7 +426,7 @@ pub(crate) struct MenuWiring<A: 'static, Id: 'static, const N: usize> {
     /// `requested`.
     pub(crate) focused: Signal<Option<usize>>,
     /// The last position [`focus_menu_item`] asked keyboard focus to move
-    /// TO, cleared whenever the menu opens or closes (each row's own
+    /// TO, cleared when focus reaches that position or whenever the menu opens or closes (each row's own
     /// `begin_open` and dismissal effect) or the toggle takes focus
     /// ([`forget_menu_focus`]) — see each row's own `menu_requested` for
     /// the lifecycle.
@@ -437,8 +437,10 @@ pub(crate) struct MenuWiring<A: 'static, Id: 'static, const N: usize> {
     /// `focus_menu_item` for somewhere else, resetting `focused` back to an
     /// intermediate position the user has already stepped past
     /// (`menu_step_origin`'s own doc has the full race). `requested` has no
-    /// such DOM writer — [`focus_menu_item`] establishes the keyboard
-    /// target, and the open/close/toggle-focus paths clear it. The session row remaps
+    /// writer that can move it backwards — [`focus_menu_item`] establishes the keyboard
+    /// target, and [`record_menu_item_focus`] clears it when that target lands.
+    /// Until then, older focus events leave it intact. The open/close/toggle-focus
+    /// paths also clear it. The session row remaps
     /// it by action when its item order changes, clearing it only if that
     /// action disappears. It therefore keeps the latest keyboard target
     /// ahead of a stray `onfocusin`, including across item withdrawal; a
@@ -528,15 +530,23 @@ impl<A: Copy, Id: 'static, const N: usize> Copy for MenuWiring<A, Id, N> {}
 /// stepped past. A step computed from `focused` at that instant repeats a
 /// step already taken instead of advancing — the DOM-focus race the
 /// original single-signal fix did not anticipate, because nothing else
-/// wrote `focused` when that fix was designed. `requested` has no second
-/// writer — only `focus_menu_item` ever sets it — so it cannot be raced
-/// back to a stale position, and it survives exactly the window where
-/// `focused` cannot be trusted. `focused` remains the fallback for the
+/// wrote `focused` when that fix was designed. Only `focus_menu_item` sets
+/// `requested`; [`record_menu_item_focus`] clears it when the latest target
+/// receives focus. The serialized queue delivers older requests before that
+/// landing, so they cannot roll the request backwards. After it lands, a
+/// later independent focus move becomes the next arrow's origin instead of
+/// being overridden by an obsolete request. `focused` remains the fallback for the
 /// narrow gap before any step has been taken at all: right after an
 /// open-intent lands focus on the first item, `remember_menu_item` writes
 /// `focused` but deliberately not `requested` (see that function's own
 /// doc), so the very first arrow press after an open still has a correct,
 /// race-free origin to start from.
+///
+/// This acknowledgement does not identify the source of focus events. An
+/// independent move while keyboard requests are pending may still be overridden;
+/// it becomes authoritative after the latest target is acknowledged. A request
+/// for an item already holding focus may produce no focus-in at all, retaining
+/// precedence until a later landing. Neither case is a general focus-source fence.
 ///
 /// Preferring either signal at all rests on an invariant neither can hold
 /// up alone: both must be EMPTY whenever focus is not inside the panel.
@@ -554,6 +564,36 @@ pub(crate) fn menu_step_origin(
     event_origin: Option<usize>,
 ) -> Option<usize> {
     requested.or(focused).or(event_origin)
+}
+
+/// Acknowledge the latest keyboard target without consuming an older landing.
+///
+/// The focus queue awaits each request before sending the next. A focus-in at
+/// another position can therefore be an older request still crossing the desktop
+/// bridge; it must not discard the newer target. Once the target itself lands,
+/// later independent focus changes can drive arrow navigation normally.
+/// Independent focus during the pending window is not distinguished here.
+fn requested_after_item_focus(requested: Option<usize>, position: usize) -> Option<usize> {
+    requested.filter(|requested| *requested != position)
+}
+
+/// Record item focus and retire the keyboard request only when its target lands.
+///
+/// Every menu item uses this path, including focus moved by a pointer or assistive
+/// technology. Keeping acknowledgement here prevents individual menus from losing
+/// the delayed-focus protection or retaining an obsolete keyboard target forever.
+pub(crate) fn record_menu_item_focus<A: Copy + Eq, Id: 'static, const N: usize>(
+    wiring: MenuWiring<A, Id, N>,
+    action: A,
+) {
+    let Some(position) = wiring.order.position(action) else {
+        return;
+    };
+    let pending = requested_after_item_focus(*wiring.requested.peek(), position);
+    let mut requested = wiring.requested;
+    requested.set(pending);
+    let mut focused = wiring.focused;
+    focused.set(Some(position));
 }
 
 /// Apply one key press arriving on a menu's toggle or on one of its
@@ -669,9 +709,9 @@ pub(crate) fn remember_menu_item<A: Copy + Eq + Hash, Id: 'static, const N: usiz
 /// `focused` has a second writer — every item's `onfocusin`/`onfocusout` —
 /// that can land an older, in-flight request's result on top of this call's
 /// own write before the request THIS call just made resolves (see
-/// `menu_step_origin`'s own doc for the exact race). `requested` has no
-/// such second writer, so a rapid burst of steps stays correct no matter
-/// how the focus bridge and the DOM events it triggers happen to interleave.
+/// `menu_step_origin`'s own doc for the exact race). Item focus-in events
+/// clear `requested` only when the latest target lands; an older landing
+/// cannot move it backwards while a burst is still awaiting that target.
 ///
 /// Silently does nothing for a position or an action no item has claimed:
 /// not an expected state — every position handed here comes from
@@ -1525,6 +1565,49 @@ mod tests {
         assert_eq!(menu_step_origin(None, Some(2), Some(0)), Some(2));
         assert_eq!(menu_step_origin(None, None, Some(0)), Some(0));
         assert_eq!(menu_step_origin(None, None, None), None);
+    }
+
+    /// An older bridge result must not roll back a newer keyboard step.
+    /// The focus event reports item 1 while the burst already requested item 3;
+    /// the next Down must continue to item 4 rather than repeat item 2.
+    #[farhelm_testtrace::test]
+    fn stale_item_focus_keeps_the_latest_keyboard_target() {
+        let pending = requested_after_item_focus(Some(3), 1);
+        assert_eq!(pending, Some(3));
+        assert_eq!(
+            next_menu_focus(
+                5,
+                menu_step_origin(pending, Some(1), Some(1)),
+                MenuFocusMove::Next
+            ),
+            Some(4)
+        );
+    }
+
+    /// The latest landing ends the window that needs request precedence.
+    /// Retaining it beyond this point would override later independent focus.
+    #[farhelm_testtrace::test]
+    fn the_latest_item_focus_retires_its_keyboard_target() {
+        assert_eq!(requested_after_item_focus(Some(3), 3), None);
+    }
+
+    /// A later pointer or assistive-technology focus move owns the next arrow.
+    /// First acknowledge a real keyboard landing, then move independently to
+    /// item 1: Down must reach item 2, not the old target's successor, item 4.
+    #[farhelm_testtrace::test]
+    fn independent_item_focus_after_a_landing_becomes_the_step_origin() {
+        let landed = requested_after_item_focus(Some(3), 3);
+        assert_eq!(landed, None, "premise: the latest request has landed");
+        let pending = requested_after_item_focus(landed, 1);
+        assert_eq!(pending, None);
+        assert_eq!(
+            next_menu_focus(
+                5,
+                menu_step_origin(pending, Some(1), Some(1)),
+                MenuFocusMove::Next
+            ),
+            Some(2)
+        );
     }
 
     /// Item withdrawal must preserve the latest arrow target despite late focus events.

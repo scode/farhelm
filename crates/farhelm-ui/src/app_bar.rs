@@ -15,9 +15,9 @@ use crate::app_updater::{AppUpdater, use_app_updater};
 use crate::menu_panel::{
     MenuFocusQueue, MenuOpenIntent, MenuOrder, MenuWiring, PanelPlacement, ROW_MENU_OUTSIDE_RELAY,
     cancel_menu_focus, closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus,
-    handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, remember_menu_item,
-    row_menu_relay_key, session_menu_placement_style, session_menu_pointer_style,
-    should_measure_on_mount,
+    handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, record_menu_item_focus,
+    remember_menu_item, row_menu_relay_key, session_menu_placement_style,
+    session_menu_pointer_style, should_measure_on_mount,
 };
 use crate::peer::display_peer;
 use crate::reader::sleep_ms;
@@ -498,7 +498,7 @@ fn BarMenuFlyout(
                                 role: "menuitem",
                                 tabindex: if tab_stop == Some(item) { "0" } else { "-1" },
                                 onmounted: move |element| remember_menu_item(wiring, item, element.data()),
-                                onfocusin: move |_| menu_focus.set(order.position(item)),
+                                onfocusin: move |_| record_menu_item_focus(wiring, item),
                                 onfocusout: move |_| menu_focus.set(None),
                                 onkeydown: move |evt| handle_menu_key(&evt, order.position(item), wiring, &()),
                                 onclick: move |_| choose(item),

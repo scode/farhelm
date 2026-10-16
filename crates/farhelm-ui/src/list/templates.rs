@@ -12,8 +12,8 @@ use crate::hosts::settings_dialog::install_dialog_with_selector;
 use crate::menu_panel::{
     MenuFocusQueue, MenuOpenIntent, MenuOrder, MenuWiring, PanelPlacement, ROW_MENU_OUTSIDE_RELAY,
     cancel_menu_focus, closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus,
-    handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, remember_menu_item,
-    session_menu_placement_style,
+    handle_menu_key, install_row_menu_outside_dismiss, measurement_outcome, record_menu_item_focus,
+    remember_menu_item, session_menu_placement_style,
 };
 use crate::peer::display_peer;
 use dioxus::prelude::*;
@@ -227,7 +227,7 @@ fn NumberShortcutMenu(
                                     tabindex: if focused().and_then(|position| order.get(position)).or(order.get(0)) == Some(key) { "0" } else { "-1" },
                                     "data-tooltip": if let Some(key) = key { format!("give this template {}", number_chord(key)) } else { "remove this template's number shortcut".into() },
                                     onmounted: move |element| remember_menu_item(wiring, key, element.data()),
-                                    onfocusin: move |_| focused.set(order.position(key)), onfocusout: move |_| focused.set(None),
+                                    onfocusin: move |_| record_menu_item_focus(wiring, key), onfocusout: move |_| focused.set(None),
                                     onkeydown: move |event| { event.stop_propagation(); handle_menu_key(&event, order.position(key), wiring, &()); },
                                     onclick: move |_| { close_menu.call(()); on_choose.call(key.map(str::to_string)); },
                                     span { if let Some(key) = key { "{number_chord(key)}" } else { "no shortcut" } }

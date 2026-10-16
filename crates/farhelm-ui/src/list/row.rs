@@ -23,7 +23,7 @@ use super::shared::{DeleteTarget, HostLocality, RowState};
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
     closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
-    measurement_outcome, remember_menu_item, session_menu_placement_style,
+    measurement_outcome, record_menu_item_focus, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
 
@@ -1189,8 +1189,8 @@ pub(super) fn SessionRow(
     // `MenuWiring::requested`'s own doc for why this has to exist
     // separately from `menu_focus` (F5/COR-FOCUS-BURST follow-up: an older
     // in-flight focus request's `onfocusin` can land after a newer press
-    // already moved `menu_focus` on, and only a signal DOM events never
-    // touch survives that). Cleared alongside `menu_focus` wherever the
+    // already moved `menu_focus` on). Item focus acknowledges the latest
+    // target without discarding it for an older landing. Cleared wherever the
     // menu opens or closes, below, and wherever the toggle takes focus
     // (`forget_menu_focus`). An item-set change remaps a surviving request
     // by action: withdrawing a middle item can leave its old position in
@@ -2201,7 +2201,7 @@ pub(super) fn SessionRow(
                                             )
                                         },
                                         onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(MenuAction::Rename));
+                                            record_menu_item_focus(menu_wiring, MenuAction::Rename);
                                         },
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| {
@@ -2248,7 +2248,7 @@ pub(super) fn SessionRow(
                                             )
                                         },
                                         onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(MenuAction::MarkSeen));
+                                            record_menu_item_focus(menu_wiring, MenuAction::MarkSeen);
                                         },
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| {
@@ -2282,7 +2282,7 @@ pub(super) fn SessionRow(
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::TogglePin) { "0" } else { "-1" },
                                     onmounted: move |element| remember_menu_item(menu_wiring, MenuAction::TogglePin, element.data()),
-                                    onfocusin: move |_| menu_focus.set(menu_order.position(MenuAction::TogglePin)),
+                                    onfocusin: move |_| record_menu_item_focus(menu_wiring, MenuAction::TogglePin),
                                     onfocusout: move |_| menu_focus.set(None),
                                     onkeydown: move |evt| handle_menu_key(&evt, menu_order.position(MenuAction::TogglePin), menu_wiring, &pin_key_id),
                                     onclick: move |_| {
@@ -2315,7 +2315,7 @@ pub(super) fn SessionRow(
                                         remember_menu_item(menu_wiring, MenuAction::Clone, element.data())
                                     },
                                     onfocusin: move |_| {
-                                        menu_focus.set(menu_order.position(MenuAction::Clone));
+                                        record_menu_item_focus(menu_wiring, MenuAction::Clone);
                                     },
                                     onfocusout: move |_| menu_focus.set(None),
                                     onkeydown: move |evt| {
@@ -2363,7 +2363,7 @@ pub(super) fn SessionRow(
                                         remember_menu_item(menu_wiring, MenuAction::ReplaceWith, element.data())
                                     },
                                     onfocusin: move |_| {
-                                        menu_focus.set(menu_order.position(MenuAction::ReplaceWith));
+                                        record_menu_item_focus(menu_wiring, MenuAction::ReplaceWith);
                                     },
                                     onfocusout: move |_| menu_focus.set(None),
                                     onkeydown: move |evt| {
@@ -2409,7 +2409,7 @@ pub(super) fn SessionRow(
                                         remember_menu_item(menu_wiring, MenuAction::Replace, element.data())
                                     },
                                     onfocusin: move |_| {
-                                        menu_focus.set(menu_order.position(MenuAction::Replace));
+                                        record_menu_item_focus(menu_wiring, MenuAction::Replace);
                                     },
                                     onfocusout: move |_| menu_focus.set(None),
                                     onkeydown: move |evt| {
@@ -2450,7 +2450,7 @@ pub(super) fn SessionRow(
                                             )
                                         },
                                         onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(MenuAction::Stop));
+                                            record_menu_item_focus(menu_wiring, MenuAction::Stop);
                                         },
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| {
@@ -2498,7 +2498,7 @@ pub(super) fn SessionRow(
                                             )
                                         },
                                         onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(MenuAction::Delete));
+                                            record_menu_item_focus(menu_wiring, MenuAction::Delete);
                                         },
                                         onfocusout: move |_| menu_focus.set(None),
                                         onkeydown: move |evt| {

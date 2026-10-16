@@ -11,9 +11,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`claude-trust-publish-after-lock-takeover.md`](claude-trust-publish-after-lock-takeover.md) — A paused trust writer
   may overwrite newer vendor configuration after stale-lock takeover; the vendor interleaving remains unverified.
 
-- [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
-  an older keyboard target after independent focus moves, potentially reaching Delete.
-
 ## High priority: material UX degradation
 
 - [`claude-trust-cleanup-delays-desktop-start.md`](claude-trust-cleanup-delays-desktop-start.md) — Retrying trust
