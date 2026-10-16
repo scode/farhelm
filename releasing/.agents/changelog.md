@@ -129,6 +129,16 @@ stable release is an entry; a revert of something that never shipped only remove
 The rule of thumb is exactly that: if a required commit turns out to have nothing user-facing, the maintainer excludes
 it at curation time and nothing else has to happen.
 
+A fix is listed as a fix only when the bug it fixes reached users in a stable release. Release candidates and dev builds
+do not count; their changes reach users under the stable release that follows them. So before sorting fixes into the two
+fix categories, check each one against the previous stable tag: when the code or feature it fixes is not in that tag, it
+gets no fix entry. A fix to something new in this release folds into that feature's entry, which cites its PR and
+describes the feature as it now behaves; anything else is dropped. A fix that is partly both keeps a fix entry for the
+part that shipped, and only that part. A fragment's `kind: fixed` does not settle this: a fix to unreleased work should
+have edited that work's fragment instead (`AGENTS.md`, "Changelog fragments"), and often has not. The maintainer made
+this the default for every release on 2026-10-16, after the v0.29.0 sweep turned up ten fixes whose bugs had only ever
+existed between stable releases.
+
 ## Fragments: what a PR leaves behind
 
 `AGENTS.md`, "Changelog fragments", carries the part of this section every PR needs, as a shorter selection of the same
