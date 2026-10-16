@@ -2117,3 +2117,27 @@ sweep exclusion removed.
 Class: fixture-premise
 
 Cause: established
+
+## 2026-10-15 — resolved: `plain Replace keeps a newer row's retry key after an older YOLO cancellation` (e2e/tests/replace.spec.ts)
+
+The original trace from `038d6b7f-5ad7-407a-a20a-db485b857dd8` shows a measured actions menu (opacity 1 and its
+placement variables), followed by dismissal, with the sidebar scrolled 11 pixels. The tall pending YOLO question pushes
+the source rows out of view; revealing the newer toggle or focused menu item then scrolls the sidebar, which
+intentionally dismisses its menu. This retry-key scenario needs both rows visible while that question remains open. A
+geometry assertion on the original viewport fails in the exact WebKit selection `f29cd269-acfe-4e8c-b06e-c27f8d467d59`:
+the older row has viewport ratio 0.288 instead of 1. The corrected fixture reserves a 1280 by 1100 viewport for the
+YOLO-cancellation branch and asserts both rows fully visible before opening the newer menu. The held request, unanswered
+question and retry-key assertions remain in place. It passed 10 of 10 WebKit repetitions in
+`631dd99b-59d1-40fa-b0f5-f34a00542ab3`, then both engines in the 16-execution focused run
+`10996a40-3c08-4423-8167-05c312193381`, including the sibling late-refusal case. No menu behavior, readiness timeout or
+retry policy changed. Runs used one browser worker and zero retries on Linux x86_64 kernel 6.8.0-146-generic, pinned
+tmux 3.7c executable SHA256 `f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, locale `C.UTF-8`, with
+ambient `FARHELM_*` scrubbed and recorder-owned `FARHELM_TEST_TRACE_DIR` supplied; the combined run also supplied
+`FARHELM_PLAYWRIGHT_POLICY_FILE`. The tested base was `bd9cd335ddbab25ac7cb7d44af1ca27b050026e7`, dirty with the
+notification focus fix and the three fixture corrections; the premise probe omitted the taller viewport. Other machine
+load, compiler and browser build identities are unavailable. Full evidence remains in private retained recorder runs and
+may expire. Disposition: fixed in #2134, with the TODO entry and sweep exclusion removed.
+
+Class: fixture-premise
+
+Cause: established
