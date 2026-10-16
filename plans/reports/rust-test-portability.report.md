@@ -78,3 +78,51 @@ executor implemented and validated the work locally; the reviewers performed sta
 
 Separate wording cold reads passed, with two titles/bodies clarified after the first reader. A documentation pass
 covered every touched source file. No unresolved source finding, scope departure, or complexity-gate failure remains.
+
+### Landing
+
+Landed on its own in round 67, with no product plan alongside it. All six PRs merged bottom-up. They are unchanged from
+what the report describes, apart from one bookkeeping conflict resolved during the rebase (below).
+
+#### What landed since the stack was based, and whether it interacted
+
+Forty-four changes reached main between this stack's base and its landing: round 65's and round 66's product fixes, a
+batch of browser-test permission and flake updates, and the agent-instruction split. I read their diffs against this
+stack, and a fresh-context reviewer did the same independently. Neither review found an interaction:
+
+- The Claude trust edits (the "preserve Claude settings numbers" fix) changed the same source file as the first PR
+  (#2093, canonical trust fixture paths) and added a test to it. That new test already builds its fixture on the
+  canonical temporary path, the same premise this plan applies to the older tests. The two edits merged cleanly. The
+  rule for resolving a trust path did not change.
+- The other code changes on main (download naming, session status after a stop, checkout error wording, terminal link
+  handling, remote uninstall, update failure reporting) touch none of the functions these tests exercise. Nothing
+  changed the terminal close and reap path, the downloads file-inspection path, device-token rotation, repository
+  discovery, or the test fixture cleanup crate.
+- Nothing on main amends what SPEC.md or SPEC_impl.md say about these areas.
+
+#### Fixes made during the landing
+
+The only one was the review-feedback index. The terminal-reap PR (#2101) removes its own feedback entry from that index.
+Meanwhile, the docs-preview fix that landed in round 65 had removed the adjacent entry. The resolution keeps both
+removals, so the index again lists exactly the feedback files in the queue. No source file changed.
+
+#### Checks
+
+- Run now, at the rebased stack tip: `cargo fmt --all -- --check` and
+  `cargo clippy -p farhelm-supervisor -p farhelm-helm -p farhelm-teststate --all-targets -- -D warnings` (the three
+  packages the stack changes), both clean.
+- Run now: `dprint check` on the resolved feedback index, clean.
+- Run now: the Claude trust module's tests and the launch-time trust test, since the trust source file is the one place
+  the rebase merged this stack with a change from main. The run went through the test recorder with the pinned nextest
+  and tmux, four slots and no retries:
+  `cargo nextest run -p farhelm-supervisor --lib -E 'test(agent_kind::claude::trust::) | test(launch::tests::claude_trust_launch_is_opt_in_and_best_effort_after_ready)'`.
+  It passed 7 of 7 with no runtime skips, run `0d9e0ed2-a6ae-4ed8-b0ef-a2867ea334bf`. That includes main's new
+  number-preservation test next to this plan's canonical-path test.
+- Reused: the executor's recorded runs for the other five fixes, listed in the report, and its workspace-wide clippy and
+  test-sleep checks. Each PR's own diff is byte-identical after the rebase, apart from the index resolution above, and
+  nothing on main touches what those tests depend on. The test-sleep check is source-only, and the merged trust file
+  adds no delay from either side.
+- Skipped: broader Rust, browser, desktop and installer runs, since nothing here changes shipped behavior. No macOS run
+  was made, as the report says.
+
+Nothing in the executor's report became untrue at landing.
