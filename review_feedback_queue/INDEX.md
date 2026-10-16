@@ -236,8 +236,5 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   the new browser test with an inherited Git repository selector can change a developer’s repository instead of its
   temporary fixture.
 
-- [`paste-guide-overstates-control-byte-protection.md`](paste-guide-overstates-control-byte-protection.md) — The paste
-  guide promises unseen-keystroke protection even though control bytes such as Ctrl-C remain deliverable.
-
 - [`introduction-promises-universal-reboot-resume.md`](introduction-promises-universal-reboot-resume.md) — The
   introduction promises conversation recovery after reboot for sessions without Resume reporting.
