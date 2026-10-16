@@ -14,9 +14,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`trash-confirmation-answer-consumes-new-selection.md`](trash-confirmation-answer-consumes-new-selection.md) — If an
   old confirmation event survives a change of pending selection, it could delete the newly selected host’s archives.
 
-- [`wrapped-file-link-partial-redraw-keeps-old-target.md`](wrapped-file-link-partial-redraw-keeps-old-target.md) —
-  Repainting only part of a wrapped link can leave its previous click target active, including for native file opening.
-
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 

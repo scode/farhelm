@@ -263,6 +263,7 @@
       this.clearHover();
       const state = {
         path, text, link, range: range ? { start: { ...range.start }, end: { ...range.end } } : null,
+        screenText: window.farhelmTerminalLinks.linkRangeText(this.term, range),
         controller: new AbortController(), info: null, leaving: false, leaveTimer: null,
       };
       this.hovered = state;
@@ -388,12 +389,21 @@
       }
     }
 
-    /** Only a successful current hover can start a transfer. Native mode is
-     * explicit: its failure never falls back to a webview Blob save.
+    /** Only a successful hover over unchanged text can start a transfer.
+     * xterm may retain a link after a partial redraw; its cached target must
+     * not outlive the cells that established this hover. Native failure never
+     * falls back to a webview Blob save.
      */
     async download(path, event = {}) {
       const state = this.hovered;
       if (!this.isClick(event) || !state || state.leaving || state.path !== path || state.info?.status !== 'ready' || this.term.getSelection()) return;
+      if (state.screenText === null || state.screenText !== window.farhelmTerminalLinks.linkRangeText(this.term, state.range)) return;
+      // A printed token can grow beyond its cached endpoint without changing
+      // any old cell. Reuse recognition so suffixes, prefixes and diagnostic
+      // punctuation obey the same boundaries as the original link provider.
+      if (state.link && !bufferLinks(this.term, state.range.start.y).some(current =>
+        current.path === path && current.range.start.x === state.range.start.x && current.range.start.y === state.range.start.y &&
+        current.range.end.x === state.range.end.x && current.range.end.y === state.range.end.y)) return;
       const controller = new AbortController();
       this.transfers.add(controller);
       this.message('downloading…');

@@ -391,6 +391,31 @@
     return line.translateToString(true, range.start.x - 1, end);
   }
 
+  /** Snapshot every cell of a file link, including its wrapped continuation.
+   * A partial repaint can leave xterm's cached link active. Reading through
+   * the public buffer API at hover and click makes that cache insufficient
+   * authority for a transfer. Keep whitespace and cell boundaries intact;
+   * missing or overlong ranges cannot establish that the text is unchanged.
+   * Bounds match the printed-path reader's 128-row span and 8192 characters.
+   */
+  function linkRangeText(term, range) {
+    if (!range?.start || !range?.end) return null;
+    const { start, end } = range;
+    if (![start.x, start.y, end.x, end.y].every(Number.isInteger) ||
+        start.x < 1 || start.y < 1 || end.x < 1 || end.y < start.y || end.y - start.y > 128) return null;
+    let text = '';
+    for (let y = start.y; y <= end.y; y++) {
+      const line = term.buffer?.active?.getLine(y - 1);
+      if (!line) return null;
+      const from = y === start.y ? start.x - 1 : 0;
+      const to = y === end.y ? end.x : line.length;
+      if (to > line.length || to <= from) return null;
+      text += line.translateToString(false, from, to);
+      if (text.length > 8192) return null;
+    }
+    return text;
+  }
+
   /**
    * Show `uri` (an OSC 8 link's target) near the pointer while it hovers the
    * link. See `linkTargetParts` for what is shown and why.
@@ -495,6 +520,7 @@
     linkTargetParts,
     linkTextMismatch,
     linkRowText,
+    linkRangeText,
     visibleFormatCharacters,
     shortenedTarget,
     displayedTarget,
