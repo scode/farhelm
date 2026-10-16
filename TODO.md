@@ -190,6 +190,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Notification bell entry missing under build mismatch.**
+  `closing notifications quiets the bell under a build mismatch` in `e2e/tests/notifications.spec.ts` expected one
+  `.session-bell-entry` but found none in Chromium during sweep `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` (browser run
+  `038d6b7f-5ad7-407a-a20a-db485b857dd8`). Exact-test classification runs `728a8cf1-e084-407f-b557-d88de2950852`,
+  `cf6fc642-3539-4257-a84b-4c5699234721`, and `312f0cff-7658-4b59-b59b-08f0b2951269` all passed. Cause unknown; preserve
+  the mismatch and notification ordering when investigating the retained trace (FLAKES.md, 2026-10-15).
+
 - **Guarded permission tooltip stays hidden.** `guarded choices explain each agent and Cursor keeps its own setting` in
   `e2e/tests/guarded-permissions.spec.ts` timed out waiting for `body > .farhelm-tooltip` in Chromium during sweep
   `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` (failed browser run `038d6b7f-5ad7-407a-a20a-db485b857dd8`). The tooltip held

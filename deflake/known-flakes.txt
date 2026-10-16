@@ -15,3 +15,4 @@ nextest farhelm::e2e terminal_backpressure::shallow_pause_resumes_without_reset_
 playwright terminal-reconnect.spec.ts view-changes-do-not-postpone-a-recovery  # reconnect-recovery-misses-its-window-under-load
 playwright terminal-reconnect.spec.ts a-rolled-back-helm-gets-no-automatic-attach  # rollback-browser-test-sees-skew-before-first-retry
 playwright guarded-permissions.spec.ts guarded choices explain each agent and Cursor keeps its own setting  # guarded-permission-tooltip-stays-hidden
+playwright notifications.spec.ts closing notifications quiets the bell under a build mismatch  # notification-bell-entry-missing-under-build-mismatch
