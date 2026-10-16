@@ -185,6 +185,9 @@ async function checkoutFixture(repoName: string) {
       { env, timeout: 10_000 });
   };
   await fs.mkdir(root);
+  // Archive paths use the supervisor's canonical root, which may differ from
+  // the lexical stack path on systems where /tmp is a symlink.
+  const canonicalRoot = await fs.realpath(root);
   await fs.mkdir(seed);
   await git("init", "--initial-branch=main", seed);
   await fs.writeFile(path.join(seed, "checkout-sentinel"), `${repo}\n`);
@@ -208,7 +211,7 @@ async function checkoutFixture(repoName: string) {
         const listed = await request.post("/api/checkout-trash/list", { data: { host, measure_sizes: false } });
         expect(listed.ok(), await listed.text()).toBe(true);
         const trash = await listed.json();
-        const owned = [...trash.checkouts, ...trash.issues].filter((entry: {path: string}) => entry.path.startsWith(root + path.sep));
+        const owned = [...trash.checkouts, ...trash.issues].filter((entry: {path: string}) => entry.path.startsWith(canonicalRoot + path.sep));
         const ids = [...new Set(owned.map((entry: {id: string}) => entry.id))];
         if (ids.length) {
           const emptied = await request.post("/api/checkout-trash/delete", { data: { host, ids } });
