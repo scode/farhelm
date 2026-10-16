@@ -1613,6 +1613,14 @@ fn scroll_folder_result(index: usize) {
     ));
 }
 
+/// Keep the active repository visible without moving focus off its combobox.
+/// The post-render caller also covers a list mounted by the current render.
+fn scroll_repository_result(index: usize) {
+    document::eval(&format!(
+        r#"document.getElementById('checkout-repository-{index}')?.scrollIntoView({{ block: 'nearest' }});"#,
+    ));
+}
+
 /// What one "clone" click seeds a fresh create form with: everything about
 /// the clicked row that a NEW session can reuse.
 ///
@@ -2429,6 +2437,11 @@ pub(super) fn CreateSessionForm(
     });
     let mut repository_open = use_signal(|| false);
     let mut repository_index = use_signal(|| 0_usize);
+    use_effect(move || {
+        if repository_open() {
+            scroll_repository_result(repository_index());
+        }
+    });
     let mut clone_checkout_naming = use_signal(CloneCheckoutNaming::default);
     let mut github_attempt = use_signal(|| None::<(IntentBinding, GithubAttempt)>);
     // A Replace-with deletes its source, whose notice the session list shows.
