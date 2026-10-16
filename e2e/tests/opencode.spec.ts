@@ -54,8 +54,9 @@ test("OpenCode keeps composer controls while offering default and explicit Zen m
   await expect(model).toHaveValue("custom'42;$literal");
   // OpenCode has one explicit permission mode, including for older omitted
   // selections. Its configured model does not imply a permission default.
+  // The help button is not a mode; only choices expose pressed state.
   const permissions = form.locator(".launch-composer-permissions-choice");
-  await expect(permissions.getByRole("button")).toHaveCount(1);
+  await expect(permissions.locator("button[aria-pressed]")).toHaveText(["yolo"]);
   await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
