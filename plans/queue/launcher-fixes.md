@@ -37,18 +37,18 @@ fix and the complexity gate, and its Completion criteria are the acceptance crit
 Each outcome's gate is binding. The maintainer delegated these decisions on the condition that the fixes stay small, and
 each ledger entry says the item returns to the maintainer if its fix cannot stay within its gate. Whether a fix meets
 its gate is yours to judge and log. If one does not, do not build it: build and push the plan's other outcomes, then
-block (per `plans/AGENTS.md`, Executing one plan, step 10) with a question that describes the larger fix that would be
-needed and asks whether to build it or discard the outcome. The entry's planned fix is the pre-triage reviewer's
-proposal; a different fix that stays within the same gate and meets the same completion criteria is fine, logged as a
-DECISION.
+block (per `plans/.agents/executing.md`, "Executing one plan", step 10) with a question that describes the larger fix
+that would be needed and asks whether to build it or discard the outcome. The entry's planned fix is the pre-triage
+reviewer's proposal; a different fix that stays within the same gate and meets the same completion criteria is fine,
+logged as a DECISION.
 
 ### Acceptance criteria
 
 - Each outcome's Completion criteria in its `TRIAGE_OUTCOMES.md` entry, including its regression test.
 - Each outcome's PR removes its feedback file and `review_feedback_queue/INDEX.md` entry and updates its Execution
   field.
-- A `fix` PR carries a changelog fragment (`kind: fixed`) per root `AGENTS.md`; test-only, docs-only and tooling PRs do
-  not.
+- A `fix` PR carries a changelog fragment (`kind: fixed`) per `AGENTS.md`, "Changelog fragments"; test-only, docs-only
+  and tooling PRs do not.
 
 ## Requirement sources
 
@@ -60,8 +60,9 @@ and small; the triaging session checked those calls. Grouping the fifty delegate
 agreed with the maintainer. Review gate: a single fresh-context gpt-6.1-sol reviewer at high effort, no swarm.
 No-workhorse mode, which `plans/AGENTS.md` requires.
 
-**Binding repository constraints:** the rule each entry's Assessment cites as settling it; root `AGENTS.md` "Execute
-triage outcomes", its changelog rule and "Finishing work"; `.agents/test-authoring.md` for any test change.
+**Binding repository constraints:** the rule each entry's Assessment cites as settling it;
+`review_feedback_queue/.agents/execute-outcomes.md`, "Execute triage outcomes", `AGENTS.md`, "Changelog fragments", and
+`AGENTS.md`, "Tests and validation" with `.agents/validation.md`; `.agents/test-authoring.md` for any test change.
 
 **Planner proposals:** each entry's planned fix, and the PR order above.
 
@@ -75,8 +76,8 @@ One PR per outcome, in the order listed. Plan-specific notes:
 
 ### Validation
 
-Per root `AGENTS.md` "Finishing work", choose the smallest set of checks that would expose a regression in what each PR
-changes, and report checks run, reused and skipped. `cargo fmt --all -- --check`,
+Per `AGENTS.md`, "Tests and validation", and `.agents/validation.md`, choose the smallest set of checks that would
+expose a regression in what each PR changes, and report checks run, reused and skipped. `cargo fmt --all -- --check`,
 `cargo clippy --all-targets -- -D warnings`, the `farhelm-ui` unit tests through the recorder, the browser specs each
 outcome's completion criteria name on Chromium and WebKit through the recorder after the documented builds, the
 test-sleep checker when a browser test changes, and `python3 releasing/check-changelog.py format`.
@@ -95,17 +96,18 @@ fix.
 
 ### Files outside the repository
 
-Per `plans/AGENTS.md` (Files outside the repository): this plan's working log is `farhelm-plan-launcher-fixes-log.md` in
-the parent directory of the checkout you run in, derived as that section says. Resolve it to an absolute path before you
-start. Scratch files go in the agent scratch directory root `AGENTS.md` describes, not in the checkout.
+Per `plans/.agents/outside-files.md`, "Files outside the repository": this plan's working log is
+`farhelm-plan-launcher-fixes-log.md` in the parent directory of the checkout you run in, derived as that section says.
+Resolve it to an absolute path before you start. Scratch files go in the agent scratch directory that `AGENTS.md`,
+"Agent scratch space", describes, not in the checkout.
 
 ### Resume protocol
 
 Your first action is to invoke the `agent-resumeable` skill with the log file's absolute path. If the log exists, read
 it and resume where the previous session left off, cross-checking it against reality (the jj graph, bookmarks, open PRs
 and the `TRIAGE_OUTCOMES.md` Execution fields) rather than starting over. If it does not exist, this is a fresh start. A
-plan that an earlier executor worked on, or that came back from review, also gets the resume check in `plans/AGENTS.md`
-(Executing one plan, step 7) before any work.
+plan that an earlier executor worked on, or that came back from review, also gets the resume check in
+`plans/.agents/executing.md`, "Executing one plan" (step 7) before any work.
 
 ### Galaxy-brain, no-workhorse
 
@@ -159,14 +161,15 @@ sampling interval to save turns.
 
 ### PR discipline
 
-- Follow root `AGENTS.md` "Execute triage outcomes": one reviewable commit, stable bookmark and draft PR per outcome, in
-  a single linear stack in the order given under The goal above. Each PR carries its outcome's agreed change, the
-  removal of its feedback file and `review_feedback_queue/INDEX.md` entry, and its `TRIAGE_OUTCOMES.md` Execution
-  update. Record the jj change ID and bookmark in that Execution field before creating the PR, then add the PR's URL
-  (with `/changes` appended, per the user's PR-link rule) to the same change and push it again; no separate bookkeeping
-  PR. Replace the Execution field's current `planned in ...` text rather than appending to it.
+- Follow `review_feedback_queue/.agents/execute-outcomes.md`, "Execute triage outcomes": one reviewable commit, stable
+  bookmark and draft PR per outcome, in a single linear stack in the order given under The goal above. Each PR carries
+  its outcome's agreed change, the removal of its feedback file and `review_feedback_queue/INDEX.md` entry, and its
+  `TRIAGE_OUTCOMES.md` Execution update. Record the jj change ID and bookmark in that Execution field before creating
+  the PR, then add the PR's URL (with `/changes` appended, per the user's PR-link rule) to the same change and push it
+  again; no separate bookkeeping PR. Replace the Execution field's current `planned in ...` text rather than appending
+  to it.
 - Use the `jjstack` skill. The stack's base is `main@origin`, or this plan's own open PRs when it resumes, set up per
-  `plans/AGENTS.md` (Executing one plan, step 6); never another plan's PRs. Bookmarks are
+  `plans/.agents/executing.md`, "Executing one plan" (step 6); never another plan's PRs. Bookmarks are
   `plan/launcher-fixes/<nn>-<short-name>` (for example `plan/launcher-fixes/01-retry-key`).
 - Avoid churn: code added in one PR and deleted in a later one means the stack should have been shaped differently.
   Within this run, a PR that needs correcting is restructured rather than corrected on top, and that applies to PRs an
@@ -238,13 +241,13 @@ Resolve routine implementation forks within the agreed scope and log them as DEC
 machinery that turns out to be unnecessary, as long as the user's decisions and the repository constraints still hold.
 Wording in this file that turns out inaccurate is corrected to the truth; the plan-specific agreed fallbacks are under
 Fallbacks above. If current code or specs invalidate a recorded triage decision (for example, the finding turns out
-already fixed or wrong), that is a block: root `AGENTS.md` (Execute triage outcomes) returns such an item to the user
-rather than changing the agreed outcome.
+already fixed or wrong), that is a block: `review_feedback_queue/.agents/execute-outcomes.md`, "Execute triage
+outcomes", returns such an item to the user rather than changing the agreed outcome.
 
 A material scope expansion, a weakened guarantee, or an omitted required behavior needs an agreed fallback or the user's
 decision; a review finding or a log entry is not authorization. If no fallback covers it, record the concrete tradeoff
-and continue with independent work. Block per `plans/AGENTS.md` (Executing one plan, step 10) only for what cannot
-proceed without the user, after pushing every outcome that can be finished.
+and continue with independent work. Block per `plans/.agents/executing.md`, "Executing one plan" (step 10) only for what
+cannot proceed without the user, after pushing every outcome that can be finished.
 
 You run unattended, so never ask the maintainer anything in conversation: no question tool, no approval prompt, and no
 "should I ...?" or offer of optional extras closing a turn, whatever a loaded skill or the harness suggests. Every fork
@@ -258,5 +261,5 @@ The plan is complete when a linear stack of draft PRs exists, one per outcome li
 failed its complexity gate (then the plan blocks as described above), that together meets the acceptance criteria above,
 each PR passed its review gate, and each built outcome's `TRIAGE_OUTCOMES.md` Execution field names its change ID,
 bookmark and PR. Open, not merged. If a `## Decisions` section exists, its latest entry must also be satisfied. Then
-close the plan per `plans/AGENTS.md` (Executing one plan, steps 11 and 12): deliver its report through the queue script,
-write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the
+queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.

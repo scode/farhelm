@@ -187,7 +187,7 @@ items, including a continuous drag, dismissed the menu and reached the underlyin
 Return pasted the exact `tl:` query and produced the expected template match. `pbcopy` needed no sudo or bootstrap
 context change; such a change did not solve the mouse-menu issue. Keep the coordinator's `--no-clipboard` isolation and
 the host clipboard untouched. Verify the full text and reactive form result before submitting. Record newly verified
-workarounds here and in the release-test section of AGENTS.md as they are found.
+workarounds here and in `releasing/mac-vm-test/BRICK-TEST.md`, "Release brick tests", as they are found.
 
 For terminal-file downloads, first clear any terminal selection with an explicit single click in blank terminal space.
 Click the path with `clickCount: 1`, inspect the hover's ready metadata, then click the ready link with `clickCount: 1`

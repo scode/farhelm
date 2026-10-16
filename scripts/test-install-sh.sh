@@ -14,7 +14,7 @@
 # portability constraint driving it, and bash's arrays, [[ ]], and local
 # variables make the fixture/assertion bookkeeping far less error-prone.
 #
-# Isolation rule (CLAUDE.md: tests never mutate the environment of the
+# Isolation rule (.agents/test-authoring.md: tests never mutate the environment of the
 # process running them): every install.sh invocation goes through
 # run_install(), which execs `/bin/sh install.sh` under `env -i` with an
 # explicit, minimal environment — this script's own $PATH, $HOME, and every

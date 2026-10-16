@@ -2421,7 +2421,7 @@ impl AgentHooks {
 /// rather than here: keeping this function pure (a `&str` in, an
 /// `AgentHooks` out, no side effects) is what lets it be unit-tested
 /// without a test process ever setting an environment variable
-/// (CLAUDE.md's testability rule forbids that).
+/// (the testability rule in .agents/test-authoring.md forbids that).
 ///
 /// ## Grammar
 ///

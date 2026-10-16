@@ -2,7 +2,7 @@
  * Screenshots for the docs website's Release notes page: the visual changes of
  * a release, each shown under the entry it belongs to behind a "show
  * screenshot" link, as website/src/release-notes/<version>.json attaches them
- * (website/AGENTS.md, "Release notes").
+ * (`website/.agents/release-notes.md`, "Release notes").
  *
  * Each test is one release's shot, named release-notes/v<X-Y-Z>-<what>, and
  * shows the release it is named for. Once published, a shot is frozen: every

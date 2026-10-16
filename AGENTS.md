@@ -8,754 +8,48 @@ cited by name throughout code comments) are archived under lore/ and are not mai
 This project is either public now, or may become public in the future. No content in this project should contain
 personal information such as personal usernames, hostnames, details about the local environments, etc.
 
-# Release brick tests
-
-When asked **`brick test release vX.Y.Z`**, follow
-[releasing/mac-vm-test/BRICK-TEST.md](releasing/mac-vm-test/BRICK-TEST.md). Discover the private machine profile there,
-read its operator policy and journal, and run **P0 checks first**, in the five-step order in BRICK-TEST.md, with
-guest-only product mutations. P0 covers fresh install/start, a separate installer upgrade, click-to-upgrade
-discovery/relaunch, local supervisor upgrade with one successful agent, then remote supervisor upgrade with one
-successful agent. Stop at the first failure or missing prerequisite. After P0 passes, P1 sends one live feedback
-submission from the candidate on P0's last Mac guest, before that fixture is exported and cleaned up; broader work is
-bonus coverage after P1. A P1 failure is reported promptly with its separate verdict and does not invalidate P0, block
-cleanup or fence bonus passes. A request to **stop after P0 checks** ends after recording P0 evidence and cleaning up
-its successful fixtures; no feedback is sent and no bonus fixture starts. **Stop after P1 checks** ends after P0 and P1
-evidence and the last fixture's cleanup. Answer **did P0 checks succeed?** from the separate P0 verdict and five
-results, naming anything incomplete. Answer **did P1 checks succeed?** from its own verdict and named feedback check.
-The full verdict includes P1; whether its failure blocks promotion is the maintainer's call for that release. Missing
-prerequisites mean could not run; resolve them with the maintainer instead of guessing machine bindings. A test request
-does not authorize publication or release promotion.
-
-Use BRICK-TEST.md's guest-native executor for actual tests: an independent Codex process inside the Mac guest drives
-native CUA and survives Farhelm quit/restart. The host coordinates Tart lifecycle, pinned networking and evidence, but
-does not drive product UI. Resolve native permissions and explicit Mac/Linux credential-copy consent during fixture
-setup. Prepared bases remain credential-free; standing authorization may cover this machine's disposable test clones. An
-OS/CUA/authentication permission block during P0 or an evaluation is a harness bug: stop, retain the failure, repair
-setup separately and start a new run. Do not manually approve or switch to host UI to rescue it. Ordinary Farhelm
-confirmations are authorized product interactions handled by the guest tester.
-
-For full or P1-only scope, resolve authorization during setup for the live feedback send to farhelm.io, which creates an
-issue in the private inbox. P0-only scope does not authorize or require that send.
-
-Before creating a new test pair, inspect live Tart state and reconcile leftover brick-test guests using their original
-ownership manifests and journal. The new test request authorizes clean shutdown of abandoned previous test pairs without
-asking again, preserving their disks and evidence. Do not interrupt an active operator, delete retained data, force-stop
-guests or touch unrelated VMs. Verify the earlier pair is stopped and its foreground owner has exited. Follow
-BRICK-TEST.md's startup reconciliation procedure. Host Tart window binding is needed only during fixture setup; actual
-product computer use binds apps directly inside the guest.
-
-Run this gate **before** moving `/latest` to the candidate. It is expected that `/latest` still names the preceding
-promoted stable; do not treat that difference as a blocker or ask to promote first. Upgrade baselines run from v0.23.0
-through that public default, excluding unpromoted intervening tags. For an old app that supports it, quit and relaunch
-inside the Mac guest with `open --env FARHELM_DESKTOP_UPDATE_LATEST=vX.Y.Z "$HOME/Applications/Farhelm.app"`, then use
-the in-app updater. Older apps use the manual candidate-installer path. Follow the procedure's verification and override
-removal checks in both cases.
-
-During fixture setup only, read OPERATIONS.md's computer-use notes before entering guest text. Update those notes and
-this section when a new Tart input workaround is verified, so the next agent does not repeat the investigation.
-`typeText` and rapid physical key sequences can drop characters; per-character `pressKey` calls with `durationMs: 100`
-delivered unmodified text reliably in the release test. To replace a field, triple-click with `durationMs: 100`, then
-inspect a screenshot for the actual selection highlight before typing. Modifier chords can reach the guest without their
-modifier (`tl:` became `tl;`, and select-all became a literal `a`); verify punctuation and the resulting reactive form
-state before submitting. The verified workaround is guest-only clipboard preparation through the journaled controller
-(`printf %s <text> | /usr/bin/pbcopy` inside the Mac guest), followed by computer use on the guest's Edit menu. Click
-Edit, navigate with `Down` keys held for 100 ms until Paste is visibly highlighted, then press Return. Direct clicks on
-guest native menu items can dismiss the menu and reach the underlying window instead. Keep Tart's shared clipboard
-disabled and the host clipboard untouched; inspect both the pasted text and the form's response before proceeding. If
-Tart window lookup fails, follow OPERATIONS.md's reconciliation notes: the guests may still be running. Preserve their
-foreground supervision and resolve GUI access instead of restarting guests or using the host's Farhelm.
-
-# Talking to the user
-
-Assume the user does not know the codebase. They know Farhelm as a product and its core concepts (the helm, the
-supervisor, sessions, hosts, and so on), but not the file names, functions, types, and other internal names behind them.
-Explain things in those product terms. Do not use an internal name unless it has already come up in the conversation, or
-you introduce it with enough context that it makes sense without opening the code.
-
-# Conventional Commits
-
-All commit messages and PR titles must use Conventional Commit format: `<type>: <short summary>`
-
-Allowed types: `feat`, `fix`, `docs`, `perf`, `refactor`, `style`, `test`, `chore`, `ci`, `revert`.
-
-Append `!` after the type for breaking changes (e.g. `feat!: remove legacy endpoint`). Scope is optional.
-
-Rules:
-
-- Type reflects the user-visible effect, not the implementation activity. A bug fix that requires heavy refactoring is
-  `fix`, not `refactor`. A new CLI flag is `feat`, not `chore`.
-- The summary after the colon is lowercase, imperative mood, no trailing period.
-- Keep the first line under 72 characters.
-
-# Finishing work
-
-For changes to tests or their fixtures, apply [.agents/test-authoring.md](.agents/test-authoring.md) during authoring
-and supply its full text verbatim to the independent reviewer. Use the review process selected for the task; this
-checklist does not request an additional reviewer or a review swarm. Report concrete violations of the relevant
-contracts, not mechanical demands for every bullet to appear in every test.
-
-Run `python -B scripts/check-test-sleeps.py` with the isolated interpreter prepared in
-[docs/test-sleep-check.md](docs/test-sleep-check.md) when changing Rust or browser tests, their helpers, or the checker.
-The CI workflow's formatting job runs this source-only check and requires zero unannotated delays. A `sleep-ok` reason
-explains a deliberate observation window, scheduling stimulus, or polling interval; it does not replace a readiness
-oracle or excuse an unverified fixture premise.
-
-Before creating, updating, or merging a PR, or claiming work is done, make a judgment call about what validation would
-add useful evidence. Never mechanically run the entire test battery. A PR, rebase, stack completion, or merge request is
-not by itself a reason to launch it. The list below is the authoritative inventory of available CI-equivalent checks and
-their coverage, not a checklist to execute in full.
-
-Start with the actual diff, the successful checks already available, and the concrete risks still uncovered. Choose the
-smallest set of checks likely to expose a regression in the affected behavior; no additional runtime tests is a valid
-choice when existing evidence still covers the change. Widen only when a specific material risk or unresolved failure
-needs broader coverage. Cross-cutting, security, lifecycle, installer, or release changes deserve careful assessment,
-not an automatic full run. Before choosing a full battery, explain what risk it covers that existing evidence and
-targeted checks cannot adequately cover. Cost does not excuse ignoring a material risk, but running more tests without
-identifying one is not diligence.
-
-For a documentation-only change that cannot affect generated artifacts or executable examples — ordinary Markdown
-documentation, a lore entry, agent instructions, or comments with no doctest or generation role — do NOT run Rust,
-JavaScript, desktop, installer, provisioning, or browser tests. Run only formatters, linters, link checkers, or other
-checks that actually inspect the changed files, if any exist. Do not run a check solely because it appears in the full
-gate list.
-
-When building a stack, use targeted checks at each review unit to catch likely regressions while they are cheap to
-localize. At the tip, assess the combined diff for interactions those checks did not cover. Stack completion does not
-require another battery or the highest-cost gates; run broader checks only for identified coverage gaps. Apply the same
-judgment when landing the stack.
-
-Reuse is per command. Compare the tested revision with the current head, including upstream changes and conflict
-resolutions after a rebase. A new commit hash does not invalidate a successful run. If extensive validation just
-finished and a minor rebase preserves the tested behavior, reuse it without more runtime tests. If the rebase changes
-behavior, run targeted checks most likely to expose a problem in those changes or their interactions; widen only when
-that leaves a material gap. Resolve uncertainty by inspecting the diff before defaulting to execution. Failed,
-interrupted, poorly identified runs, or runs whose coverage no longer applies are not evidence of a pass. Report checks
-run now; checks reused, with the covered revision and why their coverage still applies; and checks skipped, with the
-reason.
-
-For Rust execution, first put the pinned nextest and tmux on PATH using the guarded setup in
-`docs/test-run-evidence.md`. Run from the checkout root with Python 3.11+ (Python 3.13+ on macOS). Use owned sandboxes
-for expensive, slow or memory-heavy checks; small focused checks can run locally. The recorder's nextest mode enforces
-four global slots, zero retries and failure on empty selection, and retains each run's configuration and JUnit report.
-Runtime `SKIPPED` messages still require reading the retained output: an early-return test is a JUnit pass, not proof
-that its required systemd or SSH substrate ran.
-
-- `cargo fmt --all -- --check`
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo clippy -p farhelm --bins -- -D warnings` — lints the shipped binary's configuration, in which the supervisor's
-  `test-seams` feature is off; the `--all-targets` run above always has it on, because the e2e tests enable it through a
-  dev-dependency.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'workspace Rust targets' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run --workspace --exclude farhelm-desktop`
-  — executes applicable unit and integration targets, including the support crates omitted from default-members. Nextest
-  starts a process per test and bounds concurrency across binaries; the e2e group has four slots, supervisor tmux
-  modules share two, the two-host fixture reserves two, and RSS reserves all four. The release gate retains its narrower
-  package/target selections; ordinary CI does not run this suite. Do not also run the old full libtest battery.
-- `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' --tmux required -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
-  — preserves doctest coverage separately because nextest does not execute it.
-- `scripts/test-tmux-pinned-shutdown.sh` — the x86_64 Linux release gate builds the exact checksummed release named by
-  `.github/release/source-pins.env` on cache miss, then runs every focused output-client teardown regression in its own
-  test process with its own recorded nextest report. Keep this explicit release subset while the full e2e target remains
-  excluded there. A successful local workspace nextest run already covers these tests on the same pinned substrate; do
-  not duplicate them merely because this script is listed. A distro tmux loses the affected-version coverage.
-- `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
-  (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
-  inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
-  in cwd) is the oldest, most version-portable form the test runner has, whereas quoted-glob CLI arguments are newer and
-  CI pins no node version.
-- `cd crates/farhelm-supervisor/asset-js-tests && node --test` — the OMP conversation-reporter asset's own execution
-  proof: dispatch ordering against a controlled subprocess mock (including a deliberately nonserialized variant the
-  proof must reject), stale-id cancellation, execution-time file recheck, the subscribed transition events, and the
-  silent-failure boundary, run against the real shipped asset. Same node terms as the UI harness above; the release gate
-  runs it through the recorder with the `OMP reporter asset scenarios` selection.
-- `cd website/feedback-tests && node --test` — the feedback endpoint's handler (`website/feedback/handler.js`, deployed
-  as `website/api/feedback.js`): method, configuration and size refusals, field caps counted in code points, fences that
-  user text cannot close, and that no response or log line carries the token, the inbox's name, the message or the
-  contact. Configuration and the GitHub client are injected; nothing touches the network or `process.env`. Run it when
-  the handler or its tests change; CI's website job runs it beside the website build.
-- `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
-  dev packages (see the CI job for the apt list).
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'desktop Rust targets' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-ui --features desktop`
-  — exercises desktop-only persistence and IPC seams with the same system dependencies as the compile check.
-- `python3 scripts/record-test-run.py --kind development --selection 'desktop doctests' --concurrency '4 doctest threads' --tmux none -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4`
-  — preserves the desktop feature's separate doctest coverage. Desktop execution remains release-only in hosted CI.
-- `cargo check -p farhelm-desktop` — the shipped desktop binary sits outside `default-members` (so ordinary builds never
-  compile WebKit), which means `-p` is the only thing that ever compiles it.
-- `scripts/check-desktop-assets.sh` — holds the desktop build's `asset!()` set and the web bundle's files to the same
-  set, in both directions. The shipped desktop-artifact builder calls `--compare` on its actual embedded bundle, so
-  release validation preserves parity without a duplicate CI rebuild.
-- `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — the x86_64 Linux release gate runs this
-  with an isolated `CARGO_TARGET_DIR`; before any of it needs Xvfb, four pre-display process legs drive
-  `farhelm-desktop`'s own entry point directly: a missing tmux and a below-floor tmux each refuse with one exact plain
-  stderr line and exit status 1 (the app's own preflight, run before it would spawn its managed supervisor), and a
-  non-tmux bootstrap failure (an unusable state directory) exits 1 through the ordinary fallback path with no panic. The
-  non-pixel Xvfb integration gate that follows covers the embedded helm, managed supervisor, desktop authentication, the
-  tmux override reaching the managed supervisor, hard-exit tether, restart persistence, and that every asset the window
-  requested went through the desktop asset handler. The optional coordinate-driven leg is not part of CI.
-- `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
-  `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
-  before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
-  POSIX `sh` (it is never piped into a stranger's shell, so nothing forces the same portability constraint), which is
-  why only `install.sh` goes through `sh -n`.
-- `bash scripts/test-install-sh.sh` — drives the macOS-only installer as a real child against a fixture HTTP server,
-  using a Darwin/arm64 `uname` shim on Linux and BusyBox. Covers fresh install, updates side by side and stopped at each
-  step, the forwarder, 404, checksums, malformed archives, version normalization, missing prerequisites, exact closing
-  messages and tmux advice, terminal styling/progress and plain redirected output, app layout and ownership/recovery.
-  Linux refuses before downloading or writing; old releases (without app resources, or from before the side-by-side
-  layout) refuse before anything changes. Nothing outside `~/.local/bin` and `~/Applications/Farhelm.app` changes, and
-  no service manager runs. Every invocation uses `env -i` with an explicit environment, never the harness process's own.
-- `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' --tmux none -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
-  — macOS-only, after building the CLI: runs the actual installer and installed uninstaller against private fixture
-  homes and release archives. Covers updates, confirmation, dry-run preservation, foreign files and native bundles.
-  Other platforms report a skip; Linux no longer has end-to-end coverage of installer-made installations because the
-  installer refuses Linux. The focused macOS CI job and release gate also run
-  `cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'` through the recorder with four slots and
-  `--tmux none`.
-- `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
-  the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
-  own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,
-  because the workspace's glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the
-  container image and the tmux build are both cached after the first run.
-- `dprint check`
-- `cd website && bun install --frozen-lockfile && bun run build` — the docs website (Astro + Starlight) must build; this
-  is what catches a page with missing frontmatter, a sidebar slug that names no page, or a broken internal link or
-  anchor. Bun is the package manager the Vercel project is configured with, so the lockfile is `bun.lock`; commit it
-  with any dependency change. Vercel itself never builds on a push; see "Vercel deployments" below. The build itself
-  runs under Node (the `astro` binary's shebang), and Astro refuses Node older than 22.12; the CI job pins Node for that
-  reason.
-- `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
-  and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
-  cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
-- `scripts/publish-docs-shots.sh --self-test` — the docs screenshot publisher's whole validation: against a bare
-  repository standing in for GitHub, it checks that refused publishes push nothing, that only `refs/docs-assets/keep` is
-  ever created (never a branch), that a snapshot holds exactly the shots the docs pages reference, that partial,
-  incomplete, or since-modified captures are refused, that the manifest records the capture's main commit, and that a
-  snapshot stays until six weeks after it was replaced (the one main pins, always). Run it, with `shellcheck`, when the
-  script changes; seconds, no network, needs ImageMagick's `convert`.
-- `bash scripts/test-plans-watch.sh` — drives the plans monitor's watcher (`scripts/plans-watch.sh`) against a strict
-  stub `gh` that runs the watcher's own `jq` filter over GitHub-shaped tree listings: change detection, baselines read
-  from a commit, the wake check that keeps claims from waking idle executors, the idle cap, retried and persistent
-  failures, malformed and truncated responses, hung requests, argument errors, and prompt exit on SIGTERM without
-  leaving children behind. Run it, with `shellcheck` on both scripts, when either changes; under a minute, no network,
-  needs `jq`.
-- `python3 scripts/test-plans-queue.py` — the plans queue script (`scripts/plans-queue.py`), which is the lock that
-  keeps concurrent plan executors off each other's plans: its line grammar, every state transition and refusal, the
-  invariants between a state and its files, the rules a planning PR must keep, the wake check, and the compare-and-swap
-  loop against an in-memory GitHub that injects racing writers and lost responses. One case runs the real `dprint` when
-  it is on PATH, which downloads dprint's plugins if its cache is cold. Run it when the script changes; seconds, no
-  other network.
-- `python3 scripts/test-todo-picker.py` — the todo planning flow's checklist page (`scripts/todo-picker.py`): how
-  TODO.md buckets and entries are read, that entries with a plan are left out, that a summaries file written against an
-  older TODO.md is refused, and that summaries are escaped into the page. Run it when the script changes; seconds, no
-  network.
-- `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
-  layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, a synthetic git
-  history for the fragment sweep, synthetic dist manifests for the announcement comparison). Run the lint when
-  `CHANGELOG.md` or a fragment changes, the self-test when the checker does.
-- `python3 releasing/finalize-release-notes.py --self-test` — the body swap that replaces a stable release's draft notes
-  on its GitHub release with the approved text, against bodies shaped like dist's, and the refusals that need no
-  repository or release. Run it when that script or the checker's parser changes; seconds, no network.
-
-This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, desktop
-compilation, the JS harness, the website build and its feedback endpoint tests, installer validation, and
-generated-workflow validation; costly Rust, pinned-tmux, desktop runtime, and CentOS gates run in the x86_64 Linux
-release artifact job. If either workflow changes, update this list in the same change.
-
-The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
-`gh pr ready`, nor a merge to main starts a run. The release build gate is the validation that decides whether a build
-ships; the local checks above are what validates a change before it lands. The focused headless macOS uninstall suite
-runs with `gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`. `gh workflow run ci.yml --ref <branch>` runs
-the whole baseline for any ref when a hosted verdict is wanted. PRs are still opened as drafts and marked ready when the
-user asks to publish them, or as part of landing them, never on the agent's own initiative.
-
-The RELEASE workflow is not on that list: it is generated, runs on tag pushes only, and carries its own gate, which is
-not something to run locally. `releasing/AGENTS.md` describes it, the parts of it that CAN be checked locally (the
-changelog checks above among them), and the unsigned-release recovery procedure.
-
-Browser end-to-end validation follows the same judgment and reuse rules, including at merge time. Its CI job is disabled
-(`if: false` in ci.yml), so CI green does not include browser coverage. Assess whether the change leaves a concrete
-browser integration risk untested; choose relevant specs when they cover it, and run the full suite only when the risk
-needs that breadth. Do not start the full suite merely because a PR is about to merge. Documentation-only changes need
-no browser tests, and a minor rebase does not discard existing browser evidence.
-
-When browser validation is warranted, run the selected specs through the recorder on Chromium and WebKit (WebKit stands
-in for the desktop app's engine family). The full-suite child command is `cd e2e && npx playwright test`. It needs
-`cargo build` and `cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release` first, because it
-drives the built web UI against a real helm and supervisor, plus a one-time
-`cd e2e && npm install && npx playwright install chromium webkit`. Reuse matching builds and successful test results
-when the intervening diff leaves their coverage intact; see `docs/test-run-evidence.md` for recorded selections.
-
-# Careful rebase
-
-"Careful rebase" means changes may have landed on main since the work in progress was based, and it should be rebased
-onto the latest main with more care than resolving whatever textual conflicts come up. A rebase that applies cleanly can
-still be wrong. A change on main can rename or repurpose something the work relies on, change a contract a new caller
-assumes, add a caller of code the work changed, alter an invariant, a lock, or an ordering the work depends on, or amend
-SPEC.md or SPEC_impl.md in a way the work now contradicts, all without touching the same lines.
-
-- Fetch, then read every change that landed on main between the current base and the new one: the diffs, not just the
-  titles, with the work's own diff in mind. Look specifically for functional conflicts that would not show up as textual
-  ones.
-- Rebase, and resolve textual conflicts as usual. For a stack, rebase every PR in it and check each against what landed.
-- Fix obvious problems found either way as part of the rebase. A conflict that needs a design decision is the user's:
-  describe it and ask rather than picking an answer.
-- Make a judgment call about re-running tests, following "Finishing work" above: a targeted subset covering the areas
-  where the landed changes and the work interact, if any interaction carries real risk. Do not mechanically run the
-  whole test suite. When nothing that landed touches what the work depends on, no runtime tests is a valid answer, and
-  existing evidence still applies.
-- Report what landed, the interactions examined and what was concluded about each, what was fixed, and which checks ran
-  and why (or why none were needed).
-
-# Vercel deployments
-
-The docs website deploys to Vercel only when asked. `website/vercel.json` turns off every Git-triggered deployment,
-because Vercel bills even a skipped push for at least a minute of build time and nearly every push leaves the site
-unchanged. Merging to main does not update the live site, and a PR gets no preview, until someone triggers one.
-
-"Trigger vercel on main", "deploy the website", and similar wording mean `website/scripts/vercel-deploy.sh main`: a
-production deployment of GitHub's current main. "Trigger vercel on this PR" (or on PR N, or on a named branch or
-bookmark) means `website/scripts/vercel-deploy.sh <pr-number>`: a preview deployment of that PR's pushed head. Resolve
-"this PR" from the current bookmark or branch with `gh pr view`; if there is no PR, ask rather than guessing one. The
-script builds from GitHub, not from the working copy, so unpushed changes are not deployed: if the working copy is ahead
-of what GitHub has, say so and ask whether to push. It waits for the build and prints the deployment URL; report that
-URL and the outcome. It needs a logged-in Vercel CLI; if `vercel api` reports being logged out, ask the user to run
-`! vercel login` rather than handling a token. A request to trigger Vercel is not a request to run the website build or
-any other check first.
-
-# Trying a PR or branch on the maintainer's Mac
-
-"devbuild <thing to test>" means: give the maintainer the line below for that thing. The thing is a PR number, "this PR"
-(resolve it from the current bookmark or branch with `gh pr view`; if there is no PR, ask rather than guessing one), or
-a branch name such as `main`. Treat any other request to try a PR or branch on their Mac, or to run, test or see it
-there, the same way. Put the PR's number or the branch's name in place of `<N>`:
-
-```
-curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/devbuild-github.sh | bash -s -- <N>
-```
-
-`main` is a branch like any other, so `bash -s -- main` builds the current main. The script checks the target out in
-`/tmp/farhelm-devbuild` on the Mac, builds it with `scripts/devbuild-mac.sh`, and ends by printing the command that
-starts the result. Read `scripts/devbuild-github.sh` for what it does and refuses. Make sure GitHub has what you want
-tried first: the script builds the pushed head, not your working copy, so push before handing out the line and say so if
-you have unpushed changes. The target must contain `scripts/devbuild-mac.sh`; an older base needs a rebase first. The
-script refuses a PR whose branch is not in `scode/farhelm`, and it takes no commit hashes. The line is the same every
-time, and rerunning it is always safe, so after another push the maintainer reruns the same line.
-
-NOTE: The build runs on the maintainer's real Farhelm state, and its supervisor applies any database migration the
-target adds. A release that predates the migration then refuses that database, and another unlanded migration with the
-same number can misread it. When the target changes a supervisor or helm database schema, say so plainly when handing
-out the line, and offer the variant that keeps the build on separate state, which the build remembers and the start
-command it prints uses. The directory is per target, because two targets' unlanded migrations can collide there just as
-on the real state:
-
-```
-curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/devbuild-github.sh | FARHELM_DESKTOP_STATE_DIR=/tmp/farhelm-devbuild-state-<N> bash -s -- <N>
-```
-
-# Releases and the changelog
-
-`releasing/AGENTS.md` is the procedure for cutting a stable, RC, or dev release, and the full rules for `CHANGELOG.md`
-and its fragments. Read it before any of those; in short, no release tag is pushed before its base and its version are
-settled with the maintainer per that file, a tag name is never reused, and a tag is never deleted. The one rule that
-applies to ordinary PRs lives here because every PR-making agent has to follow it without being asked:
-
-A PR whose title type is `feat`, `fix`, `perf`, `style`, or `revert`, or whose type carries `!`, adds a changelog
-fragment under `releasing/changelog.d/` in the same commit as the change. The file name is a free mnemonic
-(`cursor-launch.md`); the content is a leading `---` front matter block holding a `kind:` line (`breaking`, `added`,
-`changed`, `fixed`, `removed`, or `none` for a change with nothing user-facing, with the reason as its body), then a
-draft entry written for someone running Farhelm: what changed for them, with caveats, and without internal mechanics,
-following the maintainer's wording rules in `releasing/EDITORIAL_GUIDANCE.md`. It is not reviewed at PR time; the
-release-time curation rewrites it. `python3 releasing/check-changelog.py format` validates it. Other types add one only
-when the change has a user-facing effect.
-
-# Reproducing failures: narrow tests first
-
-Run local and worker runtime tests through `python3 scripts/record-test-run.py`, including each reproduction attempt.
-Use Python 3.13 or newer on macOS: the recorder requires `os.waitid` with `WNOWAIT` to keep child ownership through
-cleanup. The release setup selects Python 3.13 explicitly on that platform. The commands in the gate inventory and
-narrow-test recipe are the child argv after its `--`. Supply the actual selection and concurrency, `--kind development`
-for ordinary validation or `--kind repetition` for a focused attempt, and an appropriate tmux mode. Use
-`--tmux required` with the built `.ci-tmux` first on PATH for controlled comparisons; `warn` records a different
-developer substrate visibly, and `none` is for checks that do not use tmux. The wrapper scrubs ambient `FARHELM_*`
-before test-process startup. Retain a variable only by naming an intentional test input with `--keep-farhelm-env`;
-values stay out of metadata. The recorder reserves `FARHELM_TEST_TRACE_DIR` for a fresh private directory per command,
-overriding any ambient value even when retention requests it. Never fix this by changing the test process's own
-environment.
-
-Keep the failed UUID run directory before retrying, and record its path and disposition in the session's working log. A
-later pass is another observation, not a replacement for the failure. Preserve failure evidence until a fix PR or
-latent-flake entry records what happened; preserve same-session failures privately without adding them to FLAKES.md.
-Keep paths, raw logs, and host identities out of public source. Public summaries use redacted commands, portable
-substrate details, run IDs, and confidence about the cause. Record an unavailable or incomplete identity as such rather
-than reconstructing it from what a machine was supposed to run. No mandatory repetition count or extra CI run follows
-from this retention rule. Storage, schema, interruption limits, and examples are in `docs/test-run-evidence.md`.
-
-When reporting across retained runs, use `python3 scripts/summarize-test-runs.py --root /path/to/retained-runs` and
-archive its portable JSON where the operator chooses. Supply additional roots or individual `--run`/`--batch`
-directories explicitly. Record incomplete discovery and coverage gaps alongside totals; retained failure-only release
-artifacts are not a denominator for all releases. This is a manual reporting aid, not another validation gate.
-
-The existing release gates use the same recorder. Collection follows those gates and uploads selected bounded records
-when a failure has occurred by that point; later packaging failures cannot trigger it. Download useful failure artifacts
-before hosted retention expires. Successful jobs do not upload run records, so those artifacts alone cannot establish a
-release pass/fail denominator. Collection also exports the fixed, bounded persistent trace layout, including after a
-recorder death; keep its collection summary and raw traces when recovery is incomplete. The recovery command and limits
-are in `docs/test-run-evidence.md`. To validate changes to the recorder itself, use
-`python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`, choosing affected contracts as
-usual; this adds no ordinary CI test job.
-
-The finishing-work list above is a gate, not a debugging tool. When investigating a failing, flaky, or suspicious test —
-including one first seen in a full-battery run — reproduce it with the narrowest run that could show it, and widen only
-when the narrow run will not reproduce: the exact test in a repetition loop, then its module or spec file, then its test
-binary or engine, then the full battery. `.agents/narrow-tests.md` is the recipe, with exact commands and caveats for
-every suite. Running a many-minute battery to check a one-test hypothesis is the failure mode this rule exists to
-prevent.
-
-# FLAKES.md
-
-`FLAKES.md` is the append-only log of LATENT flakes: tests that pass where they were written and fail elsewhere,
-sometimes, or under load, whose cause was not obvious when they failed. When you establish that a failure is a true
-flake of that kind — pre-existing, or one that survived past the session that wrote it — add a dated entry: one
-paragraph naming the test and its file (no line numbers), what was observed and where, the cause found or suspected, and
-the disposition (fixed in which PR, ignored with what reason, or open). Fixed ones stay; a fixed flake that recurs gets
-a new dated entry. Do NOT log a test that was written, flaked, and was fixed within the same session: that is ordinary
-development, and logging it buries the tech debt the file exists to show. Open flakes also get a deflake entry in
-TODO.md; the log keeps the history, TODO.md keeps the work.
-
-For new entries, follow FLAKES.md's evidence fields and its `Class:` / `Cause:` lines. A guessed cause is a hypothesis,
-even if a later run passed. Do not rewrite older entries to make them fit the new fields.
-
-# TODO.md
-
-`TODO.md` is the maintainer's running list of wanted fixes and features. When a PR addresses an entry, remove that entry
-in the same PR — the file only ever describes what is still wanted. Do not add entries on your own initiative; they are
-the maintainer's. The exception is a deflake run (below), which records the flakes it finds as Deflake entries. When a
-Deflake entry is removed, remove the matching line in `deflake/known-flakes.txt` in the same PR: the deflake sweep reads
-that file as its exclusion list, so a stale line is a test that never runs again.
-
-"tldr todo", "what's in the todo", and similar requests mean the FULL list, grouped under the file's own bucket
-headings, in the file's order, one to two sentences per entry: what it is and, when the entry says so, why or the first
-step. Every entry, not a selection — the point is to see the whole board at a glance. Bold a short handle at the start
-of each line so an entry can be referred to by name afterwards.
-
-## Todo flow
-
-A message starting with "todo flow," makes the session a todo-capturing session for the rest of the session. The point
-is that captured entries land on main without the maintainer having to remember to ask: a TODO edit left sitting in a
-working copy is easy to forget, and a forgotten one is lost the next time the workspace is reused.
-
-In such a session, every TODO.md change carries an implied "jjstack make a PR and merge it" once discussion of the entry
-is done, meaning the entry is written and nothing about it is waiting on the maintainer's answer. Load the `jjstack`
-skill, put the change on the latest main, open the draft PR, and land it per that skill. A later revision of an entry
-that already landed is a new PR of its own. The only validation is `dprint check TODO.md`. These commits and PRs skip
-the `scode-commit-msg-reviewer` cold read, even where standing instructions say to always use it: for a one-line TODO
-capture it is not worth the wait.
-
-Before adding or revising an entry, and before answering any question about what TODO.md currently holds (a "tldr todo"
-included), fetch and rebase the working copy onto the latest main per jjstack: `jj git fetch`, then rebase the
-working-copy change onto `main@origin`. Other sessions land TODO.md changes throughout the day, so a checkout that was
-current when the session started goes stale within it, and an answer read from it can miss entries or list ones that are
-already gone.
-
-NOTE: The implied merge applies ONLY while TODO.md is the only file the session has changed. If anything else has been
-touched — code, specs, other documentation, even an unrelated edit still in the working copy — do not commit or merge
-anything automatically. Say so and ask how to proceed. The implied merge is for pure TODO capture; it is not a way to
-land other work without review.
-
-# Deflake runs
-
-"Start a deflake run" (optionally "and repeat until I say stop") means the full-suite flake-discovery sweep in
-`deflake/`. Read `deflake/AGENTS.md` and follow it exactly; `deflake/SPEC.md` holds the requirements, chiefly that the
-agent never polls and only takes a turn when `deflake/bin/deflake wait` returns. A change to the driver or to those
-instructions is validated with the end-to-end procedure in `deflake/EVAL.md`, a few minutes with a low-power delegate.
-
-# Run all tests and fix
-
-"Run all tests and fix" (and similar wording asking for every test to be run and the failures fixed) means the procedure
-in `.agents/run-all-tests.md`: the checks a deflake sweep does not run, one deflake sweep, then the release gate and the
-CI baseline in GitHub, with straightforward fixes drafted as a jjstack stack and anything needing a judgment call left
-for the maintainer. Read it before starting. It is an explicit request, never a finishing step. When the "Finishing
-work" inventory above or the deflake sweep's phases change, update that file's lists in the same change.
-
-# plans/
-
-`plans/` holds a queue of planned work: one goal file per planned TODO entry or triaged outcome, executed unattended by
-any number of concurrent executors, each claiming one plan at a time through `scripts/plans-queue.py`. One monitor lands
-what they finish without waiting for the maintainer, who reviews each landed plan's report afterwards.
-`plans/queue/INDEX.md` is the queue, with each plan's state, and `plans/REPORTS.md` lists the landed plans whose reports
-await review. "Todo planning flow" (optionally naming a TODO.md bucket), "plan to implement <TODO items>", "use the
-planning system to schedule these" (for triage outcomes), "pick a plan to execute" and "execute the next plan" (with "in
-order" or a named plan as variants), "drain the plans" (optionally "and keep monitoring"), "monitor for complete plans",
-"land the complete plans", "review the plans", "show blocked plans" (or "check for blocked plans"), "release plan X",
-and "plan help" are defined in `plans/AGENTS.md`; read it before any of those, or before changing anything in the
-directory.
-
-Once working, executors and the landing monitor never ask the maintainer anything in conversation, not even an optional
-question, an offer of more work, or a harness question tool's prompt: nobody is watching, so the plan stalls until
-someone looks. A decision only the maintainer can make is a block; everything else is decided and logged, and whatever
-the maintainer should know goes into the report. `plans/AGENTS.md` (Unattended means no questions) has the details.
-
-Every planning-system flow starts on a clean working copy of the latest `main`, and a dirty working copy aborts the flow
-with a report to the maintainer. A drain returns to clean `main` between plans; `plans/AGENTS.md` defines the exact jj
-boundary and applies it to the related planning and landing flows as well.
-
-# review_feedback_queue/
-
-`review_feedback_queue/` holds review feedback that outlived its review: one file per finding, indexed by
-`review_feedback_queue/INDEX.md`. When asked to record review feedback, write it there per
-`review_feedback_queue/AGENTS.md`; when asked to address a queued item, remove the item (or narrow it, if partially
-addressed) in the same commit, change, or PR as the fix.
-
-## Trailing code review
-
-"Perform trailing code review", or similar wording around "trailing code review", means adversarially review every
-commit after the last trailing-reviewed commit through the current tip of `main`, then feed the findings into this
-queue's existing recording flow. The saved checkpoint is in `review_feedback_queue/TRAILING_REVIEW.md`; the procedure is
-in `review_feedback_queue/AGENTS.md`.
-
-By default, use a separate adversarial review agent running the same model as the current agent, with an emphasis on
-security and correctness. Honor any requested agents, models, or review emphasis. Do not ask the user to choose a
-reviewer when they have not specified one.
-
-## Triage step
-
-"Triage review feedback" means decide what to do with individual items, WITH the user. It does not authorize fixes or PR
-creation. Read `review_feedback_queue/AGENTS.md`, the index, root `TRIAGE_OUTCOMES.md` if it exists, and the `Planned`
-bucket in `TODO.md`. Work through items in index order unless the user chooses another order, skipping items with a
-recorded decision unless asked to revisit them.
-
-This is a persistent triage flow, not an execution flow. Once the session is working through review feedback, remain in
-triage mode across turns until the user explicitly starts a separate execution step. Every short command or agreement —
-including “fix this”, “fix code”, “update the spec”, “let’s do that”, “agreed”, and “yes” — is a triage decision to
-record, not permission to edit code, specifications, TODO entries, or queue files. The human must not repeat that this
-is “just triage” or otherwise police the boundary on every item.
-
-Execution requires a separate, unmistakable command that names the action, such as “execute the recorded triage
-outcomes”, “implement the approved fixes now”, or “start the execution phase”. Contextual agreement with a
-recommendation never starts execution. When execution is explicitly started, apply only the recorded scope and stop for
-the documented complexity or scope gate rather than silently expanding it.
-
-Every queued finding also has a triage priority bucket, recorded in `review_feedback_queue/INDEX.md`:
-
-- `highest`: security-impacting bugs or bugs that can lose user data, credentials, processes, or other user-owned work.
-- `high`: bugs that materially degrade the user experience, either through severe rare failures or moderate common ones.
-- `other`: everything else, including correctness, diagnostics, cleanup, and convenience issues without those impacts.
-
-Some consequences look like `highest` but are not (maintainer, 2026-10-14). Losing something the user can recreate in a
-moment, such as unsaved form input or the clipboard's contents, is not losing user-owned work. Harm confined to
-maintainer tooling (tests, release procedures, the docs build) stays out of `highest` unless it is catastrophic. A
-documentation error is `highest` only when the statement could lead a reader into a security or data-loss mistake.
-
-Assign the bucket from the user-visible consequence, not from implementation difficulty or reviewer confidence. A rare
-security or data-loss consequence remains `highest`; uncertainty about whether a consequence crosses that boundary must
-be surfaced to the user before finalizing the bucket. Keep the index grouped by bucket, with the highest bucket first,
-and preserve index order within each bucket. Explain the chosen bucket when presenting an item for triage, and revisit
-it if the user supplies a different severity judgment.
-
-For each item, complete these steps before asking the user for an outcome:
-
-1. Understand the feedback. Read the whole feedback file, trace the relevant current code paths, and read the
-   authoritative spec sections. Identify the claimed behavior, the conditions that trigger it, and the consequence.
-2. Verify whether the feedback is correct; do not take the reviewer's claim as established fact. Check its premises
-   against the current code and specs, including guards or lifecycle rules that could invalidate it. Use a focused
-   reproduction or check when code inspection cannot settle the claim, following the verification rules above.
-   Distinguish a current problem from one that only existed at the reviewed commit. If verification is blocked or
-   inconclusive, say exactly what remains unverified and why; do not present it as confirmed.
-3. State the assessment to the user, with the evidence and any uncertainty: confirmed, partly correct, incorrect,
-   already addressed, or unresolved. Keep correctness separate from whether the issue is worth addressing.
-
-When verification shows a finding is already fixed on main, do not ask the user for an outcome: record it as `discard`
-with the comment "already fixed" and the fixing commit or PR, remove its feedback file and index entry immediately, mark
-execution complete, and move on. `discard` is used because it carries no judgment about the finding.
-
-Before presenting an item for a decision, check whether its behavior is explicitly accepted by the current SPEC.md or
-SPEC_impl.md, its fix is already covered by an item in TODO.md's `Planned` bucket, it is a known bug root `BUGS.md`
-already records as one we have decided to live with, or it matches a review-only filter in
-`review_feedback_queue/FILTER.md`. Verify the actual trigger, consequence, and scope against that acceptance, planned
-work, known bug, or filter; sharing a subsystem or keyword is not enough. If fully covered, skip renewed discussion and
-record `other` with the exact spec section, planned item, `BUGS.md` entry, or filter as the reason. Remove the feedback
-file and its index entry immediately, and record execution as complete for that queue cleanup; do not leave the item to
-be skipped again in later sessions. Already planned means acknowledged work, not an implemented fix. Do not implement
-it, broaden its scope, or create another TODO merely because the same issue appears in feedback. If only part is
-covered, bring the uncovered part to the user. Briefly report skipped items and their basis, then continue to the next
-undecided item. This is an exception to the per-item decision question below.
-
-Assume the user knows Farhelm as a tool but has read neither the feedback nor the relevant code. Begin every item with
-plain-language context for the thing under discussion: name the user-facing feature or operation before describing any
-internal details. If the finding does not map cleanly to a user-facing feature, name the architectural part of Farhelm
-instead (for example, the helm's payload cache, the supervisor's session lifecycle, or the host registry) and explain
-its role. Then state the reported bug explicitly in user-facing terms: what goes wrong, under what trigger, and what the
-user observes or loses. Only after that context and bug statement, name the feedback filename and assess the finding's
-correctness with its expected versus actual behavior and practical consequence. Give enough context to understand the
-assessment without opening the file or knowing internal symbols. Prefer the user's visible behavior throughout. Do not
-lead with terms such as “proven”, “unproven”, “refinement”, or other storage and implementation labels; translate them
-into what the user sees first, and introduce an internal term only when it is needed to support the assessment.
-
-Then recommend an outcome with its reason and ask the user to decide before recording an outcome or moving to the next
-item. A recommendation is not a decision; unresolved items stay undecided. The outcomes are:
-
-- `discard`: not worth the human's time at this time. This says nothing about the item's validity, severity, or merit.
-  Drop it from the queue without remedial action; do not turn it into a spec exception, code fix, or TODO.
-- `fix spec`: clarify the underlying principle in `SPEC.md` and/or `SPEC_impl.md` so similar feedback is suppressed for
-  the right reason, not by blacklisting a particular finding. For example, an agreed target of roughly 100 sessions can
-  make million-session scalability concerns out of scope. That example is not itself a new product requirement.
-- `fix code`: the feedback is legitimate; address the problem within the existing specification.
-- `fix spec+code`: make both the agreed specification change and the corresponding code change.
-- `other`: negotiate a concrete custom outcome with the user, including what to do with the queue item.
-
-After each decision, create or update root `TRIAGE_OUTCOMES.md`. Use one heading per feedback filename, spelled exactly
-as it appears in `review_feedback_queue/`, with these fields:
-
-- Outcome: one of the five values above.
-- Assessment: the correctness verdict, supporting evidence, and any unverified claims or limitations, separate from the
-  user's chosen outcome.
-- Decision: the user's rationale and agreed scope; preserve their meaning rather than substituting the recommendation.
-  For spec changes, include the underlying principle; for `other`, include the negotiated action.
-- Completion criteria: what execution must accomplish, including any deliberately retained part of the feedback.
-- Execution: `pending` initially; later `in progress`, `blocked` with the reason, or `complete`, with the stable jj
-  change ID, bookmark, and PR URL as they become available. `` planned in `plans/queue/<slug>.md` `` means the outcome
-  was scheduled through `plans/` (see `plans/AGENTS.md`) and is executed only by running that plan.
-
-Keep previous decisions and execution records; do not overwrite the file on a new triage session. If the user revises a
-decision, retain the prior decision and note what supersedes it. Do not create entries for undecided items. Triaged
-items are no longer awaiting a triage decision, but their feedback files and index entries stay until execution,
-including for `discard`. This preserves the input for the separate execution step and its per-item PR. The automatic
-spec-covered or already-planned cleanup above is the exception: those queue items are removed during triage itself.
-
-## Execute triage outcomes
-
-"Execute triage outcomes" is a separate user request. Read root `TRIAGE_OUTCOMES.md` and execute its pending decisions
-(or the subset the user names); resume incomplete execution rather than making duplicate PRs. Outcomes marked
-`` planned in `plans/queue/<slug>.md` `` belong to that plan: execute them only as part of running it. Scheduling
-outcomes through `plans/` instead of executing them here happens only when the user explicitly asks for the planning
-system; `plans/AGENTS.md` describes it. Do not silently triage undecided items or change an agreed outcome. If current
-code or specs invalidate a decision, return that item to the user for clarification.
-
-Load and follow the `jjstack` skill. Make one reviewable commit, stable bookmark, and draft PR per triaged outcome,
-including `discard` and `other`, in a single linear stack. Use ledger order unless dependencies require another order;
-state the order before starting. Base each PR on the preceding bookmark, with the bottom PR based on the chosen stack
-base per jjstack. Do not combine items into one PR or split `fix spec+code` across PRs.
-
-Each item's PR contains its agreed changes, the corresponding `TRIAGE_OUTCOMES.md` execution update, and removal of its
-feedback file and index entry (or the agreed narrowing for a partial/custom outcome). A discard PR contains only that
-queue removal and outcome bookkeeping, with no spec or code change. Retain completed ledger entries so another execution
-request can distinguish completed work from pending work. Record the change ID and bookmark before creating the PR, then
-add its URL to the same change and update that PR; do not make a separate bookkeeping PR.
-
-Validate each change using the "Finishing work" rules above. Completion means the agreed work is verified and its draft
-PR exists, not that it has merged. Report the item-to-PR mapping and any blocked items. This workflow never marks PRs
-ready, enables auto-merge, or merges them; publishing or landing requires a separate user request.
-
-# Harness-specific code
-
-Everything Farhelm does differently per agent harness is answered per harness in a few named places, not by comparing
-harnesses at the call site. The module docs of `crates/farhelm-supervisor/src/agent_kind/mod.rs` map them, layer by
-layer, and say where a new per-harness capability goes. Read that map before adding or changing harness-specific
-behavior, add to the places it names, and do not write `kind == X`, `matches!` over specific harnesses, or a `_` arm
-over harnesses in shared code: each of those hands a new harness whatever the branch does for the ones it does not name.
-
-# Harness marks in the sidebar
-
-`docs/harness-marks.md` records where every harness mark in `crates/farhelm-ui/src/icons.rs` comes from, which are
-official and which Farhelm drew, the brand terms that decided that, and the one sizing rule they all share. Read it
-before adding or changing a mark; vendored geometry gets an entry in `THIRD_PARTY_NOTICES.md`.
-
-# Brand marks: the icon and the wordmark
-
-The app icon is `packaging/farhelm-desktop/icon.svg` (the source of `icon.png` and `Farhelm.icns` beside it). The
-wordmark, "farhelm" in JetBrains Mono Nerd Font Bold with the icon's block cursor after it, is
-`packaging/farhelm-desktop/wordmark-dark.svg` and `wordmark-light.svg`, one per ground. Its letters are outlines pulled
-from the font the UI crate vendors by `website/scripts/outline-wordmark.py` into
-`website/scripts/wordmark-outline.json`, and `website/scripts/render-svgs.mjs` inlines them into the wordmark files, the
-introduction's header, pillars, and how-it-works blocks under `website/src/assets/intro/` (shown by both the docs
-landing page and the README), and the docs website's header mark (`website/src/site-mark-dark.svg` and `-light.svg`).
-Anything that needs the name as a mark uses those files; anything that changes the mark changes the script and re-runs
-it, never the SVGs by hand, and the outline step only reruns when the word or the font changes.
-
-# Docs website
-
-`website/` is the user-facing documentation site. `website/AGENTS.md` holds its mechanics (link syntax, the sidebar as
-the outline, and stub pages), and `website/EDITORIAL_RULES.md` holds how its pages read (user-facing framing, the jargon
-list, liberal cross-referencing) and how maintainer feedback on drafts becomes new rules; read both before changing
-anything there, whatever the change. The docs Overview page (`website/src/content/docs/docs/index.mdx`, which the README
-screenshot procedure below calls the landing page) and the words drawn into its intro SVGs by
-`website/scripts/render-svgs.mjs` are edited only when the maintainer asks for that edit, even when the README
-introduction they mirror changes; propose the edit instead. The README screenshot refresh's one-line URL rewrite is the
-one exception (`website/EDITORIAL_RULES.md` has the details). `website/scripts/preview.sh` serves the site from a
-checkout at a fixed local port for the maintainer to review drafts in a browser; `website/AGENTS.md` says when to start
-it and which links to hand over. Its fixed port is deliberate (the script says why) and is not a harness that the
-fixed-port rule below applies to.
-
-# Desktop/web UI bug triage
-
-`docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and
-what a bridge-death line looks like. Start there before investigating any "the desktop UI is broken" report.
-
-# README hero screenshot
-
-The image at the top of README.md, also shown on the docs website's landing page, is a real capture of the web UI
-against a staged fleet, governed by `docs/readme-hero/SPEC.md`. "Refresh the README screenshot" means exactly: run
-`scripts/readme-screenshot.sh`, look at the PNG it prints, run `scripts/publish-readme-hero.sh` on it, and commit the
-one-line URL change it leaves behind in README.md and in the landing page. The design (`docs/readme-hero/scenario.json5`
-and the transcripts beside it) changes only when the maintainer asks for a different picture. The publish script is the
-only thing that pushes the `readme-assets` branch; never run that push by hand, and never commit the PNG on main.
-Neither script is a gate: nothing in CI runs or checks the image. Changing the publish script means running its
-`--self-test`, which is its whole validation and needs no network.
-
-# README demo video
-
-The demo video is recorded from the web UI against a staged fleet, governed by `docs/readme-video/SPEC.md`; read it
-before touching anything under `docs/readme-video/` or `e2e/readme-video/`. "Refresh the demo video" means: run
-`scripts/readme-video.sh`, and if a beat no longer works on the current UI, rewrite that beat in
-`e2e/readme-video/capture.spec.ts` to realise the same intent, then look at every still it prints and fix annotation
-placement until each one points at the right thing and hides nothing the viewer should see.
-`docs/readme-video/intent.md`, the scenario, and the transcripts are the maintainer's design and change only when asked.
-While `intent.md` opens with its THROWAWAY SAMPLE note, the video only demonstrates the machinery; say so when handing
-it over. The upload is manual; nothing in CI records or checks the video.
-
-# Docs refresh
-
-"Refresh the docs" means bringing the whole docs website up to date with everything that landed on main since the last
-full refresh: correcting what is now wrong, proposing new sections or material new text for the maintainer to confirm,
-and refreshing any screenshot that may be stale. `website/AGENTS.md`, "Refreshing the docs", is the procedure, and
-`website/src/data/docs-refresh.json` records the main commit the last full refresh read up to. Only a completed full
-refresh moves that marker; a single-page fix or a screenshot refresh on its own does not.
-
-# Docs screenshots
-
-The docs website's annotated screenshots are captured from the web UI against a staged fleet and published off main,
-governed by `docs/docs-shots/SPEC.md`; read it before touching anything under `docs/docs-shots/` or `e2e/docs-shots/`.
-Screenshots are regenerated in bulk, every page at once from one capture, and the manifest
-(`website/src/data/docs-shots.json`) records which main commit that capture ran on as `captured_from`. "Refresh the docs
-screenshots" means the procedure in the SPEC's "Refreshing" section: on the latest main, first read the UI changes since
-`captured_from` and update the shot specs and pages they affect, then run `scripts/docs-screenshots.sh`, rewrite any
-shot that no longer works on the current UI so it shows the same thing, look at every image it prints and fix annotation
-placement until each points at the right thing and hides nothing the reader needs, then run
-`scripts/publish-docs-shots.sh` and commit the manifest change it leaves. Release notes are the exception: published
-releases' `CHANGELOG.md` sections, `website/src/release-notes/*.json`, and the release shots and their tests are never
-touched by a refresh, a sweep, or a cleanup, only by a task that targets them, and the scripts carry published release
-shots over unchanged (`website/AGENTS.md`, "Release notes"). The publish script is the only thing that pushes
-`refs/docs-assets/keep`; never push that ref by hand, and never commit a screenshot on main. Neither script is a gate:
-nothing in CI runs or checks the images. Changing the publish script means running its `--self-test`, which is its whole
-validation and needs no network.
-
-# Agent screen fixtures
-
-The supervisor's Claude and Codex screen readers are tested against real screens under
-`crates/farhelm-supervisor/tests/fixtures/screens/`. "Re-capture agent screens" (or "check whether the new claude/codex
-still works with the status detection") means running `python3 scripts/capture-agent-screens.py` on the development host
-and committing the new version directory it writes; `docs/agent-screen-fixtures.md` says what it drives, what it costs,
-and how to read a failure. It spends real vendor turns, so run it when asked or after an agent upgrade, never as part of
-ordinary validation.
-
-# Driving real agent TUIs
-
-When a claim about how an installed agent behaves in a terminal matters (which prompts it shows at start, what a screen
-looks like, how it reacts to a key) and nothing in the repo proves it, look rather than trust SPEC.md, a docs page, or
-memory: `scripts/agent-tui.py` runs the agent in a private tmux server and lets you read its screen and type at it,
-without touching the live install. `.agents/real-agent-tui.md` is the recipe, including how to start an agent the way
-Farhelm does, why every first-run check needs a fresh directory, and which answers leave traces in vendor configuration.
-
-# The live install is off-limits
+## Reading these instructions
+
+NOTE: Every agent gets this file without asking. It holds the rules for any task and a map of every flow; the procedures
+live in the files it names. Codex injects only its first 32 KiB, so it stays under 28 KiB
+(`scripts/check-agents-md.py`). It ends with `# End of AGENTS.md`; if that heading is not in your context, read this
+file from disk.
+
+- Start agents at the checkout root; from anywhere else, also read the `AGENTS.md` files between the root and there.
+- A pointer (a "before ..., read X" or "when ..., read X" line, a "Flows" entry, an "Instructions by path" entry) is
+  mandatory: read the file in full, in bounded chunks, checking for truncation notices (Codex can replace the middle of
+  long output with `…N tokens truncated…`) and that you reached the end. A `Fence:` holds even if you never open the
+  file.
+- Read a flow's files once, before its first action, and a phase file on entering that phase. Re-read only after a
+  compaction or resume, or when a file's text is no longer visible to you (a cleared tool result), and then every
+  instruction file governing unfinished work, however you reached it. A summary saying a file was read is not its text,
+  and re-reading instructions is not "duplicated work".
+- After a compaction, find what governs unfinished work from "Flows" and "Instructions by path", listing changed paths
+  from the repository, not the summary: `jj diff --summary -r 'main@origin..@'`, or
+  `git diff --name-only origin/main...HEAD` plus `git status`. Read your working log first if your flow keeps one. At a
+  drain's plan boundary or a landing round boundary, re-read the role's reading list and treat other instruction files
+  read earlier as unread.
+- A delegate gets only this file, or nothing if started outside a checkout: name the governing files in its prompt and
+  tell it to read them (and this file, if needed) in full first.
+- Detail files repeat some rules here word for word; change both copies together. Cite as `` `path`, "Heading" ``; old
+  root headings resolve through `.agents/old-sections.md`. Never add a `CLAUDE.md`: it stops Claude Code from reading
+  `AGENTS.md`.
+
+## Unattended runs
+
+When nobody is watching (a plan executor, the landing monitor, a delegate), an instruction in this repository's
+instruction files or your goal file to get an answer, permission or approval from the maintainer or another person
+before doing X means X waits for that answer. An answer already given counts: the request, the goal file, a
+`## Decisions` entry, a recorded triage outcome. A check you settle from commands or evidence ("confirm the line still
+carries your claim id") is not an ask; do it. If X is required, a claim holder (plan or landing claim) blocks per
+`plans/AGENTS.md`, and any other delegate returns the question to its parent; otherwise skip X and report it as a
+follow-up. An "ask first" from a skill or harness default is decided and logged unless it guards something this
+repository fences (publication, merging, deletion). A required authorization never becomes a logged decision. Once
+working, executors and the landing monitor never ask the maintainer anything in conversation, not even an optional
+question, an offer of more work, or a harness question tool's prompt (`plans/AGENTS.md`, "Unattended means no
+questions", names the one startup exception).
+
+## The live install is off-limits
 
 This machine may run the maintainer's own Farhelm, an ordinary installation that is installed and updated the way any
 user's is. Do not assume anything about how it got there or where its pieces live beyond that. Take no state-changing
@@ -774,112 +68,259 @@ morning. Nothing in normal development needs the live install — the test suite
 from temporary state directories, and stopping a transient `farhelm-<uuid>-*.scope` unit that belongs to such a test is
 fine.
 
-# Sharing the machine with other agents
+## Sharing the machine with other agents
 
 Several agents work on this project at once, on this machine, as the same unix user, each in its own checkout or jj
-workspace. The harnesses are built so that concurrent runs do not collide: every test picks its ports from the kernel
-(the Rust e2e harness binds port 0, the Playwright config and the desktop smoke ask for a free port per run, the CentOS
-script lets docker choose), state lives in per-run random directories under `/tmp` addressed by private tmux and
-supervisor sockets, systemd scopes and units carry a UUID, and the CentOS script's ssh alias is suffixed per run. Do not
-reintroduce a fixed port, a fixed path under `/tmp` or `$HOME`, a fixed unit or container name, or a fixed ssh alias in
-a harness; when a harness genuinely needs a stable name, derive it from the run's own random directory.
+workspace. Do not reintroduce a fixed port, a fixed path under `/tmp` or `$HOME`, a fixed unit or container name, or a
+fixed ssh alias in a harness; when a harness genuinely needs a stable name, derive it from the run's own random
+directory. (Fixed lock files like `/tmp/fh-build.lock`, and the CentOS script's lock next to the ssh config, are the
+exception the fixed-path rule allows: a lock exists to be shared, and it names no state.) `website/scripts/preview.sh`'s
+fixed port is deliberate and is not a harness that the fixed-port rule applies to.
 
-What is NOT isolated, and what follows from it:
-
-- One agent per checkout or workspace. Playwright's stack-info and auth files, `.ci-tmux/`, `.ci-nextest/`, and the dx
-  output under `target/` are per checkout, and `scripts/build-tmux-assets.sh` deletes and rebuilds its python
-  environment under `target/` without a lock. Two agents in one tree race on all of them. Sibling checkouts and
-  `jj workspace` directories are the supported shape; a shared `CARGO_TARGET_DIR` across workspaces is fine for cargo
-  (it locks) but not for the dx and tmux-asset builds: the desktop smoke serializes its own cargo and dx builds behind
-  `/tmp/fh-build.lock`, and nothing serializes the rest. (Fixed lock files like that one, and the CentOS script's lock
-  next to the ssh config, are the exception the fixed-path rule allows: a lock exists to be shared, and it names no
-  state.)
+- One agent per checkout or workspace. Sibling checkouts and `jj workspace` directories are the supported shape; a
+  shared `CARGO_TARGET_DIR` across workspaces is fine for cargo (it locks) but not for the dx and tmux-asset builds.
 - Processes you did not start are someone else's. A helm or supervisor answering on a port you did not choose, a
   `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*` or `fh-e2e.*` directory holding a live
-  flock, or a docker container from the CentOS script: leave them alone. The teststate sweep already reaps dead runs
-  from any checkout, guarded by the flock, so nothing needs killing by hand.
-- The `systemd --user` manager and the CPU are shared. Timing budgets, the transient-scope availability probe, and the
-  RSS measurement in `terminal_backpressure` assume a quiet machine, and another agent's battery is exactly the load
-  FLAKES.md records as tripping them. A failure under that load is an environment event: keep the retained run, re-run
-  narrowly when the machine is quieter, and do not log it as a flake or a regression on one observation.
+  flock, or a docker container from the CentOS script: leave them alone. The one exception is
+  `website/scripts/preview.sh` stopping another checkout's preview server when it takes its port
+  (`website/.agents/previewing.md`).
+- The `systemd --user` manager and the CPU are shared. A failure under that load is an environment event: keep the
+  retained run, re-run narrowly when the machine is quieter, and do not log it as a flake or a regression on one
+  observation.
 
-# Claude Code shell commands: no globs, no expansions
+The rest is in `.agents/machine.md`.
 
-This section applies only to Claude Code sessions and their subagents; other harnesses do not have the problem it works
-around. If you are Claude Code, a shell command you compose and run (through your shell tool, or in a prompt to a Claude
-Code subagent that will run it) contains no glob and no `$` expansion of any kind: no `*`, `?` or `[...]` patterns, no
-variables (`$HOME`, `$d`), no `$(...)` or backticks, no `${...}`, no `$((...))`. Anything that needs one of those is
-written as a Deno TypeScript script, in a file, and run as that file. Put it in your scratch directory (below) unless it
-belongs in the repository. Plain commands with literal arguments (`git status`, `gh pr view 123`,
-`cargo nextest run -p farhelm-helm`) and pipelines of them stay fine in the shell.
-
-The reason is that Claude Code can still ask for approval of a shell command when the session runs with every permission
-granted, and the maintainer attributes those prompts to shell constructs it treats as unsafe, of which globs and
-expansions are the usual ones. The exact rules are Claude Code's and are not documented here. A delegate cannot show
-that prompt to anyone, so it sits invisibly until someone happens to look. On 2026-10-11 the v0.27.0 release's
-screenshot subagent waited 70 minutes on one `montage $(cat $g)` contact-sheet command that way, and the release notes
-waited with it.
-
-The exception is a command this repository's instructions give word for word (the pinned nextest and tmux `PATH` setup,
-the release procedure's version checks, the plans flow's ntfy send): run it as written, with only its placeholders
-filled in. Those predate this rule and are converted to scripts as they get touched; do not use the exception to compose
-new commands in their style.
-
-# Agent scratch space
+## Agent scratch space
 
 Anything you create outside the checkout at your own discretion goes under `/tmp/farhelm-tmp/<id>/`, where `<id>` is the
 output of one `uuidgen` you run the first time you need scratch space and reuse for the rest of the session. If you lose
-track of it (after compaction, say), mint a new one rather than guessing which existing directory is yours. The point is
-that all agent scratch on this machine is in one place, so finding it never requires digging through `/tmp` or asking
-what some directory is.
+track of it (after compaction, say), mint a new one rather than guessing which existing directory is yours, unless your
+working log records it. Nothing bulky goes in `$HOME` (`~/.cache`, `~/.local`, the checkout's parent directory) or loose
+in `/tmp`. Size does not matter: small files go there too. A `mktemp -d` that a skill asks for goes inside your
+directory, not beside it. When you hand work to a delegate or subagent, give it a subdirectory of yours and tell it to
+use that instead of minting its own. When the task that needed something bulky is over, delete it; keep what the task
+still cites. Never delete another agent's directory.
 
-More broadly, anything bulky that agent work leaves behind belongs in one of two places: the checkout, where the
-standard tools reclaim it (`cargo clean` for `target/`, deleting `node_modules`), or `/tmp/farhelm-tmp/`, which can be
-deleted wholesale and which the machine's temporary-file cleanup reclaims anyway. Nothing bulky goes in `$HOME`
-(`~/.cache`, `~/.local`, the checkout's parent directory) or loose in `/tmp`. Before this was enforced, test evidence,
-deflake worktrees, tool environments and compiler caches had piled up to about 15 GB under `~/.local` and `~/.cache`,
-with nothing that would ever remove them. When a procedure needs a tool environment that its own documentation leaves
-the location of to you, the location is your scratch directory.
+Leave these where they already go: the checkout's own build output; shared caches of standard tools (use them the way
+the tools do by default; do not redirect them); state created by the repo's harnesses and scripts (do not point `TMPDIR`
+at your scratch directory when running tests or repo scripts); anything of your own that binds a unix socket (directly
+under `/tmp` with a random name); anything another rule tells you to keep somewhere specific, such as goal files and
+working logs.
 
-That covers scratch clones and worktrees or jj workspaces made for a review or a reproduction, a separate
-`CARGO_TARGET_DIR`, Python venvs and other tool installs needed only for the task (the test-sleep checker's, for
-example), a deflake eval clone, downloaded or extracted archives, saved logs and diffs, draft commit messages, delegate
-prompt and result files, and experiment builds. Size does not matter: small files go there too. A `mktemp -d` that a
-skill asks for goes inside your directory, not beside it. When you hand work to a delegate or subagent, give it a
-subdirectory of yours and tell it to use that instead of minting its own.
+When about to create anything outside the checkout, install a tool environment, allocate a build directory, use docker,
+or clean up, read `.agents/machine.md` in full first.
 
-When the task that needed something bulky is over, delete it: a scratch jj workspace's `target/` is routinely tens of
-gigabytes. Keep what the task still cites, such as a working log or a run you are about to record, until it no longer
-does. Never delete another agent's directory.
+## Claude Code shell commands
 
-Two harness-owned trees live beside the agents' directories: the test recorder's evidence in
-`/tmp/farhelm-tmp/test-runs/` (`docs/test-run-evidence.md`) and the deflake driver's state in
-`/tmp/farhelm-tmp/deflake/` (`deflake/bin/deflake`). Both follow an absolute `TMPDIR` instead of `/tmp`. They belong to
-their tools, not to any one agent, and like everything under `/tmp` they do not outlive the machine's temporary-file
-cleanup: record what a failure showed, in a fix PR or a FLAKES.md entry, while its run directory still exists.
+This section applies only to Claude Code sessions and their subagents. If you are Claude Code, a shell command you
+compose and run (through your shell tool, or in a prompt to a Claude Code subagent that will run it) contains no glob
+and no `$` expansion of any kind: no `*`, `?` or `[...]` patterns, no variables (`$HOME`, `$d`), no `$(...)` or
+backticks, no `${...}`, no `$((...))`. Anything that needs one of those is written as a Deno TypeScript script, in a
+file, and run as that file. Put it in your scratch directory unless it belongs in the repository. Plain commands with
+literal arguments (`git status`) and pipelines of them stay fine in the shell. The exception is a command this
+repository's instructions give word for word (the pinned nextest and tmux `PATH` setup, the release procedure's version
+checks, the plans flow's ntfy send): run it as written, with only its placeholders filled in. Do not use the exception
+to compose new commands in their style.
 
-Docker cannot put images and containers anywhere but its own storage. Give anything you build or start an image tag or
-container name that contains your `<id>`, and remove it (`docker rm`, `docker rmi`) when the task is over. The CentOS
-gate's `farhelm-centos-ci` image is a cache that script maintains; leave it.
+## Talking to the user
 
-Leave these where they already go:
+Assume the user does not know the codebase. They know Farhelm as a product and its core concepts (the helm, the
+supervisor, sessions, hosts, and so on), but not the file names, functions, types, and other internal names behind them.
+Explain things in those product terms. Do not use an internal name unless it has already come up in the conversation, or
+you introduce it with enough context that it makes sense without opening the code.
 
-- The checkout's own build output (`target/`, `e2e/node_modules`, the dx output), which stays wherever the build puts
-  it.
-- Shared caches of standard tools: cargo's registry, rustup toolchains, npm and bun caches, Playwright's browsers in
-  `~/.cache/ms-playwright`, dprint's plugins. Use them the way the tools do by default; do not redirect them.
-- State created by the repo's harnesses and scripts: the `fh-it.*` and `fh-e2e.*` test directories, and the desktop
-  smoke, CentOS, and installer-test directories. Supervisor and tmux sockets live inside the test directories, unix
-  socket paths are limited to about 108 bytes, and the teststate sweep only looks directly under `/tmp`. For the same
-  reason, do not point `TMPDIR` at your scratch directory when running tests or repo scripts: plain
-  `tempfile::tempdir()` tests honor it, and some of them bind sockets.
-- Anything of your own that binds a unix socket, such as a hand-started supervisor or a `tmux -S` server. Put that
-  directly under `/tmp` with a random name, because `/tmp/farhelm-tmp/<uuid>/` already spends over 50 of the 108 bytes.
-- Anything another rule tells you to keep somewhere specific, such as goal files and working logs.
+## Conventional Commits
 
-This rule governs agents, not harness code: a harness still must not use a fixed path, per the section above.
+All commit messages and PR titles must use Conventional Commit format: `<type>: <short summary>`
 
-# lore/
+Allowed types: `feat`, `fix`, `docs`, `perf`, `refactor`, `style`, `test`, `chore`, `ci`, `revert`.
 
-`lore/` holds historical artifacts — decision records written when the decision was made. It is not part of the codebase
-and is never updated to track code changes. See `lore/AGENTS.md` for its rules before touching anything in it.
+Append `!` after the type for breaking changes (e.g. `feat!: remove legacy endpoint`). Scope is optional.
+
+Rules:
+
+- Type reflects the user-visible effect, not the implementation activity. A bug fix that requires heavy refactoring is
+  `fix`, not `refactor`. A new CLI flag is `feat`, not `chore`.
+- The summary after the colon is lowercase, imperative mood, no trailing period.
+- Keep the first line under 72 characters.
+
+## Changelog fragments
+
+A PR whose title type is `feat`, `fix`, `perf`, `style`, or `revert`, or whose type carries `!`, adds a changelog
+fragment under `releasing/changelog.d/` in the same commit as the change, without asking; the agent writes it. The file
+name is a free mnemonic (`cursor-launch.md`), nothing parses it, and `README.md` there is not a fragment. The content is
+a leading `---` front matter block holding a `kind:` line (`breaking`, `added`, `changed`, `fixed`, `removed`, or `none`
+for a change with nothing user-facing, with the reason as its body), then a draft entry written for someone running
+Farhelm: what changed for them, with caveats, and without internal mechanics, following the maintainer's wording rules
+in `releasing/EDITORIAL_GUIDANCE.md`; its first paragraph is the entry candidate, and further paragraphs supply context
+for curation. It is not reviewed at PR time; the release-time curation rewrites it.
+`python3 releasing/check-changelog.py format` validates it. Other types add one only when the change has a user-facing
+effect.
+
+A `fix` or `feat` that amends work not yet released (a follow-up to an unreleased PR) edits that PR's fragment instead
+of adding a second entry; the sweep counts an edited fragment as coverage. A `revert` of something that shipped in a
+stable release is an entry; a revert of something that never shipped only removes the original's fragment. An optional
+`pr: 123` (or `pr: 123, 456`) line claims PR numbers when the fragment is written after its change merged, or covers
+several PRs at once; a fragment added in the change's own commit needs no `pr:`. Err toward including caveats, except
+that the release cannot be downgraded from, which no entry mentions. When the draft rests on a guess (a PR with no
+description, say), say so in the body so the curator verifies it.
+
+## Frozen material
+
+A repo-wide rename, sweep or cleanup leaves these alone; each changes only under a task that targets it:
+
+- `lore/`: historical artifacts, decision records written when the decision was made, never updated to track code
+  changes (`lore/AGENTS.md`).
+- Published releases' `CHANGELOG.md` sections, `website/src/release-notes/*.json`, and the release shots and their tests
+  are never touched by a refresh, a sweep, or a cleanup, only by a task that targets them.
+- `TRIAGE_OUTCOMES.md` records, older `FLAKES.md` entries, and `plans/`, which has its own editing rules
+  (`plans/AGENTS.md`).
+- The captured agent screens under `crates/farhelm-supervisor/tests/fixtures/screens/`, which change only by re-capture
+  (`docs/agent-screen-fixtures.md`).
+- The README hero's and demo video's designs (scenarios, transcripts, `intent.md`) under `docs/readme-hero/` and
+  `docs/readme-video/`, which change only when the maintainer asks (`.agents/docs-media.md`).
+- The docs Overview page and the words in its intro SVGs, which mirror the README introduction (`website/AGENTS.md` has
+  the rule and its one exception).
+
+## Code rules
+
+Everything Farhelm does differently per agent harness is answered per harness in a few named places, not by comparing
+harnesses at the call site. The module docs of `crates/farhelm-supervisor/src/agent_kind/mod.rs` map them, layer by
+layer, and say where a new per-harness capability goes. Read that map before adding or changing harness-specific
+behavior, add to the places it names, and do not write `kind == X`, `matches!` over specific harnesses, or a `_` arm
+over harnesses in shared code: each of those hands a new harness whatever the branch does for the ones it does not name.
+
+Read `docs/harness-marks.md` before adding or changing a harness mark (`crates/farhelm-ui/src/icons.rs` and the geometry
+under `crates/farhelm-ui/src/icons/`); vendored geometry gets an entry in `THIRD_PARTY_NOTICES.md`.
+
+## TODO.md and FLAKES.md
+
+`TODO.md` is the maintainer's running list of wanted fixes and features. When a PR addresses an entry, remove that entry
+in the same PR. Do not add entries on your own initiative. The exception is a deflake run (`deflake/AGENTS.md`), which
+records the flakes it finds as Deflake entries. When a Deflake entry is removed, remove the matching line in
+`deflake/known-flakes.txt` in the same PR.
+
+Before adding or revising an entry, and before answering any question about what TODO.md currently holds (a "tldr todo"
+included), fetch and rebase the working copy onto the latest main per jjstack: `jj git fetch`, then rebase the
+working-copy change onto `main@origin`. In a stack (a deflake run, plan or triage execution), fetch and read main's
+`TODO.md` instead of rebasing mid-run, and keep both sides when the stack's own rebase meets a `TODO.md` conflict.
+
+`FLAKES.md` is the append-only log of LATENT flakes: tests that pass where they were written and fail elsewhere,
+sometimes, or under load, whose cause was not obvious when they failed. When you establish that a failure is a true
+flake of that kind — pre-existing, or one that survived past the session that wrote it — add a dated entry. Do NOT log a
+test that was written, flaked, and was fixed within the same session. Open flakes also get a deflake entry in TODO.md.
+Before writing an entry, read `.agents/test-evidence.md`, "FLAKES.md", for its fields.
+
+## Tests and validation
+
+For changes to tests or their fixtures, apply `.agents/test-authoring.md` during authoring and supply its full text
+verbatim to the independent reviewer. Use the review process selected for the task; this checklist does not request an
+additional reviewer or a review swarm. Run `python -B scripts/check-test-sleeps.py` with the isolated interpreter
+prepared in `docs/test-sleep-check.md` when changing Rust or browser tests, their helpers, or the checker.
+
+Before creating, updating, or merging a PR, or claiming work is done, make a judgment call about what validation would
+add useful evidence. Never mechanically run the entire test battery. A PR, rebase, stack completion, or merge request is
+not by itself a reason to launch it. For a documentation-only change that cannot affect generated artifacts or
+executable examples — ordinary Markdown documentation, a lore entry, agent instructions, or comments with no doctest or
+generation role — do NOT run Rust, JavaScript, desktop, installer, provisioning, or browser tests. Run only formatters,
+linters, link checkers, or other checks that actually inspect the changed files, if any exist. Reuse is per command.
+Failed, interrupted, poorly identified runs, or runs whose coverage no longer applies are not evidence of a pass. Report
+checks run now; checks reused, with the covered revision and why their coverage still applies; and checks skipped, with
+the reason.
+
+Run local and worker runtime tests through `python3 scripts/record-test-run.py`, including each reproduction attempt.
+Runtime `SKIPPED` messages still require reading the retained output: an early-return test is a JUnit pass, not proof
+that its required systemd or SSH substrate ran. Keep the failed UUID run directory before retrying, and record its path
+and disposition in the session's working log. A later pass is another observation, not a replacement for the failure.
+When investigating a failing, flaky, or suspicious test, reproduce it with the narrowest run that could show it, and
+widen only when the narrow run will not reproduce; read `.agents/narrow-tests.md` first.
+
+The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
+`gh pr ready`, nor a merge to main starts a run. Browser end-to-end validation's CI job is disabled (`if: false` in
+ci.yml), so CI green does not include browser coverage. PRs are still opened as drafts and marked ready when the user
+asks to publish them, or as part of landing them, never on the agent's own initiative. Landing is authorized where a
+flow's own file says so: plan landing, approved planning PRs, abandoned-plan source updates, release fix forward, the
+stable release's changelog and finalization PRs, a stable re-cut's changelog PR, the todo flow.
+
+- Before choosing validation, running any runtime test (Rust, browser, JS, installer, provisioning), creating or
+  updating a PR, merging one, or reporting a change to the repository's files as done, read `.agents/validation.md` and
+  `.agents/test-evidence.md` in full (the inventory, the pinned nextest and tmux setup, the recorder's arguments, the
+  browser engines).
+- When changing either workflow (`ci.yml`, or the release workflow through `release.yml`, `dist-workspace.toml` or
+  `.github/dist-build-setup.yml`), a check or test script, or the deflake sweep's phases, update the inventory in
+  `.agents/validation.md` and the lists in `.agents/run-all-tests.md` in the same change.
+- Any change to an instruction file, or one that renames or removes a Markdown heading or moves or renames a file, runs
+  `python3 scripts/check-agents-md.py`.
+
+## Instructions by path
+
+Before creating, editing or deleting anything under these paths, read the file named:
+
+- `plans/`: `plans/AGENTS.md`.
+- `releasing/` (except fragment files under `releasing/changelog.d/`), `CHANGELOG.md`, the version in `Cargo.toml` or
+  `packaging/farhelm-desktop/dist.toml`, `.github/workflows/release.yml` (generated: never hand-edit it),
+  `dist-workspace.toml`, `.github/dist-build-setup.yml`: `releasing/AGENTS.md`.
+- `review_feedback_queue/`, `TRIAGE_OUTCOMES.md`: `review_feedback_queue/AGENTS.md`.
+- `website/`, `README.md`: `website/AGENTS.md`.
+- `deflake/`: `deflake/AGENTS.md`.
+- `lore/`: `lore/AGENTS.md`.
+- `crates/farhelm-ui/src/icons.rs`, `crates/farhelm-ui/src/icons/`: `docs/harness-marks.md`.
+- `crates/farhelm-supervisor/tests/fixtures/screens/`: `docs/agent-screen-fixtures.md`.
+- `packaging/farhelm-desktop/`, `website/src/assets/intro/`, `docs/readme-hero/`, `docs/readme-video/`,
+  `docs/docs-shots/`, `e2e/readme-hero/`, `e2e/readme-video/`, `e2e/docs-shots/`, `scripts/readme-screenshot.sh`,
+  `scripts/publish-readme-hero.sh`, `scripts/readme-video.sh`, `scripts/docs-screenshots.sh`,
+  `scripts/publish-docs-shots.sh`: `.agents/docs-media.md`.
+- `.github/workflows/`, `scripts/`, `e2e/`, any test: `.agents/validation.md`.
+
+## Flows
+
+Each entry: trigger phrases, the file to read in full before the first action, and its fence.
+
+- **Release brick test** ("brick test release vX.Y.Z", "stop after P0 checks", "stop after P1 checks", "did P0 checks
+  succeed?", "did P1 checks succeed?"): `releasing/mac-vm-test/BRICK-TEST.md`. Fence: a test request does not authorize
+  publication or release promotion; an OS, computer-use or authentication permission block during a test is a harness
+  bug: stop, retain the failure, and do not manually approve or switch to host UI to rescue it; do not interrupt an
+  active operator, delete retained data, force-stop guests or touch unrelated VMs; `/latest` still naming the preceding
+  promoted stable is expected, not a blocker.
+- **Releases** (stable, RC or dev releases, fixing forward, advisories, changelog curation): `releasing/AGENTS.md`.
+  Fence: no release tag before its base and version are settled with the maintainer; never reuse or delete a tag; agents
+  never author, run or replace the signing and publication step, publish an advisory file, or move `/latest`; no release
+  bump reaches main.
+- **Careful rebase**: `.agents/careful-rebase.md`. Fence: a rebase that applies cleanly can still be wrong; a conflict
+  that needs a design decision is the user's (unattended: a block).
+- **Vercel** ("trigger vercel on main", "deploy the website", "trigger vercel on this PR"): `.agents/vercel.md`. Fence:
+  deploy only when asked; the script builds from GitHub, not the working copy.
+- **devbuild** ("devbuild <thing to test>", or any other request to try a PR or branch on the maintainer's Mac, or to
+  run, test or see it there): `.agents/devbuild.md`. Fence: say so when the target changes a database schema.
+- **TODO board and todo flow** ("tldr todo", "what's in the todo", a message starting with "todo flow,"):
+  `.agents/todo.md`. Fence: the implied merge applies ONLY while TODO.md is the only file the session has changed;
+  otherwise commit or merge nothing automatically, say so and ask.
+- **Deflake run** ("start a deflake run"): `deflake/AGENTS.md`. Fence: never poll; act only when
+  `deflake/bin/deflake wait` returns.
+- **Run all tests and fix** (and similar wording asking for every test to be run and the failures fixed):
+  `.agents/run-all-tests.md`. Fence: an explicit request, never a finishing step; it never marks a PR ready or merges.
+- **Planning system** ("todo planning flow", "todo planning flow for <bucket>", "plan to implement <TODO items>", "use
+  the planning system to schedule these", "pick a plan to execute", "execute the next plan", "execute the next plan in
+  order", "execute plan X", "drain the plans", "drain the plans and keep monitoring", "monitor for complete plans",
+  "land the complete plans", "review the plans", "show blocked plans", "check for blocked plans", "release plan X",
+  "plan help"): `plans/AGENTS.md`. Fence: every planning flow starts on a clean working copy of the latest `main`, after
+  reconciling any recorded claim of its own (a dirty working copy belonging to that claim is resumed or reset, not
+  reported); any other dirty working copy aborts the flow with a report; see also "Unattended runs".
+- **Review feedback** (recording it, commissioning a review that feeds the queue, "perform trailing code review",
+  "triage review feedback", "execute triage outcomes"): `review_feedback_queue/AGENTS.md`. Fence: triage is persistent;
+  "fix this", "yes", "agreed" during it are decisions to record, not permission to edit; execution needs a separate
+  command that names it. When asked to address a queued item, remove the item (or narrow it, if partially addressed) in
+  the same commit, change, or PR as the fix.
+- **Docs website** (writing or changing docs pages, "refresh the docs"): `website/AGENTS.md`. Fence: when the task's
+  main work changes the docs, start the preview and hand over page links when reporting, without being asked; unattended
+  runs and incidental docs edits start no preview server and name the changed page instead.
+- **Screenshots, demo video, brand marks** ("refresh the README screenshot", "refresh the demo video", "refresh the docs
+  screenshots", anything showing Farhelm's icon or name as a mark): `.agents/docs-media.md`. Fence: only the publish
+  scripts push the screenshot refs; never commit a captured screenshot on main; never hand-edit the wordmark SVGs.
+- **Agent screens** ("re-capture agent screens", checking a new claude or codex against status detection):
+  `docs/agent-screen-fixtures.md`. Fence: it spends real vendor turns; only when asked or after an agent upgrade.
+- **Desktop or web UI bug reports**: before investigating one, read `docs/desktop-web-triage.md`.
+- **Agent TUI behavior**: before relying on a claim about how an installed agent behaves in a terminal, read
+  `.agents/real-agent-tui.md`.
+
+# End of AGENTS.md

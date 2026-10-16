@@ -1,5 +1,74 @@
 # Brick test a release
 
+This file is the whole brick-test procedure, and the place the root flow index sends a **`brick test release vX.Y.Z`**
+request. "Release brick tests" holds the rules an agent running the test follows from its first action (it used to be a
+section of the root `AGENTS.md`); the sections after it are the procedure those rules refer to. Read the whole file
+before inspecting Tart state.
+
+> NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
+> propose to the maintainer follows `AGENTS.md`, "Unattended runs".
+
+## Release brick tests
+
+When asked **`brick test release vX.Y.Z`**, follow `releasing/mac-vm-test/BRICK-TEST.md`. Discover the private machine
+profile there, read its operator policy and journal, and run **P0 checks first**, in the five-step order in
+`releasing/mac-vm-test/BRICK-TEST.md`, "The test and its scopes", with guest-only product mutations. P0 covers fresh
+install/start, a separate installer upgrade, click-to-upgrade discovery/relaunch, local supervisor upgrade with one
+successful agent, then remote supervisor upgrade with one successful agent. Stop at the first failure or missing
+prerequisite. After P0 passes, P1 sends one live feedback submission from the candidate on P0's last Mac guest, before
+that fixture is exported and cleaned up; broader work is bonus coverage after P1. A P1 failure is reported promptly with
+its separate verdict and does not invalidate P0, block cleanup or fence bonus passes. A request to **stop after P0
+checks** ends after recording P0 evidence and cleaning up its successful fixtures; no feedback is sent and no bonus
+fixture starts. **Stop after P1 checks** ends after P0 and P1 evidence and the last fixture's cleanup. Answer **did P0
+checks succeed?** from the separate P0 verdict and five results, naming anything incomplete. Answer **did P1 checks
+succeed?** from its own verdict and named feedback check. The full verdict includes P1; whether its failure blocks
+promotion is the maintainer's call for that release. Missing prerequisites mean could not run; resolve them with the
+maintainer instead of guessing machine bindings. A test request does not authorize publication or release promotion.
+
+Use the guest-native executor of `releasing/mac-vm-test/BRICK-TEST.md` for actual tests: an independent Codex process
+inside the Mac guest drives native CUA and survives Farhelm quit/restart. The host coordinates Tart lifecycle, pinned
+networking and evidence, but does not drive product UI. Resolve native permissions and explicit Mac/Linux
+credential-copy consent during fixture setup. Prepared bases remain credential-free; standing authorization may cover
+this machine's disposable test clones. An OS/CUA/authentication permission block during P0 or an evaluation is a harness
+bug: stop, retain the failure, repair setup separately and start a new run. Do not manually approve or switch to host UI
+to rescue it. Ordinary Farhelm confirmations are authorized product interactions handled by the guest tester.
+
+For full or P1-only scope, resolve authorization during setup for the live feedback send to farhelm.io, which creates an
+issue in the private inbox. P0-only scope does not authorize or require that send.
+
+Before creating a new test pair, inspect live Tart state and reconcile leftover brick-test guests using their original
+ownership manifests and journal. The new test request authorizes clean shutdown of abandoned previous test pairs without
+asking again, preserving their disks and evidence. Do not interrupt an active operator, delete retained data, force-stop
+guests or touch unrelated VMs. Verify the earlier pair is stopped and its foreground owner has exited. Follow
+`releasing/mac-vm-test/BRICK-TEST.md`, "Reconcile guests and prepare coverage", for the startup reconciliation
+procedure. Host Tart window binding is needed only during fixture setup; actual product computer use binds apps directly
+inside the guest.
+
+Run this gate **before** moving `/latest` to the candidate. It is expected that `/latest` still names the preceding
+promoted stable; do not treat that difference as a blocker or ask to promote first. Upgrade baselines run from v0.23.0
+through that public default, excluding unpromoted intervening tags. For an old app that supports it, quit and relaunch
+inside the Mac guest with `open --env FARHELM_DESKTOP_UPDATE_LATEST=vX.Y.Z "$HOME/Applications/Farhelm.app"`, then use
+the in-app updater. Older apps use the manual candidate-installer path. Follow the procedure's verification and override
+removal checks in both cases.
+
+During fixture setup only, read `releasing/mac-vm-test/OPERATIONS.md`, "Computer use and continuity", before entering
+guest text. Update those notes and `releasing/mac-vm-test/BRICK-TEST.md`, "Release brick tests", when a new Tart input
+workaround is verified, so the next agent does not repeat the investigation. `typeText` and rapid physical key sequences
+can drop characters; per-character `pressKey` calls with `durationMs: 100` delivered unmodified text reliably in the
+release test. To replace a field, triple-click with `durationMs: 100`, then inspect a screenshot for the actual
+selection highlight before typing. Modifier chords can reach the guest without their modifier (`tl:` became `tl;`, and
+select-all became a literal `a`); verify punctuation and the resulting reactive form state before submitting. The
+verified workaround is guest-only clipboard preparation through the journaled controller
+(`printf %s <text> | /usr/bin/pbcopy` inside the Mac guest), followed by computer use on the guest's Edit menu. Click
+Edit, navigate with `Down` keys held for 100 ms until Paste is visibly highlighted, then press Return. Direct clicks on
+guest native menu items can dismiss the menu and reach the underlying window instead. Keep Tart's shared clipboard
+disabled and the host clipboard untouched; inspect both the pasted text and the form's response before proceeding. If
+Tart window lookup fails, follow the reconciliation notes in `releasing/mac-vm-test/OPERATIONS.md`, "Computer use and
+continuity": the guests may still be running. Preserve their foreground supervision and resolve GUI access instead of
+restarting guests or using the host's Farhelm.
+
+## The test and its scopes
+
 Tell a host agent in this checkout: **`brick test release vX.Y.Z`**. It should follow this document, using the private
 machine profile discovered below. The host coordinates lifecycle, planning and retained evidence. An independent Codex
 tester inside the Mac guest drives genuine native computer use and published installers; it survives Farhelm's own

@@ -102,13 +102,14 @@ published shots show, and the changes since then are a `git log` away.
 
 ## Release shots are frozen
 
-The Release notes page shows screenshots under some releases' entries (`website/AGENTS.md`, "Release notes"). A release
-shot is a shot one of `website/src/release-notes/*.json` lists, and it is published once the manifest lists it. Release
-notes are stable once published, except for a deliberate correction, and a release's screenshot is part of its notes: a
-recapture from today's UI would show that release something it never had. So no capture takes a published release shot,
-whether full or `--only`; its test skips, and the publish copies the image byte for byte from the snapshot the manifest
-pins. `captured_from` therefore describes every published shot except these, which keep showing the UI of the release
-they belong to. A release shot not yet published, a new release's first screenshot, is captured like any other.
+The Release notes page shows screenshots under some releases' entries (`website/.agents/release-notes.md`, "Release
+notes"). A release shot is a shot one of `website/src/release-notes/*.json` lists, and it is published once the manifest
+lists it. Release notes are stable once published, except for a deliberate correction, and a release's screenshot is
+part of its notes: a recapture from today's UI would show that release something it never had. So no capture takes a
+published release shot, whether full or `--only`; its test skips, and the publish copies the image byte for byte from
+the snapshot the manifest pins. `captured_from` therefore describes every published shot except these, which keep
+showing the UI of the release they belong to. A release shot not yet published, a new release's first screenshot, is
+captured like any other.
 
 A correction is the one way to change one: `scripts/docs-screenshots.sh --recapture-release-shot <name>` captures it
 from the current UI, and the capture record says it was recaptured on purpose. The publish refuses a record that holds a
@@ -132,7 +133,8 @@ calls `shot(page, "<page>/<shot>", [regions])`. The image is cropped to the regi
 
 ## Refreshing
 
-A full docs refresh ("Refreshing the docs" in `website/AGENTS.md`) runs this as one of its steps when the UI changed.
+A full docs refresh (`website/.agents/refreshing.md`, "Refreshing the docs") runs this as one of its steps when the UI
+changed.
 
 "Refresh the docs screenshots" means, on a checkout of the latest main:
 

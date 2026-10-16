@@ -12,27 +12,44 @@ a browser test whose cleanup broke when hosts started refusing more than eight c
 and clippy failing in CI because CI's floating Rust stable had moved to 1.99 while the local machine was on 1.98.1
 (#1742).
 
+## Reading list
+
+Before starting, read these in full, and again after any compaction or resume:
+
+- this file
+- `deflake/AGENTS.md` (the sweep's protocol, which this flow runs and whose flake record it uses)
+- `.agents/validation.md` (the check inventory step 2 is defined against)
+- `.agents/test-evidence.md` (the recorder and retained runs)
+- `.agents/machine.md` (scratch environments, `CARGO_TARGET_DIR`, what stays where it goes)
+- `docs/test-sleep-check.md` (the sleep checker's isolated interpreter)
+
+> NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
+> propose to the maintainer follows `AGENTS.md`, "Unattended runs".
+
 ## Ground rules
 
 - Nothing runs twice locally. The runtime batteries run only inside the deflake sweep; the static checks below are
   exactly what the sweep does not run. Do not "warm up" by running a battery the sweep will run anyway.
-- Fix what is straightforward, on one linear jjstack stack, one draft PR per fix, with the per-PR gates from "Finishing
-  work" in the root `AGENTS.md` and a cold-read commit message. Straightforward means a clear cause and a small,
-  low-risk fix inside the existing design: a test that assumes an old limit, a lint, a renamed symbol. Anything that
-  grows scope, adds complexity, or needs a design or product decision is not fixed here: record it where the deflake
-  protocol says (a `TODO.md` bucket, with the evidence) and list it in the final report for the maintainer to decide.
+- Fix what is straightforward, on one linear jjstack stack, one draft PR per fix, with the per-PR gates from
+  `AGENTS.md`, "Tests and validation", and `.agents/validation.md`, and a cold-read commit message. Straightforward
+  means a clear cause and a small, low-risk fix inside the existing design: a test that assumes an old limit, a lint, a
+  renamed symbol. Anything that grows scope, adds complexity, or needs a design or product decision is not fixed here:
+  record it where the deflake protocol says (a `TODO.md` bucket, with the evidence) and list it in the final report for
+  the maintainer to decide.
 - Act on failures as they arrive: investigate and make reasonable fixes proactively, without waiting for the sweep or
   the whole flow to finish, or for another request from the maintainer. During the sweep, defer only runtime validation
   that would compete with its timing-sensitive phases, as step 3 describes; that is not a reason to postpone the fix.
 - Flakes are recorded, not chased: the deflake protocol's record (a `TODO.md` Deflake entry, a dated `FLAKES.md` entry
   and a `deflake/known-flakes.txt` line), one PR per flake, no narrow-test ladder.
 - Never mark a PR ready and never merge; landing is a separate request.
-- Keep a working log in your scratch directory (`/tmp/farhelm-tmp/<id>/`, per "Agent scratch space") from the start:
-  every check with its result and recorder run id, the sweep's run id and events, every decision and why, PRs, and
-  GitHub run URLs. Name its path in the final report. The log is what lets the maintainer ask afterwards what ran and
-  what failed, including after a context compaction.
+- Keep a working log from the start at `farhelm-run-all-tests-log-<checkout>.md` in the directory that contains the
+  checkout, where a compacted session can find it again (a scratch directory can be lost track of). Record in it this
+  flow's name, the reading list above, and your scratch directory (`/tmp/farhelm-tmp/<id>/`, per `AGENTS.md`, "Agent
+  scratch space"); then every check with its result and recorder run id, the sweep's run id and events, every decision
+  and why, PRs, and GitHub run URLs. Name its path in the final report. The log is what lets the maintainer ask
+  afterwards what ran and what failed, including after a context compaction.
 - The machine is shared. Do not run `rustup update` (other agents share the default toolchain), and leave the live
-  install alone as the root `AGENTS.md` requires.
+  install alone as `AGENTS.md`, "The live install is off-limits", requires.
 
 ## 1. Start
 
@@ -50,9 +67,9 @@ duplicate PRs.
 ## 2. Static and tooling checks
 
 Run these before the sweep: several of them compile, and the sweep's timing-sensitive tests assume a quiet machine. This
-is the "Finishing work" inventory minus every battery the sweep runs, plus three checks the inventory does not name (the
-CI job's Alpine/BusyBox installer run, the newest-stable clippy, and the rehearsal generator's self-test). Generic
-recorder wrapping is fine but not required for these; record each result in the log either way.
+is the inventory in `.agents/validation.md` minus every battery the sweep runs, plus three checks the inventory does not
+name (the CI job's Alpine/BusyBox installer run, the newest-stable clippy, and the rehearsal generator's self-test).
+Generic recorder wrapping is fine but not required for these; record each result in the log either way.
 
 - `cargo fmt --all -- --check`
 - `python -B scripts/check-test-sleeps.py`, with the isolated interpreter from `docs/test-sleep-check.md` (create its
@@ -69,6 +86,7 @@ recorder wrapping is fine but not required for these; record each result in the 
 - The CI install-script job's Alpine/BusyBox run (the `docker run ... alpine:3` step in `.github/workflows/ci.yml`; the
   sweep runs `test-install-sh.sh` only under the host's GNU userland)
 - `dprint check`
+- `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test`
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`
 - `dist generate --check`
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test`
@@ -121,13 +139,13 @@ Only once the static checks pass and the sweep has finished with every failure f
 
 ## 5. Report
 
-Report, in product terms per "Talking to the user" in the root `AGENTS.md`: the checks run in step 2 and their results;
-the sweep's run id and its events; each flake recorded; the fix stack bottom-up with each PR's link and the failure it
-fixes; anything recorded for the maintainer's judgment instead of fixed; the GitHub run URLs and their verdicts; what
-was skipped and why; and the working log's path.
+Report, in product terms per `AGENTS.md`, "Talking to the user": the checks run in step 2 and their results; the sweep's
+run id and its events; each flake recorded; the fix stack bottom-up with each PR's link and the failure it fixes;
+anything recorded for the maintainer's judgment instead of fixed; the GitHub run URLs and their verdicts; what was
+skipped and why; and the working log's path.
 
 ## Keeping this file honest
 
-The step 2 list is defined against two other lists: the root `AGENTS.md` "Finishing work" inventory and the phases in
+The step 2 list is defined against two other lists: the check inventory in `.agents/validation.md` and the phases in
 `deflake/bin/deflake`. When either changes, update the list here in the same change, so nothing falls between them and
 nothing runs twice.

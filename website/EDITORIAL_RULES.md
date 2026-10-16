@@ -18,10 +18,10 @@ rather than restating the spec. Complete reference material (every flag, every f
 ## The Overview page is the maintainer's
 
 The Overview page is the docs front page at `/docs/`, the sidebar's "Overview" entry, rendered from
-`src/content/docs/docs/index.mdx`. The root `AGENTS.md` and the README scripts call it "the landing page". Agents edit
-it only when the maintainer asks for that specific edit, in conversation or in a TODO entry or plan of theirs that names
-the Overview page. The maintainer edits its wording by hand, sentence by sentence, and an agent improving it on its own
-initiative undoes that work.
+`src/content/docs/docs/index.mdx`. `.agents/docs-media.md` and the README scripts call it "the landing page". Agents
+edit it only when the maintainer asks for that specific edit, in conversation or in a TODO entry or plan of theirs that
+names the Overview page. The maintainer edits its wording by hand, sentence by sentence, and an agent improving it on
+its own initiative undoes that work.
 
 That covers everything the page shows, including the words in its drawings: the pillar titles and the how-it-works text
 are written in `scripts/render-svgs.mjs` and drawn into the SVGs under `src/assets/intro/`. Re-running that script after
@@ -35,8 +35,8 @@ a link the Overview page holds, for example), the change waits for the maintaine
 do not route around the rule by keeping the old page alive under its old name. A request to rewrite "the docs" or "every
 page" does not cover the Overview page either; ask.
 
-One edit is exempt: "Refresh the README screenshot" in the root `AGENTS.md` has `scripts/publish-readme-hero.sh` rewrite
-the screenshot URL between the markers in this page, and committing that one-line change is part of the refresh.
+One edit is exempt: "Refresh the README screenshot" in `.agents/docs-media.md` has `scripts/publish-readme-hero.sh`
+rewrite the screenshot URL between the markers in this page, and committing that one-line change is part of the refresh.
 
 ## Who the pages are for
 

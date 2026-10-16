@@ -3,7 +3,7 @@
 The maintainer's accumulated opinions on how changelog entries should read, collected from curation feedback that
 generalized beyond the entry it was given on. An agent drafting a fragment at PR time or a release section at curation
 time reads this first and follows it, so the same correction does not have to be made twice. The format rules themselves
-(headings, categories, bullets) live in `releasing/AGENTS.md`; this file is about wording.
+(headings, categories, bullets) live in `releasing/.agents/changelog.md`, "Format"; this file is about wording.
 
 Each rule records the guidance and, when it helps, the example that prompted it. A rule is added only when the
 maintainer stated it, or when the agent proposed a generalization and the maintainer said yes; an inferred rule never

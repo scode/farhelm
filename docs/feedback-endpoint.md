@@ -35,9 +35,8 @@ If either changes, the function's location has to be rethought before it can be 
   no rate limiting. How many rate-limit rules your Vercel plan allows is shown in the dashboard; this needs one.
 - The variables only exist in Production, so a preview deployment of the website answers every feedback send with 503;
   that is expected, not a bug.
-- Deploy: ask for "deploy the website" (root `AGENTS.md`, "Vercel deployments"), which runs
-  `website/scripts/vercel-deploy.sh main`. Environment variable changes only reach new deployments, so deploy after
-  setting them.
+- Deploy: ask for "deploy the website" (`.agents/vercel.md`), which runs `website/scripts/vercel-deploy.sh main`.
+  Environment variable changes only reach new deployments, so deploy after setting them.
 - Verify: send feedback from the app and check that an issue appears in the inbox, with the message and the metadata in
   plain code blocks.
 

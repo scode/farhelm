@@ -82,7 +82,7 @@ readonly MANIFEST="website/src/data/docs-shots.json"
 readonly CONTENT_DIR="website/src/content/docs"
 # Each release's screenshot list for the Release notes page, a JSON file named
 # after the version that attaches shots to that release's entries
-# (website/AGENTS.md, "Release notes"). Not pages, but the shots they name are
+# (`website/.agents/release-notes.md`, "Release notes"). Not pages, but the shots they name are
 # published like any.
 readonly RELEASE_NOTES_DIR="website/src/release-notes"
 # Written by scripts/docs-screenshots.sh after a complete capture, and deleted
