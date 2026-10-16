@@ -14889,7 +14889,8 @@
   cleanup utility seems needed, stop and return the item to the maintainer.
 - Completion criteria: a failure in any one cleanup step still runs the others. The test passes on Chromium and WebKit.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `krwlokvukupvvuslzspryupxkxkykoon`, bookmark
+  `plan/browser-test-cleanup/12-appearance-cleanup`, [PR #2150](https://github.com/scode/farhelm/pull/2150/changes).
 
 ## download-regression-fixtures-arm-cleanup-too-late.md
 
