@@ -1,4 +1,5 @@
 import { chooseLauncherHost, launcherHostOptions } from "./helpers/host-picker";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 /**
  * The two-pane shell itself (BUGS_BURNDOWN.md issue 5): the properties the
  * sidebar redesign claims but no interaction test proves on its own —
@@ -68,27 +69,6 @@ import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-
 import { attachFocusTrace, installFocusTrace } from "./helpers/focus-trace";
 import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, restartIdleAgent, waitForTermText, answerYolo } from "./helpers/term";
-
-/**
- * Attempt every owned cleanup step even if a previous release fails.
- * An assertion failure remains the primary failure; cleanup errors accompany
- * it in stderr. With a successful body, cleanup failures fail the test together.
- */
-async function cleanupOwnedSteps(bodyFailed: boolean, steps: [string, () => unknown | Promise<unknown>][]) {
-  const failures: Error[] = [];
-  for (const [label, step] of steps) {
-    try {
-      await step();
-    } catch (error) {
-      failures.push(new Error(`cleanup failed: ${label}`, { cause: error }));
-    }
-  }
-  if (failures.length) {
-    const error = new AggregateError(failures, "owned fixture cleanup failed");
-    if (bodyFailed) console.error(error);
-    else throw error;
-  }
-}
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
