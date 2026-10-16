@@ -6,6 +6,7 @@ import { chooseLauncherHost } from "./helpers/host-picker";
  * have separate integration coverage; these tests make no allocation claim.
  */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import {
   cleanupSession,
   createSession,
@@ -138,6 +139,7 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
   const root = await mkdtemp(path.join(stack.state, "inline-checkouts-"));
   let overrideSet = false;
   let submittedSave: Request | undefined;
+  let bodyFailed = false;
   page.on("request", (outgoing) => {
     if (outgoing.url().endsWith("/api/checkout-root") && outgoing.method() === "PUT") {
       submittedSave = outgoing;
@@ -219,14 +221,26 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
     await expect(overriddenForm.getByRole("option", { name: "acme/bar", exact: true })).toBeVisible();
     await expect(overriddenForm.locator(".checkout-root-field")).toHaveCount(0);
     expect((await cli("show", "--host", String(host.id))).stdout).toContain(`${root} (host override)`);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    // A failed assertion must not race the app-owned save with restoration.
-    const settled = await submittedSave?.response();
-    if (settled) await settled.finished();
-    if (overrideSet) await cli("clear-root", "--host", String(host.id));
-    const restored = await request.put("/api/checkout-root", { data: previous });
-    expect(restored.ok(), await restored.text()).toBe(true);
-    await rm(root, { recursive: true, force: true });
+    // Settle the app-owned save before restoring configuration. A failure in
+    // any release is reported, while the remaining restoration still runs.
+    await cleanupOwnedSteps(bodyFailed, [
+      ["pending checkout save", async () => {
+        const settled = await submittedSave?.response();
+        if (settled) await settled.finished();
+      }],
+      ["host checkout override", async () => {
+        if (overrideSet) await cli("clear-root", "--host", String(host.id));
+      }],
+      ["global checkout folder", async () => {
+        const restored = await request.put("/api/checkout-root", { data: previous });
+        expect(restored.ok(), await restored.text()).toBe(true);
+      }],
+      ["checkout fixture directory", () => rm(root, { recursive: true, force: true })],
+    ]);
   }
 });
 

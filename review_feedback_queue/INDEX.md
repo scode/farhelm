@@ -92,9 +92,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   checkout tests can remove their fixture folders while leaving their trash records behind, contaminating later trash
   listings.
 
-- [`checkout-composer-test-skips-configuration-restoration.md`](checkout-composer-test-skips-configuration-restoration.md)
-  — One cleanup failure can leave later browser tests using this test’s checkout folder and configuration.
-
 - [`agent-checkout-test-compares-lexical-tmp.md`](agent-checkout-test-compares-lexical-tmp.md) — New agent checkout
   tests compare canonical destinations with lexical /tmp paths and fail on macOS.
 
