@@ -81,6 +81,54 @@ fn selection_size(listing: &CheckoutTrashListing) -> usize {
         .len()
 }
 
+/// Keep the host header and frozen confirmation honest about unchecked archives.
+/// Repeated diagnostics count once per ID, and their unmeasured bytes make the
+/// known byte sum partial even when every displayed checkout has a size.
+struct ListingTotals {
+    count: usize,
+    unchecked: usize,
+    bytes: u64,
+    partial: bool,
+}
+
+impl ListingTotals {
+    /// Distinguish checked checkouts from entries the host could not inspect.
+    fn count_label(&self) -> String {
+        let checked = format!("{} {}", self.count, checkouts(self.count));
+        if self.unchecked == 0 {
+            checked
+        } else {
+            let noun = if self.unchecked == 1 {
+                "entry"
+            } else {
+                "entries"
+            };
+            format!("{checked} · {} unchecked {noun}", self.unchecked)
+        }
+    }
+}
+
+/// Summarize listing evidence without granting any deletion authority.
+/// Eligibility still belongs to `target`, including the connection and batch limit.
+fn listing_totals(listing: &CheckoutTrashListing) -> ListingTotals {
+    ListingTotals {
+        count: listing.checkouts.len(),
+        unchecked: listing
+            .issues
+            .iter()
+            .map(|issue| &issue.id)
+            .collect::<HashSet<_>>()
+            .len(),
+        bytes: listing
+            .checkouts
+            .iter()
+            .filter_map(|entry| entry.bytes)
+            .fold(0, u64::saturating_add),
+        partial: !listing.issues.is_empty()
+            || listing.checkouts.iter().any(|entry| entry.bytes.is_none()),
+    }
+}
+
 /// Collapse repeated diagnostic IDs into one selection, keeping every message
 /// visible separately. Sizes with any unknown checkout remain explicitly partial.
 fn target(host: &Host, state: Option<&HostTrash>) -> Option<Target> {
@@ -100,24 +148,16 @@ fn target(host: &Host, state: Option<&HostTrash>) -> Option<Target> {
     if ids.is_empty() || ids.len() > MAX_SELECTION {
         return None;
     }
+    let totals = listing_totals(listing);
     Some(Target {
         host: host.id,
         incarnation: host.incarnation,
         name: host.name.clone(),
         ids,
-        count: listing.checkouts.len(),
-        unchecked: listing
-            .issues
-            .iter()
-            .map(|issue| &issue.id)
-            .collect::<HashSet<_>>()
-            .len(),
-        bytes: listing
-            .checkouts
-            .iter()
-            .filter_map(|entry| entry.bytes)
-            .fold(0, u64::saturating_add),
-        partial: listing.checkouts.iter().any(|entry| entry.bytes.is_none()),
+        count: totals.count,
+        unchecked: totals.unchecked,
+        bytes: totals.bytes,
+        partial: totals.partial,
     })
 }
 
@@ -603,8 +643,9 @@ pub(super) fn TrashControl(
                             let deleting = progress.as_ref().is_some_and(|run| run.pending.contains(&host.id));
                             let show = deleting || !connected(host) || pending || listing.is_none_or(|listing| !listing.checkouts.is_empty() || !listing.issues.is_empty()) || !host_notices.is_empty();
                             let name = display_peer(&host.name);
-                            let host_count = listing.map_or_else(|| "count unknown".into(), |listing| format!("{} {}", listing.checkouts.len(), checkouts(listing.checkouts.len())));
-                            let host_size = if connected(host) && hosts_known && pending { "measuring…".into() } else { listing.map_or_else(|| "size unknown".into(), |listing| space(listing.checkouts.iter().filter_map(|entry| entry.bytes).fold(0, u64::saturating_add), listing.checkouts.iter().any(|entry| entry.bytes.is_none()))) };
+                            let totals = listing.map(listing_totals);
+                            let host_count = totals.as_ref().map_or_else(|| "count unknown".into(), ListingTotals::count_label);
+                            let host_size = if connected(host) && hosts_known && pending { "measuring…".into() } else { totals.as_ref().map_or_else(|| "size unknown".into(), |totals| space(totals.bytes, totals.partial)) };
                             let paths = listing.map(|listing| listing.checkouts.iter().map(|entry| &entry.path)
                                 .chain(listing.issues.iter().map(|issue| &issue.path))
                                 .filter_map(|path| std::path::Path::new(path).parent().map(|path| path.display().to_string()))
@@ -741,6 +782,86 @@ mod tests {
                 "build_version": "0.0.0", "refresh": { "status": "ok", "sessions": 0 } },
         }))
         .expect("connected host fixture")
+    }
+
+    /// Host summaries must not present uninspectable archives as an exact zero.
+    /// Duplicate diagnostics describe one unchecked entry, and a mixed listing
+    /// keeps its measured bytes while disclosing the missing part. The same
+    /// evidence must reach the frozen confirmation without widening its IDs.
+    #[farhelm_testtrace::test]
+    fn host_totals_qualify_unchecked_entries_and_partial_sizes() {
+        let host = host();
+        assert!(connected(&host));
+        let issue = CheckoutTrashIssue {
+            id: "unchecked".into(),
+            path: "/work/trash/unreadable".into(),
+            message: "could not check ownership".into(),
+        };
+        let checkout = |bytes| ArchivedCheckout {
+            id: "known".into(),
+            name: "old".into(),
+            repository: "fixture/repo".into(),
+            path: "/work/trash/old".into(),
+            archived_at: None,
+            bytes,
+        };
+        for (listing, expected_count, expected_size, expected_unchecked) in [
+            (
+                CheckoutTrashListing {
+                    checkouts: vec![],
+                    issues: vec![issue.clone(), issue.clone()],
+                },
+                "0 checkouts · 1 unchecked entry",
+                "0 B measured · partial",
+                1,
+            ),
+            (
+                CheckoutTrashListing {
+                    checkouts: vec![checkout(Some(4096))],
+                    issues: vec![
+                        issue.clone(),
+                        CheckoutTrashIssue {
+                            id: "another".into(),
+                            ..issue.clone()
+                        },
+                    ],
+                },
+                "1 checkout · 2 unchecked entries",
+                "4.0 KiB measured · partial",
+                2,
+            ),
+            (
+                CheckoutTrashListing {
+                    checkouts: vec![checkout(None)],
+                    issues: vec![],
+                },
+                "1 checkout",
+                "0 B measured · partial",
+                0,
+            ),
+            (
+                CheckoutTrashListing {
+                    checkouts: vec![checkout(Some(4096))],
+                    issues: vec![],
+                },
+                "1 checkout",
+                "4.0 KiB",
+                0,
+            ),
+        ] {
+            let totals = listing_totals(&listing);
+            assert_eq!(totals.count_label(), expected_count);
+            assert_eq!(space(totals.bytes, totals.partial), expected_size);
+            let state = HostTrash {
+                incarnation: host.incarnation,
+                loading: false,
+                reply: Some(Ok(listing)),
+            };
+            let selected = target(&host, Some(&state)).expect("settled nonempty listing");
+            assert_eq!(selected.unchecked, expected_unchecked);
+            assert_eq!(selected.ids.len(), selected.count + expected_unchecked);
+            assert_eq!(space(selected.bytes, selected.partial), expected_size);
+        }
     }
 
     /// A row click must select only its checkout, never a neighbouring archive

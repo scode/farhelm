@@ -15015,7 +15015,8 @@
 - Completion criteria: a host listing with unchecked entries never shows an unqualified count or a size without the
   partial mark; an issue-only host no longer reads as an exact zero. A unit test in `trash.rs` (beside the existing
   `target()` tests) covers issue-only and mixed listings. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/trash-totals-unchecked.md`.
+- Execution: complete in change `ououyovrvuwqupomoukqyylrnypmsrqp`, bookmark
+  `plan/trash-totals-unchecked/01-partial-totals`; [PR #2118](https://github.com/scode/farhelm/pull/2118/changes).
 
 ## checkout-override-error-points-to-global-settings.md
 

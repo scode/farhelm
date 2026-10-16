@@ -70,9 +70,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`number-shortcut-test-skips-session-cleanup.md`](number-shortcut-test-skips-session-cleanup.md) — A failed expanded
   shortcut test can leave its agent sessions running for subsequent tests.
 
-- [`trash-host-totals-exclude-unchecked-archives.md`](trash-host-totals-exclude-unchecked-archives.md) — A host with
-  unreadable archived work can display “0 checkouts · 0 B” instead of an unknown or partial total.
-
 - [`repository-selection-keeps-global-search-launch-block.md`](repository-selection-keeps-global-search-launch-block.md)
   — Choosing a valid repository in the new destination field can leave Launch disabled despite a successful checkout
   preview.
