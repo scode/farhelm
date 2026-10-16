@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`checkout-recovery-host-binding`](reports/checkout-recovery-host-binding.report.md) landed 2026-10-15 in #2086: Agent creates into managed checkouts: retry replay bound to the asking host
 - [`template-editor-unsafe-values`](reports/template-editor-unsafe-values.report.md) landed 2026-10-15 in #2087: Template editor shows hidden characters in model and folder, read-only like commands
 - [`codex-guide-hook-warning`](reports/codex-guide-hook-warning.report.md) landed 2026-10-15 in #2091: Codex docs page stops calling the hook warning harmless
 - [`terminal-link-safety`](reports/terminal-link-safety.report.md) landed 2026-10-16 in #2078, #2085, #2092, #2095: Terminal links act only on a real click, on the target the hover honestly shows (four triage outcomes, three complexity gated)
