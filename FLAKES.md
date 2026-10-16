@@ -2021,3 +2021,29 @@ Timeout: 5000ms
 Class: unknown
 
 Cause: unknown
+
+## 2026-10-15 — `closing notifications quiets the bell under a build mismatch` (e2e/tests/notifications.spec.ts)
+
+The full browser phase of deflake sweep `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` failed this test in Chromium, recorder
+run `038d6b7f-5ad7-407a-a20a-db485b857dd8`: the expected notification-bell entry was absent through the five-second
+count timeout. All three isolated classification selections passed unchanged: `728a8cf1-e084-407f-b557-d88de2950852`,
+`cf6fc642-3539-4257-a84b-4c5699234721`, and `312f0cff-7658-4b59-b59b-08f0b2951269`. Other composer and button failures,
+including a permission-tooltip flake, occurred in the same battery; a shared cause is not established. The tested tree
+was clean at `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`, Linux x86_64, with the browser suite on both engines excluding
+known flakes, one worker and zero retries. Classification selected only this test. Recorded tmux was 3.7c, executable
+SHA256 `9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`; locale was `C.UTF-8`. Ambient `FARHELM_*`
+names were scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` were supplied.
+Concurrent machine load and the missing entry's cause were not established. Retained evidence is private temporary
+recorder data and may expire. Disposition: open in TODO.md and excluded from future deflake sweeps; no additional
+reproductions or fix were attempted.
+
+```text
+Locator: locator('.session-bell-entry')
+Expected: 1
+Received: 0
+Timeout: 5000ms
+```
+
+Class: unknown
+
+Cause: unknown
