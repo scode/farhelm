@@ -14684,7 +14684,8 @@
   more is needed, stop and return the item to the maintainer.
 - Completion criteria: a failure after the template write still deletes it, and a failure before the write does not turn
   into a cleanup error. Both tests pass on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `toxxzslprnkzlurlyywskzqrqwkpmzmr`, bookmark
+  `plan/browser-test-cleanup/11-template-ownership`, [PR #2149](https://github.com/scode/farhelm/pull/2149/changes).
 
 ## save-template-composing-escape-discards-draft.md
 

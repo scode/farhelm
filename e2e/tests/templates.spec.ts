@@ -7,6 +7,7 @@
  * test names its own with a timestamp and deletes them afterwards.
  */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type APIRequestContext, type Page } from "@playwright/test";
 import { cleanupSession, createSession, listHosts, openRowMenu, patchPreferences, readPreferences } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
@@ -451,22 +452,25 @@ async function applyTemplate(form: ReturnType<Page["locator"]>, name: string) {
 /** A failed catalog must explain missing search results and recover without losing the launch draft. */
 test("tl: search reports a failed template read and retries it", async ({ page, request }) => {
   const name = `e2e-launcher-list-retry-${Date.now()}`;
-  await putTemplate(request, name, { kind: "agent", agent: "codex" });
-  // Keep the simulated outage on this helm's build; an absent header would
-  // also trigger the unrelated build-skew banner.
-  const templatesReply = await request.get("/api/templates");
-  expect(templatesReply.ok()).toBe(true);
-  const helmBuild = templatesReply.headers()["x-farhelm-build"];
-  expect(helmBuild).toBeTruthy();
-  let failReads = true;
-  let failedReads = 0;
-  await page.route("**/api/templates", async (route) => {
-    if (route.request().method() === "GET" && failReads) {
-      failedReads++;
-      await route.fulfill({ status: 503, contentType: "text/plain", headers: { "x-farhelm-build": helmBuild }, body: "temporary template list failure" });
-    } else await route.continue();
-  });
+  let bodyFailed = false;
+  // The write may succeed even if a later setup step fails; deletion owns the
+  // name before the first request and tolerates an absent template.
   try {
+    await putTemplate(request, name, { kind: "agent", agent: "codex" });
+    // Keep the simulated outage on this helm's build; an absent header would
+    // also trigger the unrelated build-skew banner.
+    const templatesReply = await request.get("/api/templates");
+    expect(templatesReply.ok()).toBe(true);
+    const helmBuild = templatesReply.headers()["x-farhelm-build"];
+    expect(helmBuild).toBeTruthy();
+    let failReads = true;
+    let failedReads = 0;
+    await page.route("**/api/templates", async (route) => {
+      if (route.request().method() === "GET" && failReads) {
+        failedReads++;
+        await route.fulfill({ status: 503, contentType: "text/plain", headers: { "x-farhelm-build": helmBuild }, body: "temporary template list failure" });
+      } else await route.continue();
+    });
     const form = await openNew(page);
     await form.getByLabel("name (optional)").fill("preserved draft");
     const search = form.locator('.launch-composer-search input[role="combobox"]');
@@ -485,9 +489,14 @@ test("tl: search reports a failed template read and retries it", async ({ page, 
     await search.fill(`tl:${name}`);
     await expect(form.getByRole("option", { name: `Template: ${name}`, exact: true })).toBeVisible();
     await expect(form.getByLabel("name (optional)")).toHaveValue("preserved draft");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await page.unroute("**/api/templates");
-    await deleteTemplate(request, name);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["template route", () => page.unroute("**/api/templates")],
+      ["template", () => deleteTemplate(request, name)],
+    ]);
   }
 });
 
