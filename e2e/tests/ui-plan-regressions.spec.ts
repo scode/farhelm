@@ -2,6 +2,7 @@
  * Each case owns its session or routes; the fixture helm and supervisor stay
  * real, and injected responses carry the build of that same helm. */
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { cleanupSession, createResumableSession, createSession, forceBuildSkew, listSessions, openHostMenu, openRowMenu, stopSession, stubFeed } from "./helpers/fleet";
 import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
@@ -9,7 +10,9 @@ import { FAKE_AGENT_INVOCATION, runInShell, shellMarker } from "./helpers/termin
 
 /** Header writes remain attended work under build skew. A successful restart
  * must update the sidebar's ended state, and Replace must remove its source
- * and show its replacement without relying on background invalidations. */
+ * and show its replacement without relying on background invalidations.
+ * Source and replacement cleanup remain independent so a failed release
+ * cannot leave the other agent running in the shared test stack. */
 test("header restart and replace refresh the sidebar under build skew", async ({ page, request }) => {
   const source = await createResumableSession(request, { title: `header-skew-${Date.now()}`, cwd: "/tmp" });
   let agentAttachments = 0;
@@ -18,6 +21,7 @@ test("header restart and replace refresh the sidebar under build skew", async ({
     if (url.pathname === `/api/sessions/${encodeURIComponent(source.id)}/term` && !url.searchParams.has("tab")) agentAttachments++;
   });
   let replacement: string | undefined;
+  let bodyFailed = false;
   try {
     await stopSession(request, source.id);
     await expect.poll(async () => (await listSessions(request)).sessions.find((s) => s.id === source.id)?.status.state, { timeout: 20_000 }).toBe("exited");
@@ -47,10 +51,15 @@ test("header restart and replace refresh the sidebar under build skew", async ({
     await expect(sourceRow).toHaveCount(0, { timeout: 20_000 });
     await expect(page.locator(`[data-session-id="${replacement}"]`)).toBeVisible();
     await waitForSessionRevealed(page, replacement!);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    await cleanupSession(request, source.id);
-    if (replacement) await cleanupSession(request, replacement);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["browser routes", () => page.unrouteAll({ behavior: "ignoreErrors" })],
+      ["source session", () => cleanupSession(request, source.id)],
+      ["replacement session", () => replacement && cleanupSession(request, replacement)],
+    ]);
   }
 });
 

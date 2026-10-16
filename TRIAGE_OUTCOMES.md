@@ -14934,7 +14934,8 @@
 - Completion criteria: a readiness-wait failure leaves no session behind, and a source cleanup failure still attempts
   the replacement's cleanup. The affected specs pass on Chromium and WebKit. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/browser-test-cleanup.md`.
+- Execution: complete in jj change `uwmwrwvtllotvqxtozpwxqnlnlvkynrn`, bookmark
+  `plan/browser-test-cleanup/06-resumable-ownership`, [PR #2143](https://github.com/scode/farhelm/pull/2143/changes).
 
 ## file-stat-test-compares-unresolved-temp-path.md
 

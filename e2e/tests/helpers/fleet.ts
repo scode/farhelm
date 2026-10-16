@@ -13,6 +13,7 @@ import { APIRequestContext, expect, Locator, Page, Route, WebSocketRoute } from 
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { recordPage } from "./timeline";
+import { cleanupOwnedSteps } from "./cleanup";
 
 /** The opt-in registry owns no application work; mounted Rust scopes own its getters. */
 type ReaderRegistry = { version: number; getters: Set<() => string>; error?: string };
@@ -423,6 +424,8 @@ async function waitForResumable(request: APIRequestContext, id: string, title: s
  * agent. The wait is part of the helper because the report arrives from the
  * launched process, after the create reply, and a spec that restarted
  * before it landed would meet Restart unavailable.
+ * Until readiness succeeds, this helper owns the created session: a failed
+ * poll must release it because the caller has not received its ID yet.
  */
 export async function createResumableSession(
   request: APIRequestContext,
@@ -445,8 +448,13 @@ export async function createResumableSession(
   });
   await ok(response, `creating resumable session ${body.title}`);
   const created: SessionRow = await response.json();
-  await waitForResumable(request, created.id, body.title);
-  return created;
+  try {
+    await waitForResumable(request, created.id, body.title);
+    return created;
+  } catch (error) {
+    await cleanupOwnedSteps(true, [["unready resumable session", () => cleanupSession(request, created.id)]]);
+    throw error;
+  }
 }
 
 /**
@@ -459,6 +467,8 @@ export async function createResumableSession(
  * flags must come before anything it does not know, hence the order.
  * Created with `confirm_yolo`: the session is the fixture, not the question
  * under test.
+ * As with the ordinary resumable factory, a failed readiness check must
+ * release the session before ownership can transfer to its caller.
  */
 export async function createResumableYoloSession(
   request: APIRequestContext,
@@ -482,8 +492,13 @@ export async function createResumableYoloSession(
   });
   await ok(response, `creating resumable YOLO session ${body.title}`);
   const id = (await response.json()).id as string;
-  await waitForResumable(request, id, body.title);
-  return id;
+  try {
+    await waitForResumable(request, id, body.title);
+    return id;
+  } catch (error) {
+    await cleanupOwnedSteps(true, [["unready YOLO session", () => cleanupSession(request, id)]]);
+    throw error;
+  }
 }
 
 /** Rename a session — the cheapest single-request mutation there is, which
