@@ -103,3 +103,72 @@ targeted checks.
 
 Fresh Sol readers at medium effort checked every commit and PR's wording. Implementation remained in the executor; only
 the prescribed reviews were delegated.
+
+### Landing
+
+Landed on its own in round 70, as five PRs (#2160 to #2164), merged bottom-up. They are unchanged from what the report
+describes, apart from one changelog correction made during the landing (below).
+
+#### What landed since the stack was based, and whether it interacted
+
+The executor based the stack on main after rounds 68 and 69 had landed. Those rounds brought the wrapped web-link hover
+fix and the browser-test cleanup work, which edited two of the same browser spec files. Between that base and the
+landing, only this plan's own claim and report reached main, so the landing rebase changed nothing outside `plans/`.
+
+I reviewed the stack against what was already on main, and a fresh-context reviewer did the same independently. Neither
+found an interaction:
+
+- The new browser tests follow the cleanup rules round 69 just established. The retry test creates its fixtures inside
+  its cleanup scope and releases them through the shared cleanup helper. The inline-setup test keeps its new steps
+  inside the existing cleanup. The checkout composer spec's git commands are still isolated from the caller's
+  repository.
+- All five PRs edit the same launcher component, and none undoes another. The retry fix (#2160) recognizes an unchanged
+  retry by comparing what is submitted. The custom-flags fix (#2163) only changes when a search choice rewrites the
+  flags text, so an unchanged retry still submits identical text. Choosing a repository (#2161) closes the list, so the
+  new keyboard scrolling (#2164) does not fire on a selection. The setup check (#2162) does not depend on the repository
+  search that #2161 clears.
+
+#### Fix made during the landing: one changelog entry folded into its feature's entry
+
+The custom-flags fix (#2163) repairs behavior that the custom permission flags feature (#1995) introduced. That feature
+has not shipped in any release yet; the latest is v0.28.2. The changelog rules say a fix to unreleased work edits that
+work's entry instead of adding a second one, since users never saw the bug. So the landing removed #2163's separate
+"fixed" entry and added one sentence to the pending custom-flags entry: the flags you type, including unfinished quotes
+and spacing, are kept when you pick a model through search or reselect the same agent. The other four PRs fix behavior
+that has shipped, so their separate entries stay. No code changed.
+
+#### Possible follow-ups
+
+- A new code comment in the checkout-setup fix (#2162) says a configuration change must make the launcher check the
+  setup again. That holds when a repository is selected. With none selected and the setup field showing, the reviewer
+  found that the launcher keeps its earlier answer. In that case the field can stay visible after the folder was set
+  from somewhere else. This is not a regression, since before #2162 the launcher never re-checked in that case either.
+  But the comment claims more than the code does, and the remaining gap may be worth a small fix. The report's "Things
+  you should know" states that configuration changes trigger a fresh setup check; that holds only while a repository is
+  selected.
+- SPEC_impl.md describes the launcher's remembered setup answer as tied to the host connection and installation. It now
+  also expires when the launcher sees the configuration change. That does not contradict the spec, but one clause would
+  keep it exact.
+
+#### Checks
+
+The executor ran the launcher's unit tests, clippy and the web build at the stack tip, but ran each targeted browser
+regression only at its own PR's revision. All five PRs change one component, so the combined result needed a browser run
+of its own before landing.
+
+- Run now, at the rebased tip, after fresh `cargo build` and web release builds: the three browser spec files the stack
+  touches, in full, on Chromium and WebKit, through the test recorder with the pinned tmux, one worker and no retries:
+  `npx playwright test terminal-create-idempotency.spec.ts github-checkout-composer.spec.ts custom-permissions.spec.ts`.
+  70 of 70 passed with no skips, run `fd816c03-cc60-40f9-8ea3-6992dfa3e017`. That covers all five regressions and every
+  other case in those three files, together.
+- Run now: `cargo fmt --all -- --check`, and `python3 releasing/check-changelog.py format` after the fragment change,
+  both clean.
+- Reused: the executor's final-tip UI unit run `72d572bf-687b-47bc-bc9e-abff9e168559`, its clippy runs and its
+  test-sleep, Markdown formatting and agent-instruction checks. They covered the report's final tip (`c054be6d`). The
+  landing rebase crossed only `plans/` bookkeeping and the landing changed only a changelog fragment, so the code they
+  tested is what landed.
+- Skipped: broader Rust, browser, desktop, installer, provisioning and hosted CI runs, for the reasons the report gives.
+
+The report's PR list says each PR adds a changelog fragment; #2163 no longer does, for the reason above. Apart from
+that, and the setup-check qualification under "Possible follow-ups", nothing in the executor's report became untrue at
+landing.
