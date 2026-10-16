@@ -83,9 +83,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`checkout-settings-test-restores-before-save-settles.md`](checkout-settings-test-restores-before-save-settles.md) — A
   failed browser test can leave its checkout-folder setting behind and affect later tests.
 
-- [`checkout-override-error-points-to-global-settings.md`](checkout-override-error-points-to-global-settings.md) — A
-  checkout failure can tell users to change the folder in Settings even though that host ignores the Settings value.
-
 - [`checkout-folder-save-trims-literal-path.md`](checkout-folder-save-trims-literal-path.md) — Saving an existing
   checkout-folder setting can change which directory it names, even without editing it.
 

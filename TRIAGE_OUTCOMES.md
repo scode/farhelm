@@ -15044,7 +15044,9 @@
   return the item to the maintainer.
 - Completion criteria: the unusable-folder error names both the Settings remedy and the command-line remedy for a host
   override; tests asserting the message are updated. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/checkout-override-error-wording.md`.
+- Execution: jj change `ymwllwuxlutmylmyrlunrqrukzlslmkw`, bookmark
+  `plan/checkout-override-error-wording/01-override-remedy`; draft PR
+  https://github.com/scode/farhelm/pull/2119/changes.
 
 ## link-click-tests-skip-preference-restoration.md
 
