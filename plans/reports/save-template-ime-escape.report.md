@@ -59,3 +59,45 @@ correction review found no remaining issues and explicitly accepted the scope. B
 checked against the diff; the review received the full test-authoring checklist and performed static inspection only. A
 separate gpt-6.1-sol medium wording cold read passed. The documentation pass covers the key-ownership contract,
 propagation comment and regression's purpose. No unresolved finding or scope departure remains.
+
+### Landing
+
+Landed as #2115, the third of the round's seven plans, tested stacked with the others on main.
+
+#### Review
+
+An independent fresh-context review found nothing blocking for the plan as scoped: plain Escape still cancels, a
+composing Escape now only stops the key from reaching the launcher, and the test checks its setup. The panel's Escape
+handling was released, so a "fixed" entry is right.
+
+#### Fix made while landing
+
+The reviewer found the fix very likely does not work in the Mac app or Safari: WebKit ends input-method composition
+before the keydown of the key that ends it, so Escape arrives with `isComposing` false (WebKit bug 165004). The usual
+extra check (key code 229) is not available through Dioxus on the desktop renderer. The changelog fragment now says the
+fix does not yet apply in the Mac app or Safari, instead of claiming it everywhere.
+
+#### Left as is
+
+- Follow-up for the maintainer: the same WebKit gap affects about 25 other input-method guards across the UI, including
+  this panel's released composing-Enter fix. The new browser test fakes an Escape keydown with `isComposing: true`,
+  which real WebKit does not send, so its WebKit pass does not show the Mac app is fixed.
+- Noted, not widened: the launcher's own Escape handler has no composing check, so a composing Escape in its search
+  field (results closed) or repository field (no suggestions) still cancels the whole launcher draft.
+
+#### Checks
+
+Run on all seven of this round's plans stacked on main (managed-checkout-row-accessibility, download-long-name-copies,
+save-template-ime-escape, helm-start-without-ca-bundle, stopped-session-launch-error, trash-totals-unchecked,
+checkout-override-error-wording), with every landing fix in:
+
+- `cargo fmt --all -- --check`, `dprint check`, the changelog lint and the sleep checker (301 delays, none missing a
+  reason); `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`, the UI crate's
+  clippy with the desktop feature and `cargo check -p farhelm-desktop`.
+- Through the recorder, after rebuilding the CLI: the protocol, helm and supervisor packages in full with pinned tmux,
+  run `4256456b-4340-4e64-86a5-85aa71206a7a`: 2395 passed; the UI crate with the desktop feature, run
+  `5d0c7c3a-4d29-4a92-a8e2-a1eba6893786`: 656 passed.
+- The JS harness (257 passed) and the website build.
+- The github-checkouts, templates, trash-dialog, sidebar, provisioning and tooltip-coverage specs on Chromium and
+  WebKit, run `7f4cef76-eea8-4b05-9a31-1260bb14498a`: 456 passed.
+- Not run: the CLI's end-to-end targets and other browser specs; no PR in this round changes them.
