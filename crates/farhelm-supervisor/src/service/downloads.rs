@@ -415,11 +415,14 @@ mod tests {
         let file = root.path().join("report.txt");
         tokio::fs::write(&file, b"report").await.unwrap();
         symlink(&file, root.path().join("link.txt")).unwrap();
+        // Both spellings report the resolved file, including when the temporary
+        // root itself is a symlink. Establish that expectation before inspection.
+        let canonical_file = std::fs::canonicalize(&file).unwrap();
         for path in [&file, &root.path().join("link.txt")] {
             let (info, opened) = inspect(path.to_owned()).await.unwrap();
             assert_eq!(info.status, DownloadFileStatus::Ready);
             assert_eq!(info.size, Some(6));
-            assert_eq!(info.path, file.to_str().unwrap());
+            assert_eq!(info.path, canonical_file.to_str().unwrap());
             assert!(opened.is_some());
         }
         assert_eq!(
