@@ -33,6 +33,7 @@ import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipRetu
 // =====================================================================
 
 import { expect, test, newObservedContext } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { Page, APIRequestContext, Locator, Route } from "@playwright/test";
 import {
   createResumableSession,
@@ -1362,6 +1363,7 @@ test.describe("multi-host", () => {
     const route = `/api/hosts/${remote.id}/appearance`;
     const session = await createSession(request, { title: `host-appearance-${Date.now()}`, host: remote.id });
     let observerContext: Awaited<ReturnType<typeof newObservedContext>> | undefined;
+    let bodyFailed = false;
     try {
       observerContext = await newObservedContext(browser, timeline, { storageState: await page.context().storageState() });
       await page.goto("/");
@@ -1426,11 +1428,20 @@ test.describe("multi-host", () => {
       await expect(dialog).toBeVisible();
       await expect(dialog.locator(".host-settings-appearance")).toHaveCount(0);
       await expect(dialog.locator(".host-settings-mark [data-glyph=local]")).toBeVisible();
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
     } finally {
-      await observerContext?.close();
-      const reset = await request.post(route, { data: { icon: remote.icon, color: remote.color } });
-      expect(reset.ok(), "restore the shared fleet's original appearance").toBe(true);
-      await cleanupSession(request, session.id);
+      // Browser closure and shared appearance restoration may fail separately;
+      // neither may leave this test's remote agent running.
+      await cleanupOwnedSteps(bodyFailed, [
+        ["observer context", () => observerContext?.close()],
+        ["host appearance", async () => {
+          const reset = await request.post(route, { data: { icon: remote.icon, color: remote.color } });
+          expect(reset.ok(), "restore the shared fleet's original appearance").toBe(true);
+        }],
+        ["session", () => cleanupSession(request, session.id)],
+      ]);
     }
   });
 

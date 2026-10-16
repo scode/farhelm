@@ -84,9 +84,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`short-main-pane-hides-approval-requests.md`](short-main-pane-hides-approval-requests.md) — In a sufficiently short
   window, waiting approval requests disappear until the user enlarges the window or changes the selected session.
 
-- [`appearance-test-restoration-skips-session-cleanup.md`](appearance-test-restoration-skips-session-cleanup.md) — A
-  failed browser test can leave its session and agent running in the shared test stack.
-
 - [`repository-picker-selection-moves-offscreen.md`](repository-picker-selection-moves-offscreen.md) — When repository
   suggestions overflow, keyboard users cannot see which repository Enter will select.
 
