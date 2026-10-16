@@ -1506,10 +1506,12 @@ test.describe("multi-host", () => {
     }
   });
 
-  // The YOLO-launch setting round-trips through the helm from the host's settings dialog.
-  // Every host starts asking before YOLO launches, so the checkbox starts clear; the local
-  // row is used because it always exists. The setting is restored to asking first whatever
-  // happens, since the stack is shared by the specs that follow.
+  /**
+   * The host's YOLO setting must round-trip through the helm and explain its
+   * effect on both explicit YOLO and unclassified launches. The local row
+   * always exists; restoring its initial asking state keeps this shared fleet
+   * usable by later specs even when the toggle check fails.
+   */
   test("host-settings-yolo-without-asking: the toggle is stored by the helm", async ({ page, request }) => {
     const local = (await apiHosts(request)).find((host: any) => host.kind === "local");
     expect(local.yolo_without_asking).toBe(false);
@@ -1521,7 +1523,8 @@ test.describe("multi-host", () => {
       const dialog = page.locator(".host-settings-dialog");
       const toggle = dialog.locator(".host-yolo-without-asking-toggle");
       const help = dialog.locator(".host-settings-yolo .host-settings-help");
-      await expect(help).toContainText("Farhelm asks you to confirm each YOLO launch on this host.");
+      await expect(help).toContainText("Unclassified launches on the agent's own setting count as YOLO too.");
+      await expect(help).toContainText("Farhelm asks you to confirm each of these launches on this host.");
       await expect(toggle).not.toBeChecked();
       // Styling the switch must not replace checkbox semantics. Establish
       // focus before Space, then prove the real helm stored the change.
@@ -1534,7 +1537,7 @@ test.describe("multi-host", () => {
           (await apiHosts(request)).find((host: any) => host.id === local.id).yolo_without_asking,
         )
         .toBe(true);
-      await expect(help).toContainText("YOLO sessions start on this host without asking you to confirm.");
+      await expect(help).toContainText("These sessions start on this host without asking you to confirm.");
       await expect(dialog.locator(".host-settings-mark [data-glyph=local]")).toHaveCount(1);
       await expect(dialog.locator('[data-setting="destination"]')).toHaveCount(0);
       await expect(dialog.locator(".host-settings-footer")).toContainText("changes save as you make them");
