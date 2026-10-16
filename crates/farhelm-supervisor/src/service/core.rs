@@ -7624,6 +7624,8 @@ impl Supervisor {
     /// canonical path. Unresolved `..` and dangling symlinks refuse: neither is
     /// evidence of a future directory at that spelling. Refuse paths the UTF-8
     /// wire cannot represent exactly. Resolution itself never creates anything.
+    /// The helm has already resolved global settings and per-host overrides, so
+    /// unusable-path advice names both remedies without guessing the source.
     async fn resolve_checkout_root(&self, root: &str) -> anyhow::Result<String> {
         if root.len() > 4096 {
             return Err(RequestError::new(
@@ -7645,7 +7647,8 @@ impl Supervisor {
                 ErrorKind::InvalidRequest,
                 format!(
                     "the checkout folder is not usable on this host: {error}; \
-                     change the folder in Settings"
+                     change the folder in Settings, or, if this host has its own folder, \
+                     with farhelm helm checkout-config set-root or clear-root --host"
                 ),
             )
         };
@@ -30897,6 +30900,8 @@ exit 0
     /// Missing filesystem state does not permit guessing through a dangling
     /// symlink or `..`, and does not free the archive namespace. A symlink
     /// retargeted after preview must refuse before either prospective root exists.
+    /// Unusable-root advice must include the command-line remedy for a host
+    /// override, since Settings can only change the all-hosts folder.
     #[farhelm_testtrace::test]
     async fn missing_checkout_roots_refuse_ambiguous_paths_reserved_names_and_changed_binding() {
         let state = StateDir::new();
@@ -30933,6 +30938,21 @@ exit 0
         }
         assert!(!home.path().join("missing").exists());
         assert!(!home.path().join("absent-target").exists());
+        let message = sup
+            .resolve_checkout_root(dangling.to_str().unwrap())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("change the folder in Settings"),
+            "{message}"
+        );
+        assert!(
+            message.contains(
+                "if this host has its own folder, with farhelm helm checkout-config set-root"
+            ),
+            "{message}"
+        );
         let future = home.path().join("future");
         let error = Supervisor::github_checkout_preview(
             &sup,
