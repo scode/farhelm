@@ -1995,3 +1995,29 @@ called `Result::unwrap()` on an `Err` value: BackendFailure { context: "stopping
 Class: product
 
 Cause: established — the missing-path matcher excludes uutils's errno suffix.
+
+## 2026-10-15 — `guarded choices explain each agent and Cursor keeps its own setting` (e2e/tests/guarded-permissions.spec.ts)
+
+The full browser phase of deflake sweep `39833a5d-0dc6-4e27-a6f2-e0b3bf30c0ad` failed this test in Chromium, recorder
+run `038d6b7f-5ad7-407a-a20a-db485b857dd8`: the Codex permission explanation was present in the tooltip element, but the
+element remained hidden through the five-second visibility timeout. All three isolated classification selections passed
+unchanged: `880d8bb1-7fa3-4ded-a739-9cf48eb8c6cf`, `d92ab76c-7c69-4210-9e60-3061a1c57a50`, and
+`6c7b79a1-4741-4036-a125-11662bb71031`. Other button and composer tests failed deterministically in the same battery; no
+shared cause is established. The tested tree was clean at `75af240c09c7ecd5b81a0fcba9e03f204b0be0a7`, Linux x86_64, with
+the browser suite on both engines excluding known flakes, one worker and zero retries. Classification selected only this
+test. Recorded tmux was 3.7c, executable SHA256 `9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`;
+locale was `C.UTF-8`. Ambient `FARHELM_*` names were scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and
+`FARHELM_TEST_TRACE_DIR` were supplied. Concurrent machine load and the tooltip's pointer/focus state were not
+established. Retained evidence is private temporary recorder data and may expire. Disposition: open in TODO.md and
+excluded from future deflake sweeps; no additional reproductions or fix were attempted.
+
+```text
+Locator: locator('body > .farhelm-tooltip')
+Expected: visible
+Received: hidden
+Timeout: 5000ms
+```
+
+Class: unknown
+
+Cause: unknown
