@@ -172,6 +172,11 @@ for (const olderAction of ["late refusal", "YOLO cancellation"] as const) {
     let olderDispatched = false;
     const keys: string[] = [];
     try {
+      if (olderAction === "YOLO cancellation") {
+        // The pending question is intentionally kept open while another row
+        // is used. Reserve room for that question without scrolling either row.
+        await page.setViewportSize({ width: 1280, height: 1100 });
+      }
       older = await createSession(request, { title: `replace-older-${Date.now()}` });
       newer = await createSession(request, { title: `replace-newer-${Date.now()}` });
       const olderEndpoint = `**/api/sessions/${older.id}/replace`;
@@ -203,7 +208,14 @@ for (const olderAction of ["late refusal", "YOLO cancellation"] as const) {
       await confirmSidebarReplace(olderRow);
       await expect.poll(() => olderDispatched).toBe(true);
       const question = page.locator(".yolo-confirmation");
-      if (olderAction === "YOLO cancellation") await expect(question).toBeVisible();
+      if (olderAction === "YOLO cancellation") {
+        await expect(question).toBeVisible();
+        // This is a retry-intent race, not a scroll-dismissal test. The older
+        // question and both source rows must fit before opening the newer
+        // menu: scrolling its toggle into view can dismiss the menu again.
+        await expect(olderRow).toBeInViewport({ ratio: 1 });
+        await expect(newerRow).toBeInViewport({ ratio: 1 });
+      }
 
       await confirmSidebarReplace(newerRow);
       await expect(newerRow.locator(".action-error").first()).toContainText("replace:");
