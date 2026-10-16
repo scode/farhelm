@@ -41,6 +41,7 @@
 // confirm.
 // ---------------------------------------------------------------------
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { cleanupSession, waitForTermText } from "./helpers/term";
@@ -450,6 +451,9 @@ function countUploads(page: Page): {
  * Reuses the shared suite's `createTabSession` factory: it already mints a
  * per-test working directory and registers it for cleanup, and an
  * attachment test wants exactly that.
+ * The caller owns cleanup only after this helper returns. Until then, a failed
+ * navigation or readiness check must release the session before its directory
+ * can be removed by the suite's teardown.
  */
 async function openAttachmentSession(
   page: Page,
@@ -457,11 +461,17 @@ async function openAttachmentSession(
   title: string,
 ): Promise<{ id: string; cwd: string }> {
   const session = await createTabSession(request, title);
-  await page.goto("/");
-  await page.locator(`[data-session-id="${session.id}"]`).click();
-  await waitForSessionRevealed(page, session.id);
-  await waitForTermText(page, "FAKE-AGENT READY");
-  return session;
+  try {
+    await page.goto("/");
+    await page.locator(`[data-session-id="${session.id}"]`).click();
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    return session;
+  } catch (error) {
+    // Report a failed release alongside the setup failure that triggered it.
+    await cleanupOwnedSteps(true, [["attachment session", () => cleanupSession(request, session.id)]]);
+    throw error;
+  }
 }
 
 // The headline flow, with nothing faked but the event container: a file

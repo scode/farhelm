@@ -111,9 +111,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`sound-tests-skip-remaining-cleanup-and-preferences.md`](sound-tests-skip-remaining-cleanup-and-preferences.md) — A
   failed browser-test cleanup can leave sessions and shared preferences behind, contaminating later tests.
 
-- [`paste-regression-loses-session-cleanup-ownership.md`](paste-regression-loses-session-cleanup-ownership.md) — A
-  failed browser-test setup can leave its fixture agent running and then remove its working directory.
-
 - [`checkout-composer-test-skips-configuration-restoration.md`](checkout-composer-test-skips-configuration-restoration.md)
   — One cleanup failure can leave later browser tests using this test’s checkout folder and configuration.
 
