@@ -1103,11 +1103,17 @@
    * the Enter meant for the card into agent input and leave the agent's
    * request unanswered. Taking focus from the separator would similarly
    * turn an intended width adjustment into agent input.
+   * A notification list also owns focus while it is open. A late replay
+   * taking it would dismiss the list and mark its entries read before the
+   * user finished inspecting them. Cover the opening bell too, before the
+   * list's mount has transferred focus into its panel.
    */
   function keyboardHeldElsewhere() {
     if (document.querySelector(OPEN_MODAL_SELECTOR)) return true;
     const active = document.activeElement;
-    return !!(active && active.closest && active.closest(".approval-cards, .sidebar-resize-handle"));
+    return !!(active && active.closest && active.closest(
+      '.approval-cards, .sidebar-resize-handle, .session-bell-flyout, .session-row-bell[aria-expanded="true"]',
+    ));
   }
 
   const islands = new Map();
