@@ -9,6 +9,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [landing 66a0b2] `download-long-name-copies.md` — A second desktop download of a file with a near-limit name shortens the stem so the numbered copy fits (gated)
 - [landing 66a0b3] `save-template-ime-escape.md` — Escape during input-method composition no longer closes the save-template panel and its draft (gated)
 - [landing 66a0b4] `helm-start-without-ca-bundle.md` — A Linux helm without CA certificates starts, with downloads refusing, instead of exiting at startup (gated)
-- [complete] `stopped-session-launch-error.md` — A cached launch error no longer overrides a session's recorded stopped status (gated)
+- [landing 66a0b5] `stopped-session-launch-error.md` — A cached launch error no longer overrides a session's recorded stopped status (gated)
 - [complete] `trash-totals-unchecked.md` — A host's trash totals are marked partial or unknown when unchecked entries exist, instead of showing 0 B (gated)
 - [complete] `checkout-override-error-wording.md` — A checkout failure caused by a per-host folder override names that override instead of pointing at Settings (gated)
