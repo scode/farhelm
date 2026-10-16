@@ -14035,7 +14035,8 @@
   directory with `--state-dir=`, and it parses back to the same path. The default-environment advice is unchanged. Add a
   unit regression in `setup.rs` with `xdg_state_home` set and no `--state-dir`. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/setup-advice-state-directory.md`.
+- Execution: complete in jj change `vpxnqpklplpx`, bookmark `plan/setup-advice-state-directory/01-state-dir-advice`,
+  [PR #2110](https://github.com/scode/farhelm/pull/2110/changes).
 
 ## claude-trust-browser-fixtures-escape-cleanup.md
 
