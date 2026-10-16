@@ -1142,7 +1142,8 @@ fn on_host<T>(result: anyhow::Result<T>, host_name: &str) -> anyhow::Result<T> {
 }
 
 /// The intent key an agent's create or clone is stored under on the target:
-/// the agent's own key, scoped to the session and authenticated host that asked.
+/// the agent's own key, scoped to the registry, session and authenticated host
+/// that asked.
 ///
 /// Keys are chosen by agents, and nothing else in a request records who
 /// asked, so an unscoped key let one session replay another's result: a
@@ -1160,7 +1161,12 @@ fn on_host<T>(result: anyhow::Result<T>, host_name: &str) -> anyhow::Result<T> {
 /// (or checkout) instead of returning the earlier one. The host is the
 /// registry entry the request arrived on, which approvals follow across a
 /// destination change or an adopted identity (SPEC.md, 2026-10-10).
+/// The registry's durable namespace distinguishes the same host row ID in a
+/// fresh database after recovery. Every database gains one at upgrade, so an
+/// in-flight pre-upgrade retry needs approval again rather than reusing the
+/// earlier attempt's reservation.
 fn asker_scoped_intent_key(
+    registry_namespace: &str,
     asking_host: HostId,
     asking_session: &str,
     key: Option<String>,
@@ -1168,6 +1174,8 @@ fn asker_scoped_intent_key(
     use sha2::Digest as _;
     key.map(|key| {
         let mut hash = sha2::Sha256::new();
+        hash.update((registry_namespace.len() as u64).to_be_bytes());
+        hash.update(registry_namespace.as_bytes());
         hash.update(asking_host.to_be_bytes());
         for part in [asking_session, key.as_str()] {
             hash.update((part.len() as u64).to_be_bytes());
@@ -1178,7 +1186,7 @@ fn asker_scoped_intent_key(
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
-        format!("agent-v2-{digest}")
+        format!("agent-v3-{digest}")
     })
 }
 
@@ -1286,7 +1294,15 @@ async fn create_for_agent(
         Some(_) => edits.request_fingerprint()?,
         None => None,
     };
-    let intent_key = asker_scoped_intent_key(origin.host, asking_session, intent_key);
+    let intent_key = match intent_key {
+        Some(key) => asker_scoped_intent_key(
+            &state.store.registry_namespace().await?,
+            origin.host,
+            asking_session,
+            Some(key),
+        ),
+        None => None,
+    };
     let resolved = resolve_agent_create(state, origin, &edits).await?;
     if resolved.resolution.github_repo.is_some() {
         // Only the helm turns session-authenticated repository intent into
@@ -2235,6 +2251,15 @@ async fn clone_for_agent(
         verb = "clone",
         "an agent is cloning a session"
     );
+    let intent_key = match request.intent_key {
+        Some(key) => asker_scoped_intent_key(
+            &state.store.registry_namespace().await?,
+            origin.host,
+            asking_session,
+            Some(key),
+        ),
+        None => None,
+    };
     let session = on_host(
         crate::sessions::do_create_session(
             state,
@@ -2247,11 +2272,7 @@ async fn clone_for_agent(
                 title: Some(title),
                 cols: crate::sessions::default_cols(),
                 rows: crate::sessions::default_rows(),
-                intent_key: asker_scoped_intent_key(
-                    origin.host,
-                    asking_session,
-                    request.intent_key,
-                ),
+                intent_key,
                 github_checkout: None,
                 origin: crate::sessions::CreateOrigin::Agent,
                 // A clone that comes back as the SOURCE or ASKING session is
@@ -2661,8 +2682,8 @@ mod tests {
     use crate::hosts::{HostStateView, HostView, RefreshView};
     use farhelm_proto::{RestartOffer, SessionInfo};
 
-    /// An agent's key belongs to one asking session on one authenticated host,
-    /// including when another host claims the same session ID and raw key.
+    /// An agent's key belongs to one registry, asking session and authenticated
+    /// host, including when another host claims the same session ID and raw key.
     ///
     /// Why it matters: nothing else in a create or clone records who asked,
     /// so a child re-running its parent's keyed create used to get the
@@ -2672,26 +2693,82 @@ mod tests {
     /// when the supervisor supplies an unusually long session ID. No key
     /// stays no key; retrying the same tuple keeps the stored key.
     #[farhelm_testtrace::test]
-    fn agent_intent_keys_are_scoped_to_the_asking_host_and_session() {
-        let parent = asker_scoped_intent_key(1, "parent-session", Some("k".into()));
-        let child = asker_scoped_intent_key(1, "child-session", Some("k".into()));
+    fn agent_intent_keys_are_scoped_to_the_registry_host_and_session() {
+        let namespace = "first-registry";
+        let parent = asker_scoped_intent_key(namespace, 1, "parent-session", Some("k".into()));
+        let child = asker_scoped_intent_key(namespace, 1, "child-session", Some("k".into()));
         assert_ne!(parent, child);
         assert_ne!(
             parent,
-            asker_scoped_intent_key(2, "parent-session", Some("k".into()))
+            asker_scoped_intent_key(namespace, 2, "parent-session", Some("k".into()))
+        );
+        assert_ne!(
+            parent,
+            asker_scoped_intent_key("other-registry", 1, "parent-session", Some("k".into()))
         );
         assert_eq!(
             parent,
-            asker_scoped_intent_key(1, "parent-session", Some("k".into()))
+            asker_scoped_intent_key(namespace, 1, "parent-session", Some("k".into()))
         );
         assert_ne!(
-            asker_scoped_intent_key(1, "ab", Some("c".into())),
-            asker_scoped_intent_key(1, "a", Some("bc".into()))
+            asker_scoped_intent_key(namespace, 1, "ab", Some("c".into())),
+            asker_scoped_intent_key(namespace, 1, "a", Some("bc".into()))
         );
-        assert_eq!(asker_scoped_intent_key(1, "parent-session", None), None);
-        let long =
-            asker_scoped_intent_key(i64::MAX, &"s".repeat(1024), Some("x".repeat(512))).unwrap();
+        assert_eq!(
+            asker_scoped_intent_key(namespace, 1, "parent-session", None),
+            None
+        );
+        let long = asker_scoped_intent_key(
+            namespace,
+            i64::MAX,
+            &"s".repeat(1024),
+            Some("x".repeat(512)),
+        )
+        .unwrap();
+        assert!(long.starts_with("agent-v3-"));
         assert!(long.len() <= 512, "{}", long.len());
+    }
+
+    /// Recovered registries can assign identical numeric host IDs. Even when
+    /// the supplied session, key and request are unchanged, their target-side
+    /// reservations must differ: a request digest cannot supply the missing
+    /// registry identity. This uses real databases to pin that scope's source.
+    #[farhelm_testtrace::test]
+    async fn agent_intent_keys_distinguish_fresh_registries() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = crate::store::HelmStore::open(&dir.path().join("first.db"))
+            .await
+            .unwrap();
+        let second = crate::store::HelmStore::open(&dir.path().join("second.db"))
+            .await
+            .unwrap();
+        let first_host = first.list_hosts().await.unwrap()[0].id;
+        let second_host = second.list_hosts().await.unwrap()[0].id;
+        assert_eq!(
+            first_host, second_host,
+            "premise: independently assigned host IDs collide"
+        );
+        let first_namespace = first.registry_namespace().await.unwrap();
+        let second_namespace = second.registry_namespace().await.unwrap();
+        assert_ne!(
+            first_namespace, second_namespace,
+            "premise: registries have distinct namespaces"
+        );
+        assert_ne!(
+            asker_scoped_intent_key(
+                &first_namespace,
+                first_host,
+                "same-session",
+                Some("same-key".into())
+            ),
+            asker_scoped_intent_key(
+                &second_namespace,
+                second_host,
+                "same-session",
+                Some("same-key".into())
+            ),
+            "the same request must not find another registry's approved reservation"
+        );
     }
 
     /// The helm's own clone validation refuses an explicitly empty cwd.
@@ -5778,8 +5855,13 @@ mod tests {
             assert_eq!(seen[0].title.as_deref(), Some("source"));
             assert_eq!(
                 seen[0].intent_key,
-                asker_scoped_intent_key(local, "asker", Some("clone-key".to_string())),
-                "the target stores the key scoped to the asking host and session"
+                asker_scoped_intent_key(
+                    &h.store.registry_namespace().await.unwrap(),
+                    local,
+                    "asker",
+                    Some("clone-key".to_string())
+                ),
+                "the target stores the key scoped to the registry, asking host and session"
             );
         }
     }
@@ -6368,8 +6450,13 @@ mod tests {
         );
         assert_eq!(
             seen[0].intent_key,
-            asker_scoped_intent_key(local, "asker", Some("raw-key".to_string())),
-            "the target stores the key scoped to the asking host and session"
+            asker_scoped_intent_key(
+                &h.store.registry_namespace().await.unwrap(),
+                local,
+                "asker",
+                Some("raw-key".to_string())
+            ),
+            "the target stores the key scoped to the registry, asking host and session"
         );
     }
 

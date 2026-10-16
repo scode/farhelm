@@ -15287,4 +15287,6 @@
   Superseded in part, later on 2026-10-16: while scheduling, the user chose to give every helm database a namespace,
   existing ones included, instead of the optional null-namespace path above, preferring the simpler end-state code and
   accepting that keyed retries in flight across the upgrade are treated as new requests once.
-- Execution: planned in `plans/queue/checkout-retry-helm-namespace.md`.
+- Execution: complete in jj change `rwyskqpzslmnqpnlqmmvwrwmnpwwqols`, bookmark
+  `plan/checkout-retry-helm-namespace/01-helm-namespace`,
+  [PR #2172](https://github.com/scode/farhelm/pull/2172/changes).

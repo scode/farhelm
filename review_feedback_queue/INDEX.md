@@ -14,9 +14,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 
-- [`checkout-retry-reuses-fresh-helm-host-namespace.md`](checkout-retry-reuses-fresh-helm-host-namespace.md) — A fresh
-  helm registry can reuse another host's checkout approval namespace; end-to-end recovery remains unverified.
-
 ## High priority: material UX degradation
 
 - [`claude-trust-cleanup-delays-desktop-start.md`](claude-trust-cleanup-delays-desktop-start.md) — Retrying trust

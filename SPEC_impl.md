@@ -1672,9 +1672,14 @@ they can refuse something the UI would have allowed through to the same shared c
 `Created` is a distinct reply tag from `Session` even though the payload is identical, because the tag is the only thing
 separating "what your creating verb produced" from "the row you changed" and the CLI checks it before printing an id. It
 is not a novelty claim: a create or clone carrying an idempotency key the target has already served replays that
-session, which arrives under this same tag. The relay stores an agent's key on the target scoped to the asking session
-(`agent-<asking session>-<SHA-256 of the key>`), so only the session that made a create can replay it; the fixed length
-also keeps any agent key within the target's intent-key limit. The helm draws the one distinction that matters from it —
+session, which arrives under this same tag. The relay stores an agent's key on the target as
+`agent-v3-<SHA-256 of the registry namespace, asking host row, session and key>`, with length-delimited strings. Each
+helm database has a durable random namespace, minted at creation or migration, so a fresh registry cannot reuse an
+earlier registry's approved retry when numeric host rows coincide. The host row keeps approvals tied to the logical host
+across adoption. Existing databases also gain a namespace: an in-flight keyed retry across this upgrade needs approval
+again and, if approved, creates a new session or checkout instead of returning the earlier one. The namespace is read
+only for keyed agent requests, so offline commands can still open older schemas without migrating them. The fixed-length
+hash keeps any agent key within the target's intent-key limit. The helm draws the one distinction that matters from it —
 a clone whose result is the asking session or the named source is refused rather than reported, before anything durable
 is recorded for the replayed row. The two creating verbs name their target host by display name, matching
 `AgentHost::name`. Registry IDs join host and session discovery and distinguish duplicate labels; they are not
