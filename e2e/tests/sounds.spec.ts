@@ -2,6 +2,7 @@
 // and record actual Web Audio oscillator starts. This proves the UI wiring
 // without depending on hardware, vendor agents or heuristic status timing.
 import { expect, newObservedContext, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import { cleanupSession, createSession, listHosts, localHostId, observeFeedReaders, pinAutoSelect, readFeedReaders, resetPreferences, stubFeed, waitForFeedReadersSettled } from "./helpers/fleet";
 
@@ -92,9 +93,15 @@ async function fixture(page: Page, request: APIRequestContext, created: string[]
 
 test.describe("device sounds", () => {
   const created: string[] = [];
-  test.afterEach(async ({ request }) => {
-    while (created.length) await cleanupSession(request, created.pop()!);
-    await resetPreferences(request);
+  // Drain ownership before attempting releases: a failed request must neither
+  // skip another session nor carry stale IDs into the next test's teardown.
+  test.afterEach(async ({ request }, testInfo) => {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...created.splice(0).reverse().map((id): [string, () => Promise<void>] => [
+        `session ${id}`, () => cleanupSession(request, id),
+      ]),
+      ["preferences", () => resetPreferences(request)],
+    ]);
   });
 
   /** A hidden session stays quiet, revealing it seeds history, and approvals

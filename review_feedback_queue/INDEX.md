@@ -101,9 +101,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   checkout tests can remove their fixture folders while leaving their trash records behind, contaminating later trash
   listings.
 
-- [`sound-tests-skip-remaining-cleanup-and-preferences.md`](sound-tests-skip-remaining-cleanup-and-preferences.md) — A
-  failed browser-test cleanup can leave sessions and shared preferences behind, contaminating later tests.
-
 - [`checkout-composer-test-skips-configuration-restoration.md`](checkout-composer-test-skips-configuration-restoration.md)
   — One cleanup failure can leave later browser tests using this test’s checkout folder and configuration.
 
