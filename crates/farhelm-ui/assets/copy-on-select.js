@@ -247,6 +247,12 @@
     /** Keep the measured box inside the current viewport, including after resize. */
     function reposition() {
       if (point === null) return;
+      // A fixed auto-width box wraps into the room left at its old position.
+      // Measure at the origin, like ordinary tooltips, so shrinking the window
+      // cannot turn the notice into a clipped sliver. Both writes and final
+      // placement happen in this task, before the browser paints.
+      el.style.left = "0px";
+      el.style.top = "0px";
       const size = el.getBoundingClientRect();
       const windowSize = viewport();
       const position = place(

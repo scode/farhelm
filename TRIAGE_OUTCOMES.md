@@ -14150,7 +14150,8 @@
   wrapped width (capped by the viewport) inside the window. Update the unit fixture so the measured size depends on
   position at measurement time; it must fail without the fix (the current constant-size fake cannot). Run `node --test`
   in `crates/farhelm-ui/js-tests`. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/copy-guidance-resize.md`.
+- Execution: complete in change `lxsprvzrkonxuqsoyptuskmvonnywlkq`, bookmark
+  `plan/copy-guidance-resize/01-notice-measure`; [PR #2111](https://github.com/scode/farhelm/pull/2111/changes).
 
 ## trash-fixture-cleanup-compares-lexical-root.md
 
