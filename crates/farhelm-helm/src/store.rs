@@ -320,7 +320,17 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 53;
+const SCHEMA_VERSION: i64 = 54;
+
+/// Distinguish host row IDs in this registry from the same IDs in a recovered
+/// or independently created registry. The row is minted with the schema and
+/// remains unchanged across opens and host adoption; agent retry keys use it
+/// without exposing it to supervisors as a separate protocol field.
+const REGISTRY_NAMESPACE_SCHEMA: &str = r#"CREATE TABLE registry_namespace (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    namespace TEXT NOT NULL CHECK (length(namespace) = 32)
+) STRICT;
+INSERT INTO registry_namespace (singleton, namespace) VALUES (1, lower(hex(randomblob(16))));"#;
 
 /// One helm-wide configuration row, kept apart from replayed preferences:
 /// explicit saves validate these values, and reads must never return the token.
@@ -1933,6 +1943,8 @@ pub struct HelmStore {
 ///   has not been seen, including on helms upgraded from an older schema.
 /// - 52: `session_pins`, shared pin membership, initially empty.
 /// - 53: off-by-default managed-checkout Claude trust and shared hint dismissal.
+/// - 54: a durable namespace for agent retry keys, including existing registries.
+///   Pre-upgrade keyed attempts no longer match and need fresh approval once.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2237,10 +2249,11 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               {LAUNCH_TEMPLATES_SCHEMA}
               {SESSION_NOTIFICATION_MARKS_SCHEMA}
               {NTFY_ALERTS_SCHEMA}
+              {REGISTRY_NAMESPACE_SCHEMA}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 53;",
+              PRAGMA user_version = 54;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3403,6 +3416,18 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 53")?;
         version = 53;
     }
+    if version == 53 {
+        // Some fixtures rewind only the version. Preserve their existing
+        // namespace: reopening or revisiting a migration must never rotate it.
+        tx.execute_batch(&format!(
+            "{} PRAGMA user_version = 54;",
+            REGISTRY_NAMESPACE_SCHEMA
+                .replacen("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1)
+                .replacen("INSERT INTO", "INSERT OR IGNORE INTO", 1)
+        ))
+        .context("migrating helm.db to schema version 54")?;
+        version = 54;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -3846,6 +3871,26 @@ impl HelmStore {
             conn: farhelm_supervisor::db::Db::new(conn, "helm db"),
             schema_version,
         })
+    }
+
+    /// The durable scope that separates this registry's agent retry keys from
+    /// keys minted by another helm database with identical host row IDs.
+    ///
+    /// Only keyed request handlers read it. Looking it up at open time would
+    /// break offline readers that deliberately open older schemas without
+    /// migrating them. A serving helm has already created the singleton row;
+    /// absence is an error, never a reason to mint a replacement namespace.
+    pub(crate) async fn registry_namespace(&self) -> anyhow::Result<String> {
+        self.conn
+            .call("registry namespace read task panicked", |conn| {
+                conn.query_row(
+                    "SELECT namespace FROM registry_namespace WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .context("reading the helm registry namespace")
+            })
+            .await
     }
 
     /// Every stored launch template, by name.
@@ -10722,6 +10767,75 @@ mod tests {
     }
 
     // ---- Schema and the version mechanism ----------------------------
+
+    /// A registry's namespace must survive ordinary opens; a fresh registry
+    /// must get another value even when both begin with the same host row ID.
+    /// Rotation on reopen would lose approved retries just like a new database.
+    #[farhelm_testtrace::test]
+    async fn registry_namespace_is_durable_and_distinguishes_databases() {
+        let (dir, store) = fresh_store().await;
+        let namespace = store.registry_namespace().await.unwrap();
+        assert_eq!(namespace.len(), 32);
+        assert!(namespace.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        drop(store);
+        let reopened = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(reopened.registry_namespace().await.unwrap(), namespace);
+        let other = HelmStore::open(&dir.path().join("other.db")).await.unwrap();
+        assert_ne!(other.registry_namespace().await.unwrap(), namespace);
+    }
+
+    /// Existing registries also gain a namespace, with ordinary stored state
+    /// retained. Offline opens must still tolerate the genuinely older schema
+    /// before the serving helm migrates it; a version-only rewind must not
+    /// rotate a namespace that is already present.
+    #[farhelm_testtrace::test]
+    async fn schema_54_namespaces_existing_registries_without_breaking_offline_open() {
+        let (dir, store) = fresh_store().await;
+        store.mark_seen("retained", 123).await.unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("DROP TABLE registry_namespace; PRAGMA user_version = 53;")
+            .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'registry_namespace'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0,
+            "premise: the old schema has no namespace table"
+        );
+        drop(conn);
+
+        let offline = HelmStore::open_without_migration(&path).await.unwrap();
+        assert_eq!(offline.schema_version, 53);
+        assert_eq!(offline.web_token().await.unwrap(), None);
+        assert!(
+            offline.registry_namespace().await.is_err(),
+            "offline open must not create the missing table"
+        );
+        drop(offline);
+
+        let migrated = HelmStore::open(&path).await.unwrap();
+        let namespace = migrated.registry_namespace().await.unwrap();
+        assert_eq!(namespace.len(), 32);
+        assert_eq!(
+            migrated
+                .seen_activity(&["retained".into()])
+                .await
+                .unwrap()
+                .get("retained"),
+            Some(&123)
+        );
+        drop(migrated);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA user_version = 53;").unwrap();
+        drop(conn);
+        let reopened = HelmStore::open(&path).await.unwrap();
+        assert_eq!(reopened.registry_namespace().await.unwrap(), namespace);
+    }
 
     /// A fresh database must come up on the current schema with the reserved
     /// local row already present — the two invariants every other test in
