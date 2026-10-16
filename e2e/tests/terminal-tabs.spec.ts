@@ -13,6 +13,7 @@
 // coarse to catch that within a project's own pass.
 // ---------------------------------------------------------------------
 import { expect, newObservedContext, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { renameSession, stubFeed } from "./helpers/fleet";
@@ -524,6 +525,10 @@ test("a second view of the same session detaches every terminal of the first", a
  * Adds them through the UI rather than the API because that is also how a
  * user gets here, and because the returned ids are read back out of the
  * rendered strip either way (see `addTab`).
+ *
+ * Ownership transfers only on successful return. Failed navigation, tab
+ * creation or reveal releases the session here, before its id can be lost
+ * to a caller that never received the result.
  */
 async function openSessionWithTabs(
   page: Page,
@@ -533,15 +538,20 @@ async function openSessionWithTabs(
   options: { resumable?: boolean } = {},
 ): Promise<{ id: string; cwd: string; tabs: string[] }> {
   const session = await createTabSession(request, title, options);
-  await page.goto("/");
-  await attachSession(page, session.id);
-  const tabs: string[] = [];
-  for (let i = 0; i < count; i++) {
-    const id = await addTab(page, i);
-    await waitForSessionRevealed(page, session.id, { tabId: id });
-    tabs.push(id);
+  try {
+    await page.goto("/");
+    await attachSession(page, session.id);
+    const tabs: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const id = await addTab(page, i);
+      await waitForSessionRevealed(page, session.id, { tabId: id });
+      tabs.push(id);
+    }
+    return { ...session, tabs };
+  } catch (error) {
+    await cleanupOwnedSteps(true, [["failed tab-session setup", () => cleanupSession(request, session.id)]]);
+    throw error;
   }
-  return { ...session, tabs };
 }
 
 /** The element ids terminal.js currently has mounted, sorted. */
@@ -1253,11 +1263,12 @@ test("retargeting an open tab-close question focuses the new answer", async ({ p
   const session = await openSessionWithTabs(page, request, `tab-retarget-${Date.now()}`, 2);
   const [a, b] = session.tabs;
   const deletes: string[] = [];
-  await page.route(`**/api/sessions/${session.id}/tabs/*`, async (route) => {
-    if (route.request().method() === "DELETE") deletes.push(new URL(route.request().url()).pathname.split("/").pop()!);
-    await route.continue();
-  });
+  let bodyFailed = false;
   try {
+    await page.route(`**/api/sessions/${session.id}/tabs/*`, async (route) => {
+      if (route.request().method() === "DELETE") deletes.push(new URL(route.request().url()).pathname.split("/").pop()!);
+      await route.continue();
+    });
     await page.locator(`.tab-slot[data-tab-id="${a}"] .tab-close`).click();
     await expect(page.locator(".tab-confirm .confirm-title")).toHaveText("Terminal 1");
     await expect(page.locator(".confirm-close-tab")).toBeFocused();
@@ -1271,8 +1282,11 @@ test("retargeting an open tab-close question focuses the new answer", async ({ p
     expect(deletes).toEqual([b]);
     await selectTerminal(page, a);
     await runInShell(page, `terminal-${a}`, "sh -c 'echo RETARGET-SURVIVOR:$$'", /RETARGET-SURVIVOR:\d+/);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await cleanupSession(request, session.id);
+    await cleanupOwnedSteps(bodyFailed, [["retarget session", () => cleanupSession(request, session.id)]]);
   }
 });
 

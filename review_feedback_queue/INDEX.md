@@ -116,9 +116,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`update-check-replacement-loses-focus.md`](update-check-replacement-loses-focus.md) — Installing an update replaces
   the keyboard-focused check button without transferring focus to the restart control.
 
-- [`tab-retarget-fixture-escapes-cleanup.md`](tab-retarget-fixture-escapes-cleanup.md) — Failure during the new
-  tab-retarget test's setup can leave its agent and tabs running.
-
 - [`template-discovery-fails-permanently-once-reply-exceeds.md`](template-discovery-fails-permanently-once-reply-exceeds.md)
   — A large valid template catalog permanently disables agent discovery.
 
