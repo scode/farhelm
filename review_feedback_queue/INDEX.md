@@ -193,9 +193,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`custom-permission-model-choice-erases-draft.md`](custom-permission-model-choice-erases-draft.md) — Choosing a model
   or re-selecting the same agent can erase unfinished custom permission flags.
 
-- [`save-template-composing-escape-discards-draft.md`](save-template-composing-escape-discards-draft.md) — Cancelling an
-  input-method candidate can close the save-template panel and lose its unsaved name and checkbox choices.
-
 - [`terminal-right-click-recopies-stale-selection.md`](terminal-right-click-recopies-stale-selection.md) — A right-click
   in a terminal without mouse reporting can replace newer clipboard contents with an old terminal selection.
 

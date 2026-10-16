@@ -402,6 +402,36 @@ test("save as template leaves composing Enter with the name editor", async ({ pa
   }
 });
 
+/** Dismissing an input-method candidate must not discard the name or selected
+ * fields. Ordinary Escape still closes only the inline panel, retaining the
+ * launcher. This case never saves a template or launches a session. */
+test("save as template keeps the draft on composing Escape", async ({ page }) => {
+  const form = await openNew(page);
+  const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
+  await codex.click();
+  await form.locator(".launch-composer-save-template").click();
+  const panel = form.locator(".save-template-panel");
+  const field = panel.locator(".save-template-name");
+  const agent = panel.locator('[data-field="agent"]');
+  await expect(panel).toBeVisible();
+  await expect(agent).toBeChecked();
+  await agent.uncheck();
+  await field.fill("unfinished input-method name");
+  await expect(field).toBeFocused();
+  await expect(agent).not.toBeChecked();
+  await field.evaluate((node) => {
+    node.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", isComposing: true, bubbles: true, cancelable: true }));
+  });
+  await expect(panel).toBeVisible();
+  await expect(field).toHaveValue("unfinished input-method name");
+  await expect(agent).not.toBeChecked();
+  await expect(field).toBeFocused();
+  await field.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(form).toBeVisible();
+  await expect(codex).toHaveAttribute("aria-pressed", "true");
+});
+
 /** Open New and return its form. */
 async function openNew(page: Page) {
   await page.goto("/");
