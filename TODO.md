@@ -135,7 +135,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   as one. Joining the rows would mean relying on the library's private internals. Assess whether that is still true (a
   newer version of the library may expose what is needed) and what a fix would cost, without trusting partial text or
   treating a prefix of the target as a match, which SPEC_impl.md rules out. Related: the in-flight
-  `plans/queue/terminal-link-safety.md` changes the same hover code for a different wrapped-link bug.
+  `plans/queue/terminal-link-safety.md` changes the same hover code for a different wrapped-link bug. Plan:
+  `plans/queue/wrapped-link-warning.md`.
 
 ## Doc todo
 
