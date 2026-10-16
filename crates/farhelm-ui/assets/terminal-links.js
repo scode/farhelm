@@ -347,13 +347,16 @@
   }
 
   /**
-   * `text` with Unicode format characters (bidi controls, zero-width
-   * characters and the like) replaced by visible `<U+XXXX>` escapes.
+   * Show presentation-unsafe characters as `<U+XXXX>` and escape the `<`
+   * of literal `<U+` text, so a filename cannot impersonate that notation.
    *
    * The terminal stores these characters without applying them, but the
    * hover display is ordinary HTML, where a right-to-left override would
    * reorder the very text the user is asked to compare. Showing them as
-   * escapes makes the hidden characters themselves visible. Right-to-left
+   * escapes makes the hidden characters themselves visible. The unsafe set
+   * mirrors `farhelm-proto/src/text.rs::is_presentation_unsafe`, plus all Cf
+   * characters already covered here. Keep both policies in sync; variation
+   * selectors remain readable. Right-to-left
    * letters would still reorder the line by themselves; the stylesheet
    * forces that line left to right (`.terminal-link-target-text`), the
    * order the terminal draws it in.
@@ -362,7 +365,7 @@
    * @returns {string}
    */
   function visibleFormatCharacters(text) {
-    return text.replace(/\p{Cf}/gu, (ch) =>
+    return text.replace(/<(?=U\+)|[\p{Cc}\p{Cf}\u034F\u115F\u1160\u17B4-\u17B5\u2028\u2029\u3164\uFFA0\u{E0000}-\u{E007F}]/gu, (ch) =>
       `<U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}>`,
     );
   }

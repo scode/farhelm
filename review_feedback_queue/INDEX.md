@@ -17,10 +17,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`menu-request-overrides-independent-focus.md`](menu-request-overrides-independent-focus.md) — Menu arrows can follow
   an older keyboard target after independent focus moves, potentially reaching Delete.
 
-- [`file-disclosure-misses-invisible-path-characters.md`](file-disclosure-misses-invisible-path-characters.md) —
-  Different agent-controlled filenames can look identical in the disclosure meant to authorize transfer or native
-  opening.
-
 - [`ntfy-token-follows-changed-server.md`](ntfy-token-follows-changed-server.md) — Changing the notification server can
   send the previous server's access token to the new one.
 

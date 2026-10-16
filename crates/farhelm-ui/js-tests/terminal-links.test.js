@@ -406,12 +406,28 @@ test("linkRowText reads the underlined cells of the hovered row", () => {
   assert.equal(linkRowText(term, { start: { x: 1, y: 9 }, end: { x: 4, y: 9 } }), null);
 });
 
-// Why this matters: the warning asks the user to compare the link's text
-// with its target, and the display is HTML, where a right-to-left override
-// or other format character the terminal stored but did not apply would
-// reorder or hide part of the text being compared. Spec: every Unicode
-// format character (general category Cf) becomes a visible <U+XXXX> escape;
-// everything else is left as it is.
+/** HTML disclosures must not conceal controls or confuse real characters
+ * with literal escape notation. Cover every shared unsafe family, including
+ * the unassigned parts of the tag block that category matching would miss.
+ */
+test("visibleFormatCharacters covers shared unsafe families and literal escape markers", () => {
+  const ranges = [[0, 0x1f], [0x7f, 0x9f], [0x17b4, 0x17b5], [0x200b, 0x200f],
+    [0x2028, 0x202e], [0x2060, 0x2064], [0x2066, 0x206f], [0xfff9, 0xfffb], [0xe0000, 0xe007f]];
+  const singles = [0xad, 0x34f, 0x61c, 0x115f, 0x1160, 0x180e, 0x3164, 0xfeff, 0xffa0];
+  for (const [start, end] of ranges) for (let point = start; point <= end; point++) singles.push(point);
+  for (const point of singles) {
+    const escape = `<U+${point.toString(16).toUpperCase().padStart(4, '0')}>`;
+    assert.equal(visibleFormatCharacters(String.fromCodePoint(point)), escape);
+    assert.equal(visibleFormatCharacters(escape), `<U+003C>${escape.slice(1)}`, 'literal notation must differ from its character');
+  }
+  assert.equal(visibleFormatCharacters('<U+<U+034F>'), '<U+003C>U+<U+003C>U+034F>');
+  assert.equal(visibleFormatCharacters('a  b 日 العربية ❤️ 😀 \u{E0100}'), 'a  b 日 العربية ❤️ 😀 \u{E0100}');
+  assert.equal(visibleFormatCharacters('\u{0600}'), '<U+0600>', 'existing Cf coverage extends beyond the shared known-bad list');
+});
+
+/** Bidi and zero-width escapes also protect the web-link mismatch display,
+ * while ordinary non-English text remains readable.
+ */
 test("visibleFormatCharacters makes bidi controls and zero-width characters visible", () => {
   assert.equal(visibleFormatCharacters("https://a.example/"), "https://a.example/");
   assert.equal(visibleFormatCharacters("abc\u202Edef"), "abc<U+202E>def");

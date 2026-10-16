@@ -13689,7 +13689,8 @@
 - Completion criteria: the file-link hover and its outcome messages show every character Farhelm's shared list marks
   unsafe, escape literal `<U+…>` text, and keep repeated spaces, so distinct paths never look alike; covered by tests.
   Remove this feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-link-safety.md`.
+- Execution: jj change `orzruuwyqunxporkxxnlxypoxtuqoswo`, bookmark `plan/terminal-link-safety/04-visible-paths`,
+  [PR #2095](https://github.com/scode/farhelm/pull/2095/changes).
 
 ## template-editor-conceals-peer-model-and-folder.md
 
