@@ -54,6 +54,11 @@ async function resolveToken(page: Page, token: string): Promise<string> {
 // and "no visible border" with the same value.
 const GHOST = "rgba(0, 0, 0, 0)";
 
+/**
+ * Ordinary actions must retain their resting color tiers while menu and tab
+ * exemptions stay quiet. Sampling those states explicitly keeps a browser's
+ * interaction state from looking like a regression in the shared palette.
+ */
 test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", async ({
   page,
   request,
@@ -118,10 +123,21 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
       await expect(el).toHaveCSS("background-color", await resolveToken(page, "--bg-2"));
     }
 
+    /**
+     * Sample the danger tier at rest, independently of confirmation autofocus.
+     * WebKit can give the newly focused confirmation its focus-visible fill;
+     * that interaction color is a different state from the one asserted here.
+     */
     async function expectDanger(selector: string) {
       const el = page.locator(selector);
       await expect(el).toBeVisible();
       await expect(el).toHaveClass(/btn-danger/);
+      await page.mouse.move(0, 0);
+      await el.blur();
+      await expect.poll(
+        () => el.evaluate((node) => node.matches(":hover, :focus-visible")),
+        { message: "the danger button must be at rest before sampling its fill" },
+      ).toBe(false);
       await expect(el).toHaveCSS("background-color", await resolveToken(page, "--danger-bg"));
     }
 
