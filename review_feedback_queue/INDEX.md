@@ -32,9 +32,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`uninstall-race-first-time-service-setup.md`](uninstall-race-first-time-service-setup.md) — Concurrent setup and
   uninstall can leave services pointing at a deleted executable.
 
-- [`trash-listing-exceeds-control-frame.md`](trash-listing-exceeds-control-frame.md) — An oversized trash listing
-  disables both listing and individual cleanup, even below the batch's entry limit.
-
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`file-recognition-rejects-digit-leading-extensions.md`](file-recognition-rejects-digit-leading-extensions.md) —

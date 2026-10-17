@@ -1989,6 +1989,9 @@ evidence, but cannot authorize another directory move.
 
 ### Archived-checkout trash
 
+The trash is built for archive collections well below the 10,000-archive cleanup limit, with ordinary path lengths. A
+host beyond that scale may be unlistable in the app; supporting such collections is not a goal.
+
 Protocol 44 adds `ListCheckoutTrash`/`CheckoutTrashListed` and `DeleteCheckoutTrash`/`CheckoutTrashDeleted`. The helm
 routes each HTTP request to one connected supervisor and checks the observed host incarnation before dispatch; it keeps
 no archive listing cache. IDs select records, never paths supplied by the browser. The session Delete reply includes
