@@ -198,6 +198,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Skip-confirmations session actions time out.**
+  `skip session confirmations walks row header interrupted card and tab actions` in
+  `e2e/tests/session-confirmations.spec.ts` exceeded its 120-second deadline in Chromium in browser run
+  `d01a19ad-811c-4dae-90b8-2c22a70ab473`. Classification reruns failed, passed, failed:
+  `c6df2c8c-703b-4aaa-999b-973a7f39e14f`, `c700a168-b773-4d9c-876c-ce30419149b6`,
+  `a9b44f05-c440-4b08-8acd-0e65a27a4979`. Cause unknown (FLAKES.md, 2026-10-17).
+
 - **Same-source Replace menu fails to open after YOLO cancellation.**
   `plain Replace keeps a newer same-source key after old header YOLO cancellation` in `e2e/tests/replace.spec.ts` failed
   in WebKit waiting five seconds for the source row's menu in browser run `d01a19ad-811c-4dae-90b8-2c22a70ab473`.
