@@ -23,12 +23,11 @@
 //!
 //! Control frames carry JSON (`ControlMsg`) on channel 0 — JSON so a human
 //! can eyeball a protocol trace. Data frames carry opaque bytes on a
-//! per-channel basis, and as of version 6 a data channel has one of two
-//! meanings, fixed by the control message that established it: terminal
-//! output flowing supervisor-toward-client (established by `Attach`), or
-//! attachment-upload bytes flowing client-toward-supervisor (established
-//! by `BeginUpload`). Keeping both binary keeps PTY throughput and file
-//! bytes off the JSON path.
+//! per-channel basis. The establishing request fixes their meaning:
+//! `Attach` for terminal streams, `BeginUpload` for attachment uploads,
+//! `BeginDownload` for file reads, and `BeginTcpRelay` for bidirectional
+//! loopback TCP. Keeping these binary keeps PTY, file and socket bytes off
+//! the JSON path.
 //!
 //! ## Paths that cross this protocol are UTF-8-only
 //!
@@ -70,6 +69,9 @@
 //! about the protocol as a whole.
 
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "io")]
+pub mod tcp_relay;
 
 /// Declares a fieldless enum and its `ALL` constant from one list of
 /// variants.
@@ -203,7 +205,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_53` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_54` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -214,7 +216,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 53;
+pub const PROTOCOL_VERSION: u32 = 54;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -316,9 +318,9 @@ pub enum FrameKind {
 
 /// One decoded frame. `channel` is 0 for control frames; a data frame's
 /// channel was established by whichever control request created it —
-/// `Attach` for a terminal stream, `BeginUpload` for an attachment
-/// upload — and that request is also what fixed the channel's direction
-/// and meaning.
+/// `Attach` for a terminal stream, `BeginUpload` for an attachment upload,
+/// `BeginDownload` for a file read, or `BeginTcpRelay` for bidirectional TCP.
+/// That request fixes the channel's permitted directions and meaning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub kind: FrameKind,
@@ -2468,6 +2470,36 @@ pub struct SessionDeleteOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControlMsg {
+    /// Open one raw, bidirectional TCP stream on the session's host. Only
+    /// full-authority helm connections may open relays. A missing address
+    /// tries IPv4 loopback then IPv6 loopback, without DNS; wildcard literals
+    /// use that fallback too. Other literals must be loopback, and port zero
+    /// is invalid. The channel is
+    /// nonzero and remains reserved for this connection's entire lifetime.
+    BeginTcpRelay {
+        req_id: u64,
+        session_id: String,
+        channel: u32,
+        address: Option<std::net::IpAddr>,
+        port: u16,
+    },
+    /// The loopback TCP connection is open. Each direction may initially
+    /// send UPLOAD_WINDOW_BYTES and must then respect cumulative credit.
+    /// Data frames use at most UPLOAD_CHUNK_BYTES, including short reads.
+    TcpRelayStarted { req_id: u64, channel: u32 },
+    /// Bytes accepted by the destination socket in the opposite direction.
+    /// Counts are monotonic and never exceed bytes sent; duplicates are
+    /// harmless and invalid credit ends the relay. No idle timer is implied.
+    TcpRelayAck { channel: u32, received: u64 },
+    /// Close both directions. Unknown or already-ended channels are harmless;
+    /// no half-close exists. This need not produce an admission reply.
+    CloseTcpRelay { channel: u32 },
+    /// Supervisor EOF or failure, queued after all preceding relay data.
+    /// EOF drains received bytes before closing; a failure ends immediately.
+    TcpRelayEnded {
+        channel: u32,
+        reason: Option<String>,
+    },
     /// Configure future agent/tab browser forwarding after the helm accepts this host.
     /// Full-authority peers only; the transport cannot infer whether this is the helm's
     /// own machine. Explicit false on a local reconnect clears a previous remote policy.
@@ -2485,7 +2517,8 @@ pub enum ControlMsg {
     FileStat { req_id: u64, info: DownloadFileInfo },
     /// Open a regular file and start a credit-paced read on a nonzero channel
     /// never previously used for a download on this connection. A download id
-    /// stays reserved after abort/end, including against Attach and BeginUpload,
+    /// stays reserved after abort/end, including against Attach, BeginUpload
+    /// and BeginTcpRelay,
     /// because queued bytes can outlive their producer. Helm ids never recycle.
     /// The sender may initially send UPLOAD_WINDOW_BYTES, then needs advancing
     /// DownloadAck credit. No data or successful end precedes DownloadStarted.
@@ -3652,6 +3685,7 @@ impl ControlMsg {
             ControlMsg::BrowserForwardingSet { req_id }
             | ControlMsg::FileStat { req_id, .. }
             | ControlMsg::DownloadStarted { req_id, .. }
+            | ControlMsg::TcpRelayStarted { req_id, .. }
             | ControlMsg::SessionCreated { req_id, .. }
             | ControlMsg::GithubCheckoutReconciled { req_id, .. }
             | ControlMsg::SessionList { req_id, .. }
@@ -3683,6 +3717,7 @@ impl ControlMsg {
             ControlMsg::SetBrowserForwarding { .. }
             | ControlMsg::StatFile { .. }
             | ControlMsg::BeginDownload { .. }
+            | ControlMsg::BeginTcpRelay { .. }
             | ControlMsg::CreateSession { .. }
             | ControlMsg::ReconcileGithubCheckout { .. }
             | ControlMsg::ListSessions { .. }
@@ -3707,6 +3742,9 @@ impl ControlMsg {
             // The handshake, and the channel-correlated events: nothing
             // here has a `req_id` field to return in the first place.
             ControlMsg::DownloadAck { .. }
+            | ControlMsg::TcpRelayAck { .. }
+            | ControlMsg::CloseTcpRelay { .. }
+            | ControlMsg::TcpRelayEnded { .. }
             | ControlMsg::AbortDownload { .. }
             | ControlMsg::DownloadEnded { .. }
             | ControlMsg::Hello { .. }
@@ -3734,6 +3772,7 @@ impl ControlMsg {
             ControlMsg::SetBrowserForwarding { req_id, .. }
             | ControlMsg::StatFile { req_id, .. }
             | ControlMsg::BeginDownload { req_id, .. }
+            | ControlMsg::BeginTcpRelay { req_id, .. }
             | ControlMsg::CreateSession { req_id, .. }
             | ControlMsg::ReconcileGithubCheckout { req_id, .. }
             | ControlMsg::ListSessions { req_id, .. }
@@ -3758,6 +3797,10 @@ impl ControlMsg {
             ControlMsg::BrowserForwardingSet { .. }
             | ControlMsg::FileStat { .. }
             | ControlMsg::DownloadStarted { .. }
+            | ControlMsg::TcpRelayStarted { .. }
+            | ControlMsg::TcpRelayAck { .. }
+            | ControlMsg::CloseTcpRelay { .. }
+            | ControlMsg::TcpRelayEnded { .. }
             | ControlMsg::DownloadAck { .. }
             | ControlMsg::AbortDownload { .. }
             | ControlMsg::DownloadEnded { .. }
@@ -3815,6 +3858,11 @@ impl ControlMsg {
     /// identifier is what they will grep for.
     pub fn variant_name(&self) -> &'static str {
         match self {
+            ControlMsg::BeginTcpRelay { .. } => "BeginTcpRelay",
+            ControlMsg::TcpRelayStarted { .. } => "TcpRelayStarted",
+            ControlMsg::TcpRelayAck { .. } => "TcpRelayAck",
+            ControlMsg::CloseTcpRelay { .. } => "CloseTcpRelay",
+            ControlMsg::TcpRelayEnded { .. } => "TcpRelayEnded",
             ControlMsg::SetBrowserForwarding { .. } => "SetBrowserForwarding",
             ControlMsg::BrowserForwardingSet { .. } => "BrowserForwardingSet",
             ControlMsg::StatFile { .. } => "StatFile",
@@ -4868,8 +4916,49 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_53() {
-        assert_eq!(PROTOCOL_VERSION, 53);
+    fn protocol_version_is_pinned_at_54() {
+        assert_eq!(PROTOCOL_VERSION, 54);
+    }
+
+    /// The relay's open fixes the binary channel's bidirectional meaning.
+    /// Admission is request-correlated, while byte credit and endings route
+    /// by channel; keeping these distinct prevents a missing pending reply.
+    #[farhelm_testtrace::test]
+    fn tcp_relay_wire_preserves_literal_and_request_reply_classification() {
+        let request = ControlMsg::BeginTcpRelay {
+            req_id: 17,
+            session_id: "session".into(),
+            channel: 7,
+            address: Some("::1".parse().unwrap()),
+            port: 3000,
+        };
+        let wire = r#"{"type":"begin_tcp_relay","req_id":17,"session_id":"session","channel":7,"address":"::1","port":3000}"#;
+        assert_eq!(serde_json::to_string(&request).unwrap(), wire);
+        assert_eq!(serde_json::from_str::<ControlMsg>(wire).unwrap(), request);
+        assert_eq!(request.request_req_id(), Some(17));
+        assert_eq!(request.reply_req_id(), None);
+        let started = ControlMsg::TcpRelayStarted {
+            req_id: 17,
+            channel: 7,
+        };
+        assert_eq!(started.reply_req_id(), Some(17));
+        assert_eq!(started.request_req_id(), None);
+        for event in [
+            ControlMsg::TcpRelayAck {
+                channel: 7,
+                received: 23,
+            },
+            ControlMsg::CloseTcpRelay { channel: 7 },
+            ControlMsg::TcpRelayEnded {
+                channel: 7,
+                reason: None,
+            },
+        ] {
+            assert_eq!(event.reply_req_id(), None);
+            assert_eq!(event.request_req_id(), None);
+            let encoded = serde_json::to_string(&event).unwrap();
+            assert_eq!(serde_json::from_str::<ControlMsg>(&encoded).unwrap(), event);
+        }
     }
 
     /// Delete must retain mutation fencing and approval time, with distinct

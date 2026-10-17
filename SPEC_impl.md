@@ -1519,6 +1519,27 @@ than hiding the pane, because silence is the reap's promise for a tab this view 
 `NotFound` stays `other`: its reason is the supervisor's account of the session, such as a reboot and what restart would
 do.
 
+Protocol version 54 adds helm-only raw TCP relay channels for the Mac app's localhost tunnels. `BeginTcpRelay` fixes a
+nonzero channel's bidirectional byte meaning; `TcpRelayStarted` correlates admission, while `TcpRelayAck`,
+`CloseTcpRelay` and `TcpRelayEnded` belong to the channel. Older peers cannot decode these tagged variants, so remote
+hosts require updating. The supervisor checks session existence and confines the target to literal loopback, or tries
+IPv4 then IPv6 loopback for named-localhost and wildcard targets; it performs no DNS lookup.
+
+Both directions use the attachment chunk cap and byte window, with cumulative acknowledgements only after the target
+socket accepts the bytes. TCP reads are forwarded immediately, including short reads: waiting to fill a file-sized frame
+would deadlock a short HTTP request whose client is waiting for a response. A shared bounded byte inbox coalesces
+arbitrary packet boundaries without the file-download queue's full-frame assumption. Demultiplexers never wait for a
+consumer. Supervisor admission, data and end share the existing bulk FIFO below interactive traffic; the helm's outgoing
+data retains the existing connection-wide upload enqueue allowance through the writer. Channel ids remain reserved after
+ending or cancellation, and a relay cannot inherit an earlier terminal/upload/download channel.
+
+Each relay future owns its accepted TCP socket, route and pending admission cleanup. Connection death or cancellation
+ends parked work; EOF ends both directions, with no half-close. Successful remote EOF drains preceding bytes before
+closing the local socket, and a failure cannot be overwritten by a later success. There is no per-relay idle timer: an
+idle WebSocket is healthy, and task ownership plus transport teardown supply cancellation. Existing shared-writer stall
+limits still apply to actual transport writes. Session-authenticated peers cannot open, acknowledge or close these
+channels; the restricted operation allowlist does not admit them.
+
 ### What the helm believes from a supervisor
 
 The helm's trust in an attached supervisor is scoped by effect, not by connection. A supervisor is believed about things

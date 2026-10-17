@@ -1,7 +1,7 @@
 //! The per-connection read loop, output forwarder, and stall detection.
 //!
 //! `handle_connection` is the whole lifetime of one client connection: it
-//! owns the connection-local `input_routes`/`upload_routes` maps, spawns
+//! owns terminal, upload, download and raw TCP channel routes, spawns
 //! (and, on the way out, drains) the slow request handlers admitted
 //! through `spawn_admitted`, and reads control/data frames until the
 //! peer goes away. `Forwarder` is the other half — one per attachment,
@@ -329,6 +329,12 @@ where
     // Production clients already allocate once. One retained id per read
     // avoids a drain handshake or writer-side transfer-generation machinery.
     let mut download_channels = HashSet::new();
+    let mut relays: HashMap<u32, super::tcp_relays::RelayRoute> = HashMap::new();
+    // A relay's old bytes must never become terminal input, or another
+    // stream's output. Reserve relay ids after completion, and remember
+    // earlier non-relay requests so a relay cannot inherit their queued data.
+    let mut relay_channels = HashSet::new();
+    let mut non_relay_channels = HashSet::new();
 
     // Tracking (not admission — that is now `sup.admission`, shared
     // across every connection this supervisor serves; see its own docs
@@ -349,6 +355,7 @@ where
             // iteration, not just at shutdown.
             reap_finished_tasks(&mut tasks);
             downloads.retain(|_, route| !route.task.is_finished());
+            relays.retain(|_, route| !route.task.is_finished());
             // Same discipline for finished transfers: a route left behind
             // by a completed upload would make its channel number
             // permanently unusable on this connection (see
@@ -379,11 +386,16 @@ where
                 break;
             };
             match frame.kind {
+                farhelm_proto::FrameKind::Data if relay_channels.contains(&frame.channel) => {
+                    if let Some(route) = relays.get(&frame.channel) {
+                        route.state.push(&frame.body);
+                    }
+                }
                 // An upload's bytes, if this channel is one an accepted
                 // `BeginUpload` established and whose transfer is still
                 // live. Checked before the terminal-input path below
                 // because the two share one channel-id space and a
-                // channel is only ever one of the two (the begin and
+                // channel is only ever one stream (the begin and
                 // attach handlers each refuse a channel the other holds).
                 //
                 // Nothing here awaits. Chunk delivery is a `try_send` and
@@ -582,6 +594,12 @@ where
                 }
                 farhelm_proto::FrameKind::Control => {
                     let msg = parse_control(&frame)?;
+                    if restricted_auth.is_none()
+                        && let ControlMsg::Attach { channel, .. }
+                        | ControlMsg::BeginUpload { channel, .. }
+                        | ControlMsg::BeginDownload { channel, .. } = &msg {
+                        non_relay_channels.insert(*channel);
+                    }
                     match restricted_auth.as_ref() {
                         Some(auth) => handle_restricted_control(&sup, msg, &tx, auth).await,
                         // An `AgentResponse` is the answer to something
@@ -597,6 +615,36 @@ where
                         // because `ConnectionCtx` deliberately stops at
                         // the per-message handlers.
                         None => match msg {
+                            ControlMsg::BeginTcpRelay { req_id, session_id, channel, address, port } => {
+                                if channel == 0 || non_relay_channels.contains(&channel)
+                                    || relay_channels.contains(&channel) {
+                                    send_reply(&tx, &ControlMsg::Error {
+                                        create_unaccepted: false, req_id,
+                                        kind: farhelm_proto::ErrorKind::InvalidRequest,
+                                        message: "TCP relay channel is invalid or was already used".into(),
+                                    }).await;
+                                } else {
+                                    relay_channels.insert(channel);
+                                    relays.insert(channel, super::tcp_relays::start(
+                                        &mut tasks, Arc::clone(&sup), bulk_tx.clone(), priority_tx.clone(),
+                                        super::tcp_relays::RelayRequest { req_id, session_id, channel, address, port },
+                                    ));
+                                }
+                            }
+                            ControlMsg::TcpRelayAck { channel, received } => {
+                                if let Some(route) = relays.get(&channel) { route.state.ack(received); }
+                            }
+                            ControlMsg::CloseTcpRelay { channel } => { relays.remove(&channel); }
+                            ControlMsg::Attach { req_id, channel, .. }
+                            | ControlMsg::BeginUpload { req_id, channel, .. }
+                            | ControlMsg::BeginDownload { req_id, channel, .. }
+                                if relay_channels.contains(&channel) => {
+                                send_reply(&tx, &ControlMsg::Error {
+                                    create_unaccepted: false, req_id,
+                                    kind: farhelm_proto::ErrorKind::InvalidRequest,
+                                    message: "channel was reserved for a TCP relay".into(),
+                                }).await;
+                            }
                             ControlMsg::StatFile { req_id, session_id, path } => {
                                 tasks.spawn(super::downloads::stat(Arc::clone(&sup), tx.clone(), req_id, session_id, path));
                             }
@@ -673,6 +721,7 @@ where
     }
     drop(upload_routes);
     drop(downloads);
+    drop(relays);
     drop(bulk_tx);
     // Tear down any attachments this connection owned so the next
     // attach doesn't fight a dead forwarder. Signal AND await, exactly

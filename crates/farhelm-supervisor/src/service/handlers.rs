@@ -5920,8 +5920,8 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let auth = authenticated_parent(&sup, state.path(), "parent-session").await;
 
-        // Placement and file access belong to the helm. A session credential must
-        // neither change forwarding for other sessions nor acquire a file-read side channel.
+        // Placement, file access and loopback TCP belong to the helm. A session
+        // credential must not acquire one of these direct host side channels.
         for request in [
             ControlMsg::SetBrowserForwarding {
                 req_id: 38,
@@ -5938,6 +5938,13 @@ mod tests {
                 path: "/file".into(),
                 channel: 7,
             },
+            ControlMsg::BeginTcpRelay {
+                req_id: 42,
+                session_id: "parent-session".into(),
+                channel: 8,
+                address: None,
+                port: 3000,
+            },
         ] {
             let req_id = request.request_req_id().unwrap();
             handle_restricted_control(&sup, request, &tx, &auth).await;
@@ -5951,6 +5958,34 @@ mod tests {
             sup.browser_command().is_none(),
             "a session peer cannot enable browser forwarding"
         );
+        // Credit, close and peer replies remain off-list too. They are not
+        // requests, so their refusals are unsolicited rather than correlated.
+        for request in [
+            ControlMsg::TcpRelayAck {
+                channel: 8,
+                received: 1,
+            },
+            ControlMsg::CloseTcpRelay { channel: 8 },
+            ControlMsg::TcpRelayStarted {
+                req_id: 42,
+                channel: 8,
+            },
+            ControlMsg::TcpRelayEnded {
+                channel: 8,
+                reason: None,
+            },
+        ] {
+            handle_restricted_control(&sup, request, &tx, &auth).await;
+            let reply: ControlMsg = serde_json::from_slice(&rx.recv().await.unwrap().body).unwrap();
+            assert!(matches!(
+                reply,
+                ControlMsg::Error {
+                    req_id: 0,
+                    kind: ErrorKind::Unauthorized,
+                    ..
+                }
+            ));
+        }
 
         handle_restricted_control(&sup, ControlMsg::ListSessions { req_id: 41 }, &tx, &auth).await;
         let unauthorized: ControlMsg =
