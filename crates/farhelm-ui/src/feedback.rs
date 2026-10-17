@@ -325,6 +325,11 @@ pub(crate) fn FeedbackDialog(
                     }
                 }
                 div { class: "host-settings-body",
+                    // Sent replaces the form with text; the form's controls
+                    // remain the body's entry points in the editing state.
+                    tabindex: if state() == SendState::Sent { Some("0") } else { None },
+                    role: if state() == SendState::Sent { Some("region") } else { None },
+                    aria_label: if state() == SendState::Sent { Some("feedback sent") } else { None },
                     if state() == SendState::Sent {
                         p { class: "feedback-thanks", "{THANKS}" }
                     } else {

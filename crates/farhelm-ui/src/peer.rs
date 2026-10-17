@@ -244,8 +244,10 @@ pub(crate) fn PeerLine(
 /// across browser engines and cannot preserve the helm's exact copy text. An
 /// empty end marker lets plan CSS retain that terminator in native selection
 /// without adding any text to what the user authorizes or copies.
+/// A caller that caps this text in a scrollport supplies `scroll_label` so
+/// keyboard users can enter it without adding stops to ordinary text blocks.
 #[component]
-pub(crate) fn PeerBlock(class: String, text: String) -> Element {
+pub(crate) fn PeerBlock(class: String, text: String, scroll_label: Option<String>) -> Element {
     let lines = text
         .split_inclusive('\n')
         .map(|line| {
@@ -260,6 +262,9 @@ pub(crate) fn PeerBlock(class: String, text: String) -> Element {
         .collect::<Vec<_>>();
     rsx! {
         pre { class: "{class}",
+            tabindex: if scroll_label.is_some() { Some("0") } else { None },
+            role: if scroll_label.is_some() { Some("region") } else { None },
+            aria_label: scroll_label,
             for (index, (line, newline)) in lines.iter().enumerate() {
                 span {
                     key: "{index}",
