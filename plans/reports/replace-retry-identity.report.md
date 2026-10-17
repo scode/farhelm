@@ -90,3 +90,58 @@ Both commit/PR messages passed Sol/medium cold reads. Implementation stayed loca
 is recorded privately; actual served model attribution and native/orchestrator usage are unavailable. This report also
 receives the separate native clarity and public-hygiene cold read before delivery. The executor leaves both PRs draft
 and does not merge them.
+
+### Landing
+
+Landed on its own in round 81, as #2205 and #2206, merged bottom-up and unchanged from what the report describes.
+
+#### What landed since the stack was based, and whether it interacted
+
+Only plan-queue bookkeeping reached main between this stack's base and its landing, so the landing rebase was clean and
+both PRs' diffs are identical to the ones the executor delivered. The base already held the work this stack sits next
+to: agents deleting sessions and initial prompts on session creation (#2192, #2200), initial prompts in the launcher,
+including the landing fix that makes Replace with send its prompt (#2203), agent retries scoped to each helm database
+(#2172), the cancelled-download fix (#2197) and skipping Claude's lock waits at startup (#2201). The landing monitor
+read the stack against them, and a fresh-context reviewer did the same independently. Neither found an interaction:
+
+- The supervisor's new proof that a create was refused and kept no session covers ordinary, named and prompt-bearing
+  creates, including Replace with a prompt. It excludes agent requests and managed-checkout creates.
+- Deleting a session marks its create record as created, never as failed, so a deleted session can never produce the
+  proof. The helm accepts the proof only on a create reply, and a test pins that it ignores one on a failed delete.
+- Retry keys for agent requests, the helm's tracking of pending requests and startup trust cleanup are untouched.
+
+#### Upgrade
+
+#2206 raises the protocol from 52 to 53 by adding an optional field to the existing error reply. Protocol 52, from the
+agents-delete and initial-prompt work, has not shipped either (v0.29.0 carries protocol 51), so the next release already
+requires remote hosts to be updated, and this adds no new step for users. No stored data changes. The changelog entry,
+the commit message and the report all say remote hosts need Update; release curation can merge that line with the
+near-identical one in the initial-prompt and session-delete entries. Both defects date from #1936, which shipped in
+v0.28.0, so each PR keeps its own "fixed" changelog entry rather than amending an unreleased one.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-ups
+
+- The session launcher itself, for a new session or a Replace with, still keeps its retry key after a refusal when the
+  form is unchanged, and ignores the new proof. So restoring a missing folder and submitting the same form again still
+  replays the old refusal there. This predates the stack and was outside its scope.
+- The report already lists that the top-of-session control and the interrupted-session card keep separate confirmations.
+- Minor: the code comment describing the "definitely not accepted" reply header lists only local failures and checkout
+  conflicts; it now has a third source.
+
+#### Checks
+
+- Run now: none. Main gained only plan-queue bookkeeping since the base.
+- Reused, from the executor's runs: the UI Replace tests `e801c9b2-5a04-49e3-b7c5-d308251f3b00` (16 passed), the
+  protocol, supervisor and helm selection `e5713b97-70af-4a3c-9bd8-3147999d3a1b` and the post-review rerun of its four
+  supervisor cases `226f7383-8d6a-4b54-b825-7b4df9c70455`, and the browser Replace cases on Chromium and WebKit
+  `3b5cb0b1-7e58-4927-afce-66e7e204e2ff` (12 passed), plus its builds and static checks. These were recorded on an
+  earlier base; the executor reused them after a clean rebase over the template-name escape fix (#2204), which shares no
+  code with Replace, and the landing rebase added only plan bookkeeping on top. The report lists its retained failures
+  separately; they are not counted as passes.
+- Skipped: everything the report skipped, for the reasons it gives.
+
+Nothing in the executor's report became untrue at landing.
