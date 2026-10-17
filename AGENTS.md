@@ -240,7 +240,7 @@ The CI workflow runs ONLY on demand: it has no push or pull-request trigger (rem
 ci.yml), so CI green does not include browser coverage. PRs are still opened as drafts and marked ready when the user
 asks to publish them, or as part of landing them, never on the agent's own initiative. Landing is authorized where a
 flow's own file says so: plan landing, approved planning PRs, abandoned-plan source updates, release fix forward, the
-stable release's changelog and finalization PRs, a stable re-cut's changelog PR, the todo flow.
+stable release's changelog and finalization PRs, a stable re-cut's changelog PR, run-all-tests fixes, the todo flow.
 
 - Before choosing validation, running any runtime test (Rust, browser, JS, installer, provisioning), creating or
   updating a PR, merging one, or reporting a change to the repository's files as done, read `.agents/validation.md` and
@@ -298,7 +298,8 @@ Each entry: trigger phrases, the file to read in full before the first action, a
 - **Deflake run** ("start a deflake run"): `deflake/AGENTS.md`. Fence: never poll; act only when
   `deflake/bin/deflake wait` returns.
 - **Run all tests and fix** (and similar wording asking for every test to be run and the failures fixed):
-  `.agents/run-all-tests.md`. Fence: an explicit request, never a finishing step; it never marks a PR ready or merges.
+  `.agents/run-all-tests.md`. Fence: an explicit request, never a finishing step; land straightforward fixes when their
+  checks pass, and record non-trivial or scope-expanding work for a decision.
 - **Planning system** ("todo planning flow", "todo planning flow for <bucket>", "plan to implement <TODO items>", "use
   the planning system to schedule these", "pick a plan to execute", "execute the next plan", "execute the next plan in
   order", "execute plan X", "drain the plans", "drain the plans and keep monitoring", "monitor for complete plans",
