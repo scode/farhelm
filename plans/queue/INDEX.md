@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 4e0ffc] `agent-delete-and-prompt.md` — `farhelm agent delete` (approved, no self-delete), and an initial prompt at creation from the CLI, the launcher and templates
 - [pending] `template-name-escape.md` — Template editor: an older template's unsafe session name shows escaped and read-only, like model, folder and commands
-- [pending] `webkit-ime-guards.md` — Input methods in the Mac app and Safari: the key that ends a composition no longer submits or closes, across every guard
+- [in-flight c9afbe] `webkit-ime-guards.md` — Input methods in the Mac app and Safari: the key that ends a composition no longer submits or closes, across every guard
 - [pending] `calm-session-unavailable.md` — Session pane: one calm "session unavailable" card instead of red and amber error text whenever the supervisor is out of reach
 - [pending] `replace-retry-identity.md` — Replace retries: one retry identity per source, and a fresh attempt after a definite refusal (2 outcomes, each gated)
 - [pending] `keyboard-scroll-regions.md` — Keyboard-reachable scroll areas: host setup and uninstall plans, and the trash list (2 outcomes, each gated)
