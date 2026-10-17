@@ -34,6 +34,10 @@ with suggestions when the template sets an **agent type**. Approvals and other o
 Without an agent type, every approval choice is offered, and applying the template is refused if the chosen agent does
 not offer that choice.
 
+To reuse a first message, add **initial prompt** and type it into the multiline box. Each new session started from the
+template receives that message; you can edit it in the launcher before starting. The field is offered for agents that
+accept an initial prompt, or while the template leaves the agent type unset. It is not offered for command templates.
+
 The destination can be a directory or a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout),
 chosen with the same **folder** and **managed checkout** control as the launcher. The editor explains that each session
 gets its own checkout and that its directory moves to the trash when its last session is deleted. A model or a

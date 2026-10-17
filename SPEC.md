@@ -651,24 +651,25 @@ agent choice is independent of that destination:
   agent type clears the choices incompatible with it exactly as picking that agent type by hand does. A template's
   agent-launch fields and command-launch fields apply to the launch kind active once its own launch kind, if any, is
   applied. A template may set any launcher field: launch kind, agent type, model, effort, permissions (including custom
-  and its words together), workspace trust, command, YOLO assertion, resume command, host, destination (a folder or a
-  managed checkout), and session name. Fields a template leaves out keep whatever the launcher already holds, so
-  templates stack: applying `my-codex` and then `myproject-webbuilder` applies both, the later one winning where they
-  overlap. A template whose field does not apply to what the launcher holds when it is applied, such as a model while
-  the launch kind is command or a model the chosen agent type does not offer, is refused with a message naming the
-  field, and nothing from it is applied. So is a template that sets a field the current dialog holds fixed, such as the
-  host in Replace with; Restart with does not offer templates. A template names its host by the host's recorded install
-  identity, exactly like the host default below, so a registry row retargeted to another install makes the template's
-  host field inapplicable rather than silently aiming at the successor. A launch made after applying templates is, for
-  remembered defaults, recent setups, and managed-checkout previews, exactly the launch the same hand edits would have
-  made: the resulting choices count as the user's explicit selection, and a template that changes host, installation,
-  destination, title, or agent invalidates a pending checkout preview as the equivalent hand edit does. Because a
-  template pins only what it contains, a field the launch requires and no template set still has to be filled in by
-  hand; that friction is accepted. New and Clone also offer "save as template": an inline name field and checklist
+  and its words together), workspace trust, initial prompt, command, YOLO assertion, resume command, host, destination
+  (a folder or a managed checkout), and session name. Fields a template leaves out keep whatever the launcher already
+  holds, so templates stack: applying `my-codex` and then `myproject-webbuilder` applies both, the later one winning
+  where they overlap. A template whose field does not apply to what the launcher holds when it is applied, such as a
+  model while the launch kind is command or a model the chosen agent type does not offer, is refused with a message
+  naming the field, and nothing from it is applied. So is a template that sets a field the current dialog holds fixed,
+  such as the host in Replace with; Restart with does not offer templates. A template names its host by the host's
+  recorded install identity, exactly like the host default below, so a registry row retargeted to another install makes
+  the template's host field inapplicable rather than silently aiming at the successor. A launch made after applying
+  templates is, for remembered defaults, recent setups, and managed-checkout previews, exactly the launch the same hand
+  edits would have made: the resulting choices count as the user's explicit selection, and a template that changes host,
+  installation, destination, title, or agent invalidates a pending checkout preview as the equivalent hand edit does.
+  Because a template pins only what it contains, a field the launch requires and no template set still has to be filled
+  in by hand; that friction is accepted. New and Clone also offer "save as template": an inline name field and checklist
   capture the current tab's choices, host, destination, and session name. Agent type, model and effort are checked
-  whenever set, including Clone's launch choices; command, YOLO and opted-in resume are checked when set. Permissions
-  and trust are checked only after an explicit choice; host only after a hand pick; a folder only after typing or
-  picking it; session name only after typing it. A GitHub repository is always checked. Remembered defaults and Clone's
+  whenever set, including Clone's launch choices; a nonempty initial prompt is checked too, shown by its escaped first
+  line with an ellipsis when more lines follow. Command, YOLO and opted-in resume are checked when set. Permissions and
+  trust are checked only after an explicit choice; host only after a hand pick; a folder only after typing or picking
+  it; session name only after typing it. A GitHub repository is always checked. Remembered defaults and Clone's
   inherited host and folder are offered unchecked. The saved template contains exactly the checked fields and always the
   active launch kind. A host without a usable recorded install identity is omitted with an explanation. A taken template
   name is refused without overwriting. Enter in the name field saves without launching; Escape returns to the launcher.
@@ -680,7 +681,11 @@ agent choice is independent of that destination:
   switch offers only host, destination and session name. Agent and command choices store their matching launch kind, so
   applying the template switches tabs. Existing kindless templates keep applying as stored; opening one infers its
   switch in an unsaved draft, and saving stores that switch. Choices follow the agent type when one is set, while model
-  text may be arbitrary and other fields need no agent type. Incompatible fields stay visible and prevent saving until
+  text may be arbitrary and other fields need no agent type. The initial prompt uses a resizable multiline textarea,
+  offered on the agent tab when the template's agent supports it or no agent is set. It explains that the message is
+  sent on every launch from the template and can be edited in the launcher first; the list summary mentions it. Newline
+  and tab remain editable. Invisible formatting is shown escaped and read-only, retaining its raw value through
+  unrelated saves; removing and adding the field replaces it. Incompatible fields stay visible and prevent saving until
   corrected or removed. Saving is explicit; leaving an unsaved draft asks save, discard, or keep editing. Template names
   are unique; duplicate opens an unsaved copy with a free name. Delete takes effect immediately and offers undo inside
   the dialog for about ten seconds; undo refuses if its old name has been taken. For a stored template that fails

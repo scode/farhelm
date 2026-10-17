@@ -46,6 +46,9 @@ impl Candidate {
         };
         match state.kind {
             Some(LauncherKind::Agent) => {
+                // A present empty prompt clears an earlier template's message;
+                // absence would instead leave that earlier message in place.
+                fields.prompt = state.prompt.clone();
                 fields.agent = state.harness;
                 fields.model = state.model.clone().map(Some);
                 fields.effort = state.effort.map(Some);
@@ -57,7 +60,7 @@ impl Candidate {
                 // Clone and recents mark their launch choices explicit even
                 // when this agent has no corresponding control. A forced mode
                 // or unsupported reset is not a choice the launcher can save.
-                for field in [Field::Permissions, Field::Trust] {
+                for field in [Field::Permissions, Field::Trust, Field::Prompt] {
                     if !field.offered(&fields) {
                         field.remove(&mut fields);
                     }
@@ -112,6 +115,13 @@ impl Candidate {
 /// the host's snapshot label identifies the persisted binding to the user.
 fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> String {
     let value = match field {
+        Field::Prompt => fields
+            .prompt
+            .as_ref()
+            .map(|prompt| match prompt.split_once('\n') {
+                Some((first, _)) => format!("{first}…"),
+                None => prompt.clone(),
+            }),
         Field::Agent => fields.agent.map(word),
         Field::Model => fields.model.clone().flatten(),
         Field::Effort => fields.effort.flatten().map(word),
@@ -276,6 +286,56 @@ mod tests {
     use super::*;
     use farhelm_proto::launcher::{TemplateContext, apply_template};
     use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
+
+    /// A typed first message is checked by default and keeps its full raw
+    /// text when saved; the checklist shows only its escaped first line.
+    /// Dormant or unsupported prompts must not leak into another launch kind.
+    #[test]
+    fn initial_prompt_save_choice_keeps_only_the_selected_message() {
+        let state = LauncherState {
+            kind: Some(LauncherKind::Agent),
+            harness: Some(LaunchHarness::Codex),
+            prompt: Some("first\u{202e}\n\tsecond".into()),
+            ..Default::default()
+        };
+        let candidate = Candidate::from_state(&state, ExplicitChoices::default());
+        assert!(candidate.checked.contains(&Field::Prompt));
+        assert_eq!(
+            choice_text(Field::Prompt, &candidate.fields, "host"),
+            "first<U+202E>…"
+        );
+        assert_eq!(candidate.selected(&candidate.checked).prompt, state.prompt);
+        assert_eq!(candidate.selected(&[Field::Agent]).prompt, None);
+        for prompt in [Some(String::new()), None] {
+            let candidate = Candidate::from_state(
+                &LauncherState {
+                    prompt: prompt.clone(),
+                    ..state.clone()
+                },
+                ExplicitChoices::default(),
+            );
+            assert_eq!(candidate.fields.prompt, prompt);
+            assert_eq!(candidate.checked.contains(&Field::Prompt), prompt.is_some());
+            assert_eq!(candidate.selected(&[Field::Prompt]).prompt, prompt);
+            assert_eq!(candidate.selected(&[]).prompt, None);
+        }
+        for (kind, harness) in [
+            (LauncherKind::Command, LaunchHarness::Codex),
+            (LauncherKind::Agent, LaunchHarness::Goose),
+            (LauncherKind::Agent, LaunchHarness::Pi),
+        ] {
+            let candidate = Candidate::from_state(
+                &LauncherState {
+                    kind: Some(kind),
+                    harness: Some(harness),
+                    ..state.clone()
+                },
+                ExplicitChoices::default(),
+            );
+            assert_eq!(candidate.fields.prompt, None);
+            assert!(!candidate.checked.contains(&Field::Prompt));
+        }
+    }
 
     /// Clone/recent provenance and a prior agent's edits cannot manufacture
     /// unavailable controls. The default checklist must save a valid setup
