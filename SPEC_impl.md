@@ -944,6 +944,15 @@ the skip preference. Cmd+W is consumed even without a header. The Mac desktop in
 muda's predefined Close Window, whose fixed Cmd+W accelerator would win before the page. Its renderer-free description
 is tested on Linux; native construction is type-checked by Linux desktop builds, while only macOS installs it.
 
+The same matcher maps Cmd+L on Mac desktop or Ctrl+Shift+L in browsers to a list-owned hidden Rename trigger. The open
+view publishes its accepted raw title through a separate signal, keyed by the selected session ID and independent of
+sidebar filtering. Navigation and successful local renames seed it synchronously; detail refreshes update it without
+writing the selection, whose observer would fence and refetch those same reads. The trigger uses the ordinary rename
+opener and guards. An editor retains whether it came from that shortcut: row edits return to their menu, keyboard edits
+to the selected terminal, through the same post-unmount generation and focus-ownership checks. The listener records the
+exact active element before its hidden click so repeated dialog mounts can take focus from that opener; a delayed mount
+still yields to an unrelated control chosen meanwhile.
+
 Number shortcuts use a capture listener with an independently testable physical `Digit0`–`Digit9` matcher. The build's
 Mac-desktop condition selects Meta alone; every other build selects Ctrl+Shift alone, never `navigator.platform`. Ten
 hidden `.template-number-trigger` buttons hand the digit to the same list callback that handles quick launch; the

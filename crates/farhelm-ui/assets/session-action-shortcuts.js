@@ -44,7 +44,12 @@
       if (action === "rename" && !trigger) return;
       event.preventDefault();
       event.stopPropagation();
-      if (!event.repeat && trigger && !trigger.disabled) trigger.click();
+      if (!event.repeat && trigger && !trigger.disabled) {
+        // A hidden trigger does not take focus. Rename's mounting handoff
+        // may take this exact opener, but must yield to any later focus move.
+        if (action === "rename") root.__farhelmSessionRenameOpener = document.activeElement;
+        trigger.click();
+      }
     }, true);
   }
 

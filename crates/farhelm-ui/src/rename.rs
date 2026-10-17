@@ -14,13 +14,13 @@ use crate::list::PeerTitle;
 use crate::peer::{DetailPart, PeerLine};
 use dioxus::prelude::*;
 
-/// Keep Tab inside the one-purpose rename dialog while it is mounted.
+/// Hand focus to Rename once and keep Tab inside its mounted dialog.
 ///
 /// The sidebar stays live behind the modal. Native modal attributes describe
 /// that relationship to assistive technology but do not constrain browser
 /// focus in every renderer, so the listener belongs to this exact dialog
 /// node and vanishes with it.
-fn install_rename_focus_trap(generation: u64) {
+fn install_rename_focus_trap(generation: u64, shortcut: bool) {
     document::eval(
         &r#"(() => {
             const dialog = document.querySelector('.rename-dialog[role="dialog"]');
@@ -30,7 +30,12 @@ fn install_rename_focus_trap(generation: u64) {
             // in this document. Mount owns one focus handoff, but a delayed
             // bridge callback must yield to an outside control chosen since.
             const active = document.activeElement;
-            if (!active || active === document.body || active.matches('.session-row-rename')) {
+            // A hidden shortcut click leaves focus on its original control.
+            // Identity, rather than a broad selector, prevents delayed mount
+            // work from taking focus back from a newly chosen outside control.
+            const shortcutOpener = __SHORTCUT__ && active === window.__farhelmSessionRenameOpener;
+            if (__SHORTCUT__) window.__farhelmSessionRenameOpener = null;
+            if (!active || active === document.body || active.matches('.session-row-rename') || shortcutOpener) {
                 dialog.querySelector('.rename-input')?.focus({ preventScroll: true });
             }
             const focusable = () => [...dialog.querySelectorAll(
@@ -47,7 +52,8 @@ fn install_rename_focus_trap(generation: u64) {
                     (event.shiftKey ? last : first).focus();
                 }
             });
-        })();"#.replace("__GENERATION__", &generation.to_string()),
+        })();"#.replace("__GENERATION__", &generation.to_string())
+            .replace("__SHORTCUT__", if shortcut { "true" } else { "false" }),
     );
 }
 
@@ -235,6 +241,8 @@ pub(crate) fn RenameDialog(
     current_title: String,
     error: Option<String>,
     generation: u64,
+    /// Keyboard opening preserves the same dialog but returns to the terminal.
+    shortcut: bool,
     focus_owned: Signal<bool>,
     on_submit: EventHandler<(u64, String)>,
     on_cancel: EventHandler<u64>,
@@ -250,7 +258,7 @@ pub(crate) fn RenameDialog(
             role: "dialog",
             aria_modal: "true",
             aria_label: "rename session",
-            onmounted: move |_| install_rename_focus_trap(generation),
+            onmounted: move |_| install_rename_focus_trap(generation, shortcut),
             // Focusout followed by focusin is an internal transition and
             // ends owned. A move outside has no matching focusin and ends
             // unowned. Busy controls stay focusable, so the render itself

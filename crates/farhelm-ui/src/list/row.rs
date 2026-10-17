@@ -2185,7 +2185,11 @@ pub(super) fn SessionRow(
                                         class: "btn session-row-menu-item session-row-rename",
                                         role: "menuitem",
                                         aria_label: "rename",
-                                        "data-tooltip": "rename: give this session a new title",
+                                        "data-tooltip": if selected {
+                                            format!("rename: give this session a new title ({})", crate::SESSION_RENAME_SHORTCUT)
+                                        } else {
+                                            "rename: give this session a new title".to_string()
+                                        },
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Rename) { "0" } else { "-1" },
                                         onmounted: move |element| {
