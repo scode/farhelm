@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`webkit-ime-guards`](reports/webkit-ime-guards.report.md) landed 2026-10-17 in #2194: Input methods in the Mac app and Safari: the key that ends a composition no longer submits or closes, across every guard
 - [`download-cancel-pending-entry`](reports/download-cancel-pending-entry.report.md) landed 2026-10-17 in #2197: Cancelling a terminal download before it starts leaves no request bookkeeping behind (1 outcome, gated)
 - [`triage-spec-rules-oct16`](reports/triage-spec-rules-oct16.report.md) landed 2026-10-17 in #2193, #2195, #2196: Spec rules from the 2026-10-16 triage: Claude lock trade-off, stale views in a second GUI, trash scale (3 outcomes, each gated)
 - [`calm-session-unavailable`](reports/calm-session-unavailable.report.md) landed 2026-10-17 in #2198: Session pane: one calm "session unavailable" card instead of red and amber error text whenever the supervisor is out of reach
