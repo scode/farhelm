@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`download-cancel-pending-entry`](reports/download-cancel-pending-entry.report.md) landed 2026-10-17 in #2197: Cancelling a terminal download before it starts leaves no request bookkeeping behind (1 outcome, gated)
 - [`triage-spec-rules-oct16`](reports/triage-spec-rules-oct16.report.md) landed 2026-10-17 in #2193, #2195, #2196: Spec rules from the 2026-10-16 triage: Claude lock trade-off, stale views in a second GUI, trash scale (3 outcomes, each gated)
 - [`calm-session-unavailable`](reports/calm-session-unavailable.report.md) landed 2026-10-17 in #2198: Session pane: one calm "session unavailable" card instead of red and amber error text whenever the supervisor is out of reach
 - [`bare-cache-explicit-git-dir`](reports/bare-cache-explicit-git-dir.report.md) landed 2026-10-17 in #2199: Fresh GitHub checkouts work on hosts with Git's explicit bare-repository policy (1 outcome, gated)
