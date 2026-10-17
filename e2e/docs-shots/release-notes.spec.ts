@@ -16,8 +16,8 @@
  * shot, nothing here launches a session, sends feedback, or saves a setting.
  */
 import { expect, test, type Page } from "@playwright/test";
-import { hostRowByName, openHostMenu } from "../tests/helpers/fleet";
-import { open, openLauncher } from "./open";
+import { hostRowByName, openHostMenu, openRowMenu } from "../tests/helpers/fleet";
+import { open, openLauncher, rowOf } from "./open";
 import { skipFrozenReleaseShot } from "./release-shots";
 import { shot } from "./shot";
 
@@ -531,4 +531,336 @@ test("v0.28.1 terminal links", async ({ page, request }) => {
     { side: "left", dy: 40 },
   );
   await shot(page, name, [links], { maxWidth: 930 });
+});
+
+// v0.29.0. A large release, so its shots are spread over the entries that
+// added something a reader can see: Settings gained three sections or
+// switches (#1986, #1993, #2089), the session menu, the Templates list and
+// the ? menu gained controls (#2064, #1994, #2008, #2006), the welcome card
+// is new (#2014), the session launcher gained custom permission flags and a
+// warning on a riskier agent switch (#2163, #2055), and a terminal file's
+// hover was redesigned (#2034).
+//
+// Each shot is listed under a number only its own entry cites. That is why
+// the Guarded default is explained on the custom flags shot rather than shown
+// under its own entry: #1992 is also cited by the entry about updating remote
+// hosts, so a shot listed under it would show up there too. The same goes for
+// starting in a named conversation (#2012). The ssh needs 2FA? dialog is not
+// photographed at all: its commands name the capturing machine's ssh
+// destinations and the run's state directory, which the staged fleet does not
+// rewrite (docs/docs-shots/SPEC.md, "What is real and what is not"). Nothing
+// here pins a session, marks a template, binds a key, or saves a setting.
+
+/** v0.29.0: ntfy alerts, set up in Settings. */
+test("v0.29.0 ntfy alerts", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-ntfy-alerts`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  const ntfy = dialog.getByRole("region", { name: "ntfy alerts" });
+  const enable = ntfy.getByRole("checkbox", { name: "send ntfy alerts", exact: true });
+  // The section reads the helm's saved ntfy settings before it unlocks; the
+  // staged fleet has none, so the shot shows the form a reader starts from.
+  await expect(enable).toBeEnabled();
+  await expect(enable).not.toBeChecked();
+  await ntfy.scrollIntoViewIfNeeded();
+  // Both in the left margin, level with what each explains, and aimed at
+  // the whole row rather than its switch or field, so the callout sits
+  // beside the row instead of over its label. To the right, the crop would
+  // pass the docs' text column and cut them off. The row is found by the
+  // control inside it, named from the page: `has` looks for its locator
+  // inside each label, so one chained from the section would never match.
+  await director.callout(
+    ntfy.locator("label").filter({ has: page.getByRole("checkbox", { name: "send ntfy alerts", exact: true }) }),
+    "Sends a notification to your ntfy topic when a session starts waiting for you, so it reaches your phone even when Farhelm is not in front of you.",
+    { side: "left" },
+  );
+  await director.callout(
+    ntfy.locator("label").filter({ has: page.getByRole("textbox", { name: "topic", exact: true }) }),
+    "Subscribe to the same topic in the ntfy app. Anyone who knows an ntfy.sh topic can read it, so pick one that is hard to guess.",
+    { side: "left", dy: 40 },
+  );
+  await shot(page, name, [ntfy], { maxWidth: 930 });
+});
+
+/** v0.29.0: Settings can skip the confirmations for session actions. */
+test("v0.29.0 session confirmations", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-session-confirmations`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  const sessions = dialog.getByRole("region", { name: "sessions" });
+  const skip = sessions.getByRole("checkbox", { name: "skip session confirmations", exact: true });
+  await expect(skip).not.toBeChecked();
+  // Aimed at the whole row, so the callout sits in the margin beside it
+  // rather than over its label.
+  await director.callout(
+    sessions.locator("label").filter({ has: page.getByRole("checkbox", { name: "skip session confirmations", exact: true }) }),
+    "On: delete, replace, restart and closing a shell tab act on the first click. Off by default. YOLO, host and trash questions still ask.",
+    // Moved down so its top stays below the dialog's heading.
+    { side: "left", dy: 50 },
+  );
+  // The heading and the row's help rather than the whole section, whose top
+  // margin would pull the dialog's heading into the crop.
+  await shot(page, name, [sessions.locator("h3"), sessions.locator(".host-settings-help")], {
+    pad: 12,
+    maxWidth: 930,
+  });
+});
+
+/** v0.29.0: Settings can answer Claude's trust question for new managed checkouts. */
+test("v0.29.0 claude trust", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-claude-trust`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  const trust = dialog.locator("#checkout-claude-trust");
+  const answer = trust.getByRole("checkbox", { name: /trust this folder/ });
+  // The switch is locked until the helm's saved choice has been read.
+  await expect(answer).toBeEnabled();
+  await expect(answer).not.toBeChecked();
+  await trust.scrollIntoViewIfNeeded();
+  // Aimed at the whole row, as on the ntfy alerts shot.
+  await director.callout(
+    trust.locator("label").filter({ has: page.getByRole("checkbox", { name: /trust this folder/ }) }),
+    "Off by default. On: Farhelm marks each new managed checkout trusted in Claude's own settings file, so Claude does not ask about it.",
+    // Moved down so its top stays below the save button above the switch.
+    { side: "left", dy: 60 },
+  );
+  await director.callout(
+    trust.locator("#claude-trust-caveats"),
+    "Read these before turning it on: Claude has no supported way to do this, so it is best effort.",
+    { side: "left", dy: 40 },
+  );
+  // A narrow pad keeps the post-clone command's save button, just above the
+  // switch, out of the crop.
+  await shot(page, name, [trust], { pad: 8, maxWidth: 930 });
+});
+
+/** v0.29.0: Pin to top in a session's menu. */
+test("v0.29.0 pin to top", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-pin-to-top`;
+  skipFrozenReleaseShot(name);
+  const { scenario, director } = await open(page, request);
+  const row = rowOf(page, scenario, (session) => session.status === "idle" && session.seen === false);
+  await openRowMenu(row);
+  const panel = page.locator(".session-row-menu-panel");
+  await expect(panel).toBeVisible();
+  // Photographed, never clicked: a pin is shared by every client of the
+  // helm, so it would move this row in every later shot.
+  const pin = panel.locator(".session-row-pin");
+  // Unpinned, so the item offers to pin rather than to unpin.
+  await expect(pin).toHaveAttribute("aria-label", "Pin to top");
+  await director.highlight(pin, { pad: 3 });
+  await director.callout(
+    pin,
+    "Keeps this session above the others. Every browser and the desktop app using this helm see the pin, and it carries over when you replace the session.",
+    { side: "right" },
+  );
+  await shot(page, name, [row, panel], { maxWidth: 930 });
+});
+
+/** v0.29.0: the ⚡ that marks the template Cmd+P or Ctrl+Shift+P starts. */
+test("v0.29.0 quick launch", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-quick-launch`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1100 });
+  const { director } = await open(page, request);
+  const dialog = await openTemplates(page);
+  // Opened from the Templates button rather than with the shortcut, which
+  // would start a session if a template were marked. No template is: the
+  // bolt is photographed unlit, and clicking it would save the mark.
+  const bolt = dialog.getByRole("button", { name: "quick launch quick-claude", exact: true });
+  await expect(bolt).toHaveAttribute("aria-pressed", "false");
+  await director.highlight(bolt, { pad: 3 });
+  await director.callout(
+    bolt,
+    "Mark one template with ⚡. Cmd+P on a Mac, or Ctrl+Shift+P elsewhere, then starts it without opening the session launcher.",
+    { side: "bottom", dy: 120 },
+  );
+  await shot(page, name, [dialog.locator(".templates-sidebar")], { maxWidth: 930 });
+});
+
+/** v0.29.0: a template's number key, chosen from the menu beside its ⚡. */
+test("v0.29.0 number keys", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-number-keys`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1100 });
+  const { director } = await open(page, request);
+  const dialog = await openTemplates(page);
+  // Opening the menu binds nothing; only picking one of its keys would.
+  const key = dialog.getByRole("button", { name: "number shortcut quick-claude", exact: true });
+  await key.click();
+  const menu = page.getByRole("menu", { name: "number key for quick-claude", exact: true });
+  await expect(menu).toBeVisible();
+  await director.callout(
+    menu,
+    "Give a template a number key. Cmd+0–9 in the Mac app, or Ctrl+Shift+0–9 elsewhere, then starts it without opening the session launcher.",
+    { side: "right" },
+  );
+  // The template's bolt too, so the crop starts at the row's left edge and
+  // shows which control the menu hangs from.
+  await shot(page, name, [dialog.getByRole("button", { name: "quick launch quick-claude", exact: true }), key, menu], {
+    maxWidth: 930,
+  });
+});
+
+/**
+ * v0.29.0: custom permission flags in the session launcher, with Guarded,
+ * the new default for a session started without choosing YOLO.
+ */
+test("v0.29.0 custom permissions", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-custom-permissions`;
+  skipFrozenReleaseShot(name);
+  // Wide, so the launcher leaves a left margin for the callouts.
+  await page.setViewportSize({ width: 1600, height: 1300 });
+  const { director } = await open(page, request);
+  const form = await openLauncher(page);
+  await form.locator(".launch-composer-harness-choice button", { hasText: /^Claude$/ }).click();
+  const permissions = form.locator(".launch-composer-permissions-choice");
+  await permissions.getByRole("button", { name: "custom", exact: true }).click();
+  const flags = form.locator(".custom-permission-choice");
+  await expect(flags).toBeVisible();
+  // Typed to show what goes there. Nothing launches: only the launcher's
+  // own launch button would start a session.
+  await flags.locator(".custom-permission-flags").fill("--permission-mode acceptEdits");
+  await expect(flags.locator(".custom-permission-words code")).toHaveCount(2);
+  await director.callout(
+    permissions.getByRole("button", { name: "guarded", exact: true }),
+    "Unless you choose YOLO, sessions now start in guarded: the agent's own automatic safety mode approves or blocks actions.",
+    // Moved down so its top stays below the effort row above.
+    { side: "left", dy: 50 },
+  );
+  await director.callout(
+    flags,
+    "custom passes your own permission flags instead of Farhelm's. Farhelm does not check them, so the session counts as YOLO.",
+    { side: "left", dy: 30 },
+  );
+  await shot(page, name, [permissions, flags], { maxWidth: 930 });
+});
+
+/**
+ * v0.29.0: the launcher warns, with Undo, when switching agents makes the
+ * permission mode riskier. Claude in guarded switched to Pi, which has no
+ * guarded mode, is the case the release's own browser test uses.
+ */
+test("v0.29.0 permission switch", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-permission-switch`;
+  skipFrozenReleaseShot(name);
+  // Narrow enough that the launcher, and the warning across its top, fit
+  // the docs' text column.
+  await page.setViewportSize({ width: 930, height: 1100 });
+  const { director } = await open(page, request);
+  const form = await openLauncher(page);
+  const harness = form.locator(".launch-composer-harness-choice");
+  await harness.getByRole("button", { name: "Claude", exact: true }).click();
+  const permissions = form.locator(".launch-composer-permissions-choice");
+  await permissions.getByRole("button", { name: "guarded", exact: true }).click();
+  await harness.getByRole("button", { name: "Pi", exact: true }).click();
+  const banner = form.locator(".permission-escalation-banner");
+  await expect(banner).toContainText("Permission changed: Guarded → YOLO");
+  // The warning goes away on its own after a few seconds unless the pointer
+  // rests on it, as a reader's would while reading it. The shot keeps the
+  // pointer there, and its animations running, so the warning is still up
+  // when the picture is taken (see keepAnimations in ./shot).
+  await banner.locator("span").first().hover();
+  // Below the warning, over the launcher's destination fields, which this
+  // shot is not about; beside it there is no room.
+  await director.callout(
+    banner.locator(".permission-escalation-undo"),
+    "Switching to an agent that cannot keep the permission mode you chose says so. Undo puts the earlier agent and its settings back.",
+    { side: "bottom", dx: -200, dy: 200 },
+  );
+  await shot(page, name, [banner, harness], { maxWidth: 930, keepPointer: true, keepAnimations: true });
+});
+
+/** v0.29.0: the ? menu opens the release notes. */
+test("v0.29.0 help menu", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-help-menu`;
+  skipFrozenReleaseShot(name);
+  const { director } = await open(page, request);
+  await page.locator(".app-help-toggle").click();
+  const item = page.locator('[data-bar-menu-item="release notes"]');
+  await expect(item).toBeVisible();
+  await director.callout(item, "Opens these release notes in your browser.", { side: "right" });
+  await shot(page, name, [page.locator(".app-help-toggle"), page.locator(".bar-menu-flyout")], { maxWidth: 930 });
+});
+
+/** v0.29.0: the welcome card, here reopened from the ? menu. */
+test("v0.29.0 welcome", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-welcome`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 930, height: 1000 });
+  const { director } = await open(page, request);
+  // The staged helm has already seen the welcome (e2e/global-setup.ts), so
+  // the card is opened the way a reader brings it back. That changes no
+  // setting: only dismissing a first-open card records it as seen.
+  await page.locator(".app-help-toggle").click();
+  await page.locator('[data-bar-menu-item="welcome"]').click();
+  const dialog = page.locator(".welcome-dialog");
+  await expect(dialog).toBeVisible();
+  await director.callout(
+    dialog,
+    "Shown the first time you open Farhelm, and once after this update. Dismissing it applies to all your windows; welcome in the ? menu brings it back.",
+    { side: "bottom", dy: 10 },
+  );
+  await shot(page, name, [dialog], { maxWidth: 930 });
+});
+
+/**
+ * Hover a file path in the open session's terminal and wait for its hover
+ * card. The terminal draws on a canvas, so the path has no element to hover,
+ * only a position, found the way the Work in a session page's download shot
+ * finds it.
+ */
+async function hoverTerminalPath(page: Page, needle: string) {
+  let cell: { x: number; y: number } | null = null;
+  await expect
+    .poll(async () => {
+      cell = await page.evaluate((needle) => {
+        const term = (window as any).__farhelmTerm;
+        if (!term) return null;
+        const box = term.element.querySelector(".xterm-screen").getBoundingClientRect();
+        for (let i = 0; i < term.rows; i++) {
+          const text = term.buffer.active.getLine(term.buffer.active.viewportY + i)?.translateToString(true) || "";
+          const column = text.indexOf(needle);
+          if (column >= 0) {
+            return {
+              x: box.x + (column + needle.length / 2) * box.width / term.cols,
+              y: box.y + (i + 0.5) * box.height / term.rows,
+            };
+          }
+        }
+        return null;
+      }, needle);
+      return cell !== null;
+    }, { message: `the open session's terminal must show ${needle}` })
+    .toBe(true);
+  await page.mouse.move(cell!.x, cell!.y);
+  const target = page.locator("#terminal .terminal-file-target");
+  await expect(target).toBeVisible();
+  return target;
+}
+
+/**
+ * v0.29.0: a terminal file's redesigned hover. The check's answer is the
+ * scenario's `terminal_files`, as on the Work in a session page, and the
+ * shot never clicks: that would only start a download, which the staging
+ * refuses anyway.
+ */
+test("v0.29.0 file hover", async ({ page, request }) => {
+  const name = `${PAGE}/v0-29-0-file-hover`;
+  skipFrozenReleaseShot(name);
+  const { director } = await open(page, request, { terminalFiles: true });
+  const target = await hoverTerminalPath(page, "e2e/attach.spec.ts");
+  await expect(target).toContainText("click to download");
+  await director.callout(
+    target,
+    "A file's hover shows an icon, its host and full path, and a readable size. In the desktop app, Cmd-click (Ctrl-click on Linux) saves it, and opens a .md or .txt file in its default app.",
+    { side: "right", dx: 40 },
+  );
+  await shot(page, name, [target], { pad: 60, maxWidth: 930, keepPointer: true });
 });

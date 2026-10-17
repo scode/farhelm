@@ -1,0 +1,59 @@
+{
+  "screenshots": [
+    {
+      "entry": 1986,
+      "name": "release-notes/v0-29-0-ntfy-alerts",
+      "alt": "The ntfy alerts section of Settings: the send ntfy alerts switch explained as notifying your phone when a session waits for you, and the topic field explained as needing a hard-to-guess name."
+    },
+    {
+      "entry": 2064,
+      "name": "release-notes/v0-29-0-pin-to-top",
+      "alt": "A session's menu with pin to top highlighted, explained as keeping the session above the others in every window using the helm."
+    },
+    {
+      "entry": 1994,
+      "name": "release-notes/v0-29-0-quick-launch",
+      "alt": "The Templates list with the lightning bolt beside a template highlighted, explained as marking the template Cmd+P or Ctrl+Shift+P starts."
+    },
+    {
+      "entry": 2008,
+      "name": "release-notes/v0-29-0-number-keys",
+      "alt": "A template's number key menu open in Templates, listing the keys it can take, explained as starting the template with Cmd or Ctrl+Shift and that number."
+    },
+    {
+      "entry": 2163,
+      "name": "release-notes/v0-29-0-custom-permissions",
+      "alt": "The session launcher's permissions with custom chosen and permission flags typed, explained as passed to the agent instead of Farhelm's flags; guarded explained as the new default."
+    },
+    {
+      "entry": 2034,
+      "name": "release-notes/v0-29-0-file-hover",
+      "alt": "The hover over a file path in a terminal, with a file icon, the host and full path, and the size, explained, along with Cmd-click in the desktop app."
+    },
+    {
+      "entry": 2089,
+      "name": "release-notes/v0-29-0-claude-trust",
+      "alt": "The switch in Settings that answers Claude's trust question for new managed checkouts, explained as off by default, with its caveats below it."
+    },
+    {
+      "entry": 1993,
+      "name": "release-notes/v0-29-0-session-confirmations",
+      "alt": "The skip session confirmations switch in Settings, explained as letting delete, replace, restart and closing a shell tab act on the first click."
+    },
+    {
+      "entry": 2014,
+      "name": "release-notes/v0-29-0-welcome",
+      "alt": "The welcome card, with links to Get started and to send feedback, explained as shown on first open and kept in the ? menu."
+    },
+    {
+      "entry": 2006,
+      "name": "release-notes/v0-29-0-help-menu",
+      "alt": "The ? menu with release notes pointed out, explained as opening these release notes in your browser."
+    },
+    {
+      "entry": 2055,
+      "name": "release-notes/v0-29-0-permission-switch",
+      "alt": "The session launcher after switching from Claude in guarded to Pi: a warning that the permission changed to YOLO, with Undo pointed out."
+    }
+  ]
+}

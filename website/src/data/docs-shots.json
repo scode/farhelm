@@ -1,16 +1,16 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-10-14T02:39:16Z",
-  "captured_from": "5e194427c474c4f93508210c16acd241cbada75a",
-  "commit": "564e4f80b706258dfc1be375c05a075b30aa1716",
+  "captured_at": "2026-10-16T17:20:29Z",
+  "captured_from": "597856552ef638defb8188a2726cb2cd3c4e6d05",
+  "commit": "93411b9ffeef100fdd3c1659c8ea19136dddfb37",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 418,
       "width": 1260
     },
     "add-a-remote-host/add-dialog": {
-      "height": 884,
+      "height": 996,
       "width": 1754
     },
     "add-a-remote-host/connected-host": {
@@ -42,15 +42,15 @@
       "width": 1800
     },
     "launch-templates/edit-form": {
-      "height": 1308,
+      "height": 1368,
       "width": 1796
     },
     "launch-templates/panel": {
-      "height": 1042,
+      "height": 1078,
       "width": 1844
     },
     "launch-templates/save-as-template": {
-      "height": 850,
+      "height": 904,
       "width": 1860
     },
     "launch-templates/templates-button": {
@@ -58,7 +58,7 @@
       "width": 996
     },
     "manage-hosts/app-settings": {
-      "height": 3436,
+      "height": 3642,
       "width": 1594
     },
     "manage-hosts/details": {
@@ -141,6 +141,50 @@
       "height": 744,
       "width": 1544
     },
+    "release-notes/v0-29-0-claude-trust": {
+      "height": 1224,
+      "width": 1512
+    },
+    "release-notes/v0-29-0-custom-permissions": {
+      "height": 724,
+      "width": 1562
+    },
+    "release-notes/v0-29-0-file-hover": {
+      "height": 574,
+      "width": 1530
+    },
+    "release-notes/v0-29-0-help-menu": {
+      "height": 468,
+      "width": 1230
+    },
+    "release-notes/v0-29-0-ntfy-alerts": {
+      "height": 1382,
+      "width": 1544
+    },
+    "release-notes/v0-29-0-number-keys": {
+      "height": 700,
+      "width": 1434
+    },
+    "release-notes/v0-29-0-permission-switch": {
+      "height": 1262,
+      "width": 1840
+    },
+    "release-notes/v0-29-0-pin-to-top": {
+      "height": 800,
+      "width": 1830
+    },
+    "release-notes/v0-29-0-quick-launch": {
+      "height": 1156,
+      "width": 642
+    },
+    "release-notes/v0-29-0-session-confirmations": {
+      "height": 376,
+      "width": 1528
+    },
+    "release-notes/v0-29-0-welcome": {
+      "height": 1156,
+      "width": 1104
+    },
     "session-list/controls": {
       "height": 696,
       "width": 1392
@@ -150,7 +194,7 @@
       "width": 1360
     },
     "session-list/row-menu": {
-      "height": 746,
+      "height": 800,
       "width": 1830
     },
     "session-list/statuses": {
@@ -174,8 +218,8 @@
       "width": 1562
     },
     "start-a-session/effort-permissions-trust": {
-      "height": 722,
-      "width": 1562
+      "height": 814,
+      "width": 1600
     },
     "start-a-session/harness-and-model": {
       "height": 682,
@@ -218,12 +262,12 @@
       "width": 1616
     },
     "stop-restart-resume/row-menu": {
-      "height": 844,
+      "height": 898,
       "width": 1830
     },
     "work-in-a-session/download-hover": {
       "height": 500,
-      "width": 1538
+      "width": 1530
     },
     "work-in-a-session/header": {
       "height": 392,
