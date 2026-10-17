@@ -64,3 +64,48 @@ outcome and complexity gate, and the full test-authoring checklist. Neither revi
 the findings against the changes and owns the runtime evidence above; the reviewers ran no tests. Fresh gpt-6.1-sol
 medium cold readers checked the commit and PR wording. Contaminated blind reads were excluded and replaced with fresh
 readers. No implementation work was delegated.
+
+### Landing
+
+Landed on its own in round 74, as #2190 and #2191, merged bottom-up and unchanged from what the report describes.
+
+#### What landed since the stack was based, and whether it interacted
+
+Nothing outside the plan queue reached main between this stack's base and its landing, so the landing rebase was clean
+and both PRs landed byte-identical to the heads the executor delivered. The base already held the fix that makes
+permanent deletion in the trash act only on the entries its confirmation showed (#2171, shipped in v0.29.0), so the
+stack was written against the released trash code. I read the stack against it, and a fresh-context reviewer did the
+same independently. Neither found an interaction.
+
+The reviewer also checked that the new tab stops change no dialog's initial focus or where focus returns: the trash
+dialog chooses those targets explicitly, and neither new region takes focus on its own, so the spec's rule that focus
+starts on the confirming button still holds. The host-plan style change applies only to the two plan bodies, not to the
+other dialogs that share their frame. The new browser test cleans up after itself the same way the neighboring trash
+tests do and leaves nothing behind that other tests depend on.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-ups
+
+The specification rule this plan added says every scrollable region must be reachable by keyboard, and the report notes
+that not every existing region was audited. Besides the SSH connection help area the report names, the reviewer found
+two more text-only scroll areas that have no tab stop of their own: the remove-host dialog's body and the feedback
+dialog's "sent" message. Both are short, so they probably only overflow with very large text or a very small window.
+Neither was reproduced in a browser.
+
+#### Checks
+
+- Run now: none. Main gained only plan-queue bookkeeping since the base.
+- Reused, because the landing rebase left both PRs byte-identical to what the executor delivered: the host-setup layout
+  run `cbca5cb3-6087-4114-862c-7d6178f59596` and the real-fleet uninstall plan run
+  `4a3150bc-7dba-4cc9-9d1d-ebe0b2f442af`, both recorded on the first PR's source and carried to the stack tip by the
+  report's argument that the second PR leaves host plans untouched; the full trash dialog spec run
+  `9829a85c-3483-48e3-a01e-a1c13bbbd42b` (20 passed); all on Chromium and WebKit, plus the executor's clippy, builds,
+  formatting, test-sleep, agent-instruction and changelog checks.
+- Skipped: everything the report skipped (Rust runtime, desktop shell, JavaScript unit, installer, full browser and
+  website runs), for the reasons it gives. As the report says, the Mac desktop app was not exercised. No CI run was
+  requested.
+
+Nothing in the executor's report became untrue at landing.
