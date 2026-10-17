@@ -843,10 +843,10 @@ The help leads with the mechanism: Claude has no supported switch, so Farhelm ed
 key, with an atomic replacement, and makes a best-effort removal when the checkout is archived or retired as missing. An
 archive refusal leaves the directory and trust in place. A launch or Delete never fails because this edit failed. The
 caution explains that Claude's unlocked exit save can lose either writer's update, future Claude versions may change the
-file or locking without notice, and Farhelm cannot promise continued safety. Farhelm follows Claude's advisory lock the
-way Claude's own writers do: a writer stalled past Claude's stale-lock threshold can lose an update in either direction
-when another writer takes over. This is an accepted trade-off of editing Claude's file. Trust allows repository hooks
-and commands just as answering Yes does. The mechanism is explicitly opt-in and best effort.
+file or locking without notice, and Farhelm cannot promise continued safety. Farhelm waits on Claude's advisory lock and
+never takes over a stale one. A writer stalled past Claude's stale-lock threshold can still lose an update in either
+direction when another writer takes over. This is an accepted trade-off of editing Claude's file. Trust allows
+repository hooks and commands just as answering Yes does. The mechanism is explicitly opt-in and best effort.
 
 While Claude's trust question is visible in the agent terminal of a managed checkout, the setting is off, and the hint
 has not been dismissed, an informational band appears above the terminal, below its tabs. It takes layout space rather
@@ -1098,20 +1098,21 @@ tab close, host setup, removal and uninstall, and permanent trash deletion. Repe
 the new question. The YOLO confirmation and Restart with dialog still start on Cancel.
 
 Confirmed 2026-10-01: a destructive confirmation authorizes only what the prompt the user answered said would happen.
-This covers every destructive confirmation (Delete, Restart, Restart with, Replace and Replace with), including a prompt
-that rewords itself while it is open because the session changed underneath it: the answer applies to the wording on
-screen at the click, never to a state the user was not shown. When the session setting skips a prompt, the click
-authorizes only the state the screen showed, under the same guards. The request carries the matching precondition, and
-the supervisor refuses, at the moment it acts, when the session has more alive than that: a Delete or Replace whose
-prompt said nothing was alive (or that asked nothing, because the session showed nothing alive) is refused if the agent
-or any terminal tab is running; one whose prompt warned only about open terminal tabs is refused if the agent is running
-again; a Restart whose prompt did not say it stops a running agent is refused if the agent is working (as for a Restart
-with no prompt, an idle, waiting or unknown agent is still stopped unasked). A refusal deletes, replaces or stops
-nothing (a Replace has already created its new session, and reports both, as above), and the next attempt asks again
-from the current state, skipping its question again if the setting remains on. No refusal opens a confirmation by
-itself. These races are reachable in ordinary use because the command line and agents act on sessions while a GUI is
-open (see One GUI at a time). Accepted: a terminal tab opened between a tabs-only prompt and the click is closed with
-the others; the prompt need not name the exact tabs it showed.
+This covers every destructive confirmation (Delete, Restart, Restart with, Replace and Replace with, and permanent
+deletion in the archived-checkout trash, whose answer applies only to the hosts and checkouts it was asked about),
+including a prompt that rewords itself while it is open because the session changed underneath it: the answer applies to
+the wording on screen at the click, never to a state the user was not shown. When the session setting skips a prompt,
+the click authorizes only the state the screen showed, under the same guards. The request carries the matching
+precondition, and the supervisor refuses, at the moment it acts, when the session has more alive than that: a Delete or
+Replace whose prompt said nothing was alive (or that asked nothing, because the session showed nothing alive) is refused
+if the agent or any terminal tab is running; one whose prompt warned only about open terminal tabs is refused if the
+agent is running again; a Restart whose prompt did not say it stops a running agent is refused if the agent is working
+(as for a Restart with no prompt, an idle, waiting or unknown agent is still stopped unasked). A refusal deletes,
+replaces or stops nothing (a Replace has already created its new session, and reports both, as above), and the next
+attempt asks again from the current state, skipping its question again if the setting remains on. No refusal opens a
+confirmation by itself. These races are reachable in ordinary use because the command line and agents act on sessions
+while a GUI is open (see One GUI at a time). Accepted: a terminal tab opened between a tabs-only prompt and the click is
+closed with the others; the prompt need not name the exact tabs it showed.
 
 Process-tree ownership is session-wide. Restart reaps any leftover descendants of the prior run before relaunching —
 never alongside them. Stop and delete reap everything the agent started. An agent exiting on its own does not trigger a
