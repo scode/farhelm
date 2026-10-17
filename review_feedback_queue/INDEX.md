@@ -23,9 +23,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Repeated update or removal planning can leave adding, updating, and removing hosts stuck until the helm restarts, even
   after the pages close.
 
-- [`host-plans-cannot-receive-keyboard-scroll-focus.md`](host-plans-cannot-receive-keyboard-scroll-focus.md) — Desktop
-  keyboard users may be unable to scroll through setup and uninstall plans before approving them.
-
 - [`replace-retry-key-splits-across-controls.md`](replace-retry-key-splits-across-controls.md) — Retrying an unanswered
   Replace through the other control can start another replacement agent.
 

@@ -15505,7 +15505,8 @@
   overflowing plan, a keyboard-only user can Tab into the plan area and scroll it in both the setup and uninstall
   dialogs. A WebKit browser regression does exactly that; run it through the recorder on Chromium and WebKit. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/keyboard-scroll-regions.md`.
+- Execution: complete in change `yvoouqnznnslxtptuxswkllxxnzwwqwl`, bookmark
+  `plan/keyboard-scroll-regions/01-host-plans`, https://github.com/scode/farhelm/pull/2190/changes.
 
 ## claude-trust-cleanup-delays-desktop-start.md
 
