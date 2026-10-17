@@ -174,6 +174,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   remove-host dialog's body, and the feedback dialog's "sent" message. Audit every scroll region and fix the ones that
   fall short.
 
+- **Cheaper clones from the repository cache.** Look into whether a managed checkout's clone from the host's repository
+  cache can skip most of the compression and delta work git does today, so the clone stage finishes sooner.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
@@ -872,6 +875,10 @@ are large mostly because of their tests.
   the ntfy.sh entry under Near term.
 
 ## Unbucketized
+
+- **Launch guarded from the YOLO confirmation.** When the session launcher shows the confirmation for a YOLO launch on a
+  host that asks first, offer a one-click "launch guarded instead" button next to "start YOLO session anyway", so
+  switching to a safer launch does not mean cancelling, changing the permission and launching again. UI details TBD.
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
   supervisor's `wrapper_failure_detail` (launch_artifacts.rs) records "the agent was never started: the launch never
