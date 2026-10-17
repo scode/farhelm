@@ -728,7 +728,8 @@ mod tests {
     /// than HOST because the value is a name from the hosts listing, every
     /// launch flag renders with the value it takes, and the hidden refusals
     /// for the removed `--invocation`, `--profile` and `--profile-id` must
-    /// not render.
+    /// not render. The initial prompt's literal and file inputs must both
+    /// remain discoverable in this usage line.
     ///
     /// Both lines exceed [`MAX_USAGE_WIDTH`], so this also pins what an
     /// over-wide verb looks like in the REAL text rather than only in
@@ -738,7 +739,8 @@ mod tests {
     fn a_creating_verb_renders_its_real_command_line() {
         let lines = verb_lines(&agent_command());
         for expected in [
-            "farhelm agent create [--cwd <DIR>] [--gh <REPO>] [--host <NAME>] [--template <NAME>] \
+            "farhelm agent create [--cwd <DIR>] [--gh <REPO>] [--host <NAME>] \
+             [--prompt <TEXT>] [--prompt-file <PATH>] [--template <NAME>] \
              [--agent <TYPE>] [--model <ID>] [--effort <LEVEL>] [--permissions <MODE>] \
              [--trust <BOOL>] [--command <CMD>] [--yolo] [--no-yolo] [--resume-command <CMD>] \
              [--no-resume-command] [--title <TITLE>] [--idempotency-key <KEY>]  \
