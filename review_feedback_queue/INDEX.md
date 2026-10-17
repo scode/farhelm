@@ -46,9 +46,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`file-recognition-rejects-digit-leading-extensions.md`](file-recognition-rejects-digit-leading-extensions.md) —
   Printed filenames such as backup.7z cannot be hovered or downloaded unless the program includes a directory prefix.
 
-- [`download-cancel-retains-pending-admission.md`](download-cancel-retains-pending-admission.md) — Repeatedly cancelling
-  downloads before they start leaves a small amount of helm memory retained until the host reconnects.
-
 - [`checkout-folder-save-trims-literal-path.md`](checkout-folder-save-trims-literal-path.md) — Saving an existing
   checkout-folder setting can change which directory it names, even without editing it.
 
