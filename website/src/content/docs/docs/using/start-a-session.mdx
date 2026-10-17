@@ -15,7 +15,7 @@ import Screenshot from '../../../../components/Screenshot.astro';
 In the Farhelm app on your Mac, Cmd+N opens the launcher too, even while you are typing in a terminal.
 
 When you launch, the launcher closes, the new session appears in the [session list](/docs/using/session-list/), and its
-terminal opens, ready for your first prompt.
+terminal opens. You can type your first prompt there, or supply it in the launcher.
 
 ## The launcher at a glance
 
@@ -78,6 +78,15 @@ The choice applies to this start only. Templates and recent setups do not save i
 Farhelm does not check whether the conversation exists; a mistyped id is handled by the agent. Goose, Muse, Cursor and
 OpenCode can open a conversation this way, but Farhelm cannot continue it with a later Restart. For restarting a session
 whose id Farhelm never learned, see [Restart with](/docs/using/stop-restart-resume/#the-headers-actions).
+
+## Supply the first message
+
+For agents that accept one, **initial prompt** supplies the first message when the session starts. The box accepts
+multiple lines, and Enter adds a line without launching. Restart, Clone and Replace do not send the message again;
+Clone and Replace with open with it cleared. Picking a recent setup leaves a message you have already typed alone.
+Goose, Pi and custom commands have no initial-prompt box, and Muse cannot combine one with a conversation id.
+
+To reuse a message for new sessions, save it in a [launch template](/docs/using/launch-templates/).
 
 ## Confirm a YOLO launch
 

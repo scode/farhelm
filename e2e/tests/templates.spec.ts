@@ -535,6 +535,107 @@ async function storedTemplate(request: APIRequestContext, name: string) {
   return body.templates.find((template: any) => template.name === name);
 }
 
+/** Saving a launcher message must preserve the reviewed bytes rather than
+ * their escaped preview. Unchecking it must produce an absent partial edit.
+ * Template stacking must distinguish an absent message from an empty reset.
+ */
+for (const keepPrompt of [true, false]) {
+  test(`initial prompt launcher template stacking and save selection ${keepPrompt}`, async ({ page, request }) => {
+    const stamp = Date.now();
+    const initial = `prompt-source-${stamp}`;
+    const unchanged = `prompt-unchanged-${stamp}`;
+    const clear = `prompt-clear-${stamp}`;
+    const nameOnly = `prompt-name-${stamp}`;
+    const saved = `prompt-saved-${stamp}`;
+    const message = "first\u202e\nsecond";
+    try {
+      await putTemplate(request, initial, { kind: "agent", prompt: message });
+      await putTemplate(request, unchanged, { agent: "codex", name: "other edit" });
+      await putTemplate(request, clear, { prompt: "" });
+      await putTemplate(request, nameOnly, { name: "unrelated edit" });
+      const form = await openNew(page);
+      await applyTemplate(form, initial);
+      const prompt = form.getByLabel("initial prompt", { exact: true });
+      await expect(prompt).toHaveCount(0);
+      await applyTemplate(form, unchanged);
+      await expect(prompt).toHaveValue("first<U+202E><U+000A>second");
+      await expect(prompt).toHaveJSProperty("readOnly", true);
+      await applyTemplate(form, unchanged);
+      await expect(prompt).toHaveValue("first<U+202E><U+000A>second");
+      await applyTemplate(form, clear);
+      await expect(prompt).toHaveValue("");
+      await expect(prompt).toBeEditable();
+      await applyTemplate(form, initial);
+      // A projected-out message must not be written back as absence by an
+      // unrelated template. Both dormant launch kinds retain the raw draft.
+      await form.getByRole("tab", { name: "command", exact: true }).click();
+      await applyTemplate(form, nameOnly);
+      await form.getByRole("tab", { name: "agent", exact: true }).click();
+      await expect(prompt).toHaveValue("first<U+202E><U+000A>second");
+      await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Goose", exact: true }).click();
+      await expect(prompt).toHaveCount(0);
+      await applyTemplate(form, nameOnly);
+      await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+      await expect(prompt).toHaveValue("first<U+202E><U+000A>second");
+      await form.locator(".launch-composer-save-template").click();
+      const panel = form.locator(".save-template-panel");
+      const choice = panel.locator(".save-template-choice").filter({ has: page.locator('[data-field="prompt"]') });
+      await expect(choice).toContainText("initial prompt: first<U+202E>…");
+      const checkbox = choice.locator('input[type="checkbox"]');
+      await expect(checkbox).toBeChecked();
+      if (!keepPrompt) await checkbox.uncheck();
+      await panel.locator(".save-template-name").fill(saved);
+      await panel.locator(".save-template-save").click();
+      await expect(page.locator(".templates-dialog")).toBeVisible();
+      expect((await storedTemplate(request, saved)).fields.prompt).toBe(keepPrompt ? message : undefined);
+    } finally {
+      for (const name of [initial, unchanged, clear, nameOnly, saved]) await deleteTemplate(request, name);
+    }
+  });
+}
+
+/** Recent setups omit the one-time message. Applying one must leave the
+ * current message alone, while each new Clone/Replace opening clears it.
+ * The source is an owned inert command session, never a vendor agent.
+ */
+test("initial prompt survives a recent but clears on Clone and Replace prefills", async ({ page, request }) => {
+  const source = await createSession(request, { title: `prompt-prefill-${Date.now()}` });
+  try {
+    const response = await request.get("/api/sessions");
+    const build = response.headers()["x-farhelm-build"];
+    const hosts = await listHosts(request);
+    const host = hosts.find(host => host.kind === "local");
+    expect(host).toBeTruthy(); expect(build).toBeTruthy();
+    await page.route("**/api/launch-history**", route => route.fulfill({
+      status: 200, headers: { "content-type": "application/json", "x-farhelm-build": build },
+      body: JSON.stringify({ folders: [], launches: [{ host: host!.id, canonical_cwd: "/tmp", cwd: "/tmp", selection: { harness: "codex", model: null, effort: "high", permissions: null, workspace_trust: null }, created_at: 1, creation_seq: 1 }] }),
+    }));
+    const form = await openNew(page);
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await form.getByLabel("initial prompt", { exact: true }).fill("keep through recent");
+    await expect(form.getByLabel("host", { exact: true })).toHaveAttribute("data-host-id", String(host!.id));
+    const recent = form.locator(".launch-composer-recents button");
+    await expect(recent).toHaveCount(1);
+    await recent.click();
+    await expect(form.getByLabel("initial prompt", { exact: true })).toHaveValue("keep through recent");
+    await form.locator(".launch-composer-cancel").click();
+    for (const selector of [".session-row-clone", ".session-row-replace-with"]) {
+      const row = page.locator(`.session-row[data-session-id="${source.id}"]`);
+      await expect(row).toBeVisible();
+      await openRowMenu(row);
+      await row.locator(selector).click();
+      await expect(form).toBeVisible();
+      await form.getByRole("tab", { name: "agent", exact: true }).click();
+      await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+      await expect(form.getByLabel("initial prompt", { exact: true })).toHaveValue("");
+      await form.getByLabel("initial prompt", { exact: true }).fill("discard for next prefill");
+      await form.locator(".launch-composer-cancel").click();
+    }
+  } finally {
+    await cleanupSession(request, source.id);
+  }
+});
+
 /** A prompt is a partial template edit, preserved across textarea newlines.
  * Changing to an unsupported agent keeps the incompatible field visible until
  * the user removes it; the add menu must then stop offering it.

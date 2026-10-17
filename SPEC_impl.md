@@ -4637,6 +4637,14 @@ list before the existing last-write-wins PUT. This refuses ordinary collisions, 
 there is no new endpoint or version check. The parent guards cancellation and session submission while saving, and a
 successful save hands the actual template to the Templates dialog's initial editor state without waiting for its list.
 
+The launcher's initial prompt is a separate optional draft signal. The agent tab's template snapshot retains it when the
+agent is unset or supported; a request requires a selected supported agent. Recent setups leave the draft alone and
+Clone/Replace prefills clear it. Templates replay the shared application result, preserving an empty prompt edit as
+distinct from absence. Permission-switch Undo captures it with the other draft values. The full raw prompt is bound to
+the create key and fresh-checkout retry identity, re-read after asynchronous key minting, and sent by the same API body
+builder for ordinary, named, fresh-checkout and Replace-with creates. It never enters `LaunchSelection`, `SessionLaunch`
+or recent history. Restart controls omit the prompt callback.
+
 In the launcher, `tl:name` offers templates (the only search scope that does). Accepting one first runs `apply_template`
 on a snapshot of the launcher, so a refusal applies nothing; then it replays the template as the launcher's own search
 actions (agent type, model, effort, permissions, trust, host, folder, repository, name) and sets directly only what has

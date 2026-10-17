@@ -3321,6 +3321,13 @@ pub(crate) async fn do_replace_session(
     // with" body is the user's own choice of them.
     let settings_from_source = with.is_none();
     let conversation = with.as_mut().and_then(|body| body.conversation.take());
+    // An initial prompt is only ever the user's explicit entry in a "replace
+    // with" body, sent in the same body an ordinary create sends
+    // (`SPEC_impl.md`, "Launch templates"). A plain Replace has none: the
+    // source's first message is not part of its stored launch, and Replace
+    // never sends it again (SPEC.md's initial-prompt rules).
+    // `do_create_session` validates it against the launch mode.
+    let prompt = with.as_mut().and_then(|body| body.prompt.take());
     let (mode, cwd, title, cols, rows) = match (with, with_mode) {
         (Some(with), Some(mode)) => (mode, with.cwd, with.title, with.cols, with.rows),
         // The two halves travel together: `with_mode` is `Some` exactly
@@ -3352,7 +3359,7 @@ pub(crate) async fn do_replace_session(
         &claim,
         &client,
         CreateSpec {
-            prompt: None,
+            prompt,
             named_start,
             cwd,
             mode,

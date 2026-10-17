@@ -305,6 +305,7 @@ enum TemplateEdit {
 /// bundled only so [`template_edits`] has one argument for them.
 #[derive(Clone, Copy)]
 struct TemplateTargets {
+    prompt: Signal<Option<String>>,
     launch_tab: Signal<LaunchTab>,
     structured_harness: Signal<Option<LaunchHarness>>,
     structured_model: Signal<Option<String>>,
@@ -404,7 +405,7 @@ fn capture_permission_switch(targets: PermissionUndoTargets) -> PermissionSwitch
         }};
     }
     let restore = capture!((
-        launch_tab, structured_harness, structured_model, structured_model_raw_seed,
+        prompt, launch_tab, structured_harness, structured_model, structured_model_raw_seed,
         structured_model_edited, custom_model_harness, composer_reset_reason,
         structured_effort, structured_permissions, structured_permission_flags,
         structured_permissions_is_explicit, structured_workspace_trust,
@@ -449,6 +450,22 @@ fn permission_mode_name(permission: Option<LaunchPermission>) -> &'static str {
     }
 }
 
+/// Project the agent tab's first message into templates and supported requests.
+/// Visiting a command or unsupported agent keeps the dormant text in the form,
+/// but it cannot silently become an argument to that unrelated launch.
+/// An unset agent still retains a partial template's message so a later
+/// template can supply the agent without losing the first template's edit.
+fn active_prompt(
+    kind: farhelm_proto::launcher::LauncherKind,
+    harness: Option<LaunchHarness>,
+    prompt: &Option<String>,
+) -> Option<String> {
+    (kind == farhelm_proto::launcher::LauncherKind::Agent
+        && harness.is_none_or(|agent| agent.supports_initial_prompt(false)))
+    .then(|| prompt.clone())
+    .flatten()
+}
+
 /// Capture the same raw launcher values for template application and saving.
 /// Relayed editor text retains its original bytes until deliberately edited;
 /// destination and name are included so saving does not grow a second reader.
@@ -464,7 +481,7 @@ fn launcher_snapshot(
         LaunchTab::Command => LauncherKind::Command,
     };
     LauncherState {
-        prompt: None,
+        prompt: active_prompt(kind_now, *t.structured_harness.peek(), &t.prompt.peek()),
         kind: Some(kind_now),
         harness: *t.structured_harness.peek(),
         model: t.structured_model.peek().as_ref().map(|model| {
@@ -565,7 +582,11 @@ fn template_edits(
         )));
         return Vec::new();
     };
-    let state = launcher_snapshot(t, hosts, *t.chosen_host.peek());
+    let mut state = launcher_snapshot(t, hosts, *t.chosen_host.peek());
+    // Saving projects only active choices. Applying a partial template must
+    // instead retain dormant drafts: a name-only edit on the command tab or
+    // an unsupported agent cannot erase the first message waiting on return.
+    state.prompt = t.prompt.peek().clone();
     let known_hosts: Vec<String> = hosts
         .iter()
         .filter(|host| !host.identity_mismatch)
@@ -604,6 +625,10 @@ fn template_edits(
     let kind = applied.kind.unwrap_or(LauncherKind::Agent);
     let mut edits = Vec::new();
     let mut t = t;
+    // Shared application may clear an incompatible prompt when changing the
+    // agent. Replay its result too; an absent prompt field otherwise leaves
+    // the current first message intact, including a deliberate empty edit.
+    let applied_prompt = applied.prompt.clone();
     // 1. The launch kind.
     if let Some(kind) = fields.kind {
         edits.push(TemplateEdit::Set(Box::new(move || {
@@ -728,7 +753,10 @@ fn template_edits(
     if let Some(name) = fields.name {
         edits.push(TemplateEdit::Search(ComposerSearchResult::Name(name)));
     }
-    edits.push(TemplateEdit::Set(Box::new(move || t.intent_key.set(None))));
+    edits.push(TemplateEdit::Set(Box::new(move || {
+        t.prompt.set(applied_prompt.clone());
+        t.intent_key.set(None);
+    })));
     edits
 }
 
@@ -1169,6 +1197,8 @@ fn answer_launcher_yolo(
 ///   honesty about a create being in flight, not the guard.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct IntentBinding {
+    /// One-time first message; retries bind its exact bytes, never saved history.
+    prompt: Option<String>,
     /// Transient choice bound to this request/key, absent from saved launch history.
     conversation: Option<String>,
     host: HostId,
@@ -1211,6 +1241,7 @@ impl IntentBinding {
     ) -> Option<IntentBinding> {
         let host = hosts.iter().find(|host| Some(host.id) == selected)?;
         Some(IntentBinding {
+            prompt: None,
             conversation: None,
             host: host.id,
             incarnation: host.incarnation.clone(),
@@ -1233,6 +1264,7 @@ fn same_fresh_intent(
     installation: &str,
 ) -> bool {
     accepted.host == current.host
+        && accepted.prompt == current.prompt
         && accepted.agent == current.agent
         && accepted.title == current.title
         && accepted.replace_source == current.replace_source
@@ -2510,6 +2542,10 @@ pub(super) fn CreateSessionForm(
     let mut structured_permission_flags = use_signal(String::new);
     // Never seed from a source, history or template: every dialog starts fresh.
     let mut conversation = use_signal(String::new);
+    // A message belongs to this opening, not its reusable launch. Keep the
+    // agent tab's draft while visiting command mode or choosing a recent;
+    // active_prompt excludes dormant/unsupported text from every request.
+    let mut prompt = use_signal(|| None::<String>);
     // The helm records only an explicit choice from a supported harness.
     // Seeding the draft does not send it through unsupported harnesses.
     let mut structured_workspace_trust = use_signal(|| {
@@ -2883,6 +2919,9 @@ pub(super) fn CreateSessionForm(
                 .filter(|prefill| Some(prefill.generation) != *prefill_applied.peek())
             {
                 prefill_applied.set(Some(prefill.generation));
+                // A mounted Clone/Replace prefill supersedes the old opening's
+                // first message even when the selected agent stays the same.
+                prompt.set(None);
                 permission_escalation.set(None);
                 // A clone generation replaces the destination as a unit.
                 // Invalidate before reseeding so an A→B→A clone sequence
@@ -3382,7 +3421,7 @@ pub(super) fn CreateSessionForm(
         .map(LaunchIntent::Command)
     };
     let retry_binding = current_launch.and_then(|launch| {
-        let draft = IntentBinding::of(
+        let mut draft = IntentBinding::of(
             selected,
             &hosts,
             cwd(),
@@ -3392,6 +3431,14 @@ pub(super) fn CreateSessionForm(
                 .as_ref()
                 .and_then(|prefill| prefill.replace_source.clone()),
         )?;
+        draft.prompt = match &draft.agent {
+            LaunchIntent::Structured(selection) => active_prompt(
+                farhelm_proto::launcher::LauncherKind::Agent,
+                Some(selection.harness),
+                &prompt.peek(),
+            ),
+            LaunchIntent::Command(_) => None,
+        };
         let destination = destination_draft();
         let repo = destination.repo()?;
         let installation = hosts
@@ -3548,6 +3595,13 @@ pub(super) fn CreateSessionForm(
     let summary_model = structured_model()
         .map(|model| display_peer(&model))
         .unwrap_or_else(|| "default".to_string());
+    let summary_prompt_lines = active_prompt(
+        farhelm_proto::launcher::LauncherKind::Agent,
+        structured_harness(),
+        &prompt(),
+    )
+    .filter(|text| !text.is_empty())
+    .map(|text| text.split('\n').count());
     let summary_effort = structured_effort()
         .map(crate::launch_composer::effort_value)
         .unwrap_or("default");
@@ -3654,6 +3708,7 @@ pub(super) fn CreateSessionForm(
         }
     });
     let template_targets = TemplateTargets {
+        prompt,
         launch_tab,
         structured_harness,
         structured_model,
@@ -4793,6 +4848,21 @@ pub(super) fn CreateSessionForm(
                     return;
                 };
                 binding.conversation = (matches!(binding.agent, LaunchIntent::Structured(_)) && !conversation().is_empty()).then(&*conversation);
+                binding.prompt = match &binding.agent {
+                    LaunchIntent::Structured(selection) => active_prompt(farhelm_proto::launcher::LauncherKind::Agent, Some(selection.harness), &prompt()),
+                    LaunchIntent::Command(_) => None,
+                };
+                if let Some(message) = &binding.prompt {
+                    let refusal = farhelm_proto::launcher::check_initial_prompt(message).err()
+                        .or_else(|| match &binding.agent {
+                            LaunchIntent::Structured(selection) if !selection.harness.supports_initial_prompt(binding.conversation.is_some()) => Some("this agent cannot combine an initial prompt with a named conversation".into()),
+                            _ => None,
+                        });
+                    if let Some(refusal) = refusal {
+                        error.set(Some(refusal));
+                        return;
+                    }
+                }
                 if binding.conversation.is_some() && destination_draft().repo().is_some() {
                     error.set(Some("named conversations cannot start in a new managed checkout; choose an existing folder".into()));
                     ops.release();
@@ -4810,6 +4880,7 @@ pub(super) fn CreateSessionForm(
                     (*command_yolo.peek(), *command_agent.peek(), *command_resume_on.peek(), submitted_field(&command_resume.peek(), *command_resume_edited.peek(), command_resume_raw_seed.peek().as_deref())),
                     title_for_launch(),
                     *chosen_host.peek(),
+                    prompt.peek().clone(),
                 );
                 let fresh_snapshot = fresh_draft_snapshot();
                 let mut replaying_fresh = false;
@@ -4992,6 +5063,10 @@ pub(super) fn CreateSessionForm(
                             binding.agent = LaunchIntent::Structured(selection);
                         }
                         binding = IntentBinding {
+                            prompt: match &binding.agent {
+                                LaunchIntent::Structured(selection) => active_prompt(farhelm_proto::launcher::LauncherKind::Agent, Some(selection.harness), &prompt.peek()),
+                                LaunchIntent::Command(_) => None,
+                            },
                             conversation: (matches!(binding.agent, LaunchIntent::Structured(_)) && !conversation.peek().is_empty()).then(|| conversation.peek().clone()),
                             cwd: if binding.github_checkout.is_some() { binding.cwd.clone() } else {
                                 submitted_field(&cwd.peek(), *cwd_edited.peek(), cwd_raw_seed.peek().as_deref())
@@ -5049,9 +5124,10 @@ pub(super) fn CreateSessionForm(
                     }
                     let agent = match &bound.agent {
                         LaunchIntent::Command(command) => CreateAgent::Command(command),
-                        LaunchIntent::Structured(selection) => match bound.conversation.as_deref() {
-                            Some(value) => CreateAgent::Named(selection, value),
-                            None => CreateAgent::Structured(selection),
+                        LaunchIntent::Structured(selection) => CreateAgent::Structured {
+                            selection,
+                            conversation: bound.conversation.as_deref(),
+                            prompt: bound.prompt.as_deref(),
                         },
                     };
                     // The one branch point between the two verbs this form
@@ -5533,6 +5609,9 @@ pub(super) fn CreateSessionForm(
                     }
                     if structured_harness().is_some_and(LaunchHarness::offers_workspace_trust) {
                         " · trust: {summary_trust}"
+                    }
+                    if let Some(lines) = summary_prompt_lines {
+                        " · prompt: {lines} lines"
                     }
                 }
             }
@@ -6391,6 +6470,12 @@ pub(super) fn CreateSessionForm(
                             // These callbacks retain the create form's history and intent
                             // boundaries. The shared controls only report the user's edits.
                             LaunchControls {
+                                prompt: prompt().unwrap_or_default(),
+                                on_prompt: Some(EventHandler::new(move |value: String| {
+                                    if !draft_transition_allowed(ops) { return; }
+                                    prompt.set((!value.is_empty()).then_some(value));
+                                    intent_key.set(None);
+                                })),
                                 conversation: conversation(),
                                 on_conversation: Some(EventHandler::new(move |value| {
                                     if !draft_transition_allowed(ops) { return; }
@@ -6830,6 +6915,36 @@ pub(super) fn CreateSessionForm(
 
 #[cfg(test)]
 mod tests {
+    /// A hidden prompt remains an agent-tab draft, never a command argument.
+    /// Empty presence survives templates; unsupported agents omit it.
+    #[test]
+    fn initial_prompt_projection_keeps_only_supported_agent_requests() {
+        use super::*;
+        use farhelm_proto::launcher::LauncherKind;
+        let message = Some("--literal\nsecond".to_string());
+        for harness in LaunchHarness::ALL {
+            assert_eq!(
+                active_prompt(LauncherKind::Agent, Some(*harness), &message),
+                harness
+                    .supports_initial_prompt(false)
+                    .then(|| message.clone())
+                    .flatten()
+            );
+            assert_eq!(
+                active_prompt(LauncherKind::Command, Some(*harness), &message),
+                None
+            );
+        }
+        assert_eq!(active_prompt(LauncherKind::Agent, None, &message), message);
+        assert_eq!(
+            active_prompt(
+                LauncherKind::Agent,
+                Some(LaunchHarness::Codex),
+                &Some(String::new())
+            ),
+            Some(String::new())
+        );
+    }
     /// Seeds must show history rather than filtering by a clone path or `~`.
     /// Typed text filters before the eight-row cap, preserving newest-first order.
     #[test]
@@ -7062,6 +7177,9 @@ mod tests {
         assert!(!same_fresh_intent(&original, &changed, &repo, "install-a"));
         let mut changed = current.clone();
         changed.title = "different".into();
+        assert!(!same_fresh_intent(&original, &changed, &repo, "install-a"));
+        let mut changed = current.clone();
+        changed.prompt = Some("different first message".into());
         assert!(!same_fresh_intent(&original, &changed, &repo, "install-a"));
         let mut changed = current.clone();
         changed.replace_source = Some("source-b".into());

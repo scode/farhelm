@@ -103,8 +103,12 @@ fn model_marker_label(old: Option<&str>) -> DetailPart {
 /// Omitting it keeps New session's selection-only model Enter behavior.
 /// `on_conversation` opts a launcher into the one-time selector. Template
 /// editors omit it because that value must never become a reusable choice.
+/// `on_prompt` separately opts New/Clone/Replace into a first-message editor;
+/// Restart omits it because that message must never be sent a second time.
 #[component]
 pub(crate) fn LaunchControls(
+    #[props(default)] prompt: String,
+    #[props(default)] on_prompt: Option<EventHandler<String>>,
     #[props(default)] conversation: String,
     #[props(default)] conversation_required: bool,
     #[props(default)] on_conversation: Option<EventHandler<String>>,
@@ -187,6 +191,11 @@ pub(crate) fn LaunchControls(
         })
         .unwrap_or_else(|| "choose a harness".to_string());
     let model_results_id = format!("{model_id_prefix}-results");
+    // Templates may supply formatting controls. Preserve the raw message for
+    // submission, but never let an invisible value masquerade as ordinary text.
+    let prompt_read_only = prompt
+        .chars()
+        .any(|ch| !matches!(ch, '\n' | '\t') && farhelm_proto::text::is_presentation_unsafe(ch));
     // Shared controls can coexist in different dialogs. Scope accessible help
     // with their existing model prefix so each button describes its own mode.
     let permission_help_id = format!("{model_id_prefix}-permission-help");
@@ -521,6 +530,34 @@ pub(crate) fn LaunchControls(
                     }
                     if !harness.captures_named_conversation() {
                         p { "Farhelm will not capture this conversation after a named start, so Restart will not be available." }
+                    }
+                }
+            }
+            if let (Some(harness), Some(on_change)) = (harness.filter(|h| h.supports_initial_prompt(false)), on_prompt) {
+                div { class: "launch-composer-choice initial-prompt-choice",
+                    label {
+                        span { class: "launch-composer-section-label", "initial prompt" }
+                        textarea {
+                            class: "initial-prompt", rows: 4,
+                            value: if prompt_read_only { display_peer(&prompt) } else { prompt.clone() },
+                            readonly: prompt_read_only,
+                            disabled: busy, autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                            "data-tooltip": "initial prompt: sent once when this session starts",
+                            oninput: move |event| { if !busy && !prompt_read_only { on_change.call(event.value()); } },
+                            // Enter belongs to the message, including held or IME
+                            // Enter. The form's single-line guard must not eat it.
+                            onkeydown: move |event| { if event.key() == Key::Enter { event.stop_propagation(); } },
+                        }
+                    }
+                    p { "Sent once, as {harness_label(harness)}'s first message when it starts. Restart, Clone and Replace do not send it again." }
+                    if prompt_read_only {
+                        p { "Invisible formatting is shown escaped. Clear the message to replace it." }
+                    }
+                    if !prompt.is_empty() {
+                        button { r#type: "button", class: "btn btn-neutral initial-prompt-clear", disabled: busy,
+                            "data-tooltip": "clear initial prompt: remove this first message from the draft",
+                            onclick: move |_| { if !busy { on_change.call(String::new()); } }, "clear initial prompt"
+                        }
                     }
                 }
             }

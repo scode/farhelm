@@ -5602,19 +5602,22 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 
 /* The one-time selector grows with the launcher, including the fixed-width
    Restart with dialog, while its help stays below the labelled input. */
-.named-conversation-choice {
+.named-conversation-choice,
+.initial-prompt-choice {
   display: block;
   width: 100%;
   min-width: 0;
 }
-.named-conversation-choice label {
+.named-conversation-choice label,
+.initial-prompt-choice label {
   display: grid;
   align-items: stretch;
   gap: 0.5rem;
   width: 100%;
   min-width: 0;
 }
-.named-conversation {
+.named-conversation,
+.initial-prompt {
   width: 100%;
   box-sizing: border-box;
   min-width: 0;
@@ -5626,10 +5629,20 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   min-height: 36px;
   padding: 0 12px;
 }
-.named-conversation-choice p {
+.named-conversation-choice p,
+.initial-prompt-choice p {
   margin: 0.35rem 0 0;
   color: var(--fg-1);
   font-size: 0.85rem;
+}
+
+/* A first message is prose. Preserve its lines and allow resizing without
+   widening the launcher's right column or turning Enter into submission. */
+.initial-prompt {
+  resize: vertical;
+  min-height: 100px;
+  padding: 8px 12px;
+  line-height: 1.45;
 }
 
 /* Keep the custom words visible as individual arguments rather than implying

@@ -2099,10 +2099,14 @@ pub(crate) const POLL_INTERVAL_MS: u64 = 3_000;
 pub(crate) enum CreateAgent<'a> {
     /// A command launch, sent as the user wrote it.
     Command(&'a CommandLaunch),
-    /// Structured intent compiled by the helm into one safe invocation.
-    Structured(&'a LaunchSelection),
-    /// The same reusable selection, with a selector for this request alone.
-    Named(&'a LaunchSelection, &'a str),
+    /// Reusable choices plus optional request-only inputs. Keeping the first
+    /// message here makes a command-plus-prompt body unrepresentable and keeps
+    /// transient text outside the selection stored in session/history state.
+    Structured {
+        selection: &'a LaunchSelection,
+        conversation: Option<&'a str>,
+        prompt: Option<&'a str>,
+    },
 }
 
 /// POST the create endpoint, returning the decoded `Session` on success or
@@ -2443,10 +2447,18 @@ fn create_body(
     // on.
     match agent {
         CreateAgent::Command(command) => body["command"] = serde_json::json!(command),
-        CreateAgent::Structured(selection) => body["launch"] = serde_json::json!(selection),
-        CreateAgent::Named(selection, conversation) => {
+        CreateAgent::Structured {
+            selection,
+            conversation,
+            prompt,
+        } => {
             body["launch"] = serde_json::json!(selection);
-            body["conversation"] = serde_json::json!(conversation);
+            if let Some(conversation) = conversation {
+                body["conversation"] = serde_json::json!(conversation);
+            }
+            if let Some(prompt) = prompt {
+                body["prompt"] = serde_json::json!(prompt);
+            }
         }
     }
     // The connection this create was prepared against: the directory and the
@@ -4485,7 +4497,8 @@ mod tests {
 
     /// One-time selectors are request fields, never part of reusable choices.
     /// Both create and Restart with must preserve that boundary even when
-    /// they send an otherwise unchanged selection.
+    /// they send an otherwise unchanged selection. A create's first message
+    /// shares that one-time boundary, including when a named start uses it.
     #[test]
     fn named_conversation_bodies_keep_the_selector_outside_launch_choices() {
         let selection = crate::LaunchSelection {
@@ -4498,7 +4511,11 @@ mod tests {
         };
         let create = create_body(
             "/work",
-            CreateAgent::Named(&selection, "target"),
+            CreateAgent::Structured {
+                selection: &selection,
+                conversation: Some("target"),
+                prompt: None,
+            },
             "",
             "key",
             None,
@@ -4518,7 +4535,11 @@ mod tests {
         assert_eq!(restart["with"], serde_json::json!(selection));
         let fresh = create_body(
             "/work",
-            CreateAgent::Structured(&selection),
+            CreateAgent::Structured {
+                selection: &selection,
+                conversation: None,
+                prompt: None,
+            },
             "",
             "key",
             None,
@@ -4528,6 +4549,28 @@ mod tests {
             fresh.get("conversation").is_none(),
             "ordinary requests remain value-less"
         );
+        for conversation in [None, Some("target")] {
+            let prompt = "--literal\n\t{farhelm_args}";
+            let body = create_body(
+                "/work",
+                CreateAgent::Structured {
+                    selection: &selection,
+                    conversation,
+                    prompt: Some(prompt),
+                },
+                "",
+                "prompt-key",
+                Some(1),
+                Some(2),
+            );
+            assert_eq!(body["prompt"], prompt);
+            assert_eq!(body["launch"], serde_json::json!(selection));
+            assert!(body["launch"].get("prompt").is_none());
+            assert_eq!(
+                body.get("conversation").and_then(|v| v.as_str()),
+                conversation
+            );
+        }
     }
     /// Unknown outcomes and YOLO continuations must recover the first create;
     /// an acknowledged refusal ends the intent even if it describes partial success.
@@ -4939,7 +4982,11 @@ mod tests {
         };
         let structured = create_body(
             "/tmp",
-            CreateAgent::Structured(&selection),
+            CreateAgent::Structured {
+                selection: &selection,
+                conversation: None,
+                prompt: None,
+            },
             "named",
             "key-2",
             Some(7),
@@ -4987,7 +5034,14 @@ mod tests {
                 }),
                 "command",
             ),
-            (CreateAgent::Structured(&selection), "launch"),
+            (
+                CreateAgent::Structured {
+                    selection: &selection,
+                    conversation: None,
+                    prompt: None,
+                },
+                "launch",
+            ),
         ] {
             let body = fresh_create_body(agent, "intent", 3, &checkout);
             assert_eq!(body["github_checkout"], serde_json::json!(checkout));
@@ -5000,6 +5054,20 @@ mod tests {
                 assert_eq!(body.get(key).is_some(), key == selector);
             }
         }
+        let message = "first\nsecond";
+        let body = fresh_create_body(
+            CreateAgent::Structured {
+                selection: &selection,
+                conversation: None,
+                prompt: Some(message),
+            },
+            "prompt-key",
+            3,
+            &checkout,
+        );
+        assert_eq!(body["prompt"], message);
+        assert_eq!(body["github_checkout"], serde_json::json!(checkout));
+        assert!(body["launch"].get("prompt").is_none());
     }
 
     /// A create carries the connection it was prepared against, in both
