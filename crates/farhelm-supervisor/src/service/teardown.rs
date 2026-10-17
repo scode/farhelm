@@ -911,9 +911,11 @@ impl Supervisor {
                 // an async waiter that cancellation can drop before it ends.
                 let _ownership = ownership;
                 for checkout_id in deferred {
-                    if let Err(error) =
-                        crate::launch::remove_preparation_trust_sync(&state_dir, &checkout_id)
-                    {
+                    if let Err(error) = crate::launch::remove_preparation_trust_sync(
+                        &state_dir,
+                        &checkout_id,
+                        std::time::Duration::from_secs(12),
+                    ) {
                         warn!(working_copy = %checkout_id, error = %error,
                             "checkout retired but Claude trust cleanup failed; preparation evidence retained");
                     } else {
@@ -2357,8 +2359,11 @@ mod tests {
     /// Plant a real managed allocation with a recorded vendor trust edit. No
     /// shim or Claude process runs; the deletion path still proves retirement
     /// through the ordinary store and archive primitives.
+    /// Distinct origins give startup fixtures several paths in one vendor file
+    /// without overwriting another allocation's trust evidence.
     async fn trusted_checkout(
         sup: &Arc<Supervisor>,
+        origin: &str,
     ) -> (
         Arc<SessionEntry>,
         String,
@@ -2366,7 +2371,7 @@ mod tests {
         crate::launch::ClaudeTrustRecord,
     ) {
         let root = sup.state_dir.join("workroot");
-        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
         let checkout_id = uuid::Uuid::new_v4().to_string();
         let allocation = {
             let conn = sup.store.conn.lock();
@@ -2377,8 +2382,8 @@ mod tests {
                     canonical_root: root.to_str().unwrap().into(),
                     repo_owner: "example".into(),
                     repo_name: "project".into(),
-                    original_basename: "project".into(),
-                    origin_session_id: "trust-origin".into(),
+                    original_basename: origin.into(),
+                    origin_session_id: origin.into(),
                     root_identity: None,
                     preparation_snapshot: None,
                 },
@@ -2386,15 +2391,12 @@ mod tests {
             .unwrap();
             crate::working_copies::allocate(&conn, &checkout_id, None).unwrap()
         };
-        let entry = seeded_session(
-            sup,
-            "trust-origin",
-            allocation.canonical_path.to_str().unwrap(),
-        )
-        .await;
+        let entry = seeded_session(sup, origin, allocation.canonical_path.to_str().unwrap()).await;
         let (preparation, _) = preparation_files(&sup.state_dir, &checkout_id);
         let config = sup.state_dir.join(".claude.json");
-        std::fs::write(&config, "{\"unrelated\":42}").unwrap();
+        if !config.exists() {
+            std::fs::write(&config, "{\"unrelated\":42}").unwrap();
+        }
         let environment = crate::agent_kind::claude::trust::Environment {
             home: sup.state_dir.clone(),
             config_dir: None,
@@ -2434,7 +2436,8 @@ mod tests {
             let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
                 .await
                 .unwrap();
-            let (entry, checkout_id, preparation, trust) = trusted_checkout(&sup).await;
+            let (entry, checkout_id, preparation, trust) =
+                trusted_checkout(&sup, "trust-origin").await;
             if missing {
                 std::fs::remove_dir(&trust.project_path).unwrap();
             }
@@ -2491,7 +2494,7 @@ mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .unwrap();
-        let (entry, _, _, trust) = trusted_checkout(&sup).await;
+        let (entry, _, _, trust) = trusted_checkout(&sup, "trust-origin").await;
         let root = sup.state_dir.join("workroot");
         std::fs::rename(&root, sup.state_dir.join("original-root")).unwrap();
         std::fs::create_dir(&root).unwrap();
@@ -2509,6 +2512,114 @@ mod tests {
         );
     }
 
+    /// Leftover removals must not consume the desktop's readiness budget.
+    /// Hold one vendor lock across several retired records and both startup
+    /// passes, then prove a later start removes the preserved evidence. The
+    /// timeout is below one ordinary contention budget, not a latency promise.
+    #[farhelm_testtrace::test]
+    async fn claude_trust_startup_skips_busy_lock_and_recovers_later() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let mut records = Vec::new();
+        for origin in ["trust-first", "trust-second", "trust-third"] {
+            let (entry, checkout_id, preparation, trust) = trusted_checkout(&sup, origin).await;
+            let archived = sup
+                .store
+                .archive_move_working_copy(&checkout_id, None)
+                .await
+                .unwrap();
+            assert!(matches!(
+                archived,
+                crate::working_copies::ArchiveOutcome::Archived { .. }
+            ));
+            sup.store
+                .delete_session_archiving_memberships(origin, &[])
+                .await
+                .unwrap();
+            assert!(sup.store.session(origin).await.unwrap().is_none());
+            assert!(!std::path::Path::new(&trust.project_path).exists());
+            let rows = sup.store.working_copy_rows().await.unwrap();
+            assert_eq!(
+                rows.iter()
+                    .find(|row| row.id == checkout_id)
+                    .unwrap()
+                    .allocation_state,
+                crate::working_copies::AllocationState::Retired
+            );
+            drop(entry);
+            records.push((checkout_id, preparation, trust));
+        }
+        let lock = &records[0].2.lock_path;
+        assert!(records.iter().all(|(_, _, trust)| &trust.lock_path == lock));
+        std::fs::create_dir(lock).unwrap();
+        let config = &records[0].2.config_path;
+        let before = std::fs::read(config).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&before).unwrap();
+        for (_, _, trust) in &records {
+            assert_eq!(
+                value["projects"][&trust.project_path]["hasTrustDialogAccepted"],
+                true
+            );
+        }
+        drop(sup);
+
+        let reopened = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            Supervisor::new_with_exe(state.path(), dummy_exe()),
+        )
+        .await
+        .expect("constructor must skip the held Claude lock")
+        .unwrap();
+        let serving = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::super::core::tests::serve_until_answering(&reopened),
+        )
+        .await
+        .expect("the second reload must also skip the held Claude lock");
+        assert!(
+            lock.is_dir(),
+            "startup must not steal the fixture's vendor lock"
+        );
+        assert_eq!(std::fs::read(config).unwrap(), before);
+        for (id, path, trust) in &records {
+            assert_eq!(
+                crate::launch::read_preparation_state(path, id)
+                    .unwrap()
+                    .unwrap()
+                    .claude_trust
+                    .as_ref(),
+                Some(trust)
+            );
+        }
+        serving.abort();
+        assert!(serving.await.unwrap_err().is_cancelled());
+        drop(reopened);
+
+        std::fs::remove_dir(lock).unwrap();
+        let _recovered = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(config).unwrap()).unwrap();
+        assert_eq!(value["unrelated"], 42);
+        for (id, path, trust) in &records {
+            assert!(
+                value["projects"][&trust.project_path]
+                    .get("hasTrustDialogAccepted")
+                    .is_none()
+            );
+            assert!(
+                crate::launch::read_preparation_state(path, id)
+                    .unwrap()
+                    .unwrap()
+                    .claude_trust
+                    .is_none()
+            );
+        }
+    }
+
     /// Retirement can commit just before a supervisor crash loses its worker.
     /// The persisted record recovers that edit before a free path can be
     /// allocated again, without re-running clone or preparation.
@@ -2518,7 +2629,7 @@ mod tests {
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .unwrap();
-        let (entry, checkout_id, preparation, trust) = trusted_checkout(&sup).await;
+        let (entry, checkout_id, preparation, trust) = trusted_checkout(&sup, "trust-origin").await;
         let archived = sup
             .store
             .archive_move_working_copy(&checkout_id, None)

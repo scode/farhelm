@@ -15540,4 +15540,5 @@
 - Completion criteria: with Claude's lock held and several pending trust records, supervisor startup adds no lock wait,
   the records remain for a later start, and a later start with the lock free removes them. A regression holds the lock,
   starts the supervisor and checks both; run it through the recorder. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/claude-trust-startup-no-wait.md`.
+- Execution: change `tnwnrnxxtwwszuxuuwtmlvztvwtttwuk`, bookmark `plan/claude-trust-startup-no-wait/01-no-wait`; draft
+  PR [#2201](https://github.com/scode/farhelm/pull/2201/changes).

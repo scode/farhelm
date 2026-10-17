@@ -175,8 +175,10 @@ pub(crate) fn edit(record: Option<&TrustRecord>, trusted: bool) -> anyhow::Resul
     edit_with_budget(record, trusted, Duration::from_secs(12))
 }
 
-/// The mutation seam exposes contention budget, not ambient process state.
-fn edit_with_budget(
+/// Select how long this edit may wait for Claude's lock. A zero budget still
+/// attempts acquisition once; startup uses it so best-effort cleanup cannot
+/// consume the desktop's readiness deadline. Other filesystem work is unchanged.
+pub(crate) fn edit_with_budget(
     record: Option<&TrustRecord>,
     trusted: bool,
     budget: Duration,
