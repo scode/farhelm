@@ -173,6 +173,9 @@ pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> Str
     }
     let fields = &template.fields;
     let mut parts = Vec::new();
+    if let Some(prompt) = &fields.prompt {
+        parts.push(format!("initial prompt {}", quoted(prompt)));
+    }
     if let Some(kind) = fields.kind {
         parts.push(match kind {
             LauncherKind::Agent => "agent launch".to_string(),

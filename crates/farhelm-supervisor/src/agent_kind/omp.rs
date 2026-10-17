@@ -269,19 +269,26 @@ pub(crate) fn omp_injection_decision(argv: &[String]) -> OmpInjection {
     {
         return OmpInjection::Leave("invocation is not an omp launch");
     }
-    omp_tui_args_decision(&argv[program + 1..])
+    omp_tui_args_decision(&argv[program + 1..], false)
 }
 
-/// The args-walking half of [`omp_injection_decision`]: whether OMP-level
-/// arguments (everything after the program) describe an interactive TUI
-/// conversation. Injection runs it over the launch argv; admission runs the
-/// SAME function over the live runtime's argv (interpreter and entry point
-/// already stripped by the corridor), so a process that exec'd from an
-/// interactive launch into a utility or print shape refuses even though its
-/// launch passed. The injected `-e` tail and a resume `--resume <file>` are
-/// ordinary known-flag occurrences and pass; nothing here knows about the
-/// program position, so callers must not feed it one.
-pub(crate) fn omp_tui_args_decision(args: &[String]) -> OmpInjection {
+/// Validate the live TUI's option prefix without interpreting its first message.
+/// A create appends its prompt after hook composition, behind `--`; that tail
+/// is valid runtime data even though injection must not append hooks there.
+/// Noninteractive options before the boundary still refuse, including after
+/// a process execs out of a previously interactive launch.
+pub(crate) fn omp_runtime_tui_args(args: &[String]) -> Result<(), &'static str> {
+    match omp_tui_args_decision(args, true) {
+        OmpInjection::Inject { .. } => Ok(()),
+        OmpInjection::Leave(reason) => Err(reason),
+    }
+}
+
+/// Share OMP's option grammar between injection and live-report admission.
+/// Callers strip the program (and interpreter entry point when present).
+/// Only runtime admission allows an opaque prompt tail: an injector still
+/// needs to append real options, which a preceding `--` would turn into text.
+fn omp_tui_args_decision(args: &[String], allow_prompt_tail: bool) -> OmpInjection {
     let mut command_classified = false;
     let mut user_appends_prompt = false;
     let mut index = 0;
@@ -291,6 +298,9 @@ pub(crate) fn omp_tui_args_decision(args: &[String]) -> OmpInjection {
             if argument == "--" {
                 // A `--` the walk reached is, by construction, unconsumed:
                 // every value a flag claimed was skipped past wholesale.
+                if allow_prompt_tail {
+                    break;
+                }
                 return OmpInjection::Leave(
                     "invocation contains an end-of-options boundary; appended hook flags \
                      would be prompt text",

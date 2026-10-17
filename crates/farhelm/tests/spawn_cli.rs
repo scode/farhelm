@@ -314,24 +314,33 @@ fn a_spawn_must_say_what_the_child_runs() {
 /// spawn that silently preferred one would run something the caller did
 /// not ask for. The variables point at a socket nobody listens on, so a
 /// regression that sent the request would fail on the connection rather
-/// than with clap's usage error.
+/// than with clap's usage error. Prompt text and prompt files obey that same
+/// exclusion; neither may silently alter an inherited launch.
 #[farhelm_testtrace::test]
 fn inheritance_with_a_launch_flag_is_refused() {
     let temp = farhelm_teststate::tempdir().expect("tempdir");
-    let output = spawn_command()
-        .args(["--cwd", "/tmp", "--agent", "claude", "--inherit-agent"])
-        .env("FARHELM_SESSION_ID", "parent-123")
-        .env("FARHELM_SESSION_TOKEN", "secret")
-        .env("FARHELM_SUPERVISOR_SOCK", temp.path().join("absent.sock"))
-        .output()
-        .expect("run spawn");
-    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        stderr.contains("--inherit-agent") && stderr.contains("--agent"),
-        "{stderr}"
-    );
+    let file = temp.path().join("prompt.txt");
+    std::fs::write(&file, "literal prompt").unwrap();
+    for (flag, value) in [
+        ("--agent", "claude"),
+        ("--prompt", "literal prompt"),
+        ("--prompt-file", file.to_str().unwrap()),
+    ] {
+        let mut command = spawn_command();
+        command
+            .args(["--cwd", "/tmp", flag, value, "--inherit-agent"])
+            .env("FARHELM_SESSION_ID", "parent-123")
+            .env("FARHELM_SESSION_TOKEN", "secret")
+            .env("FARHELM_SUPERVISOR_SOCK", temp.path().join("absent.sock"));
+        let output = output_with_timeout(command);
+        assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            stderr.contains("--inherit-agent") && stderr.contains(flag),
+            "{stderr}"
+        );
+    }
 }
 
 /// Spec: a spawn with launch flags goes to the helm as an agent `create`
@@ -342,7 +351,9 @@ fn inheritance_with_a_launch_flag_is_refused() {
 ///
 /// Why: SPEC.md has the attached helm resolve a spawn's launch flags, since
 /// it owns the templates and composes agent launches; the spawn contract
-/// (one id on stdout) must hold on that path as on the inherited one.
+/// (one id on stdout) must hold on that path as on the inherited one. Its
+/// first message remains literal template edits, including leading hyphens
+/// and multiline text, rather than becoming the child's reusable launch.
 #[farhelm_testtrace::test]
 fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
     use farhelm_proto::launcher::{TemplateDestination, TemplateFields};
@@ -372,6 +383,7 @@ fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
         assert_eq!(
             edits,
             TemplateFields {
+                prompt: Some("--literal\n\t{farhelm_args}".into()),
                 agent: Some(farhelm_proto::LaunchHarness::Codex),
                 model: Some(Some("gpt-6-luna".to_string())),
                 destination: Some(TemplateDestination::Folder(expected_cwd.clone())),
@@ -405,7 +417,8 @@ fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
             },
         }
     });
-    let output = spawn_command()
+    let mut command = spawn_command();
+    command
         .current_dir(temp.path())
         .args([
             "--cwd",
@@ -416,6 +429,8 @@ fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
             "codex",
             "--model",
             "gpt-6-luna",
+            "--prompt",
+            "--literal\n\t{farhelm_args}",
             "--parent",
             "parent-123",
             "--title",
@@ -425,9 +440,8 @@ fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
         ])
         .env("FARHELM_SESSION_ID", "parent-123")
         .env("FARHELM_SESSION_TOKEN", "secret")
-        .env("FARHELM_SUPERVISOR_SOCK", &socket)
-        .output()
-        .expect("run spawn");
+        .env("FARHELM_SUPERVISOR_SOCK", &socket);
+    let output = output_with_timeout(command);
     finish_server(done, server);
     assert!(
         output.status.success(),

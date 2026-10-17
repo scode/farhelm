@@ -130,6 +130,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id,
             parent: None,
@@ -477,6 +478,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
             )
             .expect("decode create frame");
             let ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id,
                 cwd,
@@ -895,6 +897,7 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id,
             parent: None,
@@ -2542,6 +2545,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         // request body below sends none).
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id,
             parent: None,
@@ -3397,6 +3401,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
         // First attempt: create succeeds, delete fails.
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id,
             intent_key,
@@ -3432,6 +3437,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
         // would answer with — same session, no second launch.
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id,
             intent_key,
@@ -3540,6 +3546,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         // request body below sends none).
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id,
             parent: None,
@@ -3767,6 +3774,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
 
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
         let ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id,
             cwd,
@@ -9085,6 +9093,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                 .unwrap();
             let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
             let ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: create_id,
                 github_checkout: Some(checkout),
@@ -9417,6 +9426,7 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
             if attempt == 0 {
                 let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
                 let ControlMsg::CreateSession {
+                    prompt: None,
                     named_start: None,
                     req_id,
                     cwd,

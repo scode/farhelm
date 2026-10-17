@@ -219,6 +219,10 @@ where
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TemplateFields {
+    /// Sent once by each create using these edits, never saved in the
+    /// resulting session's reusable launch. Absence keeps the current draft.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<LauncherKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -291,6 +295,7 @@ impl TemplateFields {
             || self.permissions.is_some()
             || self.permission_flags.is_some()
             || self.workspace_trust.is_some()
+            || self.prompt.is_some()
     }
 
     /// Infer the launcher tab from choices alone, without consulting `kind`.
@@ -318,6 +323,25 @@ pub const TEMPLATE_NAME_CAP: usize = 128;
 /// into exactly those fields.
 pub const TEMPLATE_FIELDS_CAP: usize = 64 * 1024;
 
+/// Validate literal first-message text without treating it as shell syntax.
+/// Newlines and tabs are useful in a message; other controls can manipulate
+/// terminal output and are refused. The complete launch has the same byte
+/// budget, checked again with the other create fields at admission.
+pub fn check_initial_prompt(prompt: &str) -> Result<(), String> {
+    if prompt.len() > TEMPLATE_FIELDS_CAP {
+        return Err("an initial prompt must fit within the 64 KiB launch budget".into());
+    }
+    if prompt
+        .chars()
+        .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\t'))
+    {
+        return Err(
+            "an initial prompt cannot contain control characters other than newline and tab".into(),
+        );
+    }
+    Ok(())
+}
+
 /// A named, partial set of launcher edits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -331,10 +355,15 @@ pub struct LaunchTemplate {
 /// characters: the single-line editor cannot show or preserve them. Every save path shares
 /// this check; applying an already stored template does not run it, so legacy
 /// values remain usable until the user edits the template (SPEC.md).
+/// Initial prompts have their own multiline contract: newline and tab remain
+/// literal message data, while other controls are refused.
 /// Names must also survive use as a URL segment: `.` and `..` navigate instead
 /// of naming a template, even when percent-encoded.
 /// Whether fields apply is decided against the launcher when applied.
 pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
+    if let Some(prompt) = &template.fields.prompt {
+        check_initial_prompt(prompt)?;
+    }
     crate::check_permission_flags(
         template.fields.permissions.flatten(),
         template.fields.permission_flags.as_deref(),
@@ -394,6 +423,8 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
 /// active kind uses.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LauncherState {
+    /// One-time create input; templates may fill it, session prefills cannot.
+    pub prompt: Option<String>,
     pub kind: Option<LauncherKind>,
     pub harness: Option<LaunchHarness>,
     pub model: Option<String>,
@@ -520,9 +551,34 @@ pub fn apply_template(
                 next.permissions = selection.permissions;
                 next.permission_flags = selection.permission_flags;
                 next.workspace_trust = selection.workspace_trust;
+                if !agent.supports_initial_prompt(false) {
+                    next.prompt = None;
+                }
             }
             LauncherKind::Command => next.command_agent = Some(agent),
         }
+    }
+
+    // A prompt-only template needs no selected harness yet. The final create
+    // still validates the chosen harness, while command tabs refuse the field.
+    if let Some(prompt) = &fields.prompt {
+        check_initial_prompt(prompt).map_err(|reason| refuse("initial prompt", reason))?;
+        if kind == LauncherKind::Command {
+            return Err(refuse(
+                "initial prompt",
+                "applies only to an agent launch".into(),
+            ));
+        }
+        if next
+            .harness
+            .is_some_and(|harness| !harness.supports_initial_prompt(false))
+        {
+            return Err(refuse(
+                "initial prompt",
+                "is not offered by this agent".into(),
+            ));
+        }
+        next.prompt = Some(prompt.clone());
     }
 
     // 3. The agent launch's choices.
@@ -723,6 +779,49 @@ pub fn apply_templates<'t>(
 
 #[cfg(test)]
 mod tests {
+    /// Old templates must decode without a message; a prompt-only template
+    /// can fill an unfinished agent draft, but must never become command text.
+    #[test]
+    fn initial_prompt_templates_roundtrip_and_preserve_application_rules() {
+        let old: super::TemplateFields = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.prompt, None);
+        assert_eq!(serde_json::to_string(&old).unwrap(), "{}");
+        let fields = super::TemplateFields {
+            prompt: Some("first\n\tsecond".into()),
+            ..Default::default()
+        };
+        let saved = super::LaunchTemplate {
+            name: "message".into(),
+            fields,
+        };
+        super::check_template_shape(&saved).unwrap();
+        let copy: super::LaunchTemplate =
+            serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        assert_eq!(copy, saved);
+        let context = super::TemplateContext {
+            catalog: &[],
+            known_hosts: &[],
+            host_fixed: false,
+        };
+        let applied =
+            super::apply_template(&super::LauncherState::default(), &saved, &context).unwrap();
+        assert_eq!(applied.prompt.as_deref(), Some("first\n\tsecond"));
+        let command = super::LauncherState {
+            kind: Some(super::LauncherKind::Command),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::apply_template(&command, &saved, &context)
+                .unwrap_err()
+                .field,
+            "initial prompt"
+        );
+        for bad in ["line\rreturn", "bell\u{7}", "nul\0", "escape\u{1b}"] {
+            assert!(super::check_initial_prompt(bad).is_err(), "{bad:?}");
+        }
+        assert!(super::check_initial_prompt(&"x".repeat(super::TEMPLATE_FIELDS_CAP + 1)).is_err());
+    }
+
     /// Custom CLI words stay with their agent, survive template serialization,
     /// and disappear on a later permission edit. Stacking cannot smuggle words
     /// into a non-custom choice, nor mutate the original on a refusal.

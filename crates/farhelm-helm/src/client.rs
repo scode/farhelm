@@ -786,6 +786,8 @@ struct UploadProgress {
 /// create in every respect.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CreateExtras {
+    /// Literal one-time first message, excluded from reusable launch settings.
+    pub prompt: Option<String>,
     /// A one-time command, never recorded in reusable session launch settings.
     pub named_start: Option<farhelm_proto::NamedConversationStart>,
     /// See [`SupervisorClient::create_session_with_key`].
@@ -2695,6 +2697,7 @@ impl SupervisorClient {
             cols,
             rows,
             CreateExtras {
+                prompt: None,
                 named_start: None,
                 intent_key,
                 ..CreateExtras::default()
@@ -2728,6 +2731,7 @@ impl SupervisorClient {
                     parent: extras.parent,
                     inherit_agent: false,
                     cwd: cwd.to_string(),
+                    prompt: extras.prompt,
                     launch: Some(launch),
                     title,
                     cols,

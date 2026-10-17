@@ -4114,6 +4114,7 @@ mod tests {
         assert!(sup.store.session("s-race").await.unwrap().is_some());
         assert!(source.is_dir());
         let inputs = CreateInputs {
+            prompt: None,
             named_start: None,
             cwd,
             parent: None,

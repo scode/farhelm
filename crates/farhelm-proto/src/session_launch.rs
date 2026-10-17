@@ -169,6 +169,28 @@ impl LaunchKind {
 }
 
 impl SessionLaunch {
+    /// Check the one-time message independently of reusable launch settings.
+    /// Both the helm and supervisor enforce this before any create side effect;
+    /// declaring an agent on a custom command does not grant prompt support.
+    pub fn validate_initial_prompt(&self, prompt: Option<&str>, named: bool) -> Result<(), String> {
+        let Some(prompt) = prompt else {
+            return Ok(());
+        };
+        crate::launcher::check_initial_prompt(prompt)?;
+        match self {
+            Self::Agent { selection, .. } if selection.harness.supports_initial_prompt(named) => {
+                Ok(())
+            }
+            Self::Agent { .. } => {
+                Err("this agent does not accept an initial prompt for this start".into())
+            }
+            Self::Command(_) | Self::Legacy { .. } => Err(
+                "an initial prompt is supported only for an agent launch, not a custom command"
+                    .into(),
+            ),
+        }
+    }
+
     /// A command launch with no declared agent type and no resume command,
     /// asserted not YOLO: the plainest launch there is, and what a caller
     /// that only has a command line to run (a test fixture, a scripted

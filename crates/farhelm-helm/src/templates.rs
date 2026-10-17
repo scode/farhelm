@@ -65,7 +65,7 @@ pub(crate) enum Precondition {
     /// template has the name). An agent's write verbs, which the user
     /// approved against what the card showed; checked in the same store
     /// transaction as the write, so another writer cannot land in between.
-    Unchanged(Option<TemplateFields>),
+    Unchanged(Option<Box<TemplateFields>>),
 }
 
 /// Store `template`, creating or replacing it, and announce the change: the
@@ -99,7 +99,7 @@ pub(crate) async fn store_template(
             Precondition::Unchanged(expected) => {
                 task_state
                     .store
-                    .put_launch_template_if(template, expected)
+                    .put_launch_template_if(template, expected.map(|fields| *fields))
                     .await?
             }
         };
@@ -149,7 +149,7 @@ pub(crate) async fn remove_template(
             Precondition::Unchanged(Some(expected)) => {
                 task_state
                     .store
-                    .delete_launch_template_if(name, expected)
+                    .delete_launch_template_if(name, *expected)
                     .await?
             }
         };

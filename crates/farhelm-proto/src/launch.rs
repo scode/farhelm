@@ -63,6 +63,43 @@ crate::enum_with_all! {
 
 #[warn(clippy::wildcard_enum_match_arm)]
 impl LaunchHarness {
+    /// Whether a command-line prompt leaves this harness interactive.
+    /// Muse accepts one on a fresh start, but its resume subcommand accepts
+    /// only a session reference. Goose's interactive session has no prompt
+    /// argument. Pi treats a leading `@` as a file attachment even after `--`,
+    /// so it cannot preserve arbitrary literal messages. These are launch-harness
+    /// facts, independent of reporting kind.
+    pub const fn supports_initial_prompt(self, named: bool) -> bool {
+        match self {
+            LaunchHarness::Goose | LaunchHarness::Pi => false,
+            LaunchHarness::Muse => !named,
+            LaunchHarness::Cursor
+            | LaunchHarness::Codex
+            | LaunchHarness::Claude
+            | LaunchHarness::Omp
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Grok => true,
+        }
+    }
+
+    /// Literal arguments appended after Farhelm expands its own placeholders.
+    /// Positional prompts follow an option terminator, so leading hyphens
+    /// cannot become agent options. OpenCode's TUI uses a dedicated flag.
+    /// This must never be added to the session's reusable launch or resume argv.
+    pub fn initial_prompt_arguments(self, prompt: &str) -> Result<Vec<String>, String> {
+        match self {
+            LaunchHarness::Goose => Err("Goose does not accept an initial prompt".into()),
+            LaunchHarness::Pi => Err("Pi cannot accept an arbitrary literal initial prompt".into()),
+            LaunchHarness::OpenCode => Ok(vec![format!("--prompt={prompt}")]),
+            LaunchHarness::Cursor
+            | LaunchHarness::Codex
+            | LaunchHarness::Claude
+            | LaunchHarness::Muse
+            | LaunchHarness::Omp
+            | LaunchHarness::Grok => Ok(vec!["--".into(), prompt.into()]),
+        }
+    }
+
     /// Whether `order` lists every harness exactly once: the check behind a
     /// UI display order that differs from declaration order.
     ///
@@ -581,6 +618,44 @@ pub fn check_permission_flags(
 
 #[cfg(test)]
 mod tests {
+    /// Literal messages must remain positional data, even when they look like
+    /// options or Farhelm placeholders. None of these argv shapes opts into
+    /// a harness's noninteractive print/exec mode.
+    #[test]
+    fn initial_prompt_arguments_preserve_literal_text_for_each_harness() {
+        for harness in super::LaunchHarness::ALL {
+            for text in [
+                "-p",
+                "@notes.txt",
+                "{farhelm_args}",
+                "{cwd}",
+                "resume",
+                "first\n\tsecond",
+            ] {
+                let args = harness.initial_prompt_arguments(text);
+                if !harness.supports_initial_prompt(false) {
+                    assert!(args.is_err());
+                    continue;
+                }
+                let args = args.unwrap();
+                match harness {
+                    super::LaunchHarness::OpenCode => {
+                        assert_eq!(args, [format!("--prompt={text}")])
+                    }
+                    super::LaunchHarness::Goose | super::LaunchHarness::Pi => unreachable!(),
+                    super::LaunchHarness::Cursor
+                    | super::LaunchHarness::Codex
+                    | super::LaunchHarness::Claude
+                    | super::LaunchHarness::Muse
+                    | super::LaunchHarness::Omp
+                    | super::LaunchHarness::Grok => assert_eq!(args, ["--", text]),
+                }
+            }
+        }
+        assert!(!super::LaunchHarness::Muse.supports_initial_prompt(true));
+        assert!(super::LaunchHarness::Codex.supports_initial_prompt(true));
+    }
+
     use super::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
     /// Quoting chooses argv boundaries, never execution. Comments and malformed

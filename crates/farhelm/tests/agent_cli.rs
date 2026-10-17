@@ -1703,6 +1703,126 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
     );
 }
 
+/// The shared flags must send message contents rather than a file path, with
+/// newlines, tabs and leading hyphens intact. Feeding stdin from a file keeps
+/// the child bounded without changing the test runner's own environment.
+#[farhelm_testtrace::test]
+fn create_initial_prompt_reads_literal_file_and_stdin_text() {
+    const TEXT: &str = "--help\n\t{farhelm_args}";
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let file = temp.path().join("message.txt");
+    std::fs::write(&file, TEXT).unwrap();
+    for (case, (flag, value)) in [
+        ("--prompt", TEXT),
+        ("--prompt-file", file.to_str().unwrap()),
+        ("--prompt-file", "-"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let socket = temp.path().join(format!("supervisor-{case}.sock"));
+        let (done, owner) = mock_supervisor(&socket, |request| {
+            let ControlMsg::AgentRequest {
+                req_id,
+                request: AgentVerb::Create { edits, .. },
+                ..
+            } = request
+            else {
+                panic!("expected create, got {request:?}");
+            };
+            assert_eq!(edits.prompt.as_deref(), Some(TEXT));
+            Some(ControlMsg::AgentResponse {
+                req_id,
+                outcome: AgentOutcome::Err {
+                    kind: ErrorKind::InvalidRequest,
+                    message: "observed literal prompt".into(),
+                },
+            })
+        });
+        let command = agent_command_with_args(
+            &socket,
+            &[
+                "create", "--host", "local", "--cwd", "/work", "--agent", "codex", flag, value,
+            ],
+        );
+        // The bounded runner closes stdin before spawning. A shell performs
+        // only this fixture's file redirection, then replaces itself with the
+        // CLI. Arguments remain separate positional data; output
+        // caps, wait ownership and the shared execution deadline stay intact.
+        let command = if value == "-" {
+            let mut redirected = Command::new("/bin/sh");
+            redirected
+                .args(["-c", "exec \"$@\" < \"$0\""])
+                .arg(&file)
+                .arg(command.get_program())
+                .args(command.get_args());
+            for (name, value) in command.get_envs() {
+                match value {
+                    Some(value) => {
+                        redirected.env(name, value);
+                    }
+                    None => {
+                        redirected.env_remove(name);
+                    }
+                }
+            }
+            redirected
+        } else {
+            command
+        };
+        let output = output_with_timeout(command);
+        finish_server(done, owner);
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("observed literal prompt")
+        );
+    }
+}
+
+/// Invalid message sources must fail before a supervisor request is possible.
+/// A file is bounded even though ordinary filesystem reads could be unlimited.
+#[farhelm_testtrace::test]
+fn initial_prompt_flags_refuse_controls_conflicts_and_oversized_files() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("not-listening.sock");
+    for text in ["escape\u{1b}", "carriage\rreturn"] {
+        let output = output_with_timeout(agent_command_with_args(
+            &socket,
+            &["create", "--prompt", text],
+        ));
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("control characters")
+        );
+    }
+    let file = temp.path().join("too-long.txt");
+    std::fs::write(&file, "x".repeat(64 * 1024 + 1)).unwrap();
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["create", "--prompt-file", file.to_str().unwrap()],
+    ));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("64 KiB"));
+    std::fs::write(&file, "message").unwrap();
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &[
+            "create",
+            "--prompt",
+            "message",
+            "--prompt-file",
+            file.to_str().unwrap(),
+        ],
+    ));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("cannot be used")
+    );
+}
+
 /// Spec: clone refuses omitted source and destination selectors before it
 /// opens the supervisor socket.
 ///

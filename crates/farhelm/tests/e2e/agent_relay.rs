@@ -405,6 +405,57 @@ async fn an_agent_request_is_answered_by_the_helm_holding_the_attachment() {
     );
 }
 
+/// A multiline first message crosses the authenticated relay as literal
+/// template edits. This proves transport and reply correlation; the helm's
+/// approval and supervisor's launch-spec tests cover their own boundaries.
+#[farhelm_testtrace::test]
+async fn initial_prompt_create_relay_preserves_literal_message() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let token = credential_for(&h, &session.id).await;
+    let reply = AgentReply::Created {
+        session: farhelm_proto::AgentSession {
+            id: "created-child".into(),
+            host_id: "host".into(),
+            host: Some("host".into()),
+            title: "child".into(),
+            cwd: "/work".into(),
+            agent: "codex".into(),
+            status: String::new(),
+            current: false,
+            stale: false,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+        },
+    };
+    let handler = ScriptedHandler::answering(reply.clone());
+    let helm = connect_helm(&h.sup, handler.clone()).await;
+    let (_channel, _replay, _stream) = helm.attach_live(&session.id, 80, 24).await.unwrap();
+    let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
+    let verb = AgentVerb::Create {
+        host: Some("host".into()),
+        templates: vec![],
+        edits: farhelm_proto::launcher::TemplateFields {
+            agent: Some(farhelm_proto::LaunchHarness::Codex),
+            prompt: Some("--literal\n\t{farhelm_args}".into()),
+            destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                "/work".into(),
+            )),
+            ..Default::default()
+        },
+        intent_key: None,
+        confirm_yolo: false,
+        spawn: None,
+    };
+    assert_eq!(
+        outcome_of(peer.ask(&session.id, verb.clone()).await),
+        AgentOutcome::Ok { reply }
+    );
+    assert_eq!(
+        *handler.asked.lock().unwrap(),
+        vec![(session.id.clone(), verb)]
+    );
+}
+
 /// Delete reaches the attached helm with its explicit target and consent,
 /// and its checkout notice survives both relay hops. A self-delete is refused
 /// locally before the helm is asked, avoiding its own retained request fence.

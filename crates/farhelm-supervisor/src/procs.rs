@@ -3215,6 +3215,54 @@ mod tests {
         );
     }
 
+    /// A composed initial prompt stays opaque to live-report admission even
+    /// when it resembles an exiting option, utility command or file reference.
+    /// Hook injection still refuses a preexisting delimiter: appending hooks
+    /// there would make them message text, unlike this already-composed runtime.
+    #[farhelm_testtrace::test]
+    fn initial_prompt_omp_runtime_keeps_conversation_report_admission() {
+        for text in [
+            "--print",
+            "--mode rpc",
+            "models",
+            "@notes.txt",
+            "first\nsecond",
+        ] {
+            let mut args = vec!["-e".to_string(), "/fixture/reporter.ts".into()];
+            args.extend(
+                farhelm_proto::LaunchHarness::Omp
+                    .initial_prompt_arguments(text)
+                    .unwrap(),
+            );
+            let words: Vec<_> = args.iter().map(String::as_str).collect();
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+                omp_runtime_link(11, &words),
+                corridor_link(10, "/bin/bash", &["-bash"]),
+            ];
+            let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+                .expect("a literal first message must not disable conversation capture");
+            assert_eq!(emitter.pid, 11);
+            let mut invocation = vec!["omp".to_string()];
+            invocation.extend(args);
+            assert!(matches!(
+                crate::agent_kind::omp::omp_injection_decision(&invocation),
+                crate::agent_kind::omp::OmpInjection::Leave(_)
+            ));
+        }
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(11, &["--print", "--", "literal message"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("a real print option before the message still refuses");
+        assert!(
+            refusal.contains("no longer describes an interactive conversation"),
+            "{refusal}"
+        );
+    }
+
     /// A utility subcommand in the live runtime argv refuses the same way:
     /// the grammar is the launch classifier's, re-read live.
     #[farhelm_testtrace::test]

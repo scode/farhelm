@@ -5844,12 +5844,35 @@ const TOMBSTONE_PREFIX: &str = "sha256:";
 /// identity alone, not the whole request, and must still refuse a key reused
 /// by a different request (see `service`'s `reconcile_github_checkout`).
 pub(crate) fn tombstone_fingerprint(fingerprint: &str) -> String {
-    let mut tombstone = format!("{TOMBSTONE_PREFIX}{}", sha256_hex(fingerprint));
+    // A completed agent retry follows the original request even if a
+    // template's prompt changed. Only pending recovery needs that prompt's
+    // hash; deletion retains request identity alone, as before prompts existed.
+    let request_only = agent_request_parts(fingerprint).map(|(digest, _)| {
+        serde_json::to_string(&("agent_request_v1", digest)).expect("request identity serializes")
+    });
+    let mut tombstone = format!(
+        "{TOMBSTONE_PREFIX}{}",
+        sha256_hex(request_only.as_deref().unwrap_or(fingerprint))
+    );
     if let Some(identity) = fresh_checkout_identity(fingerprint) {
         tombstone.push_str(IDENTITY_MARKER);
         tombstone.push_str(&identity_digest(&identity));
     }
     tombstone
+}
+
+/// Split the frozen agent request identity from optional pending-launch text
+/// identity. The prompt hash is deliberately absent from a deletion tombstone
+/// and from completed replay matching, but required before relaunching pending work.
+pub(crate) fn agent_request_parts(fingerprint: &str) -> Option<(String, Option<String>)> {
+    if let Ok((tag, digest)) = serde_json::from_str::<(String, String)>(fingerprint)
+        && tag == "agent_request_v1"
+    {
+        return Some((digest, None));
+    }
+    let (tag, digest, prompt) =
+        serde_json::from_str::<(String, String, String)>(fingerprint).ok()?;
+    (tag == "agent_prompt_request_v1").then_some((digest, Some(prompt)))
 }
 
 /// Separates a fresh-checkout tombstone's identity digest from the rest.

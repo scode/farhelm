@@ -733,12 +733,11 @@ agent choice is independent of that destination:
   replacement by another identity-less install goes unnoticed — an accepted residual, since absent identities carry no
   continuity evidence in either direction.
 
-Creation launches the agent; you type your first prompt into its terminal. Automatic initial-prompt delivery is post-v1.
-The expected shape when it comes: for agents that accept an initial prompt on the command line (Claude Code and Codex
-both do), add the prompt to the composed command — no readiness detection needed. Injecting a prompt into the terminal
-of an already-running agent requires reliably detecting that it is ready for input, which is the same hard problem as
-status detection; that route is only for agents without the argv affordance. Either way it is an additive change (an
-optional field on create/spawn), which is why v1 can skip it safely.
+Creation launches an interactive agent. A supported agent can receive a one-time initial prompt as part of its start
+argv, after Farhelm's own arguments have been composed, without waiting for terminal readiness. With no initial prompt,
+you type the first message into its terminal. An initial prompt is not part of the stored launch, so relaunching or
+copying that launch never repeats it; templates may supply one on every new create. Sending messages into an
+already-running agent remains separate work.
 
 A custom model id is typed into the model field and applied with Enter; it needs a chosen harness. The optional session
 name sits in the destination block under host and folder, visible without any disclosure. Launch and Cancel are the
@@ -2233,6 +2232,17 @@ copies its explicitly selected source's stored launch onto an explicitly named h
 translation between hosts: a command written for one machine may name a binary that is absent, a different build, or one
 that takes different flags on another.
 
+`farhelm agent create` and ordinary `farhelm spawn` accept `--prompt TEXT` or `--prompt-file PATH`, mutually exclusive;
+`-` reads the file contents from stdin. Templates carry the same prompt field. The prompt shares the 64 KiB launch
+budget, allows newline and tab, and refuses other control characters. It is sent once as literal command-line data at
+creation, including for a managed checkout, and stays separate from the stored launch: Restart, Clone, Replace and
+recent setups never send or remember it again. A template supplies its prompt on every create using it. Command launches
+and inherited spawns refuse prompt flags. Claude, Codex, Cursor, Grok, Muse, OMP and OpenCode support prompts; Goose and
+Pi do not. Muse refuses a named conversation plus a prompt. A create's approval card shows the full escaped message in a
+scrollable block, under a distinct card kind an older UI cannot decode. Template cards carry the prompt in their fields
+and likewise fail an older decoder. A completed keyed create still replays when its template's prompt changes; an
+interrupted ordinary agent create refuses a changed resolved prompt before relaunching.
+
 Agents can also write templates, behind the same card, since a template can carry a command line that every host the
 helm manages may later run. `farhelm agent template create <name>` sets the fields given by `--cwd` or
 `--gh`/`--github`, `--title`, `--host` and the launch flags other than `--template`; `--host` names a host by its
@@ -2272,8 +2282,8 @@ The instructions must identify session titles, working directories, and agent la
 supplied data, not instructions to follow. The helm relaying those values does not make their authors trusted. This is a
 short interpretation rule for the reading agent, not a guarantee that Farhelm prevents model prompt injection.
 
-As with interactive creation, spawning launches the agent without an initial prompt in v1; the spawning agent (or the
-user) interacts with the child through its terminal.
+Spawning starts an interactive agent, optionally with the one-time initial prompt above; later interaction uses the
+child's terminal.
 
 The parent reference is optional organizational metadata only and implies no VCS relationship. It is acceptable for
 agent-created sessions to have no parent reference; the parent filter need not identify everything an agent created. The
@@ -2482,7 +2492,6 @@ Further requirements:
 
 - Notifications outside a session (about a host or the whole app), and desktop or operating-system notifications other
   than configured ntfy waiting alerts.
-- Automatic initial-prompt delivery (at creation or spawn).
 - Terminal history persistence beyond what the live terminal retains. A durable history store is a possible future
   add-on; v1 leans on agent conversation resume instead.
 - A prompt composer or message-level abstraction over the terminal.

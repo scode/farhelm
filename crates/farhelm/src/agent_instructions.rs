@@ -167,6 +167,16 @@ fn render(agent: &Command) -> String {
          option and copies the source's existing directory. Clone and --inherit-agent refuse a session created\n\
          before launch kinds; use create instead.\n\
          \n\
+         create and spawn accept --prompt TEXT or --prompt-file PATH (- reads stdin),\n\
+         mutually exclusive. The message is sent once, when the agent starts; Restart,\n\
+         Clone and Replace do not send it again. Templates can set a prompt for every\n\
+         launch using them, including template create/edit through these shared flags.\n\
+         Claude, Codex, Cursor, Grok, Muse, OMP and OpenCode accept initial prompts;\n\
+         Goose, Pi and custom commands do not. Muse cannot combine one with a named\n\
+         conversation. --inherit-agent refuses prompt flags; use an ordinary spawn.\n\
+         Newlines and tabs are allowed; other control characters are refused. The prompt\n\
+         shares the 64 KiB launch budget. A create's approval card shows the full message.\n\
+         \n\
          The user approves every acting verb. spawn, create, clone, rename, stop, restart, delete and\n\
          the template writes each wait while Farhelm shows the user a card, for up to 9\n\
          minutes, unless the user told Farhelm not to ask for this host; listings and\n\

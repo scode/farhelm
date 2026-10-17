@@ -15,6 +15,10 @@ It can also ask to open a web link in your browser
 happens, whoever typed the command; a command you type yourself in a session's terminal is asked about the same way.
 Looking never asks.
 
+An agent starting another session can supply its first message with `--prompt` or `--prompt-file` (`-` reads stdin). The
+approval card shows the full message. It is sent once when the new agent starts; restarting, copying or replacing that
+session does not send it again. A launch template can supply a message on every launch using it.
+
 An agent can only do this from a session that is open in the Farhelm window. If it is not, the agent is told to ask you
 to open it.
 
