@@ -140,6 +140,12 @@ mod checkout_root;
 mod claude_trust;
 #[cfg(native_desktop)]
 pub mod desktop;
+
+// The native menu's description is renderer-free. Compile its shortcut guard
+// in ordinary UI tests too, so Linux does not need AppKit or a display server.
+#[cfg(all(test, not(native_desktop)))]
+#[path = "desktop/menu.rs"]
+mod desktop_menu_tests;
 mod feed;
 mod feedback;
 mod github_checkout;
@@ -1431,6 +1437,14 @@ fn install_window_activity_tracking() {
 /// build cannot advertise a chord that it does not handle.
 pub(crate) const HAS_NEW_SESSION_SHORTCUT: bool = cfg!(all(native_desktop, target_os = "macos"));
 
+/// The Delete hint follows the same build decision as its capture listener.
+/// Mac browsers use the browser chord even though the host OS has Command.
+pub(crate) const SESSION_DELETE_SHORTCUT: &str = if HAS_NEW_SESSION_SHORTCUT {
+    "⌘W"
+} else {
+    "Ctrl+Shift+Backspace"
+};
+
 /// Give the Mac desktop's Cmd+N the New button's current prefill and busy guard.
 ///
 /// Capture runs before xterm's input handler so the chord cannot reach the
@@ -1525,6 +1539,16 @@ fn install_template_number_shortcuts() {
     ));
 }
 
+/// Reserve session action chords before xterm and reuse the live UI controls.
+/// The shipped asset exposes the matcher to tests for both build modes; web
+/// browser tests cannot exercise the native Mac app's Command bindings.
+fn install_session_action_shortcuts() {
+    document::eval(&format!(
+        "{}\nwindow.installSessionActionShortcuts({HAS_NEW_SESSION_SHORTCUT});",
+        include_str!("../assets/session-action-shortcuts.js")
+    ));
+}
+
 /// Normalize composition-ending keys before either renderer serializes them.
 ///
 /// WebKit can send compositionend before its ending keydown, so that key would
@@ -1561,6 +1585,7 @@ fn AppBody() -> Element {
     use_hook(install_quick_switcher_shortcut);
     use_hook(install_quick_launch_shortcut);
     use_hook(install_template_number_shortcuts);
+    use_hook(install_session_action_shortcuts);
     #[cfg(native_desktop)]
     use_hook(|| {
         // cfg! keeps the Mac branch type-checked by the Linux desktop build

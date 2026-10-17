@@ -2517,9 +2517,9 @@ pub(crate) fn SessionView(
                             r#type: "button",
                             class: "btn btn-danger header-delete",
                             "data-tooltip": if skip_session_confirmations {
-                                "delete: remove this session and its state"
+                                format!("delete: remove this session and its state ({})", crate::SESSION_DELETE_SHORTCUT)
                             } else {
-                                "delete: remove this session and its state, after you confirm"
+                                format!("delete: remove this session and its state, after you confirm ({})", crate::SESSION_DELETE_SHORTCUT)
                             },
                             disabled: lifecycle.busy(),
                             "aria-expanded": "{confirming_header_delete.is_open()}",
