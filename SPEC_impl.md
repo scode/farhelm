@@ -1915,8 +1915,10 @@ requires object-shaped configuration/projects/project, and changes only `hasTrus
 projects/project object is created for the opt-in. Removal deletes only that key, preserving even empty objects. A
 same-directory temporary file receives the original mode, is written and fsynced, renamed atomically, and followed by
 directory fsync. Publication refuses a replaced target/lock or a lock held for four seconds, leaving margin before
-Claude's ten-second stale-lock threshold. Temporary files and owned locks are cleaned on error. Claude's unlocked
-exit-save race and vendor format changes remain explicit limits; none of these checks proves compatibility forever.
+Claude's ten-second stale-lock threshold. Temporary files and owned locks are cleaned on error. The advisory lock has
+the same accepted limit as Claude's own writers: a writer stalled past Claude's stale-lock threshold can publish an old
+snapshot after another writer takes over, losing an update in either direction. Claude's unlocked exit-save race and
+vendor format changes remain explicit limits too; none of these checks proves compatibility forever.
 
 Confirmed archive or missing-source retirement schedules removal off the Delete reply path. The worker retains directory
 admission until it settles, preventing reuse while an old remover can still touch that path's key; terminal I/O and
