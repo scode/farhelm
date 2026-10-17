@@ -1796,11 +1796,12 @@ before forwarding each chunk, so growth past the cap fails the whole transfer.
 Download data uses the attachment upload's chunk size and credit window reversed. Acknowledgements are cumulative bytes
 consumed, monotonic and no greater than bytes sent. Begin, data and end share a bounded bulk writer queue, drained after
 terminal and control traffic; the connection reader never waits for a download's consumer. A helm-side guard owns
-routing and cancellation from before Begin is sent through EOF. Dropping it sends Abort, and connection death reports
-failure. Download channel ids stay reserved for the connection's lifetime, including against attachment and upload
-reuse: queued frames can outlive an aborted producer. The production helm already allocates each id only once. There is
-no upload staging, publication phase, admission cap or progress timer. Session-authenticated connections remain behind
-the restricted operation allowlist and cannot stat or read files.
+routing and cancellation from before Begin is sent through EOF. Dropping it retires any pending admission reply entry
+and sends Abort, which need not produce a reply; connection death reports failure. Download channel ids stay reserved
+for the connection's lifetime, including against attachment and upload reuse: queued frames can outlive an aborted
+producer. The production helm already allocates each id only once. There is no upload staging, publication phase,
+admission cap or progress timer. Session-authenticated connections remain behind the restricted operation allowlist and
+cannot stat or read files.
 
 The helm exposes authenticated JSON `POST /api/sessions/{id}/files/stat` and `/files/download`, with a `path` field.
 Both use session-owner routing and the same auth-inside-desktop-CORS boundary as attachments; only OPTIONS preflight is

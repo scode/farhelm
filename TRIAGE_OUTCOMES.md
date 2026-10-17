@@ -15319,7 +15319,8 @@
 - Completion criteria: cancelling a download admission before the supervisor replies leaves no pending request behind on
   the live connection. A regression cancels admission in that window and asserts the pending entry is gone; run it
   through the recorder. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/download-cancel-pending-entry.md`.
+- Execution: change `olusylrnlvlouvtpwyqtlrzylxzxvwsk`, bookmark `plan/download-cancel-pending-entry/01-retire-entry`;
+  draft PR [#2197](https://github.com/scode/farhelm/pull/2197/changes).
 
 ## bare-cache-fetch-conflicts-with-explicit-git-policy.md
 

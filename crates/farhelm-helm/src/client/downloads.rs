@@ -16,9 +16,12 @@ pub(super) struct DownloadHandle {
 
 /// One credit-paced file read. Drop cancels upstream on every unfinished exit,
 /// including a cancelled HTTP body or a cancelled BeginDownload request.
+/// Admission owns its pending reply entry too: AbortDownload may stop the
+/// supervisor before it can answer, so connection teardown cannot be its only cleanup.
 pub struct DownloadGuard {
     client: Arc<SupervisorClient>,
     channel: u32,
+    admission_req_id: u64,
     bytes: mpsc::Receiver<Vec<u8>>,
     end: watch::Receiver<Option<Result<(), String>>>,
     pub info: DownloadFileInfo,
@@ -70,9 +73,11 @@ impl SupervisorClient {
             .lock()
             .await
             .insert(channel, DownloadHandle { bytes, end });
+        let req_id = self.req_id();
         let mut guard = DownloadGuard {
             client: Arc::clone(self),
             channel,
+            admission_req_id: req_id,
             bytes: receiver,
             end: ended,
             info: DownloadFileInfo {
@@ -83,7 +88,6 @@ impl SupervisorClient {
             received: 0,
             finished: false,
         };
-        let req_id = self.req_id();
         let reply = self
             .request(
                 req_id,
@@ -125,17 +129,23 @@ impl SupervisorClient {
             route
                 .end
                 .send_replace(Some(Err("download receiver overflow".into())));
-            self.cancel_download(channel);
+            self.cancel_download(channel, None);
         }
         true
     }
 
     /// Drop paths cannot await. The owned cleanup task retires routing and
     /// sends an idempotent cancellation, just like terminal/upload cleanup.
-    fn cancel_download(self: &Arc<Self>, channel: u32) {
+    /// A dropped guard also retires its admission request before sending Abort:
+    /// that abort need not produce a reply. Already answered ids are harmless
+    /// no-ops, and a late reply to a retired id is discarded by ordinary demux.
+    fn cancel_download(self: &Arc<Self>, channel: u32, admission_req_id: Option<u64>) {
         let client = Arc::clone(self);
         tokio::spawn(async move {
             client.downloads.lock().await.remove(&channel);
+            if let Some(req_id) = admission_req_id {
+                client.pending.lock().await.map.remove(&req_id);
+            }
             let _ = client
                 .writer_tx
                 .send(Frame::control(&ControlMsg::AbortDownload { channel }).into())
@@ -208,7 +218,127 @@ impl DownloadGuard {
 impl Drop for DownloadGuard {
     fn drop(&mut self) {
         if !self.finished {
-            self.client.cancel_download(self.channel);
+            self.client
+                .cancel_download(self.channel, Some(self.admission_req_id));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{DuplexStream, ReadHalf};
+    use tokio::time::timeout;
+
+    /// Read one scripted-peer control message with a deadline. The peer stays
+    /// in the test's scope so withholding an admission reply cannot look like
+    /// a transport loss that would clear every pending entry on its own.
+    async fn read_control(reader: &mut FrameReader<ReadHalf<DuplexStream>>) -> ControlMsg {
+        let frame = timeout(Duration::from_secs(5), reader.read_frame())
+            .await
+            .expect("the live peer did not receive a control message")
+            .unwrap()
+            .expect("the client closed the transport");
+        parse_control(&frame).unwrap()
+    }
+
+    /// Cancelling admission must retire exactly its unanswered request while
+    /// the connection stays live. Repeat the boundary to expose accumulation;
+    /// an unrelated stat and a late admission reply prove cleanup neither drains
+    /// other requests nor depends on the supervisor answering the cancelled one.
+    #[farhelm_testtrace::test]
+    async fn cancelled_download_admission_retires_only_its_pending_request() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut reader, mut writer) = peer.await.unwrap();
+        let info = DownloadFileInfo {
+            path: "/fixture/file.txt".into(),
+            size: Some(1),
+            status: DownloadFileStatus::Ready,
+        };
+
+        for _ in 0..3 {
+            let admission = tokio::spawn({
+                let client = Arc::clone(&client);
+                async move { client.begin_download("session", "file.txt").await }
+            });
+            let ControlMsg::BeginDownload {
+                req_id, channel, ..
+            } = read_control(&mut reader).await
+            else {
+                panic!("expected download admission");
+            };
+            assert!(client.pending.lock().await.map.contains_key(&req_id));
+            assert!(client.downloads.lock().await.contains_key(&channel));
+
+            let stat = tokio::spawn({
+                let client = Arc::clone(&client);
+                async move { client.stat_file("session", "other.txt").await }
+            });
+            let ControlMsg::StatFile {
+                req_id: stat_id, ..
+            } = read_control(&mut reader).await
+            else {
+                panic!("expected the unrelated stat request");
+            };
+            assert_eq!(client.pending.lock().await.map.len(), 2);
+            admission.abort();
+            let cancelled = admission.await;
+            assert!(matches!(cancelled, Err(error) if error.is_cancelled()));
+
+            // Abort is enqueued after the owned task retires both entries.
+            // Observing it pins cleanup without a sleep or a reply that could
+            // accidentally clear the admission through the ordinary path.
+            assert_eq!(
+                read_control(&mut reader).await,
+                ControlMsg::AbortDownload { channel }
+            );
+            assert!(!client.downloads.lock().await.contains_key(&channel));
+            {
+                let pending = client.pending.lock().await;
+                assert!(
+                    !pending.closed,
+                    "connection teardown must not supply cleanup"
+                );
+                assert!(!pending.map.contains_key(&req_id));
+                assert_eq!(pending.map.len(), 1);
+                assert!(pending.map.contains_key(&stat_id));
+            }
+
+            writer
+                .write_control(&ControlMsg::DownloadStarted {
+                    req_id,
+                    channel,
+                    info: info.clone(),
+                })
+                .await
+                .unwrap();
+            writer
+                .write_control(&ControlMsg::FileStat {
+                    req_id: stat_id,
+                    info: info.clone(),
+                })
+                .await
+                .unwrap();
+            let observed = timeout(Duration::from_secs(5), stat)
+                .await
+                .expect("the live connection did not answer stat after the late admission reply")
+                .unwrap()
+                .unwrap();
+            assert_eq!(observed, info);
+            let pending = client.pending.lock().await;
+            assert!(!pending.closed);
+            assert!(pending.map.is_empty());
         }
     }
 }
