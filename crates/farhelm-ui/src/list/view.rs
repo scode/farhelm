@@ -950,6 +950,10 @@ pub(crate) fn ListView(
     // A switcher choice is an accepted search action, not a clone seed.
     let mut initial_create_action =
         use_signal(|| None::<crate::launch_composer::ComposerSearchResult>);
+    // A quick launch keeps the definitions from its one fresh read. Replaying
+    // names against another fetch could compose a different setup mid-opening.
+    let mut initial_quick_templates =
+        use_signal(Vec::<farhelm_proto::launcher::LaunchTemplate>::new);
     // Quick launch owns one fetch/mount/submit handoff. New still composes the
     // request; this flag only keeps its fields hidden until a fallback is needed.
     let mut quick_launch_pending = use_signal(|| false);
@@ -3375,14 +3379,15 @@ pub(crate) fn ListView(
             auto_launch.set(false);
             initial_create_error.set(None);
             initial_create_action.set(action);
+            initial_quick_templates.set(Vec::new());
             show_create.set(true);
             true
         },
     );
     let quick_base = base.clone();
-    // Both shortcuts resolve a name from fresh shared preferences and then
-    // enter exactly the same New/template/confirmation path.
-    let quick_launch = use_callback(move |number: Option<String>| {
+    // Resolve the whole ordered request from one shared-preference/template
+    // read, then enter the ordinary New/template/confirmation path once.
+    let quick_launch = use_callback(move |references: Vec<Option<String>>| {
         if *quick_launch_pending.peek()
             || *show_create.peek()
             || *templates_open.peek()
@@ -3421,28 +3426,31 @@ pub(crate) fn ListView(
             }
             match result {
                 Ok((fresh, templates)) => {
-                    let name = match &number {
-                        Some(key) => fresh.template_shortcuts.get(key).cloned(),
-                        None => fresh.quick_launch_template.clone(),
-                    };
+                    let resolved = references
+                        .iter()
+                        .map(|number| {
+                            let name = match number {
+                                Some(key) => fresh.template_shortcuts.get(key),
+                                None => fresh.quick_launch_template.as_ref(),
+                            };
+                            name.and_then(|name| {
+                                templates.iter().find(|template| &template.name == name)
+                            })
+                            .cloned()
+                        })
+                        .collect::<Option<Vec<_>>>();
                     preferences.0.write().quick_launch_template = fresh.quick_launch_template;
                     preferences.0.write().template_shortcuts = fresh.template_shortcuts;
-                    if let Some(template) = name
-                        .as_ref()
-                        .and_then(|name| templates.iter().find(|t| &t.name == name))
-                    {
-                        if open_new.call(Some(
-                            crate::launch_composer::ComposerSearchResult::Template(
-                                template.name.clone(),
-                            ),
-                        )) {
+                    if let Some(templates) = resolved {
+                        if open_new.call(None) {
                             auto_launch
-                                .set(super::templates::quick_launch_eligible(&template.fields));
+                                .set(super::templates::stacked_quick_launch_eligible(&templates));
+                            initial_quick_templates.set(templates);
                         }
                     } else {
                         initial_template.set(None);
-                        quick_launch_hint.set(number.is_none());
-                        number_shortcut_hint.set(number.is_some());
+                        quick_launch_hint.set(references.iter().any(Option::is_none));
+                        number_shortcut_hint.set(references.iter().any(Option::is_some));
                         templates_open.set(true);
                     }
                 }
@@ -3487,7 +3495,7 @@ pub(crate) fn ListView(
                     restore = !open_new.call(Some(action));
                 }
                 Some(super::quick_switcher::SwitcherPick::QuickLaunch) => {
-                    quick_launch.call(None);
+                    quick_launch.call(vec![None]);
                     restore = false;
                 }
                 None => {}
@@ -3503,14 +3511,14 @@ pub(crate) fn ListView(
             "data-opening-generation": "{opening_generation()}",
             "data-read-completed-generation": "{quick_read_completed()}",
             disabled: quick_launch_pending() || show_create() || templates_open() || busy,
-            onclick: move |_| quick_launch.call(None),
+            onclick: move |_| quick_launch.call(vec![None]),
         }
         for key in super::templates::NUMBER_KEYS {
             button {
                 key: "number-{key}", class: "template-number-trigger", r#type: "button",
                 hidden: true, tabindex: "-1", "data-number-key": "{key}",
                 disabled: quick_launch_pending() || show_create() || templates_open() || busy,
-                onclick: move |_| quick_launch.call(Some(key.into())),
+                onclick: move |_| quick_launch.call(vec![Some(key.into())]),
             }
         }
         // Status sounds follow the very replies these rows display. Keeping
@@ -3774,6 +3782,7 @@ pub(crate) fn ListView(
                     // Clone/Replace owns its seed even if it supersedes a
                     // switcher opening before the launcher unmounts.
                     initial_action: if clone_prefill().is_none() { initial_create_action() } else { None },
+                    initial_templates: if clone_prefill().is_none() { initial_quick_templates() } else { Vec::new() },
                     // The "replace with" source as the sidebar currently
                     // lists it, so the launcher's warning follows a source
                     // that starts or stops while it is open. While the
