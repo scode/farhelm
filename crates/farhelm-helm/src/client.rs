@@ -3151,6 +3151,18 @@ impl SupervisorClient {
         id: &str,
         guard: farhelm_proto::DeleteGuard,
     ) -> anyhow::Result<farhelm_proto::SessionDeleteOutcome> {
+        self.delete_session_fenced(id, guard, false).await
+    }
+
+    /// The shared deletion exchange, optionally refusing an active target
+    /// request instead of waiting. Agent deletes use this to break crossing
+    /// deletes without weakening the credential fence or delaying either reply.
+    pub(crate) async fn delete_session_fenced(
+        &self,
+        id: &str,
+        guard: farhelm_proto::DeleteGuard,
+        refuse_if_agent_request_in_flight: bool,
+    ) -> anyhow::Result<farhelm_proto::SessionDeleteOutcome> {
         let req_id = self.req_id();
         match self
             .request(
@@ -3160,6 +3172,7 @@ impl SupervisorClient {
                     session_id: id.to_string(),
                     only_if_nothing_alive: guard.only_if_nothing_alive(),
                     only_if_agent_ended: guard.only_if_agent_ended(),
+                    refuse_if_agent_request_in_flight,
                 },
             )
             .await?

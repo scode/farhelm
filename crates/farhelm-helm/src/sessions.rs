@@ -2748,54 +2748,62 @@ pub(crate) async fn delete_session(
     // Helm-owned for the reason `create_session` is: the delete is followed
     // by dropping the session's seen state and its cached row.
     crate::run_owned(async move {
-        let (claim, client) = match route_session(&state, &id).await {
-            Ok(routed) => routed,
-            Err(e) => return http_error(e),
-        };
-        // Before the supervisor sees the delete, and held until it answers: a
-        // request this session has waiting for the user, or on its way to a
-        // card, holds its request fence there, which the delete would
-        // otherwise wait out (see `approvals::Approvals::deny_session`).
-        let _deleting = state.approvals.deny_session(&id);
-        match client
-            .delete_session_with(
-                &id,
-                farhelm_proto::DeleteGuard::from_flags(
-                    query.only_if_nothing_alive,
-                    query.only_if_agent_ended,
-                ),
-            )
-            .await
-        {
-            Ok(outcome) => {
-                if let Err(error) = state.store.set_pinned(&id, false).await {
-                    warn!(
-                        session_id = manager::peer_text(&id).as_str(),
-                        error = %error,
-                        "could not clear the deleted session's pin; a stray row may remain"
-                    );
-                }
-                if let Err(error) = state.store.clear_seen(&id).await {
-                    warn!(
-                        session_id = manager::peer_text(&id).as_str(),
-                        error = %error,
-                        "could not clear the deleted session's seen state; a stray row may remain"
-                    );
-                }
-                if let Err(error) = state.store.clear_notification_marks(&id).await {
-                    warn!(
-                        session_id = manager::peer_text(&id).as_str(),
-                        error = %error,
-                        "could not clear the deleted session's notification marks; a stray row may remain"
-                    );
-                }
-                forget_session(&state, &claim, &id).await;
-                axum::Json(outcome).into_response()
-            }
+        let guard = farhelm_proto::DeleteGuard::from_flags(
+            query.only_if_nothing_alive,
+            query.only_if_agent_ended,
+        );
+        match do_delete_session(&state, &id, guard, None).await {
+            Ok(outcome) => axum::Json(outcome).into_response(),
             Err(e) => http_error(e),
         }
     })
     .await
+}
+
+/// Delete through the same approval denial, teardown and local cleanup for
+/// browser and agent requests. Only agent requests refuse a busy target fence:
+/// their own retained request fence makes waiting vulnerable to crossing deletes.
+/// The agent's connection is also the one whose snapshot its approval showed;
+/// rerouting after approval must not carry consent onto a replacement host.
+pub(crate) async fn do_delete_session(
+    state: &AppState,
+    id: &str,
+    guard: farhelm_proto::DeleteGuard,
+    agent_connection: Option<u64>,
+) -> anyhow::Result<farhelm_proto::SessionDeleteOutcome> {
+    let (claim, client) = route_session(state, id).await?;
+    if agent_connection.is_some_and(|expected| expected != client.connection_id()) {
+        return Err(anyhow::Error::new(SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::Conflict,
+            message: "the target host's connection changed while this delete waited for approval; nothing was deleted, retry to approve its current state".to_string(),
+        }));
+    }
+    let _deleting = state.approvals.deny_session(id);
+    let outcome = client
+        .delete_session_fenced(id, guard, agent_connection.is_some())
+        .await?;
+    forget_deleted_session(state, &claim, id).await;
+    Ok(outcome)
+}
+
+/// Finish local bookkeeping only after the supervisor confirms teardown.
+/// These tables are best effort: a stale row must not hide a real deletion
+/// from other clients. Replace uses the same tail after inheriting its pin.
+async fn forget_deleted_session(state: &AppState, claim: &manager::SessionClaim, id: &str) {
+    if let Err(error) = state.store.set_pinned(id, false).await {
+        warn!(session_id = manager::peer_text(id).as_str(), error = %error,
+            "could not clear the deleted session's pin; a stray row may remain");
+    }
+    if let Err(error) = state.store.clear_seen(id).await {
+        warn!(session_id = manager::peer_text(id).as_str(), error = %error,
+            "could not clear the deleted session's seen state; a stray row may remain");
+    }
+    if let Err(error) = state.store.clear_notification_marks(id).await {
+        warn!(session_id = manager::peer_text(id).as_str(), error = %error,
+            "could not clear the deleted session's notification marks; a stray row may remain");
+    }
+    forget_session(state, claim, id).await;
 }
 
 /// The body of `PUT /api/sessions/{id}/seen`: `Some(stamp)` marks the
@@ -3513,32 +3521,7 @@ async fn finish_replacement(
             }));
         }
     };
-    // The deleted source's read/unread and notification-mark rows go with
-    // it, exactly as in `delete_session` (SPEC_impl.md's `session_seen`
-    // paragraph and its notification storage note). Best effort: a stray row
-    // is harmless and must not turn a finished replace into a failure.
-    if let Err(error) = state.store.clear_seen(id).await {
-        warn!(
-            session_id = manager::peer_text(id).as_str(),
-            error = %error,
-            "could not clear the replaced session's seen state; a stray row may remain"
-        );
-    }
-    if let Err(error) = state.store.set_pinned(id, false).await {
-        warn!(
-            session_id = manager::peer_text(id).as_str(),
-            error = %error,
-            "could not clear the replaced session's pin; a stray row may remain"
-        );
-    }
-    if let Err(error) = state.store.clear_notification_marks(id).await {
-        warn!(
-            session_id = manager::peer_text(id).as_str(),
-            error = %error,
-            "could not clear the replaced session's notification marks; a stray row may remain"
-        );
-    }
-    forget_session(state, claim, id).await;
+    forget_deleted_session(state, claim, id).await;
     Ok(Replaced {
         session: created,
         delete_notice,

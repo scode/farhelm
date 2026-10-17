@@ -203,7 +203,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_51` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_52` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -214,7 +214,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 51;
+pub const PROTOCOL_VERSION: u32 = 52;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -1756,6 +1756,15 @@ pub enum AgentVerb {
         /// The exact target id, including for an intentional self action.
         session_id: Option<String>,
     },
+    /// Remove an explicitly named session and its state. Self-deletion is
+    /// refused: the relay's requesting-session fence must outlive the reply.
+    /// Answered with [`AgentReply::Deleted`], including checkout recovery advice.
+    Delete {
+        session_id: Option<String>,
+        /// Consent to stop the agent and tabs. The helm still binds deletion
+        /// to the liveness state actually shown on the approval card.
+        stop_if_running: bool,
+    },
     /// Relaunch one session through the owning supervisor's ordinary
     /// restart lifecycle, resuming its own conversation. The target must
     /// CURRENTLY offer [`RestartOffer::Resume`] (it revalidates rather than
@@ -1904,6 +1913,7 @@ impl AgentVerb {
             // reported as a free retry.
             AgentVerb::Rename { .. }
             | AgentVerb::Stop { .. }
+            | AgentVerb::Delete { .. }
             | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
             | AgentVerb::Clone { .. }
@@ -1934,6 +1944,7 @@ impl AgentVerb {
             AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => false,
             AgentVerb::Rename { .. }
             | AgentVerb::Stop { .. }
+            | AgentVerb::Delete { .. }
             | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
             | AgentVerb::Clone { .. }
@@ -2085,6 +2096,9 @@ pub enum AgentReply {
     /// `sessions` listing observes rather than something this reply could
     /// know synchronously.
     Stopped {},
+    /// A completed session deletion. A checkout notice is part of the
+    /// success and must be reported even though the session is gone.
+    Deleted { outcome: SessionDeleteOutcome },
     /// Answers `Create` and `Clone`: the session that now exists, in the
     /// same [`AgentSession`] shape a listing would show it in.
     ///
@@ -2350,7 +2364,8 @@ pub enum ReportVendor {
 /// to version 35: a supervisor that ignored its flag would delete
 /// unconditionally, killing the agent the prompt never mentioned, so an older
 /// supervisor is refused at the hello rather than trusted to honor it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DeleteGuard {
     /// Delete whatever is alive.
     #[default]
@@ -2917,6 +2932,11 @@ pub enum ControlMsg {
         /// protocol (see [`DeleteGuard`]).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         only_if_agent_ended: bool,
+        /// Agent deletes must not wait on a target's active command: two
+        /// sessions deleting each other would each retain the other's fence.
+        /// UI deletes and Replace keep their ordinary wait when false.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        refuse_if_agent_request_in_flight: bool,
     },
     /// Acknowledges `DeleteSession`: sent only once the row, the tmux
     /// session, and (if one existed) the process tree are all positively
@@ -4805,8 +4825,50 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_51() {
-        assert_eq!(PROTOCOL_VERSION, 51);
+    fn protocol_version_is_pinned_at_52() {
+        assert_eq!(PROTOCOL_VERSION, 52);
+    }
+
+    /// Delete must retain mutation fencing and approval time, with distinct
+    /// reply and wire guard shapes. Dropping the busy-target guard recreates
+    /// a cross-session lock cycle even when the lifecycle guard is unchanged.
+    #[farhelm_testtrace::test]
+    fn agent_delete_wire_shapes_and_authority_are_explicit() {
+        let verb = AgentVerb::Delete {
+            session_id: Some("target".into()),
+            stop_if_running: true,
+        };
+        assert!(verb.is_mutating());
+        assert!(verb.may_wait_for_user());
+        assert_eq!(
+            serde_json::to_value(&verb).unwrap(),
+            serde_json::json!({
+                "verb": "delete", "session_id": "target", "stop_if_running": true,
+            })
+        );
+        let message = ControlMsg::DeleteSession {
+            req_id: 3,
+            session_id: "target".into(),
+            only_if_nothing_alive: true,
+            only_if_agent_ended: false,
+            refuse_if_agent_request_in_flight: true,
+        };
+        let value = serde_json::to_value(&message).unwrap();
+        assert_eq!(value["refuse_if_agent_request_in_flight"], true);
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(value).unwrap(),
+            message
+        );
+        let reply = AgentReply::Deleted {
+            outcome: SessionDeleteOutcome {
+                notice: Some("checkout preserved".into()),
+                archived: false,
+            },
+        };
+        assert_eq!(
+            serde_json::from_value::<AgentReply>(serde_json::to_value(&reply).unwrap()).unwrap(),
+            reply
+        );
     }
 
     /// Placement setup has its own acknowledgement. Request echoes cannot settle it,
@@ -5142,6 +5204,7 @@ mod tests {
             session_id: "s1".to_string(),
             only_if_nothing_alive: false,
             only_if_agent_ended: false,
+            refuse_if_agent_request_in_flight: false,
         };
         assert_eq!(
             serde_json::to_value(&delete).unwrap(),
@@ -5160,6 +5223,7 @@ mod tests {
             session_id: "s1".to_string(),
             only_if_nothing_alive: true,
             only_if_agent_ended: false,
+            refuse_if_agent_request_in_flight: false,
         };
         assert_eq!(
             serde_json::to_value(&guarded).unwrap(),
@@ -5236,6 +5300,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 only_if_nothing_alive: false,
                 only_if_agent_ended: false,
+                refuse_if_agent_request_in_flight: false,
             },
             ControlMsg::SessionDeleted {
                 req_id: 2,

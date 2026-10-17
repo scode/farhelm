@@ -109,6 +109,12 @@ pub enum ApprovalAction {
     },
     /// `farhelm agent stop`.
     Stop { target: ApprovalSession },
+    /// The guard describes the same snapshot shown to the user; it is never
+    /// recomputed after approval, when more processes might be running.
+    Delete {
+        target: ApprovalSession,
+        guard: crate::DeleteGuard,
+    },
     /// `farhelm agent restart`: resumes the target's own conversation with its
     /// stored launch.
     Restart {

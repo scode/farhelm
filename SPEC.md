@@ -2060,19 +2060,27 @@ whichever machine they are on — with the asking session and its host marked. T
 own-host-only rule above, which stands unchanged: creating is a local act, asking is not. Every verb goes this way,
 including questions about the session's own host, so there is one answer to what an agent sees. The failure this defines
 is "no helm is attached to this session", reported as such, with opening the session in a client as the remedy — never a
-silent fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, restart — on
-any session named by id, including the asking session when the caller deliberately supplies its id, with the helm
-applying its ordinary rules to the operation exactly as it would for a client request. Rename also requires the title
-the caller observed; the owning supervisor compares and changes it atomically, so a stale agent cannot overwrite a
-concurrent rename. Restart requires an explicit `--session` target that can resume its conversation (as in the GUI,
-there is no other kind of restart), and an explicit `--stop-if-running` consent when the target is working (an idle,
-waiting, or unknown target is stopped without it, as in the GUI). It runs only that session's stored launch on its
-owning host and accepts no replacement command. The owning supervisor revalidates both the resume offer and the target's
-status at handling time, and refuses rather than launching anything else when the conversation can no longer be resumed.
-An explicit self restart warns before dispatch that it can interrupt the invoking CLI, lose its acknowledgement, and
-leave resumed task continuation unconfirmed; it never prints an unobserved completion as success. There is no
-`farhelm agent replace`: an agent replacing its own session would be killing itself mid-request, which is a design
-question this version leaves open rather than answers by accident.
+silent fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, restart, delete
+— on any session named by id, including the asking session when the caller deliberately supplies its id (except Delete),
+with the helm applying its ordinary rules to the operation exactly as it would for a client request. Rename also
+requires the title the caller observed; the owning supervisor compares and changes it atomically, so a stale agent
+cannot overwrite a concurrent rename. Restart requires an explicit `--session` target that can resume its conversation
+(as in the GUI, there is no other kind of restart), and an explicit `--stop-if-running` consent when the target is
+working (an idle, waiting, or unknown target is stopped without it, as in the GUI). It runs only that session's stored
+launch on its owning host and accepts no replacement command. The owning supervisor revalidates both the resume offer
+and the target's status at handling time, and refuses rather than launching anything else when the conversation can no
+longer be resumed. An explicit self restart warns before dispatch that it can interrupt the invoking CLI, lose its
+acknowledgement, and leave resumed task continuation unconfirmed; it never prints an unobserved completion as success.
+There is no `farhelm agent replace`: an agent replacing its own session would be killing itself mid-request, which is a
+design question this version leaves open rather than answers by accident.
+
+`farhelm agent delete --session <id> [--stop-if-running]` removes a session with the same teardown and checkout notices
+as the UI's Delete. Without the flag it refuses any agent or terminal tabs still alive; with it, the approval card names
+what would be stopped, and deletion is held to that displayed state just as a UI confirmation is. A session cannot
+delete itself: its relay holds its own request fence until the reply, while deletion must take that same fence before
+revoking its credential. Self-stop remains available. A delete also refuses a target with an agent command still in
+flight rather than waiting, so two sessions deleting each other cannot stall on each other's fences. A lost reply means
+outcome unknown; it never claims that the session survived.
 
 The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
 `farhelm agent create` makes a session on an explicitly named host, and `farhelm agent clone` copies an explicitly named
@@ -2084,20 +2092,20 @@ that supervisor's own refusal, reported verbatim rather than paraphrased on the 
 refused with its state named. The new session appears in every client the way any other create does.
 
 Every acting verb of `farhelm spawn` and `farhelm agent` asks the user first. `farhelm spawn` in every form,
-`farhelm agent create`, `clone`, `rename`, `stop`, `restart` and `open-url`, and the template writes below are carried
-out only once the user approves them in the GUI, including when an agent acts on its own session. The read-only verbs
-(the hosts, sessions and templates listings, and `farhelm agent instructions`) never ask, and neither does Farhelm's own
-plumbing that runs in a session, such as the hooks that report a conversation's identity, which is not an agent verb.
-Farhelm cannot tell an agent from a person typing in a session's shell and does not try: whoever runs the command in a
-session asks as that session. The helm decides, because the requesting host and its supervisor are not trusted to (see
-Local authority and trust between hosts), and it decides by the host connection the request arrived on, never by
-anything the request or its supervisor claims. A request from a host whose "run farhelm commands from this host without
-asking" setting is on (see Topology) is not asked about for commands. Opening links uses its own two permissions below;
-neither link permission grants command authority, and command authority grants neither link permission. Spawn is the
-exception that proves the rule: it is the one action the requesting host's own supervisor carries out, and the launch
-`--inherit-agent` reuses comes from that supervisor, so a compromised supervisor could carry out a spawn without asking,
-show a different launch on the card than the one it starts, or ignore the YOLO rule below. That is accepted, because
-spawn acts only on its own host, which the threat model already trusts. Waiting for the user holds nothing other
+`farhelm agent create`, `clone`, `rename`, `stop`, `restart`, `delete` and `open-url`, and the template writes below are
+carried out only once the user approves them in the GUI, including when an agent acts on its own session. The read-only
+verbs (the hosts, sessions and templates listings, and `farhelm agent instructions`) never ask, and neither does
+Farhelm's own plumbing that runs in a session, such as the hooks that report a conversation's identity, which is not an
+agent verb. Farhelm cannot tell an agent from a person typing in a session's shell and does not try: whoever runs the
+command in a session asks as that session. The helm decides, because the requesting host and its supervisor are not
+trusted to (see Local authority and trust between hosts), and it decides by the host connection the request arrived on,
+never by anything the request or its supervisor claims. A request from a host whose "run farhelm commands from this host
+without asking" setting is on (see Topology) is not asked about for commands. Opening links uses its own two permissions
+below; neither link permission grants command authority, and command authority grants neither link permission. Spawn is
+the exception that proves the rule: it is the one action the requesting host's own supervisor carries out, and the
+launch `--inherit-agent` reuses comes from that supervisor, so a compromised supervisor could carry out a spawn without
+asking, show a different launch on the card than the one it starts, or ignore the YOLO rule below. That is accepted,
+because spawn acts only on its own host, which the threat model already trusts. Waiting for the user holds nothing other
 operations wait on, apart from the asking session's own next change, which is refused while an earlier one is still
 waiting. A link request takes no session-change lock: it neither blocks another session command nor waits for one.
 

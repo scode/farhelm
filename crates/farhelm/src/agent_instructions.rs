@@ -105,6 +105,11 @@ fn render(agent: &Command) -> String {
          title from discovery: --expected-title='old title'. An empty old title is written\n\
          --expected-title=. To act on yourself deliberately, discover your * session and pass\n\
          its id. Self-stop can kill this command; stop leaves the row.\n\
+         Delete removes the row and its stored state. It refuses anything still alive unless\n\
+         --stop-if-running permits stopping the agent and all tabs. The approval card names\n\
+         what will stop; a changed running state can refuse the delete. A session cannot\n\
+         delete itself; use stop instead. A target with a Farhelm command in flight is\n\
+         refused until that command finishes. Report any checkout notice printed on stderr.\n\
          Restart resumes the target's own conversation; there is no other kind of restart\n\
          and no --mode. It works only when the restart_offer field of sessions --json is\n\
          resume, which the table's OFFER column also spells resume. Any other value says why\n\
@@ -162,7 +167,7 @@ fn render(agent: &Command) -> String {
          option and copies the source's existing directory. Clone and --inherit-agent refuse a session created\n\
          before launch kinds; use create instead.\n\
          \n\
-         The user approves every acting verb. spawn, create, clone, rename, stop, restart and\n\
+         The user approves every acting verb. spawn, create, clone, rename, stop, restart, delete and\n\
          the template writes each wait while Farhelm shows the user a card, for up to 9\n\
          minutes, unless the user told Farhelm not to ask for this host; listings and\n\
          instructions never wait. Run acting verbs with a tool timeout of at least 10 minutes,\n\

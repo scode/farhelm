@@ -19,7 +19,7 @@
 //! Every verb here is served from the exact code path its REST counterpart
 //! uses — `hosts::host_views` for hosts, `aggregate::session_list` for
 //! sessions, `sessions::do_rename_session`/`do_stop_session`/
-//! `do_restart_session` for the three lifecycle verbs,
+//! `do_restart_session`/`do_delete_session` for the lifecycle verbs,
 //! `sessions::do_create_session` for `create` and `clone`, and
 //! `templates::store_template`/`remove_template` for the template writes.
 //! Not for economy:
@@ -45,10 +45,10 @@
 //!
 //! # Lifecycle verbs act on ANY session, not only the asker's own
 //!
-//! `Rename`, `Stop`, and `Restart` each carry `session_id: Option<String>` so
+//! `Rename`, `Stop`, `Restart`, and `Delete` each carry `session_id: Option<String>` so
 //! an old wire shape can still be decoded and refused. The relay and this
 //! authoritative boundary both require `Some(id)`, including for a deliberate
-//! self-action. The id may name any session the helm knows, on any host.
+//! self-action (Delete refuses self). The id may name any session the helm knows, on any host.
 //! [`resolve_target`] logs both asking and target identities so an operator
 //! can distinguish a self-action from one reaching across the fleet.
 //!
@@ -371,6 +371,20 @@ impl AgentRequestHandler for HelmAgentRequests {
                         .map(|()| AgentReply::Stopped {}),
                     Err(refused) => Err(refused),
                 }
+            }
+            AgentVerb::Delete {
+                session_id: target,
+                stop_if_running,
+            } => {
+                let target = resolve_target(target.expect("validated"), session_id, "delete");
+                if target == session_id {
+                    return outcome_of(Err(anyhow::Error::new(crate::SupervisorError {
+                        origin: crate::client::ErrorOrigin::Helm,
+                        kind: ErrorKind::InvalidRequest,
+                        message: "a session cannot delete itself; use stop to end its agent while keeping the session".to_string(),
+                    })), mutating);
+                }
+                agent_delete(&state, origin, session_id, &target, stop_if_running).await
             }
             AgentVerb::Restart {
                 session_id: target,
@@ -731,9 +745,9 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
             }
             Ok(())
         }
-        AgentVerb::Stop { session_id } | AgentVerb::Restart { session_id, .. } => {
-            required(session_id.as_deref(), "--session")
-        }
+        AgentVerb::Stop { session_id }
+        | AgentVerb::Restart { session_id, .. }
+        | AgentVerb::Delete { session_id, .. } => required(session_id.as_deref(), "--session"),
         // Everything else a create needs may come from a template, so only
         // the helm's resolution can tell what is missing (`agent_launch`).
         AgentVerb::Create { host, .. } => {
@@ -1647,6 +1661,63 @@ async fn approve_launch(
         }));
     }
     crate::yolo_guard::check_agent(state, host, &launch).await
+}
+
+/// Bind an approved deletion to one target snapshot. The supervisor checks
+/// this guard again under its lifecycle claim; a restarted agent or new tab
+/// cannot gain destructive consent while the approval card waits.
+async fn agent_delete(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking: &str,
+    target: &str,
+    stop_if_running: bool,
+) -> anyhow::Result<AgentReply> {
+    let (_, client) = crate::sessions::route_session(state, target).await?;
+    let listing = client
+        .list_sessions()
+        .await
+        .context(ReadOnlyPhase("reading the session to delete"))?;
+    let shown = listing.sessions.iter().find(|info| info.id == target).ok_or_else(|| {
+        anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::Unavailable,
+            message: "Farhelm cannot read the target session's running state, so nothing was deleted; retry after refreshing the session listing".to_string(),
+        })
+    })?;
+    let guard = agent_delete_guard(shown, stop_if_running).map_err(|message| {
+        anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::Conflict,
+            message,
+        })
+    })?;
+    let action = ApprovalAction::Delete {
+        target: crate::approvals::describe_session(state, target).await,
+        guard,
+    };
+    approved(state, origin, asking, action).await?;
+    crate::sessions::do_delete_session(state, target, guard, Some(client.connection_id()))
+        .await
+        .map(|outcome| AgentReply::Deleted { outcome })
+}
+
+/// The delete card and dispatch share this guard. Unknown status may still
+/// hide a live agent, so it requires the same consent as a known live one.
+fn agent_delete_guard(
+    info: &farhelm_proto::SessionInfo,
+    stop_if_running: bool,
+) -> Result<farhelm_proto::DeleteGuard, String> {
+    use farhelm_proto::DeleteGuard;
+    if info.status.has_ended() && info.tabs.is_empty() {
+        Ok(DeleteGuard::NothingAlive)
+    } else if !stop_if_running {
+        Err("the target session's agent or terminal tabs may still be running; pass --stop-if-running to permit stopping them before deletion".to_string())
+    } else if info.status.has_ended() {
+        Ok(DeleteGuard::AgentEnded)
+    } else {
+        Ok(DeleteGuard::Unconditional)
+    }
 }
 
 /// Ask the user to approve `action` for `asking_session` (see
@@ -4539,6 +4610,324 @@ mod tests {
             ),
             "expected an empty Stopped reply, got {outcome:?}"
         );
+    }
+
+    /// Delete retains the approval's liveness guard and returns checkout
+    /// recovery advice through the shared UI teardown path. The splice proves
+    /// the exchange and cleanup, not process death; the supervisor tests own it.
+    #[farhelm_testtrace::test]
+    async fn agent_delete_preserves_the_card_guard_and_checkout_notice() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::DeleteSession {
+                req_id,
+                session_id,
+                only_if_nothing_alive,
+                only_if_agent_ended,
+                refuse_if_agent_request_in_flight,
+            } = request
+            else {
+                panic!("expected DeleteSession, got {request:?}");
+            };
+            assert_eq!(session_id, "target");
+            assert!(!only_if_nothing_alive);
+            assert!(!only_if_agent_ended);
+            assert!(refuse_if_agent_request_in_flight);
+            writer
+                .write_control(&ControlMsg::SessionDeleted {
+                    req_id,
+                    notice: Some("checkout preserved; inspect it before removing it".into()),
+                    archived: false,
+                })
+                .await
+                .unwrap();
+        });
+        let (h, local) =
+            spliced_local_fleet(client_side, vec![session("asker", 1), session("target", 2)]).await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        h.store.set_pinned("target", true).await.unwrap();
+        let _gui = h.state.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Delete {
+                        session_id: Some("target".into()),
+                        stop_if_running: true,
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert!(matches!(
+            card.action,
+            ApprovalAction::Delete {
+                guard: farhelm_proto::DeleteGuard::Unconditional,
+                ..
+            }
+        ));
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcome = task.await.unwrap();
+        join_responder(responder, &outcome).await;
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Deleted {
+                        outcome: farhelm_proto::SessionDeleteOutcome {
+                            notice: Some(_),
+                            archived: false
+                        }
+                    }
+                }
+            ),
+            "{outcome:?}"
+        );
+        assert!(h.store.host_of_session("target").await.unwrap().is_none());
+    }
+
+    /// Auto-approval applies to Delete, but a lost destructive reply remains
+    /// unknown. The stopped target's guard must survive even without a card;
+    /// otherwise a concurrent restart could be killed without consent.
+    #[farhelm_testtrace::test]
+    async fn agent_delete_without_asking_keeps_the_guard_and_unknown_outcome() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        for lost in [false, true] {
+            let (sent, received) = tokio::sync::oneshot::channel();
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let responder = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::DeleteSession {
+                    req_id,
+                    only_if_nothing_alive,
+                    refuse_if_agent_request_in_flight,
+                    ..
+                } = request
+                else {
+                    panic!("{request:?}");
+                };
+                assert!(only_if_nothing_alive);
+                assert!(refuse_if_agent_request_in_flight);
+                sent.send(()).unwrap();
+                if !lost {
+                    writer
+                        .write_control(&ControlMsg::SessionDeleted {
+                            req_id,
+                            notice: None,
+                            archived: true,
+                        })
+                        .await
+                        .unwrap();
+                }
+            });
+            let target = session_info("target", SessionStatus::Exited { exit_code: Some(0) });
+            let (h, local) =
+                spliced_local_fleet(client_side, vec![session("asker", 1), target]).await;
+            let handler = HelmAgentRequests::for_state(&h.state);
+            let origin = origin_of(&h, local);
+            let task = tokio::spawn(async move {
+                handler
+                    .handle(
+                        origin,
+                        "asker",
+                        AgentVerb::Delete {
+                            session_id: Some("target".into()),
+                            stop_if_running: false,
+                        },
+                    )
+                    .await
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(20), received)
+                .await
+                .expect("the peer must observe the delete before disconnect")
+                .unwrap();
+            if lost {
+                // A splice keeps answering listings after its peer exits.
+                // Break the fleet connection only after DeleteSession reaches
+                // the peer, distinguishing an unanswered mutation from a
+                // refusal before any destructive request was sent.
+                h.fleet.take_down(local);
+            }
+            let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), task)
+                .await
+                .expect("delete must settle after its reply or connection loss")
+                .unwrap();
+            join_responder(responder, &outcome).await;
+            assert!(
+                h.state.approvals.list().is_empty(),
+                "trusted host must not need a GUI"
+            );
+            if lost {
+                assert!(
+                    matches!(outcome, AgentOutcome::Err { kind: ErrorKind::Timeout, ref message } if message.contains("unknown")),
+                    "{outcome:?}"
+                );
+            } else {
+                assert!(
+                    matches!(
+                        outcome,
+                        AgentOutcome::Ok {
+                            reply: AgentReply::Deleted {
+                                outcome: farhelm_proto::SessionDeleteOutcome { archived: true, .. }
+                            }
+                        }
+                    ),
+                    "{outcome:?}"
+                );
+            }
+        }
+    }
+
+    /// Approval belongs to the target connection whose state the card showed.
+    /// Even a reconnect of the same installation requires a fresh card, rather
+    /// than sending a destructive request against a replacement connection.
+    #[farhelm_testtrace::test]
+    async fn agent_delete_refuses_a_target_reconnected_while_approval_waited() {
+        let (builder, remote) = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("identity-local".into()),
+                sessions: vec![session("asker", 1)],
+                ..HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@builder",
+                HostScript {
+                    identity: Some("identity-builder".into()),
+                    sessions: vec![session("target", 2)],
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        h.await_refreshed(remote).await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.manager.events().admit(1).unwrap();
+        let before = h.manager.status(remote).unwrap();
+        let previous_connection = before.client.unwrap().connection_id();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Delete {
+                        session_id: Some("target".into()),
+                        stop_if_running: true,
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert!(matches!(card.action, ApprovalAction::Delete { .. }));
+        h.fleet.kill_connection(remote);
+        h.await_refreshed_after(remote, before.incarnation).await;
+        assert_ne!(
+            origin_of(&h, remote).connection,
+            previous_connection,
+            "premise: the target has a replacement connection"
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), task)
+            .await
+            .expect("reconnected target must refuse before dispatch")
+            .unwrap();
+        assert!(
+            matches!(outcome, AgentOutcome::Err { kind: ErrorKind::Conflict, ref message }
+                if message.contains("connection changed") && message.contains("nothing was deleted")),
+            "{outcome:?}; a standalone peer never answers DeleteSession, so dispatch would hang instead"
+        );
+    }
+
+    /// A self-delete must fail before approval or supervisor dispatch, and a
+    /// running target without explicit stop consent must not acquire a card.
+    #[farhelm_testtrace::test]
+    async fn agent_delete_refuses_self_and_running_targets_without_consent() {
+        let (h, local, _) = two_host_fleet().await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        for (target, consent, expected) in [
+            ("local-live", true, "cannot delete itself"),
+            ("local-old", false, "--stop-if-running"),
+        ] {
+            let outcome = handler
+                .handle(
+                    origin_of(&h, local),
+                    "local-live",
+                    AgentVerb::Delete {
+                        session_id: Some(target.into()),
+                        stop_if_running: consent,
+                    },
+                )
+                .await;
+            assert!(
+                matches!(outcome, AgentOutcome::Err { ref message, .. } if message.contains(expected)),
+                "{outcome:?}"
+            );
+            assert!(h.state.approvals.list().is_empty());
+        }
+    }
+
+    /// A delete's guard follows the displayed state, even with explicit
+    /// stop consent. An ended agent with open tabs never authorizes killing
+    /// an agent restarted while the card waits; unknown is conservatively live.
+    #[farhelm_testtrace::test]
+    fn agent_delete_guard_covers_ended_tabs_live_and_unknown_states() {
+        use farhelm_proto::DeleteGuard;
+        for (status, tabs, expected) in [
+            (
+                SessionStatus::Exited { exit_code: Some(0) },
+                false,
+                DeleteGuard::NothingAlive,
+            ),
+            (SessionStatus::Interrupted, true, DeleteGuard::AgentEnded),
+            (SessionStatus::Running, false, DeleteGuard::Unconditional),
+            (SessionStatus::Unknown, false, DeleteGuard::Unconditional),
+        ] {
+            let mut info = session_info("target", status);
+            if tabs {
+                info.tabs.push(farhelm_proto::TabInfo { id: "tab".into() });
+            }
+            assert_eq!(agent_delete_guard(&info, true).unwrap(), expected);
+            assert_eq!(
+                agent_delete_guard(&info, false).is_ok(),
+                expected == DeleteGuard::NothingAlive
+            );
+        }
     }
 
     /// Spec: `Stop`, like `Rename`, can target ANY session the helm knows,

@@ -138,6 +138,7 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
         AgentReply::Session { .. }
         | AgentReply::Restarted { .. }
         | AgentReply::Stopped {}
+        | AgentReply::Deleted { .. }
         | AgentReply::Created { .. }
         | AgentReply::TemplateWritten { .. }
         | AgentReply::UrlOpened {}
