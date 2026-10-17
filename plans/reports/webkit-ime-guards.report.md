@@ -124,3 +124,59 @@ full diff and that retained evidence, found no actionable findings, and accepted
 the plan's pre-agreed fallback. That is not approval of an unconditional guarantee or native Mac proof. The executor
 checked those findings against source and retained results and owns the runtime evidence above; reviewers ran no tests.
 Fresh gpt-6.1-sol medium readers checked commit and PR wording. No implementation work was delegated.
+
+### Landing
+
+Landed on its own in round 75, as #2194, unchanged from what the report describes.
+
+#### What landed since the PR was based, and whether it interacted
+
+Only plan-queue bookkeeping (claims and report deliveries, no code) reached main between this PR's base and its landing,
+so the landing rebase was clean and the PR landed byte-identical to the head the executor delivered. Its base already
+held the other recent keyboard fixes: the template panel's composing-Escape fix (#2115), the menu focus fix, the
+new-session dialog fixes and the keyboard-scrollable host plans and trash. I read the PR against them, and a
+fresh-context reviewer did the same independently. Neither found an interaction. The new guard runs before every other
+window-wide key listener, leaves the terminal's own input alone, and only marks a key in the field whose composition
+just ended. The checks that already ignore composing keys, such as the template panel's Escape and dialog Escape, now
+also ignore WebKit's composition-ending key, which is the intended fix. Menus, approval cards and the launcher's buttons
+never compose, so they are unaffected.
+
+#### Fixes made during the landing
+
+None.
+
+#### Things to keep in mind
+
+- The Mac app has not been tried with a real input method. The browser tests replay key events in Playwright's WebKit on
+  Linux. The changelog entry's first paragraph already calls this a partial workaround and names its gaps, but it
+  describes the protected case without saying that it is unverified on a real Mac; only the body says so. Release
+  curation should keep that qualifier in the entry unless the report's manual Mac check has passed by then.
+- The guard only acts once the earlier typing keys have been released before the key that ends composition arrives. If a
+  real Mac input method, or the user's fast typing, leaves an earlier key held at that moment, the guard stands aside
+  and that key behaves as it did before this change. Only the manual Mac check can show how often that happens.
+- This PR removed the near-term TODO entry for WebKit input-method guards, as a fix should. The known gaps (an earlier
+  key still held, or an ending key that arrives after 16ms) are also recorded in SPEC_impl.md and the changelog entry,
+  but the pending manual Mac check is now recorded only in this report.
+- Minor: the new SPEC_impl.md section sits between two paragraphs about session menus, and its "matching key code" means
+  the physical key, not the 229 key code discussed next to it. Moving it is a possible documentation follow-up; nothing
+  depends on it.
+
+#### Checks
+
+The report says its clippy, desktop renderer compile and desktop asset parity check ran without a recorded revision,
+before the executor's last code change. Those are cheap, so they were run again.
+
+- Run now, at the rebased tip `58d60067`: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, and `scripts/check-desktop-assets.sh` (26 assets, requested set equal
+  to bundled set), all clean. The new script is built into the page as source text rather than fetched as an asset, so
+  the asset check confirms nothing else changed rather than covering it.
+- Reused, because the landing rebase left the PR byte-identical to what the executor delivered: the JavaScript harness
+  run `df3c7cad-8d6b-458d-ab9f-d4bb6c9efeab` (269 passed) and the final browser run of the composition cases on Chromium
+  and WebKit `bb4f491b-c8ff-4f02-801b-3947509b0df3` (40 passed), both recorded at revision `6edab83d` whose patch the
+  executor's clean rebase left unchanged; the final web release build at `6edab83d`; the transport proof run
+  `290ff0ad-5eae-4b0c-89b2-33c6f888447c`; and its Markdown formatting, changelog-format and test-sleep checks.
+- Skipped: native Mac input-method execution and the full workspace and browser batteries, for the reasons the report
+  gives, and the backend `cargo build`, which clippy's full-target compile at the rebased tip now covers for
+  compilation.
+
+Nothing in the executor's report became untrue at landing.
