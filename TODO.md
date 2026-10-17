@@ -44,6 +44,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Stop Codex's folder-trust questions from returning.** Codex appears to be asking "trust this folder" again in
+  Farhelm sessions. The maintainer recalls an earlier fix; investigate what changed and restore the intended behavior.
+
+- **Per-host terminal background color.** Allow setting a terminal background color for each host.
+
 - **Fix launcher keyboard focus and Enter.** Clicking the background between fields clears the selection; clicking again
   appears to select the whole dialog. Enter does not launch in either state and seems to require a focused control. Make
   Enter launch when the dialog is ready, including after clicking between fields.
