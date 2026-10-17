@@ -721,11 +721,15 @@ agent choice is independent of that destination:
   Visible modals retain the keyboard, held keys launch once, and the chord never reaches the terminal. Matching uses the
   physical digit key, independent of the printed character; the numeric keypad is excluded. Each row's key button opens
   a menu with no shortcut, then 1–9 and 0; occupied keys name their template, and choosing one moves it. A template has
-  at most one key and each key has at most one template. An ineligible template cannot acquire a key, but an existing
-  binding stays removable. Both key and bolt hover explain direct launching, their uniqueness and the current choice.
-  Bindings are a whole-map shared preference, replaced on write; concurrent windows may lose one map edit. Names must be
-  syntactically valid but need not exist at write time. Rename keeps a key, delete frees it through both delete paths,
-  and Undo never restores it. A browser that reserves a chord keeps its behavior.
+  at most one key and each key has at most one template. Any template can hold a number key, including one that cannot
+  launch alone; only the combined setup must be launchable. Pressing such a key alone opens New with the template
+  applied and a prominent alert banner at the top explaining that it cannot launch on its own and how to combine it with
+  the sequence prefix. The banner expires about six seconds after application finishes, or when the user starts editing.
+  Both key and bolt hover explain launching, their uniqueness and the current choice; partial-template key hover
+  explains composition. The bolt retains its existing eligibility rule. Bindings are a whole-map shared preference,
+  replaced on write; concurrent windows may lose one map edit. Names must be syntactically valid but need not exist at
+  write time. Rename keeps a key, delete frees it through both delete paths, and Undo never restores it. A browser that
+  reserves a chord keeps its behavior.
 - Quick-launch sequences compose templates without changing the single-chord shortcuts. Cmd+X in the Mac desktop app, or
   Ctrl+Shift+X in browsers, starts a sequence, except in a text field where it retains its normal meaning; the
   terminal's input textarea counts as the terminal. Bare physical number keys or their usual template chord queue

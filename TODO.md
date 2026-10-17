@@ -52,12 +52,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Follow up on the recent quick launch system so an agent can populate the templates.
 
-- **Compose quick launch templates with multi-key chords.** Support Emacs-style key sequences that combine a base
-  template with a modifier template: "do X, but with Codex". For example, bind the template for X to Cmd-1 and a "use
-  Codex" template to Cmd-2, then compose them through the sequence. This captures the concept; the exact keybindings,
-  composition rules, and launch interaction are to be settled during TODO planning. Plan:
-  `plans/queue/quick-launch-chords.md`.
-
 - **Name a session while it starts.** Start a session with a rename dialog open, so the session is already starting
   while you type its name. Make this the default for quick launches, where just pressing Enter immediately accepts the
   default name. Details TBD at plan time. Plan: `plans/queue/name-session-while-starting.md`.

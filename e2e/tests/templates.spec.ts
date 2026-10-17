@@ -195,7 +195,7 @@ for (const [field, value] of [
 
 /** Keys move between saved names independently of the bolt. Keyboard Escape
  * closes only the nested menu; rename must retain the key, while delete/Undo
- * retires it permanently. An ineligible saved name still offers removal.
+ * retires it permanently. Partial templates retain the same complete key menu.
  */
 test("number keys move, follow rename, and stay freed after undo", async ({ page, request }) => {
   const prefix = `number-bindings-${Date.now()}`;
@@ -210,7 +210,7 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     const dialog = page.getByRole("dialog", { name: "templates", exact: true });
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
     const keyButton = (name: string) => dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
-    await expect(keyButton(partial)).toBeDisabled();
+    await expect(keyButton(partial)).toBeEnabled();
     await expect(keyButton(a)).toHaveText("Ctrl+Shift+ –");
     await expect(keyButton(a)).toHaveAttribute("data-tooltip", /right away.*Only one template/);
     await expect(dialog.getByRole("button", { name: `quick launch ${a}`, exact: true }))
@@ -254,13 +254,101 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await expect(keyButton(partial)).toBeEnabled();
     await keyButton(partial).click();
     const remove = dialog.getByRole("menu", { name: `number key for ${partial}`, exact: true });
-    await expect(remove.getByRole("menuitem")).toHaveCount(1);
+    await expect(remove.getByRole("menuitem")).toHaveCount(11);
     await remove.getByRole("menuitem", { name: "no shortcut", exact: true }).click();
     await expect.poll(async () => (await readPreferences(request)).template_shortcuts ?? {}).toEqual({});
-    await expect(keyButton(partial)).toBeDisabled();
+    await expect(keyButton(partial)).toBeEnabled();
   } finally {
     await patchPreferences(request, { template_shortcuts: null, quick_launch_template: null });
     for (const name of [a, b, partial, renamed]) await deleteTemplate(request, name);
+  }
+});
+
+/** A model-only key is useful for composition even though it cannot launch
+ * alone. Hold catalog loading past the notice lifetime to prove that loading
+ * cannot consume the explanation; editing and elapsed visible time must both
+ * dismiss it without dispatching a session create.
+ */
+test("model-only number key opens New with a temporary composition explanation", async ({ page, request }) => {
+  const name = `model-key-${Date.now()}`;
+  const response = await request.get("/api/launch-catalog");
+  expect(response.ok()).toBe(true);
+  const catalog = await response.json();
+  const model = catalog.find((entry: { harness: string }) => entry.harness === "claude");
+  expect(model, "the real catalog must offer a Claude model for this fixture").toBeTruthy();
+  const gate = routeGate();
+  let hold = false;
+  let held = false;
+  let creates = 0;
+  await page.route("**/api/launch-catalog", async route => {
+    if (hold) {
+      held = true;
+      await gate.wait();
+    }
+    await route.fallback();
+  });
+  await page.route("**/api/sessions", async route => {
+    if (route.request().method() !== "POST") return route.fallback();
+    creates++;
+    await route.fulfill({ status: 500, body: "unexpected create from a partial-template key" });
+  });
+  try {
+    await patchPreferences(request, { template_shortcuts: null, quick_launch_template: null });
+    await putTemplate(request, name, { model: model.id });
+    const dialog = await openTemplates(page);
+    const key = dialog.getByRole("button", { name: `number shortcut ${name}`, exact: true });
+    await expect(key).toBeEnabled();
+    await expect(key).toHaveAttribute("data-tooltip", /cannot launch on its own.*Ctrl\+Shift\+X/);
+    await expect(dialog.getByRole("button", { name: `quick launch ${name}`, exact: true })).toBeDisabled();
+    await key.click();
+    await dialog.getByRole("menu", { name: `number key for ${name}`, exact: true })
+      .getByRole("menuitem", { name: "Ctrl+Shift+4", exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "4": name });
+    await dialog.locator(".templates-close").click();
+    await expect(dialog).toHaveCount(0);
+    hold = true;
+    await page.keyboard.press("Control+Shift+Digit4");
+    const form = page.locator(".create-session-form");
+    const banner = form.getByRole("alert").filter({ hasText: "cannot launch on its own" });
+    await expect.poll(() => held).toBe(true);
+    await expect(form.getByRole("status")).toHaveText("loading session setup…");
+    await expect(banner).toHaveCount(0);
+    // sleep-ok: hold catalog loading beyond the six-second notice lifetime to distinguish mount expiry from form-open expiry.
+    await page.waitForTimeout(6500);
+    expect(held && hold, "the catalog gate must still own the loading boundary").toBe(true);
+    await expect(form.getByRole("status")).toHaveText("loading session setup…");
+    hold = false;
+    gate.release();
+    await expect(banner).toContainText(`${name} cannot launch on its own.`);
+    await expect(banner).toContainText("Ctrl+Shift+X");
+    await banner.click();
+    await expect(banner, "reading the explanation is not an edit").toBeVisible();
+    await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue(model.id);
+    await test.info().attach("partial-template-notice", { body: await page.screenshot(), contentType: "image/png" });
+    const modelInput = form.getByRole("combobox", { name: "model", exact: true });
+    await modelInput.focus();
+    await expect(modelInput).toBeFocused();
+    await expect(banner).toBeVisible();
+    await page.keyboard.type("edited");
+    await expect(banner).toHaveCount(0);
+    await form.locator(".launch-composer-cancel").click();
+    await expect(form).toHaveCount(0);
+    await page.keyboard.press("Control+Shift+Digit4");
+    await expect(banner).toBeVisible();
+    await form.getByRole("tab", { name: "command", exact: true }).click();
+    await expect(banner, "button-based draft choices also dismiss the notice").toHaveCount(0);
+    await form.locator(".launch-composer-cancel").click();
+    await expect(form).toHaveCount(0);
+    await page.keyboard.press("Control+Shift+Digit4");
+    await expect(banner).toBeVisible();
+    await expect(banner).toHaveCount(0, { timeout: 10000 });
+    await expect(form).toBeVisible();
+    expect(creates, "a partial-template key must leave New for deliberate completion").toBe(0);
+  } finally {
+    gate.release();
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await patchPreferences(request, { template_shortcuts: null, quick_launch_template: null });
+    await deleteTemplate(request, name);
   }
 });
 

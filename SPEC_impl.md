@@ -4626,6 +4626,12 @@ stopImmediatePropagation because same-window capture listeners otherwise still r
 modal focus and the existing modal-opening hook cancel both state owners. The relays stay mounted and enabled across
 render-delayed armed state; Enter takes the queue before starting the existing generation-fenced quick-launch read.
 
+Number bindings accept partial templates; the bolt keeps its runnable-template affordance. A single partial-template key
+passes its name to New for a prominent alert. The form starts one component-owned six-second expiry only after initial
+application finishes, so a slow catalog read cannot spend the viewing interval. Form input, changes and deliberate
+search choices dismiss the hint; Clone/Replace reseeding withdraws it. Nothing stores the hint or changes launch
+admission.
+
 A template is stored by the helm in `helm.db` (schema 38, table `launch_templates`): its unique name, and its fields as
 the JSON of `farhelm_proto::launcher::TemplateFields`. The fields stay one JSON value rather than a column each because
 a template is applied whole and never queried by field, and because the set of launcher fields is the wire crate's to
