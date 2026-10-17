@@ -8,6 +8,10 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
+- [`pending-menu-arrows-can-ignore-independent-focus.md`](pending-menu-arrows-can-ignore-independent-focus.md) — Pending
+  arrow moves can still override independent focus before activation; historical acceptance is absent from the
+  specification and triage ledger.
+
 ## High priority: material UX degradation
 
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
@@ -90,3 +94,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`checkout-config-refresh-erases-setup-draft.md`](checkout-config-refresh-erases-setup-draft.md) — An unrelated
   configuration refresh can unmount the launcher's checkout-folder editor and erase its unfinished entry.
+
+- [`outage-card-content-can-overflow-above-view.md`](outage-card-content-can-overflow-above-view.md) — A short terminal
+  area or long host error can put the outage explanation and recovery instructions above the reachable view.
