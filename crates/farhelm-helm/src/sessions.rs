@@ -822,7 +822,7 @@ pub(crate) async fn route_session(
 /// function would still route to the cached owner. A contested entry clears
 /// itself as soon as the fleet agrees again, so a collision that resolved
 /// needs no intervention.
-async fn resolve_owner(
+pub(crate) async fn resolve_owner(
     state: &AppState,
     session_id: &str,
 ) -> anyhow::Result<(store::HostId, manager::HostStatus)> {
@@ -2808,7 +2808,13 @@ pub(crate) async fn do_delete_session(
 /// Finish local bookkeeping only after the supervisor confirms teardown.
 /// These tables are best effort: a stale row must not hide a real deletion
 /// from other clients. Replace uses the same tail after inheriting its pin.
+/// Tunnel cancellation is awaited before cache forgetting, under the creation
+/// gate, so successful teardown cannot leave a newly published listener behind.
 async fn forget_deleted_session(state: &AppState, claim: &manager::SessionClaim, id: &str) {
+    // Creation and cache forgetting are one local transaction: a create cannot
+    // publish after deletion closed the old listener but before ownership vanishes.
+    let _tunnel_mutation = state.tunnels.mutation.lock().await;
+    state.tunnels.close_session_locked(id).await;
     if let Err(error) = state.store.set_pinned(id, false).await {
         warn!(session_id = manager::peer_text(id).as_str(), error = %error,
             "could not clear the deleted session's pin; a stray row may remain");

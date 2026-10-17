@@ -320,7 +320,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 54;
+const SCHEMA_VERSION: i64 = 55;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -991,6 +991,9 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
+    /// Only true authorizes desktop loopback tunnels; unset and false both disable them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tunnel_consent: Option<bool>,
     /// Shared opt-out for the managed-checkout Claude trust hint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claude_trust_hint_dismissed: Option<bool>,
@@ -1057,6 +1060,13 @@ pub struct Preferences {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreferencePatch {
+    /// Null revokes consent just like false; omission preserves the stored choice.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub tunnel_consent: Option<Option<bool>>,
     /// Null restores the hint; omission preserves another client's choice.
     #[serde(
         default,
@@ -1945,6 +1955,7 @@ pub struct HelmStore {
 /// - 53: off-by-default managed-checkout Claude trust and shared hint dismissal.
 /// - 54: a durable namespace for agent retry keys, including existing registries.
 ///   Pre-upgrade keyed attempts no longer match and need fresh approval once.
+/// - 55: nullable shared tunnel consent. Upgraded helms start without authorization.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2161,7 +2172,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  quick_launch_template TEXT,
                  template_shortcuts TEXT NOT NULL DEFAULT '{{}}',
                  welcome_seen INTEGER CHECK (welcome_seen IN (0, 1)),
-                 claude_trust_hint_dismissed INTEGER CHECK (claude_trust_hint_dismissed IN (0, 1))
+                 claude_trust_hint_dismissed INTEGER CHECK (claude_trust_hint_dismissed IN (0, 1)),
+                 tunnel_consent INTEGER CHECK (tunnel_consent IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2253,7 +2265,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 54;",
+              PRAGMA user_version = 55;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3428,6 +3440,20 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 54")?;
         version = 54;
     }
+    if version == 54 {
+        // Rewound migration fixtures can already carry the column. Never reset
+        // consent merely because the version marker was rewound.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('preferences') WHERE name = 'tunnel_consent'",
+            [], |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch("ALTER TABLE preferences ADD COLUMN tunnel_consent INTEGER CHECK (tunnel_consent IN (0, 1));")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 55;")
+            .context("migrating helm.db to schema version 55")?;
+        version = 55;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4378,12 +4404,13 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
                         let remembered_permissions: Option<String> = row.get(3)?;
                         Ok(Preferences {
+                            tunnel_consent: row.get(14)?,
                             claude_trust_hint_dismissed: row.get(13)?,
                             welcome_seen: row.get(12)?,
                             list_sort: row.get(0)?,
@@ -4434,12 +4461,17 @@ impl HelmStore {
     /// Validation (that `list_sort` is a word this helm serves) belongs to
     /// the handler, not here: the store records what it is told, exactly as
     /// it does for every other table.
+    /// Runtime tunnel-consent changes also need the tunnel mutation gate and
+    /// a close-all after a successful disabling write. The preferences handler
+    /// owns that cancellation-safe transaction; storage alone owns no listeners.
     pub async fn update_preferences(&self, patch: PreferencePatch) -> anyhow::Result<()> {
         self.conn.call("preference write task panicked", move |conn: &mut Connection| -> anyhow::Result<()> {
             // Each field travels as (present, value): `CASE WHEN present`
             // is what lets a NULL value mean "clear" rather than "keep",
             // which a COALESCE could not express.
             let welcome_seen_present = patch.welcome_seen.is_some();
+            let tunnel_consent_present = patch.tunnel_consent.is_some();
+            let tunnel_consent = patch.tunnel_consent.flatten();
             let welcome_seen = patch.welcome_seen.flatten();
             let trust_hint_present = patch.claude_trust_hint_dismissed.is_some();
             let trust_hint = patch.claude_trust_hint_dismissed.flatten();
@@ -4470,8 +4502,8 @@ impl HelmStore {
             conn
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -4491,7 +4523,8 @@ impl HelmStore {
                          quick_launch_template = CASE WHEN ?22 THEN excluded.quick_launch_template ELSE quick_launch_template END, \
                          template_shortcuts = CASE WHEN ?24 THEN excluded.template_shortcuts ELSE template_shortcuts END, \
                          welcome_seen = CASE WHEN ?26 THEN excluded.welcome_seen ELSE welcome_seen END, \
-                         claude_trust_hint_dismissed = CASE WHEN ?28 THEN excluded.claude_trust_hint_dismissed ELSE claude_trust_hint_dismissed END",
+                         claude_trust_hint_dismissed = CASE WHEN ?28 THEN excluded.claude_trust_hint_dismissed ELSE claude_trust_hint_dismissed END, \
+                         tunnel_consent = CASE WHEN ?30 THEN excluded.tunnel_consent ELSE tunnel_consent END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -4520,7 +4553,9 @@ impl HelmStore {
                         welcome_seen,
                         welcome_seen_present,
                         trust_hint,
-                        trust_hint_present
+                        trust_hint_present,
+                        tunnel_consent,
+                        tunnel_consent_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -10363,6 +10398,7 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                tunnel_consent: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -10389,6 +10425,7 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                tunnel_consent: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -10414,6 +10451,7 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                tunnel_consent: None,
             },
             "an explicit null clears exactly the field it names"
         );
@@ -10488,6 +10526,7 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                tunnel_consent: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -11940,6 +11979,7 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                tunnel_consent: None,
             },
             "the new field defaults absent while both existing choices survive"
         );
@@ -12013,6 +12053,7 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                tunnel_consent: None,
             },
             "the new field defaults absent while every existing choice survives"
         );
@@ -16883,5 +16924,85 @@ mod tests {
             (None, None),
             "reset restores the unset durable shape"
         );
+    }
+
+    /// Consent is explicit and shared: sparse patches preserve it, null revokes,
+    /// and reopening the database must not reset the user's security decision.
+    #[farhelm_testtrace::test]
+    async fn tunnel_consent_sparse_patch_persists_and_clears() {
+        let (dir, store) = fresh_store().await;
+        assert_eq!(store.preferences().await.unwrap().tunnel_consent, None);
+        for value in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::json!(null),
+        ] {
+            store
+                .update_preferences(
+                    serde_json::from_value(serde_json::json!({"tunnel_consent":value})).unwrap(),
+                )
+                .await
+                .unwrap();
+            store
+                .update_preferences(
+                    serde_json::from_value(serde_json::json!({"compact":true})).unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                store.preferences().await.unwrap().tunnel_consent,
+                value.as_bool()
+            );
+        }
+        store
+            .update_preferences(serde_json::from_str(r#"{"tunnel_consent":true}"#).unwrap())
+            .await
+            .unwrap();
+        drop(store);
+        let reopened = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(
+            reopened.preferences().await.unwrap().tunnel_consent,
+            Some(true)
+        );
+        for invalid in [r#"{"tunnel_consent":1}"#, r#"{"tunnel_consent":"true"}"#] {
+            assert!(serde_json::from_str::<PreferencePatch>(invalid).is_err());
+        }
+    }
+
+    /// Real old schemas gain disabled consent without losing preferences. A
+    /// version-only rewind must preserve a consent column that already exists.
+    #[farhelm_testtrace::test]
+    async fn schema_55_tunnel_consent_is_disabled_on_upgrade_and_rewind_safe() {
+        let (dir, store) = fresh_store().await;
+        store
+            .update_preferences(serde_json::from_str(r#"{"compact":true}"#).unwrap())
+            .await
+            .unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE preferences DROP COLUMN tunnel_consent; PRAGMA user_version = 54;",
+        )
+        .unwrap();
+        assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'tunnel_consent'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        drop(conn);
+        let migrated = HelmStore::open(&path).await.unwrap();
+        assert_eq!(migrated.preferences().await.unwrap().tunnel_consent, None);
+        assert_eq!(migrated.preferences().await.unwrap().compact, Some(true));
+        migrated
+            .update_preferences(serde_json::from_str(r#"{"tunnel_consent":true}"#).unwrap())
+            .await
+            .unwrap();
+        drop(migrated);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA user_version = 54;").unwrap();
+        drop(conn);
+        let reopened = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            reopened.preferences().await.unwrap().tunnel_consent,
+            Some(true)
+        );
+        assert_eq!(reopened.preferences().await.unwrap().compact, Some(true));
     }
 }

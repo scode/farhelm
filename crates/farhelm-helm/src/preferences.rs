@@ -3,7 +3,7 @@
 //! last user-selected session, compact-row choice, and the remembered
 //! permissions and workspace-trust choices of successful structured launches,
 //! host confirmation choices, terminal web-link ownership, quick-launch template,
-//! number-key bindings, welcome dismissal, and contact reused after successful feedback.
+//! number-key bindings, welcome dismissal, tunnel consent, and contact reused after successful feedback.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client persists its own copy, so a browser tab and the desktop
@@ -12,6 +12,9 @@
 //! in whichever client last wrote it. Every client fetches the row once
 //! after authenticating and writes a sparse patch on change; a field a
 //! patch leaves out is untouched, and an explicit `null` clears one.
+//! Tunnel consent is also an active-resource boundary: only true enables new
+//! listeners, and an acknowledged false/null write closes listeners and their
+//! accepted relays. That transaction survives a disconnected HTTP caller.
 //!
 //! The remembered launch choices are exceptions to "every client writes its own
 //! choice": no shipped client ever PUTs them. They are written only by the helm
@@ -95,6 +98,7 @@ pub(crate) async fn put_preferences(
     axum::Json(patch): axum::Json<PreferencePatch>,
 ) -> impl IntoResponse {
     let trust_hint_changed = patch.claude_trust_hint_dismissed.is_some();
+    let tunnel_consent_changed = patch.tunnel_consent.is_some();
     if let Some(Some(bindings)) = &patch.template_shortcuts {
         let mut names = std::collections::BTreeSet::new();
         // A whole-map replacement has ten possible entries, each naming a
@@ -193,7 +197,27 @@ pub(crate) async fn put_preferences(
             message: "terminal_link_click must be intercept, both, or program".into(),
         }));
     }
-    match state.store.update_preferences(patch).await {
+    // SQLite can commit after an HTTP caller disappears. A consent write owns
+    // its cleanup tail so cancellation cannot persist revocation and skip close.
+    let result = if tunnel_consent_changed {
+        let state = Arc::clone(&state);
+        tokio::spawn(async move {
+            let _mutation = state.tunnels.mutation.lock().await;
+            let disabling = patch.tunnel_consent != Some(Some(true));
+            state.store.update_preferences(patch).await?;
+            if disabling {
+                state.tunnels.close_all_locked().await;
+            }
+            state.manager.events().bump();
+            Ok::<(), anyhow::Error>(())
+        })
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|result| result)
+    } else {
+        state.store.update_preferences(patch).await
+    };
+    match result {
         Ok(()) => {
             if trust_hint_changed {
                 state.manager.events().bump();
@@ -701,6 +725,7 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                tunnel_consent: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -809,6 +834,7 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                tunnel_consent: None,
             },
             "an explicit null clears the field it names and only that one"
         );
