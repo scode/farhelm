@@ -2135,6 +2135,33 @@ pub(crate) fn SessionView(
             // middle, actions pinned right — see this component's docs for
             // why everything that used to be its own band lives here.
             header { class: "titlebar",
+                // Header questions share Escape cancellation, including their
+                // lifecycle admission. Once an answer has taken a claim, a
+                // queued Escape must leave the running operation alone.
+                onkeydown: move |event: KeyboardEvent| {
+                    if event.key() != Key::Escape || event.is_composing() {
+                        return;
+                    }
+                    let mut cancelled = false;
+                    if *confirming.peek() {
+                        confirming.set(false);
+                        view_claim.set(None);
+                        cancelled = true;
+                    }
+                    if confirming_header_replace.take(&()).is_some() {
+                        cancel_replace_intent();
+                        cancelled = true;
+                    }
+                    if confirming_header_delete.take(&()).is_some() {
+                        cancelled = true;
+                    }
+                    if cancelled {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        // Focus after the cancelled question has unmounted.
+                        document::eval("requestAnimationFrame(() => window.farhelmTerm?.focusSelected());");
+                    }
+                },
                 // Both of these carry their own text as a tooltip because both
                 // ellipsize: a title and a cwd share `CreateSession`'s 64 KiB
                 // field budget, so the hover tooltip is the only route back

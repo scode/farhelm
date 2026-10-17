@@ -10,6 +10,7 @@ import {
 } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 import { routeGate } from "./helpers/route-gate";
+import { attachSession, waitForTermText } from "./helpers/term";
 
 installTerminalSuiteHooks();
 
@@ -202,6 +203,79 @@ async function showStatus(page: Page, id: string, state: "running" | "interrupte
   // Unregister and drain together: unroute alone races a pending route.fetch.
   return () => page.unrouteAll({ behavior: "wait" });
 }
+
+/** Escape must decline every header question without starting its action.
+ * Each prompt takes focus first, then cancellation must restore the live
+ * terminal and release lifecycle admission so the same control can ask again.
+ * A fresh echo and Enter after each cancellation also exercise stale consent:
+ * that Enter belongs to the terminal, not the removed question.
+ */
+test("Escape cancels header restart replace and delete questions and restores terminal focus", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  const session = await createResumableSession(request, { title: `header-escape-${Date.now()}` });
+  const lifecycleRequests: string[] = [];
+  page.on("request", (candidate) => {
+    const path = new URL(candidate.url()).pathname;
+    if ((candidate.method() === "DELETE" && path === `/api/sessions/${session.id}`)
+      || (candidate.method() === "POST"
+        && ["restart", "replace", "stop"].some((action) => path === `/api/sessions/${session.id}/${action}`))) {
+      lifecycleRequests.push(`${candidate.method()} ${path}`);
+    }
+  });
+  try {
+    await patchPreferences(request, { skip_session_confirmations: null });
+    await showStatus(page, session.id, "running");
+    await page.goto("/");
+    await attachSession(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await waitForTermText(page, "> ");
+    await expect(page.locator(".titlebar .status-badge")).toHaveClass(/\brunning\b/);
+    const terminal = page.locator("#terminal .xterm-helper-textarea");
+    await expect(terminal).toBeFocused();
+    await page.keyboard.type("header-escape-live");
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "echo:header-escape-live");
+    await expect(page.locator(".restart-primary")).not.toHaveAttribute("aria-disabled", "true");
+    await expect(page.locator(".restart-primary")).toHaveAttribute("data-confirms", "true");
+
+    for (const [action, triggerSelector, promptSelector] of [
+      ["restart", ".restart-primary", "#restart-confirm-panel"],
+      ["replace", ".header-replace", ".header-replace-confirm"],
+      ["delete", ".header-delete", ".header-delete-confirm"],
+    ] as const) {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const trigger = page.locator(triggerSelector);
+        const prompt = page.locator(promptSelector);
+        await expect(trigger).toBeEnabled();
+        await trigger.click();
+        await expect(prompt).toBeVisible();
+        await expect(prompt.locator(".btn-danger")).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(prompt).toHaveCount(0);
+        await expect(terminal).toBeFocused();
+        const echoed = `escape-${action}-${attempt}-${Date.now()}`;
+        await page.keyboard.type(echoed);
+        await page.keyboard.press("Enter");
+        await waitForTermText(page, `echo:${echoed}`);
+        expect(lifecycleRequests, `${action} cancellation must send no lifecycle request`).toEqual([]);
+        for (const selector of [".restart-primary", ".header-replace", ".header-delete"]) {
+          await expect(page.locator(selector)).toBeEnabled();
+        }
+      }
+    }
+  } finally {
+    try {
+      await page.goto("about:blank");
+      await page.unrouteAll({ behavior: "wait" });
+    } finally {
+      try {
+        await cleanupSession(request, session.id);
+      } finally {
+        await patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null });
+      }
+    }
+  }
+});
 
 /** One switch must remove all seven questions immediately, persist across
  * reload, and be reversible. Each request is observed independently of the
