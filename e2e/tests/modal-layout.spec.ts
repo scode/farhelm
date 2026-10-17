@@ -4,6 +4,8 @@
  * Routes control only the host/list/archive facts needed to make each style
  * family tall. The renderer, modal isolation and CSS remain the shipped app;
  * screenshots precede the geometry assertion so a failed margin has evidence.
+ * The keyboard guard inspects actual overflow, including horizontal overflow;
+ * a declared scroll style alone does not establish a region that needs access.
  */
 import { expect, test } from "./helpers/evidence";
 import { type Locator, type Page } from "@playwright/test";
@@ -125,6 +127,83 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
   return dialog;
 }
 
+/**
+ * Every overflowing scrollport needs a keyboard entry point, including WebKit
+ * where a plain overflow container does not become a Tab stop automatically.
+ * A named region supplies its own stop when its content has no usable control.
+ * Native editors already provide both focus and scrolling on the element itself.
+ * Menus and suggestion lists own arrow-key navigation, so their roles exempt
+ * their scrollports without adding a product attribute for the test to recognize.
+ * This is a structural guard; the per-region tests exercise Tab and PageDown.
+ */
+async function expectKeyboardReachableScrollers(dialog: Locator) {
+  const scan = await dialog.evaluate((node) => {
+    const tabbable = (element: HTMLElement) => {
+      const style = getComputedStyle(element);
+      return element.tabIndex >= 0 && !element.matches(":disabled") &&
+        !element.closest('[inert], [aria-disabled="true"]') &&
+        style.visibility === "visible" && element.getClientRects().length > 0;
+    };
+    const namedRegion = (element: HTMLElement) => {
+      const labelledBy = (element.getAttribute("aria-labelledby") ?? "").split(/\s+/)
+        .map((id) => document.getElementById(id)?.textContent?.trim() ?? "").join(" ").trim();
+      return element.getAttribute("role") === "region" &&
+        Boolean(element.getAttribute("aria-label")?.trim() || labelledBy) && tabbable(element);
+    };
+    const scrollers = [];
+    const unreachable = [];
+    for (const element of [node, ...node.querySelectorAll("*")]) {
+      if (!(element instanceof HTMLElement) || element.getClientRects().length === 0) continue;
+      const style = getComputedStyle(element);
+      if (style.visibility !== "visible") continue;
+      const axes = [];
+      if (["auto", "scroll"].includes(style.overflowX) && element.scrollWidth > element.clientWidth + 1) axes.push("x");
+      if (["auto", "scroll"].includes(style.overflowY) && element.scrollHeight > element.clientHeight + 1) axes.push("y");
+      if (axes.length === 0) continue;
+      const description = `${element.tagName.toLowerCase()}.${[...element.classList].join(".")} (${axes.join(",")})`;
+      scrollers.push(description);
+      if (element.closest('[role="menu"], [role="listbox"]')) continue;
+      if ((element.matches("input, textarea") || element.isContentEditable) && tabbable(element)) continue;
+      if (namedRegion(element)) continue;
+      if ([...element.querySelectorAll<HTMLElement>("*")].some(tabbable)) continue;
+      unreachable.push(description);
+    }
+    return { scrollers, unreachable };
+  });
+  expect(scan.scrollers, "the dialog fixture has actual overflowing auto/scroll content").not.toEqual([]);
+  expect(scan.unreachable, "each scrollport has a named Tab stop or an enabled tabbable control").toEqual([]);
+}
+
+/**
+ * Keep confirmation and feedback fixtures independent of shared preferences.
+ * A sent message stores contact even when it is empty; intercept that write as
+ * well as the send so a layout assertion cannot change the next spec's seed.
+ */
+async function stubDialogPreferences(page: Page) {
+  await page.route("**/api/preferences", async (route) => {
+    if (route.request().method() === "PUT") {
+      await fulfillAsHelm(route, { status: 204 });
+      return;
+    }
+    const response = await route.fetch();
+    const preferences = await response.json();
+    await route.fulfill({ response, json: {
+      ...preferences, skip_host_remove_confirmation: false, feedback_contact: null,
+    } });
+  });
+}
+
+/** Open the real help-menu entry after its menu is mounted. */
+async function openHelpDialog(page: Page, name: string) {
+  await page.getByRole("button", { name: "help", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "help", exact: true });
+  await expect(menu).toBeVisible();
+  await menu.locator(`[data-bar-menu-item="${name}"]`).click();
+  const dialog = page.getByRole("dialog", { name, exact: true });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
 for (const width of [1000, 360]) {
   for (const family of ["host-settings", "templates", "trash", "rename", "restart-with", "launcher"]) {
     /** Every separate modal style must preserve breathing room when content overflows. */
@@ -148,3 +227,103 @@ for (const width of [1000, 360]) {
     });
   }
 }
+
+for (const family of ["host-settings", "templates", "trash", "rename", "restart-with", "launcher"]) {
+  /** A geometry-safe card still needs keyboard access to every nested scrollport. */
+  test(`overflowing ${family} scrollports have keyboard entry points`, async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 720 });
+    const dialog = await openTallDialog(page, family);
+    await expect(dialog).toBeVisible();
+    await page.setViewportSize({ width: 360, height: 300 });
+    await expectKeyboardReachableScrollers(dialog);
+  });
+}
+
+/** Empty help has no copy buttons to make its overflowing explanation reachable. */
+test("text-only SSH help scrollports have keyboard entry points", async ({ page }) => {
+  await page.route("**/api/ssh-connections", (route) => fulfillAsHelm(route, {
+    json: { unavailable: [], hosts: [], extra: null },
+  }));
+  await page.setViewportSize({ width: 360, height: 720 });
+  await page.goto("/");
+  const dialog = await openHelpDialog(page, "ssh needs 2FA?");
+  await expect(dialog).toContainText("No ssh hosts are registered.");
+  await expect(dialog.locator(".ssh-help-body button")).toHaveCount(0);
+  await page.setViewportSize({ width: 360, height: 220 });
+  await expectKeyboardReachableScrollers(dialog);
+});
+
+/** Footer buttons cannot stand in for keyboard access to the text-only body. */
+test("remove-host scrollports have keyboard entry points", async ({ page }) => {
+  await stubDialogPreferences(page);
+  await stubHost(page);
+  await page.setViewportSize({ width: 360, height: 720 });
+  await page.goto("/");
+  const row = hostRowByName(page, PEER);
+  await openHostMenu(row);
+  await row.locator(".host-remove").click();
+  const dialog = page.locator(".host-remove-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Its supervisor and sessions keep running");
+  await page.setViewportSize({ width: 360, height: 220 });
+  await expectKeyboardReachableScrollers(dialog);
+});
+
+/**
+ * Sent replaces the editable body with text. Freeze its 1.5-second close timer
+ * before sending so this assertion cannot race dismissal on a busy browser.
+ */
+test("sent-feedback scrollports have keyboard entry points", async ({ page }) => {
+  await stubDialogPreferences(page);
+  let sends = 0;
+  await page.route("**/api/feedback", async (route) => {
+    sends += 1;
+    await fulfillAsHelm(route, { status: 204 });
+  });
+  await page.setViewportSize({ width: 360, height: 720 });
+  await page.goto("/");
+  const dialog = await openHelpDialog(page, "send feedback");
+  await dialog.locator(".feedback-message").fill("Keep the sent message reachable.");
+  await page.clock.install();
+  await page.clock.pauseAt(new Date(Date.now() + 5_000));
+  await dialog.locator(".feedback-send").click();
+  await expect(dialog.locator(".feedback-thanks")).toContainText("Thanks.");
+  expect(sends, "the controlled send completed before inspecting its text-only state").toBe(1);
+  await expect(dialog.locator(".feedback-message")).toHaveCount(0);
+  await page.setViewportSize({ width: 360, height: 220 });
+  await expectKeyboardReachableScrollers(dialog);
+});
+
+/**
+ * A held save disables every body control. Inspect that unsettled boundary,
+ * before the refusal restores the controls that normally provide Tab entry.
+ */
+test("host-settings scrollports stay reachable while saving", async ({ page }) => {
+  let releaseSave!: () => void;
+  const saveReleased = new Promise<void>((resolve) => (releaseSave = resolve));
+  let submitted: unknown;
+  await page.route("**/api/hosts/9011/destination", async (route) => {
+    submitted = route.request().postDataJSON();
+    await saveReleased;
+    await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: "held layout refusal" });
+  });
+  try {
+    await page.setViewportSize({ width: 360, height: 720 });
+    const dialog = await openTallDialog(page, "host-settings");
+    await dialog.locator(".host-edit").click();
+    const input = dialog.locator(".host-destination-input");
+    await input.fill("edited-layout-host.example.invalid");
+    await expect(input).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => submitted, { message: "the destination save is held" })
+      .toEqual({ ssh: "edited-layout-host.example.invalid" });
+    const body = dialog.locator(".host-settings-body");
+    await expect(input).toBeDisabled();
+    await expect(body.locator("button:enabled, input:enabled, select:enabled, textarea:enabled")).toHaveCount(0);
+    await page.setViewportSize({ width: 360, height: 300 });
+    await expectKeyboardReachableScrollers(dialog);
+  } finally {
+    releaseSave();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+});

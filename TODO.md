@@ -169,13 +169,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   say today. Consider whether such a focus-source design is worth it; it would need its own scope and acceptance checks.
   Plan: `plans/queue/menu-focus-source.md`.
 
-- **Audit scroll regions for keyboard reach.** SPEC.md requires every scrollable region in the GUI to be reachable and
-  scrollable with the keyboard alone, WebKit included, with a tab stop of its own when its content holds nothing
-  focusable. The keyboard-scroll-regions plan fixed the host plans and the trash list but audited nothing else. Already
-  known to break the rule: the SSH connection help area while loading, showing an error or showing no commands, the
-  remove-host dialog's body, and the feedback dialog's "sent" message. Audit every scroll region and fix the ones that
-  fall short. Plan: `plans/queue/keyboard-scroll-audit.md`.
-
 - **Cheaper clones from the repository cache.** Look into whether a managed checkout's clone from the host's repository
   cache can skip most of the compression and delta work git does today, so the clone stage finishes sooner.
 
