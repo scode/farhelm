@@ -2174,3 +2174,34 @@ remain in the private recorder directories identified above and may expire.
 Class: unknown
 
 Cause: unknown
+
+## 2026-10-17 — `plain Replace keeps a newer same-source key after old header YOLO cancellation` (e2e/tests/replace.spec.ts)
+
+Deflake sweep `46d1a087-c154-4eb6-b578-0efa669129e6` failed this test in WebKit in browser run
+`d01a19ad-811c-4dae-90b8-2c22a70ab473`: the source row's menu was absent after the five-second visibility wait. The
+failing WebKit execution took 12.719 seconds; Chromium passed in 4.528 seconds. Isolated classification reruns
+`213407df-5293-46eb-87ca-d08bbe6b3535`, `46df9503-ab98-4587-a36d-c8392c58183d`, and
+`a4bb8764-8cf4-42f0-aeee-d97ad0267184` failed, passed, and failed, respectively. Nine other browser outcomes failed in
+the battery; a shared cause is not established. The older two-row Replace scenario has a resolved 2026-10-15 entry, but
+this observation does not establish the same cause for the same-source scenario. Disposition: open in TODO.md and
+excluded from future sweeps; no additional reproduction or fix attempted.
+
+```text
+Error: expect(locator).toBeVisible() failed
+Locator: locator('.session-row[data-session-id="<session>"]').locator('.session-row-menu-flyout')
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Clean tested commit `7b3d44d6fea3a675af7d5fa0f6152dba7ead8f1d`, Linux x86_64, kernel 6.8.0-146-generic, Playwright
+1.64.0. Selection: browser suite on both engines excluding known flakes, one worker, zero retries; classification
+selected this test. Recorded tmux 3.7c executable SHA256
+`9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`, locale `C.UTF-8`. Ambient `FARHELM_*` names were
+scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` were supplied. Concurrent
+load, compiler and browser build identities are unavailable. Evidence remains in private temporary recorder directories
+named by the run IDs and may expire.
+
+Class: unknown
+
+Cause: unknown

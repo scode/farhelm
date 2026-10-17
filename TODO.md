@@ -198,6 +198,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Same-source Replace menu fails to open after YOLO cancellation.**
+  `plain Replace keeps a newer same-source key after old header YOLO cancellation` in `e2e/tests/replace.spec.ts` failed
+  in WebKit waiting five seconds for the source row's menu in browser run `d01a19ad-811c-4dae-90b8-2c22a70ab473`.
+  Isolated classification reruns failed, passed, failed: `213407df-5293-46eb-87ca-d08bbe6b3535`,
+  `46df9503-ab98-4587-a36d-c8392c58183d`, `a4bb8764-8cf4-42f0-aeee-d97ad0267184`. Cause unknown (FLAKES.md, 2026-10-17).
+
 - **Client/helm skew reload route is already handled.** `client-helm-skew-prompts-reload` in
   `e2e/tests/terminal-reconnect.spec.ts` failed in WebKit with `route.fulfill: Route is already handled!` in the browser
   sweep `b8635849-b577-4ec0-a8df-315fbdb4e5de`. All three isolated reruns passed both engines:
