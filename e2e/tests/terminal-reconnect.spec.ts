@@ -644,19 +644,30 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
   page,
   request,
 }) => {
-  // A cadence, not a barrier: with terminal sockets withheld below, the
-  // rung only decides how soon after the winner attaches the loser's first
-  // reachable attempt fires. The probe interval matches so a winner that
-  // takes longer than the ladder is indistinguishable from one that does
-  // not — nothing here depends on which phase the recovery is in.
+  // Enter the slow-probe phase quickly. The recovery sync below must skip
+  // that wait without acquiring the displacing intent of a user click.
   await reconnectTimingsFromNextLoad(page, {
-    delaysMs: [1_000, 1_000, 1_000, 1_000, 1_000, 1_000],
-    probeIntervalMs: 1_000,
+    delaysMs: [50],
+    probeIntervalMs: 30_000,
   });
   let ownId: string | undefined;
   try {
     const own = await openOwnTerminal(page, request, `takeover-during-backoff-does-not-steal-t-${Date.now()}`);
     ownId = own.id;
+    // Capture the real view's next sync rather than inventing a lease or
+    // path. Adding a shell and returning to the agent provides that sync
+    // and covers recovery with more than one mounted terminal.
+    await page.evaluate(() => {
+      const term = (window as any).farhelmTerm;
+      const sync = term.sync.bind(term);
+      term.sync = (...args: any[]) => {
+        (window as any).__recoverySyncArgs = args;
+        return sync(...args);
+      };
+    });
+    const shellTab = await addTab(page, 0);
+    await waitForSessionRevealed(page, own.id, { tabId: shellTab });
+    await selectTerminal(page, "agent");
     // Something distinctive on screen, so "kept its snapshot" is a claim
     // about THIS session's content rather than about a pane being non-empty.
     await page.locator("#terminal").click();
@@ -668,8 +679,19 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
     // ladder could reach the helm ahead of the winner below.
     await withholdTerminalSockets(page);
     await rememberSocket(page, "terminal");
-    await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
-    await expect(page.locator(".terminal-reconnect-now")).toBeVisible();
+    // Close every channel: leaving the shell connected would deliver the
+    // winner's takeover notice, testing the known-takeover latch instead
+    // of an automatic recovery that must discover the competing owner.
+    await page.evaluate(() => {
+      const win = window as any;
+      win.__lostChannels = (Object.values(win.__farhelmIslands) as any[]).map((island) => island.ws);
+      for (const ws of win.__lostChannels) ws.close();
+    });
+    await expect.poll(() => page.evaluate(() => {
+      const channels = (window as any).__lostChannels as WebSocket[];
+      return { count: channels.length, closed: channels.every((ws) => ws.readyState === WebSocket.CLOSED) };
+    })).toEqual({ count: 2, closed: true });
+    await expect(page.locator("#term-connecting .terminal-reconnect-now")).toBeVisible();
 
     const second = await newObservedContext(browser, timeline);
     const page2 = await second.newPage();
@@ -684,13 +706,19 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
       // what makes it `if_unowned` and refusable.
       await expectTerminalSocketsWereWithheld(page);
       await admitTerminalSockets(page);
+      await page.evaluate(() => {
+        const win = window as any;
+        const [base, specs, attach, reconnect] = win.__recoverySyncArgs;
+        win.farhelmTerm.sync(base, specs.map((spec: any) => ({ ...spec, unavailable: true })), attach, reconnect);
+        win.farhelmTerm.sync(base, specs.map((spec: any) => ({ ...spec, unavailable: false })), attach, reconnect);
+      });
 
       // The loser's next attempt fires, is refused, and lands it in the
       // state it was actually in: taken over, with the deliberate way back.
       await expect(page.locator("#term-banner")).toContainText("Detached: another client attached", {
-        timeout: 20_000,
+        timeout: 10_000,
       });
-      await expect(page.locator(".banner-reclaim")).toBeVisible();
+      await expect(page.locator("#term-banner .banner-reclaim")).toBeVisible();
       await expect(
         page.locator(".terminal-reconnect-now"),
         "a client that has been taken over stops trying: the ladder is over",
@@ -1947,6 +1975,61 @@ try {
 } finally {
   if (id) await cleanupSession(request, id);
 }
+});
+
+/**
+ * A replay marker is attachment evidence only until its socket dies. Hold
+ * xterm's completed write callback across that death to prove it cannot
+ * erase the successor retry or replace the outage card with a dead screen.
+ */
+test("late-replay-flush-keeps-a-new-recovery-alive", async ({ page, request }) => {
+  await reconnectTimingsFromNextLoad(page, { delaysMs: [50, 5_000], probeIntervalMs: 5_000 });
+  let ownId: string | undefined;
+  try {
+    const own = await openOwnTerminal(page, request, `late-flush-${Date.now()}`);
+    ownId = own.id;
+    await waitForSessionRevealed(page, own.id);
+    await rememberSocket(page, "terminal");
+    await page.evaluate(() => {
+      const win = window as any;
+      const original = win.__farhelmIslands.terminal.term;
+      const real = win.Terminal.prototype.write;
+      win.__heldReplayWrites = [];
+      win.__realReplayWrite = real;
+      win.Terminal.prototype.write = function (data: unknown, cb?: () => void) {
+        if (this !== original && cb) {
+          return real.call(this, data, () => win.__heldReplayWrites.push(cb));
+        }
+        return real.call(this, data, cb);
+      };
+      win.__farhelmIslands.terminal.ws.close();
+    });
+    await waitForRemount(page, "terminal");
+    await expect.poll(() => page.evaluate(() => {
+      const win = window as any;
+      const replay = win.__farhelmIslands.terminal.test.replay;
+      return { held: win.__heldReplayWrites.length > 0, reason: replay.revealReason, revealed: replay.revealed };
+    }), { message: "replacement replay must reach its marker while the flush callback is held" })
+      .toEqual({ held: true, reason: "marker", revealed: false });
+    await rememberOpenSocketUntilClose(page, "terminal");
+    await page.evaluate(() => (window as any).__farhelmIslands.terminal.ws.close());
+    await waitForRememberedSocketClose(page, "terminal");
+    await page.evaluate(() => {
+      const win = window as any;
+      win.Terminal.prototype.write = win.__realReplayWrite;
+      for (const cb of win.__heldReplayWrites.splice(0)) cb();
+    });
+    await expect(page.locator("#term-connecting")).toBeVisible();
+    await waitForRemount(page, "terminal", 15_000);
+    await waitForSessionRevealed(page, own.id);
+    const marker = `after-flush-${Date.now()}`;
+    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    await page.keyboard.type(marker);
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, `echo:${marker}`);
+  } finally {
+    if (ownId) await cleanupSession(request, ownId);
+  }
 });
 
 // A frame QUEUED before the evidence-free idle gave up must not confirm

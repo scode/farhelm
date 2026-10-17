@@ -139,6 +139,9 @@ pub(super) struct RowState {
     pub(super) host_icon: farhelm_proto::host_appearance::HostIcon,
     /// Compared alongside the silhouette so color-only saves redraw the row.
     pub(super) host_color: farhelm_proto::host_appearance::HostColor,
+    /// Outage cause from the list's existing host read, shared with the
+    /// session card. No row performs its own registry request.
+    pub(super) unavailable_cause: &'static str,
     /// How long ago this session was last active, already FORMATTED, or
     /// `None` for a helm that sends no activity stamp at all.
     ///

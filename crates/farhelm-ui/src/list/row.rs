@@ -415,14 +415,6 @@ struct AgentBadge {
     description: String,
 }
 
-/// Hover text for a row's stale mark, in both densities.
-///
-/// The visible mark is the bare word (or, compact, a glyph), so the tooltip
-/// says what it means rather than repeating it: the row is the helm's
-/// last-known view of a session whose host is not connected right now
-/// (`Session::stale`; SPEC.md keeps such sessions listed, marked stale).
-const STALE_TOOLTIP: &str = "stale: the host is not connected, so this is its last-known state";
-
 /// Keep the specific approval mode audible even when several modes share a shield.
 fn permission_description(permission: PermissionGlyph) -> &'static str {
     match permission {
@@ -719,8 +711,9 @@ std::thread_local! {
 /// `abbreviate_home` and `command_basename` for the display constraints.
 ///
 /// A row the helm marked stale
-/// — its host is in some non-connected state — is dimmed and badged rather
-/// than hidden, per SPEC.md's "stay in the list … clearly marked". Its
+/// — its host is in some non-connected state — is dimmed and carries a
+/// neutral cause phrase from the existing hosts read. Compact rows keep
+/// that cause in the glyph's accessible text and tooltip. Its
 /// stop/rename/delete controls stay ENABLED, which looks like an oversight
 /// and is not: the helm refuses those operations with the host's own state
 /// named in the message ("host 3 is unreachable-reprobing, so this operation
@@ -945,10 +938,12 @@ pub(super) fn SessionRow(
         locality,
         host_icon,
         host_color,
+        unavailable_cause,
         activity,
         deleting,
         bell_open,
     } = state;
+    let stale_tooltip = format!("{unavailable_cause}: this is the session's last-known state");
     #[cfg(test)]
     SESSION_ROW_RENDERS.with(|renders| renders.set(renders.get() + 1));
     // The two abbreviations the dense row runs on, computed once per
@@ -1673,9 +1668,9 @@ pub(super) fn SessionRow(
                                     ManagedCheckoutMark { checkout: checkout.clone(), cwd: session.cwd.clone() }
                                 }
                                 if session.stale {
-                                    span { class: "compact-qualifier", "data-tooltip": "{STALE_TOOLTIP}",
+                                    span { class: "compact-qualifier", "data-tooltip": "{stale_tooltip}",
                                         QualifierIcon { glyph: QualifierGlyph::Stale }
-                                        span { class: "visually-hidden", "stale" }
+                                        span { class: "visually-hidden", "{unavailable_cause}" }
                                     }
                                 }
                             }
@@ -1742,7 +1737,7 @@ pub(super) fn SessionRow(
                                 StatusBadgeView { badge, dot_onclick: move |_| {}, dot_title: None }
                             }
                             if session.stale {
-                                span { class: "stale-badge", "data-tooltip": "{STALE_TOOLTIP}", "stale" }
+                                span { class: "stale-badge", "data-tooltip": "{stale_tooltip}", "{unavailable_cause}" }
                             }
                         }
                     }
@@ -2801,6 +2796,7 @@ mod tests {
                         locality: HostLocality::Unknown,
                         host_icon: Default::default(),
                         host_color: Default::default(),
+                        unavailable_cause: "waiting for supervisor",
                         activity: None,
                         deleting: false,
                         bell_open: None,
@@ -2980,6 +2976,7 @@ mod tests {
                         locality: HostLocality::Unknown,
                         host_icon: Default::default(),
                         host_color: Default::default(),
+                        unavailable_cause: "waiting for supervisor",
                         activity: None,
                         deleting: false,
                         bell_open: None,
@@ -3079,6 +3076,7 @@ mod tests {
                             locality: HostLocality::Unknown,
                             host_icon: Default::default(),
                             host_color: Default::default(),
+                            unavailable_cause: "waiting for supervisor",
                             activity: None,
                             deleting: false,
                             bell_open: None,
@@ -3164,6 +3162,7 @@ mod tests {
                         locality: HostLocality::Unknown,
                         host_icon: Default::default(),
                         host_color: Default::default(),
+                        unavailable_cause: "waiting for supervisor",
                         activity: None,
                         deleting: false,
                         bell_open: open.then_some(read_through),

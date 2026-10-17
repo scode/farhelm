@@ -22,7 +22,9 @@ use crate::api::{
 };
 use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
-use crate::hosts::{HostLookup, HostsRead, is_connected, stale_session_notice};
+use crate::hosts::{
+    HostLookup, HostsRead, SessionUnavailableNotice, is_connected, stale_session_notice,
+};
 use crate::ops::{ConfirmSlot, OpGuard, ReadGate, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
@@ -333,15 +335,14 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
 /// and the session would end up with exactly one live terminal and no
 /// explanation. Refusing loudly beats shipping that.
 ///
-/// ## A stale session shows metadata, not a terminal (PLAN_M6.md item 6)
+/// ## A stale session keeps only the screen this view already had
 ///
 /// When the helm marks this session stale — its host is in any
-/// non-connected state — this view renders its metadata behind a notice and
-/// mounts NO terminal at all. SPEC.md: "opening such a session shows its
-/// metadata — title, directory, last-known status — behind a clear
-/// host-unreachable notice; there is no terminal to show." Attaching anyway
-/// would produce a socket the helm refuses, and a blank pane under a failed
-/// attach explains nothing.
+/// non-connected state — this view keeps its metadata in one band and shows
+/// a calm outage card. Existing terminals and tabs stay inert under it; a
+/// view opened while stale has no screen to retain and offers no terminals.
+/// Availability travels with the ordinary island specs so recovery can
+/// nudge a waiting automatic retry without invoking a displacing user action.
 ///
 /// The notice names the host's ACTUAL state rather than saying "unreachable"
 /// for every cause (`hosts::stale_session_notice`), because a skewed host
@@ -1154,6 +1155,15 @@ pub(crate) fn SessionView(
     // changes, so the host-state read is triggered by the staleness
     // TRANSITION rather than by each reply that reports the same flag again.
     let stale = use_memo(move || current.read().stale);
+    // A view opened from a stale row has no screen to retain. Once this
+    // view has offered terminals, a transient outage keeps those same DOM
+    // islands; interruption after a reboot still removes them on recovery.
+    let mut had_terminal = use_signal(|| false);
+    use_effect(move || {
+        if terminal_absence(&current.read(), relaunched()).is_none() && !had_terminal() {
+            had_terminal.set(true);
+        }
+    });
 
     // Staleness is discovered by the detail read, so the host-state read
     // follows the flag rather than waiting for the next revision: a session
@@ -1739,16 +1749,11 @@ pub(crate) fn SessionView(
     let terminal_specs = use_memo(move || {
         let lease = lease.read().clone()?;
         let session = current.read();
-        // A stale session has no terminal to attach (see this component's
-        // docs), so the desired set is EMPTY rather than absent — an empty
-        // sync is what tears down islands belonging to a host that went away
-        // while this view was open, which returning `None` (the
-        // lease-not-yet-minted case) would leave mounted and silently dead.
-        // Interrupted joins stale here: the pane the attach
-        // would target is the one the reboot destroyed, and the ladder in
-        // terminal.js would otherwise retry a refusal forever. The one
-        // decision for all three is `terminal_absence`.
-        if terminal_absence(&session, relaunched()).is_some() {
+        // Empty is an explicit teardown, unlike None (no lease yet).
+        // A fresh stale view has nothing to retain; interruption means the
+        // reboot destroyed the terminal, even if this view held its screen
+        // through the outage. Retained stale specs keep their identities.
+        if !keep_terminal_surface(&session, relaunched(), had_terminal()) {
             return Some("[]".to_string());
         }
         let tabs = visible_tabs(&session.tabs, &opened_tabs.read(), &closed_tabs.read());
@@ -1765,6 +1770,7 @@ pub(crate) fn SessionView(
         // remote-host compromise into control of the local helm API.
         let mut specs = vec![serde_json::json!({
             "el": AGENT_TERMINAL_ELEMENT_ID,
+            "unavailable": session.stale,
             "banner": AGENT_BANNER_ELEMENT_ID,
             // Where this terminal's connecting placeholder is written
             // while its attach catches up (PLAN_M5.md item 5). Per island
@@ -1803,6 +1809,7 @@ pub(crate) fn SessionView(
         for id in mountable {
             specs.push(serde_json::json!({
                 "el": tab_terminal_element_id(id),
+                "unavailable": session.stale,
                 "banner": tab_banner_element_id(id),
                 "connecting": tab_connecting_element_id(id),
                 "status": attachment_status_element_id(&tab_terminal_element_id(id)),
@@ -2716,18 +2723,9 @@ pub(crate) fn SessionView(
                     "could not refresh this session; showing the last state this client read"
                 }
             }
-            // The whole terminal surface is either present or replaced by
-            // the host-state notice — never both. SPEC.md gives a stale
-            // session metadata behind a notice and NO terminal, and an
-            // empty strip beside a dead pane would be exactly the
-            // unexplained blankness that rule exists to prevent.
-            if let Some(notice) = &stale_notice {
-                // The notice is rendered as PARTS, not as one interpolated
-                // string: every peer-supplied value in it (the host's name,
-                // its identities, the transport's own words) gets its own
-                // direction-isolated element, so none of them can rearrange
-                // the sentence explaining why this session has no terminal.
-                PeerLine { class: "host-stale-notice", parts: notice.clone() }
+            // Metadata remains in one band, independent of whether this
+            // view has a frozen screen to retain beneath the outage card.
+            if stale_notice.is_some() {
                 if stale_metadata {
                     div { class: "stale-metadata",
                         if let Some(badge) = stale_badge {
@@ -2851,15 +2849,14 @@ pub(crate) fn SessionView(
                     }
                 }
             }
-            // The whole terminal surface — strip and panes — is either
-            // present or replaced by one of the explanations above; see
-            // `terminal_absence` for the precedence.
-            if terminal_absence(&shown, relaunched()).is_none() {
+            // Retain the whole surface through outages, but never invent a
+            // screen for a fresh stale view or attach a rebooted terminal.
+            if keep_terminal_surface(&shown, relaunched(), had_terminal()) {
                 // The tab strip: the agent terminal first and unclosable
                 // (SPEC.md gives a session one agent terminal, and closing it
                 // is not one of the operations that exist), then every open
                 // tab in the server's creation order, then the add control.
-                div { class: "tab-strip",
+                div { class: "tab-strip", inert: shown.stale.then_some(""),
                     button {
                         r#type: "button",
                         class: if active_tab.is_none() { "btn tab tab-agent selected" } else { "btn tab tab-agent" },
@@ -2986,6 +2983,7 @@ pub(crate) fn SessionView(
                 // WKWebView (MT-5).
                 div {
                     class: "terminal-panes",
+                    "data-unavailable": "{shown.stale}",
                     "data-deleting": if header_deleting { "true" } else { "false" },
                     // What terminal.js's page-wide drop guard shows when a
                     // drop lands on a pane no live terminal takes (a
@@ -2993,6 +2991,9 @@ pub(crate) fn SessionView(
                     // drop reaches the pane): the same refusal a
                     // disconnected terminal gives, from its one definition.
                     "data-drop-refusal": crate::attachments::DETACHED_TEXT,
+                    if let Some(notice) = &stale_notice {
+                        SessionUnavailableCard { notice: notice.clone() }
+                    }
                     // The delete in flight, over the terminal where the eye
                     // is: the row and header say it too, but a user looking
                     // at the terminal would otherwise see nothing until the
@@ -3009,6 +3010,7 @@ pub(crate) fn SessionView(
                     }
                     div {
                         class: if active_tab.is_none() { "terminal-pane selected" } else { "terminal-pane" },
+                        inert: shown.stale.then_some(""),
                         "data-terminal": "agent",
                         div { id: "{AGENT_BANNER_ELEMENT_ID}", class: "banner" }
                         div { id: "{AGENT_TERMINAL_ELEMENT_ID}", class: "terminal" }
@@ -3072,6 +3074,7 @@ pub(crate) fn SessionView(
                         div {
                             key: "{tab_id}",
                             class: if active_tab.as_deref() == Some(tab_id.as_str()) { "terminal-pane selected" } else { "terminal-pane" },
+                            inert: shown.stale.then_some(""),
                             "data-terminal": "{tab_id}",
                             // Past the island cap this view renders an
                             // explanation instead of a mount point, and
@@ -3124,6 +3127,31 @@ pub(crate) fn SessionView(
                             }
                         }
                     }
+                }
+            } else if let Some(notice) = &stale_notice {
+                div { class: "terminal-panes",
+                    SessionUnavailableCard { notice: notice.clone() }
+                }
+            }
+        }
+    }
+}
+
+/// The host outage owns one accessible card above any retained terminal.
+/// PeerLine escapes and direction-isolates host names and diagnostics; only
+/// fixed client wording enters the headline.
+#[component]
+fn SessionUnavailableCard(notice: SessionUnavailableNotice) -> Element {
+    rsx! {
+        div { class: "session-unavailable-overlay host-stale-notice", role: "status",
+            div { class: "session-unavailable-card",
+                div { class: "session-unavailable-heading",
+                    span { class: "delete-spinner", "aria-hidden": "true" }
+                    "Session unavailable — {notice.cause}"
+                }
+                PeerLine { class: "session-unavailable-explanation", parts: notice.explanation }
+                if !notice.detail.is_empty() {
+                    PeerLine { class: "session-unavailable-detail", parts: notice.detail }
                 }
             }
         }
@@ -3443,6 +3471,17 @@ fn terminal_absence(session: &Session, relaunched: bool) -> Option<TerminalAbsen
         Some(TerminalAbsence::Interrupted)
     } else {
         None
+    }
+}
+
+/// Keep only a screen this view could already have displayed. A recovered
+/// interrupted session must still lose its destroyed terminals, even when
+/// the same view retained them during the host outage.
+fn keep_terminal_surface(session: &Session, relaunched: bool, had_terminal: bool) -> bool {
+    match terminal_absence(session, relaunched) {
+        None => true,
+        Some(TerminalAbsence::Stale) => had_terminal,
+        Some(TerminalAbsence::Interrupted) => false,
     }
 }
 
@@ -3910,6 +3949,21 @@ mod tests {
             ..interrupted.clone()
         };
         assert_eq!(terminal_absence(&stale, true), Some(TerminalAbsence::Stale));
+    }
+
+    /// An outage can retain only a screen from this view's own lifetime;
+    /// learning that the host rebooted still withdraws that destroyed pane.
+    #[farhelm_testtrace::test]
+    fn retained_screens_do_not_create_fresh_stale_or_interrupted_terminals() {
+        let mut session = live_session();
+        session.stale = true;
+        assert!(!keep_terminal_surface(&session, false, false));
+        assert!(keep_terminal_surface(&session, false, true));
+        session.status = crate::SessionStatus::Interrupted;
+        assert!(keep_terminal_surface(&session, false, true));
+        session.stale = false;
+        assert!(!keep_terminal_surface(&session, false, true));
+        assert!(keep_terminal_surface(&session, true, true));
     }
 
     /// Staleness outranks interruption because an unreachable host cannot

@@ -252,16 +252,17 @@ keep fixed icon-sized widths: live status uses the first slot's dot, compact end
 distinct stopped, exit, interrupted, or error glyph, and an absent status or unknown locality leaves its slot blank. A
 session with notifications adds a bell between the agent glyph (and its permission mark) and the activity-time column,
 in both densities; it is absent, taking no width, when the list is empty, and its hover help and accessible name carry
-the unread count. Compact rows therefore remain one visual line; stale survives there as a small labelled glyph. The
-full status, annotation, exit code, and qualifier meaning remain in accessible text and tooltips, and ended glyphs never
-acquire the live dot's mark-read action. Noncompact ended details and qualifier words occupy their own full-width line
-under the title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without
-ellipsis, clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded
-ages such as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: an agent launch's agent type and
-a command launch's declared agent type are authoritative, a legacy row gets its stored agent kind's glyph and the
-unclassified permission mark, and a command with no declared agent type gets the terminal glyph; nothing is read off a
-command line. C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode uses its attributed
-inline mark, and an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that fact absent.
+the unread count. Compact rows therefore remain one visual line; host unavailability survives there as a neutral glyph
+with the same cause phrase the regular row and session card show, in its accessible text and tooltip. The full status,
+annotation, exit code, and qualifier meaning remain in accessible text and tooltips, and ended glyphs never acquire the
+live dot's mark-read action. Noncompact ended details and qualifier words occupy their own full-width line under the
+title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without ellipsis,
+clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded ages such
+as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: an agent launch's agent type and a command
+launch's declared agent type are authoritative, a legacy row gets its stored agent kind's glyph and the unclassified
+permission mark, and a command with no declared agent type gets the terminal glyph; nothing is read off a command line.
+C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode uses its attributed inline mark, and
+an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that fact absent.
 `list::shared::session_locality` decides among three answers rather than two — `Local` when the session's host id
 matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when both
 ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read that has
@@ -457,11 +458,28 @@ button that opened it, still confirm-in-place with focus on the enabled confirmi
 consequence sentence they lead with is the one line standing between a click and a killed process tree, and a header
 that kept it in flow would have to either wrap or truncate it. Header Replace has a separate anchored confirmation state
 so it cannot accidentally open the interrupted card's confirmation. Everything conditional — a refused restart's prose,
-the host-unreachable notice and its last-known-status band, the "helm stopped listing this session" line — is still a
-full-width band, because a band that only appears when it has something to say costs the steady state nothing. A
-classified status renders in at most one place: the header normally, the stale notice's own metadata band for a stale
-session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for a session
-nothing has classified yet.
+the last-known-status band and the "helm stopped listing this session" line — is still a full-width band, because a band
+that only appears when it has something to say costs the steady state nothing. A classified status renders in at most
+one place: the header normally, the stale notice's own metadata band for a stale session (where SPEC.md's
+title/directory/last-known-status triple is assembled), and nowhere at all for a session nothing has classified yet.
+
+An unavailable session uses one accent card over the terminal scrim, sharing Delete's card geometry and spinner.
+`hosts::session_unavailable_cause` maps the existing host read to a stable phrase for both row densities and the card;
+retry counts and escaped peer diagnostics stay in smaller print. The remedy is preserved verbatim. A pending registry
+read says checking, a failed read names that failure, and a connected host under a stale session says refreshing. The
+browser's reconnect card uses the same CSS with its own counter and neutral retry button. Recoverable detach notices
+never paint the red banner; takeover, stall and terminal refusals still do.
+
+The session view remembers whether it has offered terminals. Staleness retains those islands and makes their panes and
+tab strip inert; a freshly opened stale view offers no terminals. The existing recovery snapshot's xterm element moves
+beside the replacement mount so hidden replay does not hide the old screen. It is disposed only at successful replay
+reveal, or restored into its mount for a final refusal. Pane visibility still hides background tabs. Availability in the
+synced terminal specs nudges waiting recovery controllers once when the host returns, through the existing automatic
+`if_unowned` path, without changing the retry ladder or disturbing attempts already in flight. Takeover tombstones and
+the build-mismatch capability veto remain authoritative. Interruption after a reboot still empties the desired set.
+Replay callbacks from a socket that died meanwhile cannot retire its new recovery. If replay reveals while the pane is
+still inert, the availability edge completes the focus handoff through the same guard used by reveal, preserving
+deliberate focus in fields, dialogs and other keyboard owners.
 
 Restart with uses a separate dialog because it relaunches the current session rather than creating one. For an agent
 launch it renders the same `LaunchControls` component as the session launcher, with the harness fixed to the session's

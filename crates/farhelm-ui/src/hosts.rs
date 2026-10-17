@@ -867,72 +867,97 @@ pub(crate) enum HostLookup<'a> {
     Failed(&'a str),
 }
 
-/// The notice a STALE session's view is drawn behind (SPEC.md: "opening such
-/// a session shows its metadata — title, directory, last-known status —
-/// behind a clear host-unreachable notice").
+/// The stable outage cause shared by session cards and both row densities.
 ///
-/// Names the host's ACTUAL state rather than saying "unreachable" for all of
-/// them, and that is the requirement rather than a nicety: a generic
-/// unreachable notice over a version-skewed host would hide the one thing
-/// that fixes it, and over an identity-mismatched host it would hide that a
-/// DECISION is being waited on. The remedy rides along for the same reason.
+/// Retry counts belong in the diagnostic line, so ordinary connection attempts
+/// never change this headline. Registry-read failures are a different claim:
+/// they say what the client failed to read, not what happened to the host.
+pub(crate) fn session_unavailable_cause(lookup: HostLookup<'_>) -> &'static str {
+    match lookup {
+        HostLookup::Pending => "checking host",
+        HostLookup::Failed(_) => "host state unavailable",
+        HostLookup::Absent => "host removed",
+        HostLookup::Known(host) => match &host.state {
+            HostPhase::Connecting { .. } | HostPhase::Unreachable { .. } => {
+                "waiting for supervisor"
+            }
+            HostPhase::Connected { .. } => "refreshing session",
+            HostPhase::VersionSkew { .. } if runs_newer_version(&host.state) => "host is too new",
+            HostPhase::VersionSkew { .. } => "host needs update",
+            HostPhase::IdentityMismatch { .. } => "host identity mismatch",
+            HostPhase::IdentityUnverified { .. } => "host identity unverified",
+            HostPhase::Duplicate { .. } => "duplicate host",
+            HostPhase::Retired { .. } => "host connection stopped",
+            HostPhase::Unrecognized => "host state unknown",
+        },
+    }
+}
+
+/// Three text tiers for the outage card, with peer values kept isolated.
 ///
-/// The three non-`Known` lookups each get their own wording rather than
-/// sharing a vague one, because they are three different situations: the
-/// state has not been read yet, the state could not be refreshed (so any
-/// phase this view still held would be a claim about the past dressed as the
-/// present), or the host is confirmed gone from the registry — which is not
-/// a connection problem at all and has a different remedy.
-pub(crate) fn stale_session_notice(host_name: &str, lookup: HostLookup<'_>) -> Vec<DetailPart> {
-    let mut parts = if host_name.trim().is_empty() {
+/// Remedies retain the helm's wording verbatim: in particular a newer host
+/// needs a newer helm, and shortening that sentence must not reverse it.
+#[derive(Clone, PartialEq)]
+pub(crate) struct SessionUnavailableNotice {
+    pub cause: &'static str,
+    pub explanation: Vec<DetailPart>,
+    pub detail: Vec<DetailPart>,
+}
+
+/// Explain an unavailable session without conflating host failure, a registry
+/// read failure, and the brief disagreement between recovery and detail reads.
+pub(crate) fn stale_session_notice(
+    host_name: &str,
+    lookup: HostLookup<'_>,
+) -> SessionUnavailableNotice {
+    let name = if host_name.trim().is_empty() {
         vec![DetailPart::text("this session's host")]
     } else {
         vec![DetailPart::peer(host_name)]
     };
-    match lookup {
-        // A CONNECTED host under a stale session is a transient disagreement
-        // between two reads, not a state to explain: the session row this
-        // view holds was fetched before the host came back, and the next
-        // detail poll will clear the staleness. Running the generic sentence
-        // here would produce "…is connected, so there is no terminal to
-        // show", which is a contradiction the user cannot act on and which
-        // reads as a bug in the product rather than as a moment mid-refresh.
-        // `SessionView` also drives an immediate detail refresh when it sees
-        // this, so the moment is as short as one round trip.
-        HostLookup::Known(host) if is_connected(&host.state) => parts.push(DetailPart::text(
-            " has reconnected — refreshing this session's state.",
-        )),
+    let cause = session_unavailable_cause(lookup.clone());
+    let (explanation, detail) = match lookup {
+        HostLookup::Known(host) if is_connected(&host.state) => (
+            vec![DetailPart::text("Refreshing this session's state.")],
+            vec![],
+        ),
         HostLookup::Known(host) => {
-            parts.push(DetailPart::text(format!(
-                ": {phase}, so there is no terminal to show — everything below is the helm's \
-                 last-known record of this session. ",
-                phase = phase_display_label(&host.state),
-            )));
-            parts.extend(state_detail(&host.state));
-            if let Some(remedy) = state_remedy(&host.state) {
-                parts.push(DetailPart::text(" "));
-                parts.extend(remedy);
-            }
+            let explanation = state_remedy(&host.state).unwrap_or_else(|| {
+                let mut parts = name.clone();
+                parts.push(DetailPart::text(
+                    " is not answering. The session keeps running there; this view reattaches by itself.",
+                ));
+                parts
+            });
+            let mut detail = name;
+            detail.push(DetailPart::text(": "));
+            detail.extend(state_detail(&host.state));
+            (explanation, detail)
         }
-        HostLookup::Pending => parts.push(DetailPart::text(
-            " is not connected, so there is no terminal to show — everything below is the helm's \
-             last-known record of this session. Its host's current state has not been read yet.",
-        )),
-        HostLookup::Failed(error) => {
-            parts.push(DetailPart::text(
-                " is not connected, so there is no terminal to show — everything below is the \
-                 helm's last-known record of this session. Its host's state could not be \
-                 refreshed, so nothing current can be said about it: ",
-            ));
-            parts.push(DetailPart::peer(error));
+        HostLookup::Pending => {
+            let mut parts = vec![DetailPart::text("checking ")];
+            parts.extend(name);
+            parts.push(DetailPart::text("…"));
+            (parts, vec![])
         }
-        HostLookup::Absent => parts.push(DetailPart::text(
-            " is no longer registered with this helm, so there is no terminal to show and nothing \
-             here can be operated on — everything below is the helm's last-known record of this \
-             session. Re-adding the destination would reach it again.",
-        )),
+        HostLookup::Failed(error) => (
+            vec![DetailPart::text(
+                "The helm's host state could not be refreshed.",
+            )],
+            vec![DetailPart::peer(error)],
+        ),
+        HostLookup::Absent => (
+            vec![DetailPart::text(
+                "This host is no longer registered with this helm. Re-adding the destination would reach it again.",
+            )],
+            name,
+        ),
+    };
+    SessionUnavailableNotice {
+        cause,
+        explanation,
+        detail,
     }
-    parts
 }
 
 // ---------------------------------------------------------------------
@@ -4974,25 +4999,18 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_stale_notice_identifies_the_host_and_carries_its_remedy() {
         let skewed = host(HostPhase::VersionSkew {
-            peer_protocol: 9,
+            peer_protocol: 7,
             peer_build: "0.2.0".to_string(),
             our_protocol: 8,
             our_build: "0.1.0".to_string(),
             remediation: "update the host's farhelm binary".to_string(),
         });
-        let notice = detail_text(&stale_session_notice(
-            "user@box",
-            HostLookup::Known(&skewed),
-        ));
-        assert!(notice.contains("user@box"), "the host is named: {notice}");
-        assert!(
-            notice.contains("update the host's farhelm binary"),
-            "the remedy travels with the notice, or the user is told only that they are stuck: \
-             {notice}"
-        );
-        assert!(
-            notice.contains("no terminal"),
-            "SPEC.md: there is no terminal to show for such a session: {notice}"
+        let notice = stale_session_notice("user@box", HostLookup::Known(&skewed));
+        assert_eq!(notice.cause, "host needs update");
+        assert!(detail_text(&notice.detail).contains("user@box"));
+        assert_eq!(
+            detail_text(&notice.explanation),
+            "update the host's farhelm binary"
         );
     }
 
@@ -5003,24 +5021,61 @@ mod tests {
     /// send the user looking for a network fault that does not exist.
     #[farhelm_testtrace::test]
     fn the_stale_notice_distinguishes_unread_unrefreshed_and_unregistered() {
-        let unread = detail_text(&stale_session_notice("user@box", HostLookup::Pending));
-        assert!(unread.contains("has not been read yet"), "{unread}");
+        let unread = stale_session_notice("user@box", HostLookup::Pending);
+        assert_eq!(unread.cause, "checking host");
+        assert_eq!(detail_text(&unread.explanation), "checking user@box…");
 
-        let unrefreshed = detail_text(&stale_session_notice(
-            "user@box",
-            HostLookup::Failed("connection refused"),
-        ));
-        assert!(
-            unrefreshed.contains("could not be refreshed")
-                && unrefreshed.contains("connection refused"),
-            "{unrefreshed}"
-        );
+        let unrefreshed =
+            stale_session_notice("user@box", HostLookup::Failed("connection refused"));
+        assert_eq!(unrefreshed.cause, "host state unavailable");
+        assert!(detail_text(&unrefreshed.explanation).contains("could not be refreshed"));
+        assert_eq!(detail_text(&unrefreshed.detail), "connection refused");
 
-        let gone = detail_text(&stale_session_notice("user@box", HostLookup::Absent));
+        let gone = detail_text(&stale_session_notice("user@box", HostLookup::Absent).explanation);
         assert!(
             gone.contains("no longer registered") && gone.contains("Re-adding"),
             "a removed host's remedy is registration, not waiting: {gone}"
         );
+    }
+
+    /// Every persistent host state must name its cause and keep the remedy
+    /// in the actionable tier. Retry evidence cannot churn the headline.
+    #[farhelm_testtrace::test]
+    fn outage_cards_share_causes_with_rows_and_preserve_remedies() {
+        let expected = [
+            "waiting for supervisor",
+            "waiting for supervisor",
+            "refreshing session",
+            "host is too new",
+            "host identity mismatch",
+            "host identity unverified",
+            "duplicate host",
+            "host connection stopped",
+            "host state unknown",
+        ];
+        for (state, expected) in every_phase().into_iter().zip(expected) {
+            let host = host(state);
+            let lookup = HostLookup::Known(&host);
+            let notice = stale_session_notice("<peer>\u{202e}", lookup.clone());
+            assert_eq!(notice.cause, expected);
+            assert_eq!(notice.cause, session_unavailable_cause(lookup));
+            if let Some(remedy) = state_remedy(&host.state) {
+                assert_eq!(notice.explanation, remedy);
+            }
+            if !is_connected(&host.state) {
+                assert_eq!(
+                    notice.detail.first(),
+                    Some(&DetailPart::peer("<peer>\u{202e}"))
+                );
+            }
+        }
+        let local = host(HostPhase::Unreachable {
+            cause: LOCAL_SUPERVISOR_NOT_RUNNING.to_string(),
+            last_error: "start the matching supervisor".to_string(),
+        });
+        let notice = stale_session_notice("local", HostLookup::Known(&local));
+        assert_eq!(notice.cause, "waiting for supervisor");
+        assert_eq!(Some(notice.explanation), state_remedy(&local.state));
     }
 
     /// `is_connected` decides presentation only, and must agree with the
