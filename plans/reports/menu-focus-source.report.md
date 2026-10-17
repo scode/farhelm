@@ -70,3 +70,45 @@ The required single fresh-context gpt-6.1-sol review at high effort found one st
 and the same reviewer rechecked it with no open findings. The review covered correctness, design, language idioms, the
 complexity gate, documentation and the full test-authoring checklist. Commit and PR wording passed a separate
 fresh-context cold read after revision.
+
+### Landing
+
+Landed in round 85, as #2232, second of the round's two plans, and unchanged from what the report describes.
+
+#### What landed since the PR was based, and whether it interacted
+
+Since this PR's base, main gained the session action shortcuts (#2218, #2221, #2230), including Rename from the
+keyboard, and, earlier in this round, the localhost tunnels from the Mac app (#2219, #2227, #2229, #2231). The landing
+monitor read them against this PR, and a fresh-context reviewer did the same independently. Neither found an
+interaction. The Rename shortcut's only change to the session row is its tooltip, apart from this PR's one-line addition
+there. Closing Rename returns focus to the terminal when the shortcut opened it, or to the row's menu button when the
+menu did; neither is a menu item, so Rename never goes through the new focus rule. No popup menu was added since the
+base, so the session, host, app-bar and template-number menus this PR sets up are still all of them. The tunnels change
+no menu. The landing rebase was clean, and the PR's diff is identical to the one the executor delivered.
+
+#### Fixes made during the landing
+
+None. The changelog entry stays a separate "fixed" entry rather than an edit of the earlier menu focus fix's entry
+(#2176), because that fix already shipped in v0.29.0.
+
+#### Things to keep in mind
+
+As the report and the changelog entry say, this is a limited fix. A focus move already sent to the desktop page cannot
+be recalled, so a rapid arrow press whose request was already on its way can still pull focus back after the user moved
+it. The near-term TODO entry for this case was removed with this PR even though its own example (Down twice, click the
+fourth item, Down) can still end on the fourth item when the second press's focus move was already sent. The remaining
+case is recorded only in the report, the changelog entry and the code comments; tracking it would need a new TODO entry.
+
+#### Checks
+
+- Run now, on main with this PR and the localhost tunnels merged together locally: `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, and the UI JavaScript
+  harness (`node --test`, 293 passed, run directly rather than through the recorder, so it has no run id), all clean.
+- Reused, from the executor's runs on the revision the report names: the menu unit tests
+  `fdc46282-338b-4bc3-9c59-32e7e4a4fbed` (21 passed) and the browser run of the menu keyboard cases on Chromium and
+  WebKit `51f312ec-4055-46d0-acef-2adebe538ab1` (20 passed). They predate the session shortcuts and tunnels, and no menu
+  browser case was re-run on the combined tree; that neither changes menu keyboard behavior rests on the code reading
+  above, not on a test.
+- Skipped: everything the report skipped, for the reasons it gives. The desktop bridge itself was not exercised.
+
+Nothing in the executor's report became untrue at landing.
