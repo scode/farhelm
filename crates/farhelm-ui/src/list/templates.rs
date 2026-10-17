@@ -308,6 +308,7 @@ fn from_word<T: serde::de::DeserializeOwned>(value: &str) -> Option<T> {
 /// way to make its launcher edit absent again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Field {
+    Prompt,
     Agent,
     Model,
     Effort,
@@ -324,7 +325,7 @@ pub(super) enum Field {
 impl Field {
     // Command-only fields lead when present; their absence keeps the agent
     // editor in its usual agent/model/effort order without a second ordering table.
-    pub(super) const ALL: [Self; 11] = [
+    pub(super) const ALL: [Self; 12] = [
         Self::Command,
         Self::Yolo,
         Self::Agent,
@@ -333,6 +334,7 @@ impl Field {
         Self::Permissions,
         Self::Trust,
         Self::Resume,
+        Self::Prompt,
         Self::Host,
         Self::Destination,
         Self::Name,
@@ -342,6 +344,7 @@ impl Field {
     /// separate edits so switching kind cannot silently reinterpret either.
     pub(super) fn label(self) -> &'static str {
         match self {
+            Self::Prompt => "initial prompt",
             Self::Agent => "agent type",
             Self::Model => "model",
             Self::Effort => "effort",
@@ -359,6 +362,7 @@ impl Field {
     /// in the DOM and in tests even though their labels deliberately match.
     pub(super) fn key(self) -> &'static str {
         match self {
+            Self::Prompt => "prompt",
             Self::Agent => "agent",
             Self::Model => "model",
             Self::Effort => "effort",
@@ -377,6 +381,7 @@ impl Field {
     /// will be applied; value truthiness must never decide whether it exists.
     pub(super) fn is_set(self, f: &TemplateFields) -> bool {
         match self {
+            Self::Prompt => f.prompt.is_some(),
             Self::Agent => f.agent.is_some(),
             Self::Model => f.model.is_some(),
             Self::Effort => f.effort.is_some(),
@@ -397,6 +402,7 @@ impl Field {
     /// replaced through another explicit control, including a model suggestion.
     fn escaped_read_only_value(self, f: &TemplateFields) -> Option<String> {
         let value = match self {
+            Self::Prompt => f.prompt.as_deref(),
             Self::Command => f.command.as_deref(),
             Self::Resume => f.resume_command.as_ref().and_then(|v| v.as_deref()),
             Self::Model => f.model.as_ref().and_then(|v| v.as_deref()),
@@ -410,7 +416,12 @@ impl Field {
         }?;
         value
             .chars()
-            .any(farhelm_proto::text::is_presentation_unsafe)
+            .any(|ch| {
+                // Textareas preserve message line breaks and tabs. Invisible
+                // formatting still uses the editor's raw-preserving escape.
+                !(self == Self::Prompt && matches!(ch, '\n' | '\t'))
+                    && farhelm_proto::text::is_presentation_unsafe(ch)
+            })
             .then(|| display_peer(value))
     }
 
@@ -418,6 +429,7 @@ impl Field {
     /// behalf. In particular, model/effort/trust do not require an agent type.
     fn add(self, f: &mut TemplateFields) {
         match self {
+            Self::Prompt => f.prompt = Some(String::new()),
             Self::Agent => f.agent = Some(LaunchHarness::ALL[0]),
             Self::Model => f.model = Some(None),
             Self::Effort => f.effort = Some(None),
@@ -436,6 +448,7 @@ impl Field {
     /// not reset the launcher's current value.
     pub(super) fn remove(self, f: &mut TemplateFields) {
         match self {
+            Self::Prompt => f.prompt = None,
             Self::Agent => f.agent = None,
             Self::Model => f.model = None,
             Self::Effort => f.effort = None,
@@ -457,6 +470,11 @@ impl Field {
     /// capability answers rather than a second list of per-agent facts.
     pub(super) fn offered(self, f: &TemplateFields) -> bool {
         match self {
+            Self::Prompt => {
+                f.kind == Some(LauncherKind::Agent)
+                    && f.agent
+                        .is_none_or(|agent| agent.supports_initial_prompt(false))
+            }
             Self::Host | Self::Destination | Self::Name => true,
             Self::Agent => f.kind.is_some(),
             Self::Command | Self::Yolo | Self::Resume => f.kind == Some(LauncherKind::Command),
@@ -719,6 +737,9 @@ pub(super) fn template_summary(fields: &TemplateFields) -> String {
         None => format!("{name} default"),
     };
     let mut parts = Vec::new();
+    if fields.prompt.is_some() {
+        parts.push("initial prompt".to_string());
+    }
     if let Some(kind) = fields.kind {
         parts.push(format!("{} launch", word(kind)));
     }
@@ -836,6 +857,19 @@ fn FieldEditor(
     let refusal = field.refusal(&current, catalog.as_deref());
     let label = field.label();
     let controls = match field {
+        Field::Prompt => rsx! {
+            label { class: "templates-field",
+                span { "initial prompt" }
+                textarea { class: "templates-prompt", rows: 4,
+                    value: escaped.unwrap_or_else(|| current.prompt.clone().unwrap_or_default()),
+                    disabled, readonly: text_read_only,
+                    autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                    "data-tooltip": "initial prompt: the first message on each launch from this template",
+                    oninput: move |event| { if !text_read_only { draft.with_mut(|draft| draft.fields.prompt = Some(event.value())); } },
+                }
+            }
+            span { class: "templates-hint", "Sent as the agent's first message on every launch from this template. You can still edit it in the launcher before launching." }
+        },
         Field::Agent => rsx! {
             Choice { label, value: current.agent.map(word).unwrap_or_default(),
                 options: LaunchHarness::ALL.iter().map(|a| (word(*a), crate::launch_composer::harness_label(*a).to_string())).collect(), disabled,
@@ -1690,6 +1724,41 @@ pub(super) fn TemplatesDialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Presence is the template edit, including an empty message that clears
+    /// the receiving draft. Compatibility belongs to the selected agent;
+    /// line breaks stay editable, while invisible formatting stays escaped.
+    #[test]
+    fn initial_prompt_field_preserves_presence_and_agent_compatibility() {
+        let mut fields = Draft::default().fields;
+        assert!(Field::Prompt.offered(&fields));
+        Field::Prompt.add(&mut fields);
+        assert_eq!(fields.prompt.as_deref(), Some(""));
+        assert!(Field::Prompt.is_set(&fields));
+        fields.prompt = Some("first\n\tsecond".into());
+        assert_eq!(Field::Prompt.escaped_read_only_value(&fields), None);
+        assert!(template_summary(&fields).contains("initial prompt"));
+        for harness in LaunchHarness::ALL {
+            fields.agent = Some(*harness);
+            assert_eq!(
+                Field::Prompt.offered(&fields),
+                harness.supports_initial_prompt(false)
+            );
+            assert_eq!(
+                Field::Prompt.refusal(&fields, None).is_none(),
+                harness.supports_initial_prompt(false)
+            );
+        }
+        fields.kind = Some(LauncherKind::Command);
+        assert!(!Field::Prompt.offered(&fields));
+        fields.prompt = Some("first\u{202e}\nsecond".into());
+        assert_eq!(
+            Field::Prompt.escaped_read_only_value(&fields).as_deref(),
+            Some("first<U+202E><U+000A>second")
+        );
+        Field::Prompt.remove(&mut fields);
+        assert_eq!(fields.prompt, None);
+    }
 
     /// All single-line peer-text fields share the read-only boundary, so a
     /// model or folder cannot conceal bytes that commands already protect.

@@ -2936,6 +2936,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   font-size: 13px;
 }
 .templates-field input,
+.templates-field textarea,
 .templates-field select {
   box-sizing: border-box;
   width: 100%;
@@ -2949,6 +2950,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   font-size: 13px;
 }
 .templates-code { font-family: var(--font-mono); }
+/* Prompt messages retain line breaks; vertical resizing stays within the
+   editor column on narrow windows. */
+.templates-field textarea {
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.45;
+}
 .templates-list-error { display: grid; gap: 8px; justify-items: start; }
 /* WebKit paints native select surfaces itself; keep its surface and our text
    in the same dark color scheme rather than pairing pale text with white. */

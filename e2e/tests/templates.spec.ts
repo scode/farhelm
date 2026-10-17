@@ -535,6 +535,77 @@ async function storedTemplate(request: APIRequestContext, name: string) {
   return body.templates.find((template: any) => template.name === name);
 }
 
+/** A prompt is a partial template edit, preserved across textarea newlines.
+ * Changing to an unsupported agent keeps the incompatible field visible until
+ * the user removes it; the add menu must then stop offering it.
+ */
+test("initial prompt template field preserves multiline text and agent compatibility", async ({ page, request }) => {
+  const name = `initial-prompt-${Date.now()}`;
+  const message = "first line\n\t--literal {farhelm_args}";
+  try {
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-new").click();
+    await dialog.locator(".templates-name").fill(name);
+    await addField(dialog, "initial prompt");
+    const prompt = dialog.getByLabel("initial prompt", { exact: true });
+    await expect(prompt).toBeEditable();
+    await prompt.fill(message);
+    await expect(prompt).toHaveValue(message);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields.prompt).toBe(message);
+    await expect(dialog.locator(".templates-row").filter({ has: page.getByText(name, { exact: true }) })
+      .locator(".templates-row-summary")).toContainText("initial prompt");
+    await addField(dialog, "agent type");
+    await dialog.getByLabel("agent type", { exact: true }).selectOption("pi");
+    await expect(dialog.locator('.templates-set-field[data-field="prompt"] .templates-error')).toContainText("does not fit");
+    await expect(prompt).toHaveValue(message);
+    await dialog.getByRole("button", { name: "remove initial prompt", exact: true }).click();
+    await dialog.locator(".templates-add").click();
+    await expect(dialog.locator(".templates-add-menu").getByRole("button", { name: "initial prompt", exact: true })).toHaveCount(0);
+    await dialog.locator(".templates-add").click();
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    const saved = await storedTemplate(request, name);
+    expect(saved.fields.agent).toBe("pi");
+    expect(saved.fields.prompt).toBeUndefined();
+  } finally {
+    await deleteTemplate(request, name);
+  }
+});
+
+/** Host-supplied formatting must be visible without rewriting the stored
+ * message when an unrelated field is saved. Explicit removal/re-addition is
+ * the editor's existing way to replace a value it cannot display directly.
+ */
+test("initial prompt template escapes formatting while preserving raw saved text", async ({ page, request }) => {
+  const name = `initial-prompt-escaped-${Date.now()}`;
+  const message = "first\u202e\nsecond";
+  try {
+    await putTemplate(request, name, { kind: "agent", prompt: message });
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-row-name").getByText(name, { exact: true }).click();
+    const prompt = dialog.getByLabel("initial prompt", { exact: true });
+    await expect(prompt).toHaveJSProperty("readOnly", true);
+    await expect(prompt).toHaveValue("first<U+202E><U+000A>second");
+    await addField(dialog, "session name");
+    await dialog.locator(".templates-session-name").fill("other edit");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields.prompt).toBe(message);
+    await dialog.getByRole("button", { name: "remove initial prompt", exact: true }).click();
+    await addField(dialog, "initial prompt");
+    await expect(prompt).toBeEditable();
+    await expect(prompt).toHaveValue("");
+    await prompt.fill("replacement\nmessage");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields.prompt).toBe("replacement\nmessage");
+  } finally {
+    await deleteTemplate(request, name);
+  }
+});
+
 /** An approvals-only template deliberately leaves the agent unset. Saving
  * non-YOLO choices must preserve that omission, since the agent selected at
  * launch owns the eventual compatibility decision. */
