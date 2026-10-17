@@ -145,6 +145,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   instead of the fifth. A full fix needs to know where each focus change came from, which the menus' focus events do not
   say today. Consider whether such a focus-source design is worth it; it would need its own scope and acceptance checks.
 
+- **Audit scroll regions for keyboard reach.** SPEC.md requires every scrollable region in the GUI to be reachable and
+  scrollable with the keyboard alone, WebKit included, with a tab stop of its own when its content holds nothing
+  focusable. The keyboard-scroll-regions plan fixed the host plans and the trash list but audited nothing else. Already
+  known to break the rule: the SSH connection help area while loading, showing an error or showing no commands, the
+  remove-host dialog's body, and the feedback dialog's "sent" message. Audit every scroll region and fix the ones that
+  fall short.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
