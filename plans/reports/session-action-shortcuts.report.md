@@ -93,3 +93,79 @@ applicable, complete runner reports. Selected-out Rust tests are distinct from r
 Each slice received the required single fresh-context gpt-6.1-sol high review. Escape and Delete had no findings.
 Rename's stale-title finding was fixed; its source recheck and the added external-rename regression review found no
 remaining issues. Each commit/PR message passed its cold reader.
+
+### Landing
+
+Landed on its own in round 84, as #2218, #2221 and #2230, merged bottom-up. The PRs are unchanged from what the report
+describes, apart from a merge with the quick-launch key sequences that landed just before (below).
+
+#### What landed since the stack was based, and whether it interacted
+
+Since this stack's base, main gained the quick-launch template sequences (#2220, #2225, #2228), which add their own
+window-wide keyboard listener, edit the session list view, and amend the same keyboard sections of SPEC.md and
+SPEC_impl.md. The landing monitor read the two features against each other, and a fresh-context reviewer did the same
+independently. Neither found a functional conflict:
+
+- The keys do not collide. Delete is Cmd+W in the Mac app and Ctrl+Shift+Backspace elsewhere; Rename is Cmd+L in the Mac
+  app and Ctrl+Shift+L elsewhere. A launch sequence starts with Cmd+X in the Mac app or Ctrl+Shift+X elsewhere, then
+  takes number keys (bare or with the number-shortcut chord), the ⚡ chord, Enter and Escape.
+- No key is consumed by both features. Pressing Delete or Rename while a launch sequence is waiting cancels the sequence
+  and then acts, as the quick-launch rule "any other key cancels and reaches its normal target" says. Delete still asks
+  its usual confirmation unless session confirmations are skipped. In the reverse order, with a Delete question showing,
+  a sequence started afterwards owns Enter and Escape, so its Enter cannot confirm the question.
+- The input-method guard stays first among the window listeners, and these shortcuts ignore keys during text
+  composition. The menu focus, keyboard scroll region and template name changes already in the base do not interact.
+- The SPEC.md and SPEC_impl.md amendments from both plans merge cleanly and agree.
+
+#### Fixes made during the landing
+
+The Rename PR (#2230) conflicted with the quick-launch landing in two places, both because each side added code at the
+same spot: the interface's top-level component, where each adds its own state, and the session list view, where each
+adds hidden trigger buttons. The landing kept both sides in each place. The window keyboard listeners run in the order
+they are installed, so a listener that consumes a key hides it from later ones; after the merge the order was already
+correct: input-method guard, launch sequence, quick switcher, quick launch, template numbers, session actions. No
+behavior was changed by hand.
+
+#### Things to keep in mind
+
+- The Mac app has not been exercised: Cmd+W, Cmd+L, Cmd+W with no session open, the rebuilt menu without Close Window,
+  Cmd+Q, and the window close button with saved size and position. The report already asks for a native pass, for
+  example through the devbuild flow.
+- Cmd+X from the terminal in the Mac app is an existing open question, not one this stack created: the quick-launch
+  landing already lists checking whether the Edit menu's Cut takes Cmd+X before Farhelm sees it. #2221 rebuilt the Mac
+  menu as a copy of the previous default, Cut included, so nothing changed there; but its SPEC_impl.md text now records
+  that a built-in menu item's fixed shortcut (Close Window's Cmd+W) wins before the page, which makes the concern more
+  likely. The Mac pass should try Cmd+X from the terminal together with the new shortcuts. If Cut wins, the Mac app's
+  menu definition that #2221 added is where the fix goes.
+- In the Mac app, W sits just below 2 and 3, so reaching for Cmd+2 or Cmd+3 (a template number key, alone or inside a
+  launch sequence) and hitting Cmd+W deletes the open session, immediately if session confirmations are skipped. One
+  possible follow-up is for an active sequence to swallow Cmd+W; that would be an exception to SPEC.md's rule that any
+  other key cancels the sequence and reaches its normal target, so it needs a decision.
+- The report records a retained, unclassified launcher layout failure in a test this plan does not touch. After this
+  landing the monitor ran that test on main: "composer fits a 1440 by 900 window without scrolling once a harness and
+  model are chosen" fails in both Chromium and WebKit on the asserted "must fit inside its own viewport", run
+  `7d8604f9-5825-4833-9529-fc9779848919`. When it started failing has not been established.
+- Minor: the docs pages this stack edits write keys in bold (**Cmd+L**), while the rest of the docs write them plain.
+
+#### Checks
+
+Because the landing merged this stack with another keyboard feature, both features' browser tests ran together on the
+merged code, and the code the merge touched was checked again.
+
+- Run now, at the rebased tip after fresh `cargo build` and web release builds: the session-shortcut, session
+  confirmation and quick-launch browser specs in full, on Chromium and WebKit, through the test recorder with the pinned
+  tmux, one worker and no retries:
+  `npx playwright test session-action-shortcuts.spec.ts session-confirmations.spec.ts quick-launch.spec.ts`. 76 of 76
+  passed with no skips, run `a3221a40-35d6-4bb2-9944-1ccdd2002db7`.
+- Run now: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, and the UI JavaScript harness (`node --test`, 290 passed, run directly
+  rather than through the recorder), all clean.
+- Run now, on main after the merge (the same code): the UI crate's unit tests through the recorder,
+  `cargo nextest run -p farhelm-ui --lib`, 515 of 515 passed, run `03bae717-87c1-4438-9c87-a835ae6fefcc`; `dprint check`
+  on SPEC.md, SPEC_impl.md, TODO.md and the three edited docs pages; and `python3 releasing/check-changelog.py format`,
+  all clean.
+- Reused: the executor's test-sleep check and its focused browser runs listed in the report, for the parts of each PR
+  the merge did not touch.
+- Skipped: everything the report skipped, for the reasons it gives.
+
+Nothing in the executor's report became untrue at landing.
