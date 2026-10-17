@@ -1330,45 +1330,6 @@ test("second client takes over; first shows the detach banner", async ({
   await second.close();
 });
 
-// PLAN_M2.md acceptance 4: a restart-gap session (tmux gone, metadata
-// intact) must open to "metadata plus why there is no terminal", not a
-// silently blank pane. Nothing before this test pinned the UI half of
-// that criterion — the Rust suite covers only the supervisor side, in
-// `restart_gap_lists_sessions_without_a_terminal_and_attach_fails`
-// (crates/farhelm/tests/e2e.rs).
-//
-// This suite's stack cannot restart its supervisor mid-run
-// (start-stack.sh boots one long-lived supervisor for the whole file), so
-// a genuine restart gap is out of reach here. The stand-in: a session row
-// the real supervisor has never heard of. That is a DIFFERENT failure
-// branch on the supervisor side — an id absent from `sup.sessions`
-// entirely takes the "no such session: {id}" arm of `ControlMsg::Attach`'s
-// handler (service.rs), while a genuine restart-gap row (present in the
-// map, `entry.terminal` empty) takes the sibling "session {id} has no
-// terminal ..." arm right below it, worded from the session's durable
-// outcome (`missing_terminal_message`) — distinct branch, distinct
-// wording, not reproduced here. What the two DO share, and what this test actually
-// exercises, is everything downstream of that error: `serve_term` in
-// farhelm-helm/src/lib.rs attaches over a REAL WebSocket, gets back
-// whichever error, and relays it as a genuine `detached` control message
-// the same way regardless of which arm produced it; the browser side
-// (terminal.js's `showBanner`) and the list UI's metadata rendering have
-// no way to tell the two apart either. So this pins the shared
-// helm/WebSocket/UI error-display path — the UI CONTRACT of "metadata
-// shown, plus a server-provided explanation instead of a silently blank
-// terminal" — not the restart-gap-specific message, which belongs to the
-// Rust test named above.
-//
-// Only the row's EXISTENCE is synthetic: route-intercepted GET
-// /api/sessions, injecting one extra row alongside the real ones (rather
-// than fabricating the whole response) so the shared "e2e-session" row
-// every other test in this file depends on still comes from the real
-// supervisor on THIS request. That protection is necessarily local to
-// this one route handler and this one page, though: Playwright routes are
-// page-scoped, so nothing here could leak into another test's page even
-// if it wanted to. The banner text is asserted only to be non-empty and
-// to name the session, whatever exact prose this particular arm's error
-// happens to carry.
 // While the session view marks its panes as deleting, a detach notice's
 // banner is held back, and it paints once the mark clears with the terminal
 // still mounted: the failed-delete path.
@@ -1449,15 +1410,34 @@ test("a detach banner is held while a delete is in flight and paints if it fails
   expect(await page.evaluate(() => (window as any).__bannerShownWhileDeleting)).toBe(false);
 });
 
-test("opening a terminal-less session shows its metadata and the server's own explanation", async ({
+/**
+ * A stale listing must retain its metadata and show calm recovery when the
+ * supervisor refuses the terminal, rather than leaving an unexplained pane.
+ *
+ * Only the listing row is synthetic; the real attach must fail with the
+ * missing session's identity before the recovery surface is accepted as
+ * evidence. This is an infrastructure refusal, not a final stall or takeover
+ * decision, so it must not produce a red detach banner. Known interrupted
+ * sessions have separate card coverage in terminal-restart.spec.ts.
+ */
+test("opening a stale session shows metadata and calm terminal recovery", async ({
   page,
 }) => {
-  // A well-formed but unknown UUID: recognizable in the banner text
-  // without colliding with any id a real session in this run could have.
+  // A well-formed but unknown UUID identifies this fixture's real refusal
+  // without colliding with any session in the shared stack.
   const bogusId = "00000000-0000-0000-0000-000000000000";
   const title = `terminal-less-${Date.now()}`;
   const cwd = "/tmp/terminal-less-fixture";
   const invocation = "true";
+  const detachReasons: string[] = [];
+  page.on("websocket", (socket) => {
+    if (new URL(socket.url()).pathname !== `/api/sessions/${bogusId}/term`) return;
+    socket.on("framereceived", ({ payload }) => {
+      if (typeof payload !== "string") return;
+      const frame = JSON.parse(payload);
+      if (frame.type === "detached") detachReasons.push(frame.reason);
+    });
+  });
 
   // This test only ever issues GETs against this route (no create/stop/
   // delete call in its body), so there is no other method to fall through
@@ -1474,9 +1454,8 @@ test("opening a terminal-less session shows its metadata and the server's own ex
       title,
       cwd,
       invocation,
-      // Exactly the shape a restart-gap row has (PLAN_M2.md, and
-      // `SessionStatus::Exited` in farhelm-proto/src/lib.rs): known dead,
-      // no code to fabricate.
+      // Keep the row terminal-bearing rather than classifying it as an
+      // interrupted session, whose dedicated card suppresses attachment.
       status: { state: "exited", exit_code: null },
     });
     listing.total += 1;
@@ -1496,22 +1475,17 @@ test("opening a terminal-less session shows its metadata and the server's own ex
   await expect(page.locator(".titlebar .header-copy").nth(0)).toContainText(cwd);
   await expect(page.locator(".titlebar .header-copy").nth(1)).toContainText(invocation);
 
-  // (b) the banner becomes visible and carries the server's own reason
-  // (farhelm-ui/assets/terminal.js's showBanner, fed by serve_term's
-  // `detached` notice — "Detached: <reason>"), not a blank pane or a
-  // generic "connection closed". This IS this test's real synchronization
-  // point: the banner is asynchronous, arriving only after the WS
-  // round-trips through the real attach failure, so waiting on it (rather
-  // than on `__farhelmTermReady`, which flips as soon as mount() opens the
-  // socket and says nothing about how the attach behind it resolves) is
-  // what actually proves the failure was relayed all the way to the DOM.
-  const banner = page.locator("#term-banner");
-  await expect(banner).toBeVisible({ timeout: 10_000 });
-  // The visibility assertion above guarantees the element exists, so
-  // `textContent()` cannot be null here.
-  const bannerText = await banner.textContent();
-  expect(bannerText).toMatch(/^Detached: .+/);
-  expect(bannerText).toContain(bogusId);
+  // A connected socket alone cannot prove that the server refused this
+  // attach: wait for the real refusal before inspecting the recovery UI.
+  await expect.poll(() => detachReasons.some((reason) => reason.includes(bogusId)), {
+    timeout: 10_000,
+    message: "the supervisor refused this fixture's missing terminal",
+  }).toBe(true);
+  const recovery = page.locator("#term-connecting .session-unavailable-card");
+  await expect(recovery).toBeVisible({ timeout: 10_000 });
+  await expect(recovery).toContainText("Session unavailable — reconnecting");
+  await expect(recovery.locator(".terminal-reconnect-now")).toBeEnabled();
+  await expect(page.locator("#term-banner")).toBeHidden();
 
   // (c) no agent output ever reached the terminal: the attach failed
   // before any `TermEvent::Data` could exist to write into the buffer.
