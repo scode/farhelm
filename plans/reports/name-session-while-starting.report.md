@@ -80,3 +80,72 @@ coverage. No live installation was changed, and no native desktop runtime was ex
 Each PR passed its single fresh-context gpt-6.1-sol review at high effort. The preference-fixture correction passed the
 same reviewer's follow-up check, as did the settings-test correction. Commit and PR wording passed cold reads. No source
 finding or scope departure remains.
+
+### Landing
+
+Landed on its own in round 86, as #2233 and #2234, merged bottom-up and unchanged from what the report describes.
+
+#### What landed since the stack was based, and whether it interacted
+
+Besides plan-queue bookkeeping, one change reached main between this stack's base and its landing: #2235, which only
+adds a TODO.md entry about supporting agent wrappers. #2234 also edits TODO.md, removing this plan's entry, and the two
+did not conflict; the landing rebase was clean and both PRs' diffs are identical to the ones the executor delivered. The
+base already held the work this stack builds on: the quick-launch key sequences and partial templates (#2220, #2225,
+#2228), the session action shortcuts including Rename from the keyboard (#2218, #2221, #2230), the localhost tunnels
+(#2219, #2227, #2229, #2231), initial prompts (#2200, #2203), the outage card (#2198) and the input-method guard
+(#2194). The landing monitor read the stack against them, and a fresh-context reviewer did the same independently.
+Neither found an interaction:
+
+- A launch sequence ends in a single session creation, so the bolt shortcut, number keys, sequences and the quick
+  switcher's Quick launch row all reach naming the same way. A partial template, a refusal, a YOLO question or an
+  offline host opens the session launcher before any success, and naming then does not open.
+- Naming reuses the Rename dialog that the Rename shortcut opens, and returns focus to the terminal the same way. The
+  key-sequence, number-key and session-shortcut listeners ignore keys while it is open, and it already ignores Enter and
+  Escape during input-method composition. The stack adds no new text input.
+- Naming opens only after the session is accepted, so it does not delay creation or the initial prompt, and the
+  launcher's protection against starting a retried launch twice is unchanged.
+
+#### Upgrade
+
+#2233 moves the helm database from schema 55, which the localhost tunnels introduced, to 56 by adding one nullable
+column for the naming setting, following the same steps as the tunnel consent column; no other change claims schema 56.
+An unset value means naming is on, for new and upgraded helms alike, so existing users will see the naming dialog after
+a quick launch. SPEC.md says the switch is on even when the helm never stored a choice; the docs page and the changelog
+entry call it on by default and name the Settings switch that turns it off. An older helm refuses the newer database,
+which the plan accepted.
+
+#### Main was failing three helm tests, and this stack fixes them
+
+The tunnel landing in round 85 (#2229) added the tunnel consent column but did not remove it from three test fixtures
+that rewind a database to an older schema, so those three helm tests have failed on main since then. The tunnel plan's
+executor ran only targeted helm test selections, which did not include these fixtures, and the landing monitor reused
+those runs instead of running the whole helm library test set, so neither caught it. #2233 removes both the tunnel
+consent column and its own column in those fixtures. The report attributes its first run's three failures (run
+`6ae9e22d-ac8b-4df1-a3ff-9d38c8816843`) to its own column only; the tunnel column was the original cause on main. The
+monitor confirmed all three failing on main before this landing, run `d3e85d00-f298-4382-9774-d115f509aaf2`, and the
+whole helm test set passes after it (below).
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-up
+
+Minor: the Launch templates docs page says the naming choice is shared by every window but leaves out that other open
+windows pick it up only when they reload, which the Settings help text does say.
+
+#### Checks
+
+- Run now, on main after this landing: the helm crate's library tests through the test recorder, four slots and no
+  retries, `cargo nextest run -p farhelm-helm --lib`. 1154 passed and 2 failed, run
+  `fb6f2d7d-ca0c-4594-8fc7-bd540cfff8f6`. The two failures were the provisioning tests, which install this checkout's
+  own build of Farhelm, and that build was stale (protocol 53, from before the tunnels). After a fresh `cargo build`
+  both provisioning tests passed, run `28b5b766-6ce8-4def-b430-b80f22c51a02`. Across the two runs, all 1156 helm library
+  tests pass on main; the failed run is retained.
+- Reused: the executor's recorded runs listed in the report, including the helm and UI library run
+  `060ca4ba-dcde-4caf-b124-f8c8c0b54e93` (1,676 passed), the quick-launch browser run
+  `95f3d26c-9dfd-4c5e-8a42-319aeeb6977b` (64 passed) and the settings retry `91dacba2-1b66-4f62-a149-ebd749ce688a`, at
+  the revisions the report gives, plus its builds and static checks. The landing rebase changed no code.
+- Skipped: everything the report skipped, for the reasons it gives.
+
+Apart from the cause of the three fixture failures, nothing in the executor's report became untrue at landing.
