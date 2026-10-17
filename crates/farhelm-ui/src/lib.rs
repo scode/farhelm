@@ -147,6 +147,7 @@ mod hosts;
 mod icons;
 mod launch_composer;
 mod launch_controls;
+mod launch_sequence;
 mod list;
 mod menu_panel;
 mod modal_isolation;
@@ -1549,6 +1550,14 @@ fn AppBody() -> Element {
     // embedded asset handler to be its first hook, and this is the one
     // component both builds mount, with every animation underneath it.
     use_hook(install_window_activity_tracking);
+    // The sequence owns consumed keys before the ordinary command listeners;
+    // its asset stops same-window listeners as well as terminal propagation.
+    use_hook(|| {
+        document::eval(&format!(
+            "{}\nwindow.installLaunchSequence({HAS_NEW_SESSION_SHORTCUT});",
+            include_str!("../assets/launch-sequence.js")
+        ));
+    });
     use_hook(install_quick_switcher_shortcut);
     use_hook(install_quick_launch_shortcut);
     use_hook(install_template_number_shortcuts);
@@ -1561,6 +1570,7 @@ fn AppBody() -> Element {
         }
     });
     let mut current = use_signal(|| None::<Session>);
+    use_context_provider(|| launch_sequence::LaunchSequence(Signal::new(None)));
     // A keyed SessionView unmounts on navigation; unresolved Replace belongs
     // to the page so retrying from another surface still names the same create.
     use_context_provider(|| list::ReplaceIntent(Signal::new(None)));
@@ -1826,6 +1836,7 @@ fn AppBody() -> Element {
                                 }
                             },
                         }
+                        launch_sequence::LaunchSequenceIndicator {}
                     }
             }
             }

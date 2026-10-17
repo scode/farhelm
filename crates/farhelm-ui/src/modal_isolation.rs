@@ -116,6 +116,9 @@ const ISOLATE_TEMPLATE: &str = r#"(() => {
     // An opening matters even if it closes before an asynchronous continuation
     // next checks the DOM. Quick launch uses this epoch to retire an old read.
     window.__farhelmModalOpening = (window.__farhelmModalOpening || 0) + 1;
+    // A programmatic dialog opening cancels a sequence even before focus or
+    // another key arrives; the modal and its caller keep their usual focus.
+    window.cancelFarhelmLaunchSequence?.();
     const escapeSelector = __ESCAPE__;
 
     // The dialog and its ancestors up to body stay live; every other element

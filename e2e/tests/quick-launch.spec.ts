@@ -92,6 +92,179 @@ test.afterEach(async ({ request }) => {
   await resetPreferences(request);
 });
 
+/** A partial first template and runnable final template require a render after
+ * the last replay. The held create and paint observer distinguish a direct
+ * composed launch from a draft exposed with an obsolete incomplete reason. */
+test("launch sequence stacks a number template and bolt without showing New", async ({ page, request }, testInfo) => {
+  const prefix = `sequence-${Date.now()}`;
+  const partial = `${prefix}-partial`;
+  const runnable = `${prefix}-run`;
+  const source = await createSession(request, { title: `${prefix}-source` });
+  const gate = routeGate();
+  const created: string[] = [];
+  const bodies: any[] = [];
+  const binary: Buffer[] = [];
+  let bodyFailed = false;
+  try {
+    await commandTemplate(request, runnable);
+    const saved = await request.put(`/api/templates/${partial}`, {
+      data: { name: "earlier-name", kind: "agent" },
+    });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    page.on("websocket", (socket) => {
+      if (new URL(socket.url()).pathname.endsWith("/term")) {
+        socket.on("framesent", ({ payload }) => {
+          if (Buffer.isBuffer(payload)) binary.push(payload);
+        });
+      }
+    });
+    await patchPreferences(request, { template_shortcuts: { "1": partial }, quick_launch_template: runnable });
+    await pinAutoSelect(page, source.id);
+    await page.goto("/");
+    await attachSession(page, source.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    binary.length = 0;
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      bodies.push(route.request().postDataJSON());
+      await gate.wait();
+      const response = await route.fetch();
+      if (response.ok()) created.push((await response.json()).id);
+      await route.fulfill({ response });
+    });
+    await page.evaluate(() => {
+      const root = window as unknown as { sequencePainted: boolean; sequenceObserver: MutationObserver };
+      root.sequencePainted = false;
+      root.sequenceObserver = new MutationObserver(() => {
+        if (document.querySelector(".create-session-form")?.getClientRects().length) root.sequencePainted = true;
+      });
+      root.sequenceObserver.observe(document.body, { childList: true, subtree: true, attributes: true });
+    });
+    await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+    await page.keyboard.press("Control+Shift+KeyX");
+    const indicator = page.locator(".launch-sequence-indicator");
+    await expect(indicator).toHaveAttribute("role", "status");
+    await expect(indicator).toContainText("press number keys");
+    await page.keyboard.press("Digit1");
+    await chord(page);
+    await expect(indicator).toContainText(partial);
+    await expect(indicator).toContainText(runnable);
+    await page.screenshot({ path: testInfo.outputPath("launch-sequence.png") });
+    await page.keyboard.press("Enter");
+    await expect.poll(() => bodies.length).toBe(1);
+    const form = page.locator(".create-session-form");
+    await expect(form).toHaveCount(1);
+    await expect(form).toBeHidden();
+    await expect(indicator).toHaveCount(0);
+    expect(bodies[0]).toMatchObject({ title: `${runnable}-session`, command: { command: FAKE_AGENT, yolo: false } });
+    expect(Buffer.concat(binary).toString(), "the sequence owns its complete input").toBe("");
+    gate.release();
+    await expect.poll(() => created.length).toBe(1);
+    await expect(page.locator(`[data-session-id="${created[0]}"]`)).toHaveAttribute("data-session-selected", "true");
+    await expect(form).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { sequencePainted: boolean }).sequencePainted)).toBe(false);
+    expect(bodies).toHaveLength(1);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["launch gate", () => gate.release()],
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["paint observer", () => page.evaluate(() =>
+        (window as unknown as { sequenceObserver?: MutationObserver }).sequenceObserver?.disconnect()
+      )],
+      ["created sessions", () => cleanupOwnedSteps(false, created.map((id) => [id, () => cleanupSession(request, id)]))],
+      ["source", () => cleanupSession(request, source.id)],
+      ["templates", async () => {
+        for (const name of [partial, runnable]) {
+          const removed = await request.delete(`/api/templates/${name}`);
+          expect(removed.ok() || removed.status() === 404).toBe(true);
+        }
+      }],
+    ]);
+  }
+});
+
+/** Cancelling by ordinary typing must deliver that same key to the old agent.
+ * Escape and programmatic modal focus instead cancel without creating anything. */
+test("launch sequence cancellation leaves ordinary terminal input and modals in control", async ({ page, request }) => {
+  const source = await createSession(request, { title: `sequence-cancel-${Date.now()}` });
+  try {
+    await pinAutoSelect(page, source.id);
+    await page.goto("/");
+    await attachSession(page, source.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+    const indicator = page.locator(".launch-sequence-indicator");
+    await page.keyboard.press("Control+Shift+KeyX");
+    await expect(indicator).toBeVisible();
+    const probe = `sequence-pass-${Date.now()}`;
+    await page.keyboard.type(probe);
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, `echo:${probe}`);
+    await expect(indicator).toHaveCount(0);
+    await page.keyboard.press("Control+Shift+KeyX");
+    await expect(indicator).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(indicator).toHaveCount(0);
+    await page.keyboard.press("Control+Shift+KeyX");
+    await expect(indicator).toBeVisible();
+    // Mount and focus a modal fixture without dispatching any click or key.
+    // A synthetic button.click() would cancel through the click listener and
+    // could pass even if the modal-focus cancellation were missing.
+    await page.evaluate(() => {
+      const dialog = document.createElement("div");
+      dialog.id = "sequence-modal-fixture";
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.tabIndex = -1;
+      dialog.textContent = "programmatic modal";
+      document.body.append(dialog);
+      dialog.focus();
+    });
+    await expect(page.locator("#sequence-modal-fixture")).toBeFocused();
+    await expect(indicator).toHaveCount(0);
+    await page.locator("#sequence-modal-fixture").evaluate((dialog) => dialog.remove());
+  } finally {
+    await cleanupSession(request, source.id);
+  }
+});
+
+/** The prefix's editing exception applies before a sequence starts, while an
+ * unbound digit remains queued until Enter opens the existing binding hint. */
+test("launch prefix keeps text fields and resolves an unbound digit only at Enter", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+  // All ordinary app editors currently sit in dialogs. A non-modal editor
+  // fixture distinguishes the text-field exception from the modal guard.
+  await page.evaluate(() => {
+    const input = document.createElement("input");
+    input.id = "sequence-editor-fixture";
+    input.addEventListener("keydown", (event) => {
+      if (event.code === "KeyX") input.dataset.prefixPassed = String(!event.defaultPrevented);
+    });
+    document.querySelector(".app-main")!.append(input);
+    input.focus();
+  });
+  const editor = page.locator("#sequence-editor-fixture");
+  await expect(editor).toBeFocused();
+  await expect(page.locator('[role="dialog"][aria-modal="true"]:visible')).toHaveCount(0);
+  await page.keyboard.press("Control+Shift+KeyX");
+  await expect(editor).toHaveAttribute("data-prefix-passed", "true");
+  await expect(page.locator(".launch-sequence-indicator")).toHaveCount(0);
+  await editor.evaluate((input) => input.remove());
+  await page.keyboard.press("Control+Shift+KeyX");
+  await page.keyboard.press("Digit9");
+  await expect(page.locator(".launch-sequence-indicator")).toBeVisible();
+  await expect(page.locator(".templates-dialog")).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".templates-dialog")).toBeVisible();
+  await expect(page.locator(".templates-dialog")).toContainText("number");
+  await expect(page.locator(".launch-sequence-indicator")).toHaveCount(0);
+});
+
 /** A completed preparation read belongs to its opening, even if the user
  * opens and cancels New while the read is held. The diagnostic generation
  * proves that the old continuation finished; absence alone is not readiness. */
