@@ -634,23 +634,6 @@ an existing question remounts. Confirm buttons consume repeated or composing Ent
 opening key cannot also answer the question. Host dialogs retain quiet scripted focus and independent Escape selectors;
 trash focuses and scrolls its confirming answer into view. YOLO and Restart with keep their Cancel default.
 
-**Input-method keys.** `composition-guard.js` installs before AppBody's other window capture listeners. It marks an
-otherwise noncomposing keydown as composing when the same input just ended a composition, so existing Rust guards,
-desktop event serialization and JS shortcuts see the same value. This works around
-[WebKit's end-before-keydown order](https://bugs.webkit.org/show_bug.cgi?id=165004); Dioxus's desktop keyboard API does
-not expose the legacy key code, and 229 alone would also suppress ordinary Pinyin Enter. The compatibility hint expires
-after 16ms and is consumed by the next keydown or keyup; 229 does not extend it because it can also label an ordinary
-Enter. An unreleased native composing key on the target makes the end ambiguous: it could be Chromium's ending key, or
-earlier WebKit typing or a modifier still held. The listener declines a hint in both cases, deliberately leaving WebKit
-rollover unprotected so Chromium's separate next key works even before the ending key is released. Only a matching key
-code releases the recorded composing key; any keyup retires a pending end conservatively. Browser replay of the outlined
-229-or-window rule exposes the conflict at equal elapsed time; a threshold cannot select the two different desired
-outcomes. This is the agreed spare-real-key fallback, not an inference that a held key caused the end. The 16ms bound
-covers the immediate replay sequence with a scheduling margin, not measured native Mac timing; delayed ending keys
-remain unprotected. Installation is idempotent across authenticated-tree remounts, and xterm's helper textarea retains
-its own input-method handling. Browser tests replay both orders and pin the overlap omission; they do not establish real
-Mac IME or desktop-shell behavior.
-
 Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
 appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. In-place
 confirmations retain their panel so the user can finish the interaction. Rename does not: opening it closes the menu and
@@ -839,6 +822,23 @@ Known risks, accepted deliberately:
   SPEC.md's confirmation language is deliberately mechanism-agnostic; this is the constraint that picks the mechanism.
 - Blitz (Dioxus's native renderer) is not production-ready. The plan assumes webview desktop indefinitely; nothing may
   depend on Blitz landing.
+
+**Input-method keys.** `composition-guard.js` installs before AppBody's other window capture listeners. It marks an
+otherwise noncomposing keydown as composing when the same input just ended a composition, so existing Rust guards,
+desktop event serialization and JS shortcuts see the same value. This works around
+[WebKit's end-before-keydown order](https://bugs.webkit.org/show_bug.cgi?id=165004); Dioxus's desktop keyboard API does
+not expose the legacy key code, and 229 alone would also suppress ordinary Pinyin Enter. The compatibility hint expires
+after 16ms and is consumed by the next keydown or keyup; 229 does not extend it because it can also label an ordinary
+Enter. An unreleased native composing key on the target makes the end ambiguous: it could be Chromium's ending key, or
+earlier WebKit typing or a modifier still held. The listener declines a hint in both cases, deliberately leaving WebKit
+rollover unprotected so Chromium's separate next key works even before the ending key is released. Only a keyup of the
+same physical key (`event.code`) releases the recorded composing key; any keyup retires a pending end conservatively.
+Browser replay of the outlined 229-or-window rule exposes the conflict at equal elapsed time; a threshold cannot select
+the two different desired outcomes. This is the agreed spare-real-key fallback, not an inference that a held key caused
+the end. The 16ms bound covers the immediate replay sequence with a scheduling margin, not measured native Mac timing;
+delayed ending keys remain unprotected. Installation is idempotent across authenticated-tree remounts, and xterm's
+helper textarea retains its own input-method handling. Browser tests replay both orders and pin the overlap omission;
+they do not establish real Mac IME or desktop-shell behavior.
 
 ## Terminal widget: xterm.js island
 
