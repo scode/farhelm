@@ -7248,10 +7248,14 @@ test("composer fits a 1440 by 900 window without scrolling once a harness and mo
   await expect(form.locator("#launch-composer-model-results")).toHaveCount(0);
   await expect(form.locator(".launch-composer-effort-choice")).toBeVisible();
 
+  const dimensions = await form.evaluate((node) => ({
+    scrollHeight: node.scrollHeight,
+    clientHeight: node.clientHeight,
+  }));
   expect(
-    await form.evaluate((node) => node.scrollHeight <= node.clientHeight),
-    "the populated resting composer must fit inside its own viewport",
-  ).toBe(true);
+    dimensions.scrollHeight,
+    `the populated resting composer must fit inside its own viewport: ${JSON.stringify(dimensions)}`,
+  ).toBeLessThanOrEqual(dimensions.clientHeight);
   expect((await form.boundingBox())!.width, "the full-width dialog must match the mockup footprint").toBe(960);
 
   const destination = form.locator(".launch-composer-column-destination");

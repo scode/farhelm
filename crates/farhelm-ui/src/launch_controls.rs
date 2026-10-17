@@ -537,8 +537,10 @@ pub(crate) fn LaunchControls(
                 div { class: "launch-composer-choice initial-prompt-choice",
                     label {
                         span { class: "launch-composer-section-label", "initial prompt" }
+                        // Extra intrinsic rows would defeat the compact
+                        // minimum height of .initial-prompt in app.css.
                         textarea {
-                            class: "initial-prompt", rows: 4,
+                            class: "initial-prompt", rows: 3,
                             value: if prompt_read_only { display_peer(&prompt) } else { prompt.clone() },
                             readonly: prompt_read_only,
                             disabled: busy, autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
