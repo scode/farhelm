@@ -329,7 +329,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
       await expect(row(next.id)).toHaveAttribute("data-session-selected", "true");
       source = next;
     }
-    await expect(page.locator(".header-delete")).toHaveAttribute("data-tooltip", "delete: remove this session and its state");
+    await expect(page.locator(".header-delete")).toHaveAttribute("data-tooltip", "delete: remove this session and its state (Ctrl+Shift+Backspace)");
     const headerDeleted = page.waitForResponse((reply) => reply.request().method() === "DELETE"
       && new URL(reply.url()).pathname === `/api/sessions/${source.id}`);
     await page.locator(".header-delete").click();

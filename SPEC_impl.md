@@ -936,6 +936,14 @@ edits. Clone/Replace revokes any pending choice, and closing clears the parent o
 search-accept callback as Enter and a clicked search result. Completed read failures follow that callback's ordinary
 refusal behavior; resource refreshes do not reapply the initial choice. Name and template picks do not submit the form.
 
+Session-action shortcuts use an idempotent capture listener and a pure key matcher from `session-action-shortcuts.js`.
+The build's Mac-desktop condition selects Cmd+W for Delete; browsers use Ctrl+Shift+Backspace. A visible modal yields,
+and browser Delete leaves ordinary editors alone while consuming xterm's input proxy. Matching keys stop before xterm;
+repeat and disabled controls never click. Delete clicks the current header button, sharing admission, confirmation and
+the skip preference. Cmd+W is consumed even without a header. The Mac desktop installs an explicit native menu without
+muda's predefined Close Window, whose fixed Cmd+W accelerator would win before the page. Its renderer-free description
+is tested on Linux; native construction is type-checked by Linux desktop builds, while only macOS installs it.
+
 Number shortcuts use a capture listener with an independently testable physical `Digit0`–`Digit9` matcher. The build's
 Mac-desktop condition selects Meta alone; every other build selects Ctrl+Shift alone, never `navigator.platform`. Ten
 hidden `.template-number-trigger` buttons hand the digit to the same list callback that handles quick launch; the

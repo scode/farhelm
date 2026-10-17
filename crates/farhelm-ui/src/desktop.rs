@@ -21,7 +21,8 @@
 //! credential file and the atomic write both state files share,
 //! `tmux_preflight` picks the supervisor's tmux and refuses an unusable
 //! one, `bundle` finds the pieces installed beside the app, and `updater`
-//! keeps an installed app up to date.
+//! keeps an installed app up to date. `menu` preserves native Mac menu actions
+//! while leaving Cmd-W available for deleting the open session.
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,7 @@ use farhelm_supervisor::service::{SHUTDOWN_OUTPUT_BUDGET, STATE_DIR_CLAIM_WAIT};
 
 mod assets;
 mod bundle;
+mod menu;
 mod state;
 mod tmux_preflight;
 mod updater;
@@ -204,7 +206,7 @@ pub fn run() -> anyhow::Result<()> {
     // has to work through — including the one risk it is most likely to
     // trip over — is written out in `attachments`' module header.
     builder
-        .with_cfg(
+        .with_cfg(menu::configure(
             dioxus::desktop::Config::new()
                 // Dioxus's index has no charset declaration. WebKit otherwise
                 // can choose a legacy encoding for this native page and the text
@@ -231,7 +233,7 @@ pub fn run() -> anyhow::Result<()> {
                         .observe(event, &state_path);
                 })
                 .with_disable_drag_drop_handler(true),
-        )
+        ))
         .launch(crate::App);
     Ok(())
 }

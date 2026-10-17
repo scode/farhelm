@@ -1766,6 +1766,11 @@ Cmd+N in the Mac desktop app opens New with the same prefill, even from a focuse
 New is disabled. New's hover text names the shortcut in the Mac desktop app only; the web UI has no such shortcut
 because browsers keep Cmd/Ctrl+N for a new window.
 
+Cmd+W in the Mac desktop app, or Ctrl+Shift+Backspace in browsers (including on Mac), invokes the open session's header
+Delete action with its ordinary confirmation and busy rules. With no session open it does nothing. The Mac app's Window
+menu has no Close Window item, leaving Cmd+W to session deletion; the window close button and Cmd+Q still close the app.
+The browser chord leaves text editors other than the terminal alone. A visible modal keeps keyboard ownership.
+
 Cmd+0–9 in the Mac desktop app, or Ctrl+Shift+0–9 in every other client, directly launches templates with number keys
 (see Creation). Browsers on a Mac use Ctrl+Shift as well, leaving their Cmd+digits free for tabs and zoom.
 
