@@ -825,8 +825,10 @@ The help leads with the mechanism: Claude has no supported switch, so Farhelm ed
 key, with an atomic replacement, and makes a best-effort removal when the checkout is archived or retired as missing. An
 archive refusal leaves the directory and trust in place. A launch or Delete never fails because this edit failed. The
 caution explains that Claude's unlocked exit save can lose either writer's update, future Claude versions may change the
-file or locking without notice, and Farhelm cannot promise continued safety. Trust allows repository hooks and commands
-just as answering Yes does. The mechanism is explicitly opt-in and best effort.
+file or locking without notice, and Farhelm cannot promise continued safety. Farhelm follows Claude's advisory lock the
+way Claude's own writers do: a writer stalled past Claude's stale-lock threshold can lose an update in either direction
+when another writer takes over. This is an accepted trade-off of editing Claude's file. Trust allows repository hooks
+and commands just as answering Yes does. The mechanism is explicitly opt-in and best effort.
 
 While Claude's trust question is visible in the agent terminal of a managed checkout, the setting is off, and the hint
 has not been dismissed, an informational band appears above the terminal, below its tabs. It takes layout space rather

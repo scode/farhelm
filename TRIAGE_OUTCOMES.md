@@ -15371,7 +15371,8 @@
 - Completion criteria: SPEC.md's Claude trust caveats (and SPEC_impl.md's matching passage, if it lists the accepted
   vendor races) state that limit beside the unlocked exit-save race. No code change. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-spec-rules-oct16.md`.
+- Execution: change `koumoqkvlznlxmxoooszpvtryyklmloo`, bookmark `plan/triage-spec-rules-oct16/01-claude-lock-limit`;
+  draft PR [#2193](https://github.com/scode/farhelm/pull/2193/changes).
 
 ## claude-trust-settings-misses-invalidation.md
 
