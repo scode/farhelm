@@ -2,8 +2,8 @@
 
 NOTE: This is not a finishing gate and not something to start on your own initiative. It is what an explicit "run all
 tests and fix" request means: every check this machine can run, one deflake sweep for the runtime batteries, then the
-release gate in GitHub, with straightforward fixes drafted along the way. Expect it to take several hours, most of it
-the sweep.
+release gate in GitHub, with straightforward fixes validated and landed along the way. Expect it to take several hours,
+most of it the sweep.
 
 The point is to find, before a release is cut, what the release process would otherwise find: deterministic failures
 that crept in because no ordinary gate runs a suite (the browser suite runs in neither CI nor the release gate), and
@@ -41,7 +41,15 @@ Before starting, read these in full, and again after any compaction or resume:
   that would compete with its timing-sensitive phases, as step 3 describes; that is not a reason to postpone the fix.
 - Flakes are recorded, not chased: the deflake protocol's record (a `TODO.md` Deflake entry, a dated `FLAKES.md` entry
   and a `deflake/known-flakes.txt` line), one PR per flake, no narrow-test ladder.
-- Never mark a PR ready and never merge; landing is a separate request.
+- Land each straightforward fix as soon as its relevant validation and review pass, using normal jjstack landing. Do not
+  wait for the sweep or the hosted rehearsal to finish when the fix already has adequate evidence. This flow authorizes
+  marking ready and merging its fix and record PRs by default; no separate landing request is needed. Record-only PRs
+  are ready once their document checks pass. A fix that needs a design decision, adds non-trivial complexity, or expands
+  scope stays unimplemented and recorded for the maintainer, as above. Do not turn an uncertain fix into a merge merely
+  to clear a failure.
+- Keep ready, independent fixes below unfinished fixes in the linear stack so unrelated work cannot delay their landing.
+  Reorder only when the changes are independent, preserving their diffs and validation coverage; an unready prerequisite
+  still blocks its dependents.
 - Keep a working log from the start at `farhelm-run-all-tests-log-<checkout>.md` in the directory that contains the
   checkout, where a compacted session can find it again (a scratch directory can be lost track of). Record in it this
   flow's name, the reading list above, and your scratch directory (`/tmp/farhelm-tmp/<id>/`, per `AGENTS.md`, "Agent
@@ -108,18 +116,21 @@ rerunning the check.
 
 ## 3. Deflake sweep
 
-Run one sweep exactly as `deflake/AGENTS.md` describes, including its rule that you take no turn until `wait` returns,
-and handle every event as it says. Its PRs go on the same stack as the fixes from step 2, on top of them.
+Run one sweep with `deflake/AGENTS.md`'s waiting, classification and event-handling protocol, including its rule that
+you take no turn until `wait` returns. Its outstanding PRs stay on the same linear stack as the fixes from step 2. This
+parent flow's eager-landing policy overrides the standalone deflake flow's prohibition on marking ready or merging those
+PRs. Handle and acknowledge an event in the same turn, including any landing for which the evidence is ready.
 
 A fix for a deterministic failure needs a runtime check of its own (usually the failing test, through the recorder).
 Running it in the middle of the sweep competes with the sweep for the machine; prefer to run it once the sweep is past
 its timing-sensitive phases (the nextest and browser phases come first) or after it finishes, and do not count the
-sweep's own pre-fix result as evidence for the fix.
+sweep's own pre-fix result as evidence for the fix. A fix waiting for that required check is not ready to land; once the
+check passes, land it without waiting for unrelated work.
 
 ## 4. Release gate and CI in GitHub
 
 Only once the static checks pass and the sweep has finished with every failure fixed or recorded. On top of the stack
-(or of `main` when there is nothing to fix):
+(or of `main` when all fixes have already landed):
 
 1. `python3 releasing/rehearse-release-gate.py` writes `.github/workflows/release-gate-rehearsal.yml`. Its docstring
    says what the rehearsal runs and what it does not (the two tag assertions).
@@ -131,8 +142,8 @@ Only once the static checks pass and the sweep has finished with every failure f
 5. Wait for both runs with one background loop over `gh run view <id> --json status,conclusion` (no `pgrep` liveness
    checks), then read every job's conclusion. The rehearsal's three legs take a while; the macOS leg is usually last.
 6. A failure that did not happen locally is the point of this step. Fix it below the rehearsal commit (insert the fix
-   into the stack, then let the rehearsal rebase on top), push the fix PR, and push the rehearsal bookmark again to get
-   a fresh verdict.
+   into the stack, then let the rehearsal rebase on top), validate and land it under the same readiness rule, and push
+   the rehearsal bookmark again to get a fresh verdict.
 7. When both runs are green, delete the rehearsal branch on GitHub
    (`gh api -X DELETE repos/scode/farhelm/git/refs/heads/<bookmark>`), its local bookmark, and its commit
    (`jj abandon`). The runs and their logs stay on GitHub.
@@ -140,9 +151,9 @@ Only once the static checks pass and the sweep has finished with every failure f
 ## 5. Report
 
 Report, in product terms per `AGENTS.md`, "Talking to the user": the checks run in step 2 and their results; the sweep's
-run id and its events; each flake recorded; the fix stack bottom-up with each PR's link and the failure it fixes;
-anything recorded for the maintainer's judgment instead of fixed; the GitHub run URLs and their verdicts; what was
-skipped and why; and the working log's path.
+run id and its events; each flake recorded; the fix stack bottom-up with each PR's link, landing status and the failure
+it fixes; anything recorded for the maintainer's judgment instead of fixed; the GitHub run URLs and their verdicts; what
+was skipped and why; and the working log's path.
 
 ## Keeping this file honest
 
