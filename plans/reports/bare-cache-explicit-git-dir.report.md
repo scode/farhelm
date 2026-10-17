@@ -58,3 +58,36 @@ violations. It checked the full diff, the real-shim test path, policy isolation,
 review was source-only; the recorder run above supplies execution evidence. A fresh gpt-6.1-sol medium reader understood
 the commit and PR wording and found no contradicted claim or convention violation. The first wording task arrived as an
 unreadable payload; it was resent as plaintext before that reader saw the candidate. No implementation was delegated.
+
+### Landing
+
+Landed in round 77, as #2199, second of the round's two plans and unchanged from what the report describes.
+
+#### What landed since the PR was based, and whether it interacted
+
+Since this PR's base, main gained three specification-only changes (#2193, #2195, #2196) about Claude settings edits,
+stale views across GUIs and the trash's scale limit, and the round's first plan, the calm session outage card (#2198),
+which changes how the interface shows a session whose host is unavailable. The landing monitor read them against this
+PR, and a fresh-context reviewer did the same independently. Neither found an interaction. This PR changes only how the
+supervisor names its cached repository when fetching for a managed checkout, which none of those touch. A failed
+checkout still shows as the existing failed-checkout state, never as the new outage card. All four share a file with
+this PR (SPEC_impl.md, the triage ledger or the review queue index), always in a different section, and the landing
+rebase merged them without conflict, leaving the PR's diff identical to the one the executor delivered.
+
+#### Fixes made during the landing
+
+None. The bug came with the shared repository cache, which first shipped in v0.26.1, so the PR's own changelog entry,
+filed as a fix, is right. Release curation could say "managed checkouts" where the entry says "fresh GitHub checkouts",
+since that is the name the docs site uses for them.
+
+#### Checks
+
+- Run now, at the rebased tip: `dprint check` on SPEC_impl.md, the triage ledger and the review queue index, and
+  `python3 releasing/check-changelog.py format`, both clean.
+- Reused from the executor's runs on its own base, which the report records, because the landing rebase left the PR's
+  diff unchanged and nothing that joined its base touches the supervisor's checkout code: the recorded checkout run
+  `952efe6a-bf2a-4f14-b7fd-9aa0ac14c961` (five passed, including the new explicit-policy regression against real Git),
+  plus its clippy, formatting, test-sleep and agent-instruction checks.
+- Skipped: the full Rust suite, browser, desktop, installer and provisioning tests, for the reasons the report gives.
+
+Nothing in the executor's report became untrue at landing.
