@@ -44,6 +44,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Consider moving session details to the bottom.** Consider moving the session name, host and related details from the
+  top of the session view to the bottom. There appears to be room there, and it could help highlight which session and
+  host are active. Details TBD at planning time.
+
 - **Stop Codex's folder-trust questions from returning.** Codex appears to be asking "trust this folder" again in
   Farhelm sessions. The maintainer recalls an earlier fix; investigate what changed and restore the intended behavior.
 
