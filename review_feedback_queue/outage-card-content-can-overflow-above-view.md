@@ -35,3 +35,11 @@ explanations out of view but reachable by scrolling” excludes content that can
 Status at pinned tip: the same unbounded centering remains at `crates/farhelm-ui/assets/app.css:6573–6599`; no fixing
 commit was identified. No browser reproduction or runtime tests were run. Surrounding implementations and coverage
 sources were read selectively; every patch assigned to this reviewer was read in full.
+
+## Astra high repeat review
+
+Reviewed commit: 7eed523f7af20a67316ae477d129cbad961ffa79. A fresh Astra high reviewer independently reported the same
+unbounded-centering mechanism under the unchanged charter and commit assignment, without seeing the first pass's result.
+Suggested bucket remains `other`; confidence remains likely. The entire assigned commit patch was read, including tests
+and deleted findings. Browser geometry and a harmful omission remain unverified; no runtime test was run. This adds
+independent provenance, not a separate queue item.
