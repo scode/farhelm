@@ -15351,7 +15351,8 @@
   real-Git regression in the launch tests' isolated Git environment sets the policy and runs the shim's cache fetch and
   clone, asserting both succeed; run it through the recorder. SPEC_impl.md shows the new command line. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/bare-cache-explicit-git-dir.md`.
+- Execution: change `vxsopzwyronvsrynsuymupxzwosykpqt`, bookmark `plan/bare-cache-explicit-git-dir/01-git-dir`; draft PR
+  [#2199](https://github.com/scode/farhelm/pull/2199/changes).
 
 ## claude-trust-publish-after-lock-takeover.md
 
