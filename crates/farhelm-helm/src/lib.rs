@@ -230,6 +230,9 @@ pub mod store;
 /// The terminal WebSocket: the browser's end of an attachment.
 mod terminal;
 
+/// Desktop loopback tunnels and the consent-ordered lifetime of their listeners.
+mod tunnels;
+
 /// `farhelm helm checkout-config`: the stored checkout configuration
 /// (working-copy root, post-clone command), its inheritance resolution,
 /// and the offline CLI that edits it — backed by the never-create,
@@ -518,6 +521,8 @@ struct AppState {
     clipboard_sink: Option<ClipboardSink>,
     /// A desktop-only capability; standalone helms never open links on their server machine.
     link_opener: Option<LinkOpener>,
+    /// Session-owned native TCP listeners; shutdown closes accepted relays too.
+    tunnels: tunnels::TunnelManager,
     /// Native saves are an embedded-app capability, never a server-helm flag.
     /// The desktop resolves its account's Downloads folder at startup; tests
     /// inject a private directory without changing the process environment.
@@ -611,6 +616,7 @@ impl AppState {
             )),
             clipboard_sink: None,
             link_opener: None,
+            tunnels: tunnels::TunnelManager::default(),
             downloads_dir: None,
             file_opener: None,
             clipboard_admission: clipboard::ClipboardAdmission::new(),
@@ -641,6 +647,15 @@ fn api_router(state: Arc<AppState>) -> Router {
             get(sessions::list_sessions).post(sessions::create_session),
         )
         .route("/api/launch-catalog", get(sessions::launch_catalog))
+        .route("/api/sessions/{id}/tunnels", get(tunnels::list_tunnels))
+        .route(
+            "/api/sessions/{id}/tunnels/open",
+            axum::routing::post(tunnels::open_tunnel),
+        )
+        .route(
+            "/api/sessions/{id}/tunnels/{tunnel_id}",
+            axum::routing::delete(tunnels::close_tunnel),
+        )
         .route(
             "/api/checkout-trash/list",
             axum::routing::post(sessions::list_checkout_trash),
@@ -2101,16 +2116,17 @@ async fn run_with_ready(
             None => std::future::pending::<()>().await,
         }
     };
-    tokio::select! {
-        result = axum::serve(listener, app) => result.context("serving helm HTTP")?,
-        result = token_control.failed() => result?,
+    let serving = tokio::select! {
+        result = axum::serve(listener, app) => result.context("serving helm HTTP"),
+        result = token_control.failed() => result,
         () = checkout_config::watch_revision(
             state.store.clone(), Arc::clone(state.manager.events()), checkout_revision,
         ) => unreachable!("checkout configuration watcher runs until serving ends"),
-        () = embedded_shutdown => {}
-    }
+        () = embedded_shutdown => Ok(())
+    };
+    state.tunnels.shutdown().await;
     state.manager.shutdown();
-    Ok(())
+    serving
 }
 
 /// The response header carrying this helm's build version to the browser
