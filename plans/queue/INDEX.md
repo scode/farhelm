@@ -4,5 +4,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [landing af454e] `session-action-shortcuts.md` — keyboard shortcuts to delete and rename the open session (⌘W, ⌘L)
 - [in-flight 31e803] `tunnel-localhost-links.md` — open a remote session's localhost link through a tunnel in the Mac app
-- [pending] `menu-focus-source.md` — menu arrows follow focus moved while arrow presses are landing
+- [in-flight fb5871] `menu-focus-source.md` — menu arrows follow focus moved while arrow presses are landing
 - [pending] `name-session-while-starting.md` — name a quick-launched session in a rename dialog while it starts (after `quick-launch-chords.md`)
