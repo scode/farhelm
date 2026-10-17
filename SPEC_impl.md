@@ -4611,6 +4611,21 @@ reader's skip-and-log policy.
 
 ### Launch templates
 
+Quick launch resolves its ordered digit/bolt references from one fresh preference and template read. It hands the
+captured definitions to ordinary New, replaying one through the existing template/search acceptance path per effect
+pass. A refusal stops the remaining replay. Automatic submission waits for a render after the final replay, so its
+captured readiness and refusal describe the resulting draft. A coarse fold over launch kind, agent and command decides
+whether to attempt direct launch; the mounted form retains full validation, catalog, host and admission authority.
+
+The launch-sequence asset owns only the synchronous armed flag and a pure key classifier. Rust holds the ordered
+references in app-owned transient context; the sidebar's hidden relays mutate that signal synchronously, and the main
+area renders its non-modal status pill. No storage or general keymap is involved. Prefix and number modifiers follow the
+build's Mac-desktop choice; the bolt keeps its existing operating-system chord, including Cmd+P in a Mac browser. The
+sequence listener installs after the composition guard and before other command listeners, consuming with
+stopImmediatePropagation because same-window capture listeners otherwise still run. Pointer/click, blur, visibility,
+modal focus and the existing modal-opening hook cancel both state owners. The relays stay mounted and enabled across
+render-delayed armed state; Enter takes the queue before starting the existing generation-fenced quick-launch read.
+
 A template is stored by the helm in `helm.db` (schema 38, table `launch_templates`): its unique name, and its fields as
 the JSON of `farhelm_proto::launcher::TemplateFields`. The fields stay one JSON value rather than a column each because
 a template is applied whole and never queried by field, and because the set of launcher fields is the wire crate's to

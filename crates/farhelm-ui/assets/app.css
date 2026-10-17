@@ -366,6 +366,7 @@
   --radius-sm: 3px; /* controls and inputs */
   --radius-md: 4px; /* panels, cards, and dialogs */
   --radius-lg: 8px; /* pill-ish badges */
+  --radius-pill: 999px; /* transient launch-sequence echo area */
 
   /* The session row's two fixed leading tracks (status dot, locality glyph)
      and the gap between tracks. The identity line builds its grid columns
@@ -650,6 +651,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 .app-main {
+  position: relative;
   flex: 1;
   /* A floor, not zero: with a shrinkable main pane a legal narrow window
    * would silently squeeze the selected terminal to nothing while the
@@ -657,6 +659,31 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    * scrolls (see `.app-shell`) instead. */
   min-width: 320px;
   height: 100%;
+}
+
+/* A temporary echo area covers terminal lines without moving the terminal or
+ * taking the keyboard. It also has a stable home before any session exists. */
+.launch-sequence-indicator {
+  position: absolute;
+  z-index: 50;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 28px);
+  width: max-content;
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-menu);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.launch-sequence-hint {
+  margin-left: 12px;
+  color: var(--fg-1);
 }
 
 .main-empty {

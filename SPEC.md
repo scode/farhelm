@@ -726,6 +726,18 @@ agent choice is independent of that destination:
   Bindings are a whole-map shared preference, replaced on write; concurrent windows may lose one map edit. Names must be
   syntactically valid but need not exist at write time. Rename keeps a key, delete frees it through both delete paths,
   and Undo never restores it. A browser that reserves a chord keeps its behavior.
+- Quick-launch sequences compose templates without changing the single-chord shortcuts. Cmd+X in the Mac desktop app, or
+  Ctrl+Shift+X in browsers, starts a sequence, except in a text field where it retains its normal meaning; the
+  terminal's input textarea counts as the terminal. Bare physical number keys or their usual template chord queue
+  templates in order; the ordinary ⚡ chord queues the marked template. Enter applies them in that order, later edits
+  winning, and directly launches through the same defaults, validation and admission as quick launch. An unbound key
+  opens Templates at Enter with the binding hint. A refusal names its template and reveals New with the draft; an
+  incomplete result or YOLO question uses the same fallback. Enter with nothing queued cancels without opening anything.
+  A non-modal status pill floats over the bottom of the terminal area, or the main area with no session open, naming
+  queued templates and saying "Enter launch · Esc cancel". Before any key it says "Launch sequence: press number keys to
+  queue templates, Enter to launch, Esc to cancel." There is no timeout. Escape cancels and is consumed; a click,
+  switching windows or opening a dialog cancels. Any other key cancels and reaches its normal target; Meta, Control and
+  Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the
@@ -868,21 +880,21 @@ only the user can write is the user's responsibility. Farhelm does not check the
 and archive promises in this section assume no other account can create, replace, or take over entries in it.
 
 Before Launch becomes available, the composer shows the exact host and path. Direct template launching is the exception:
-marking a template with ⚡ or giving it a number key is consent to its managed-checkout destination, so it obtains the
-same exact preview and launches without showing the path first. A lost race still reveals New with the conflict and new
-preview rather than submitting again. Preview creates no directory and reserves nothing. An unnamed checkout uses the
-lowest available positive `repo-N` and that basename as its session title. An explicit title keeps its printable display
-spelling while the path uses `repo-` followed by its lowercase ASCII slug; runs outside letters and digits become
-hyphens. A title already starting with `repo-` does not repeat that prefix. An empty slug or a component over 200 bytes
-is refused, and so is a checkout path too long to archive later (the archive location adds up to 82 bytes to it, and the
-whole must stay within the system's path limit: 4096 bytes on Linux, 1024 on macOS). Existing files, directories and
-symlinks all occupy a name. If another create wins the displayed path, Launch reports the conflict and obtains a new
-preview; it never submits automatically or silently chooses another directory. An explicit name remains a conflict
-rather than gaining a suffix. For Clone into the source's repository, an untouched nonempty copied title defaults to
-`<source title>-clone`, then the lowest free `<source title>-clone-N` for N ≥ 2. The name field shows the effective
-name, and preview and launch use it alike. Changing hosts or repositories restarts the suffix search; editing the name
-makes it explicit and disables automatic suffixes. A lost-race launch re-previews and may advance the default name, but
-still needs another click on Launch for the newly shown path.
+marking a template with ⚡ or giving it a number key is consent to its managed-checkout destination, including when
+combined in a quick-launch sequence, so it obtains the same exact preview and launches without showing the path first. A
+lost race still reveals New with the conflict and new preview rather than submitting again. Preview creates no directory
+and reserves nothing. An unnamed checkout uses the lowest available positive `repo-N` and that basename as its session
+title. An explicit title keeps its printable display spelling while the path uses `repo-` followed by its lowercase
+ASCII slug; runs outside letters and digits become hyphens. A title already starting with `repo-` does not repeat that
+prefix. An empty slug or a component over 200 bytes is refused, and so is a checkout path too long to archive later (the
+archive location adds up to 82 bytes to it, and the whole must stay within the system's path limit: 4096 bytes on Linux,
+1024 on macOS). Existing files, directories and symlinks all occupy a name. If another create wins the displayed path,
+Launch reports the conflict and obtains a new preview; it never submits automatically or silently chooses another
+directory. An explicit name remains a conflict rather than gaining a suffix. For Clone into the source's repository, an
+untouched nonempty copied title defaults to `<source title>-clone`, then the lowest free `<source title>-clone-N` for N
+≥ 2. The name field shows the effective name, and preview and launch use it alike. Changing hosts or repositories
+restarts the suffix search; editing the name makes it explicit and disables automatic suffixes. A lost-race launch
+re-previews and may advance the default name, but still needs another click on Launch for the newly shown path.
 
 Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no repository ignore
 an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
@@ -1751,6 +1763,9 @@ because browsers keep Cmd/Ctrl+N for a new window.
 
 Cmd+0–9 in the Mac desktop app, or Ctrl+Shift+0–9 in every other client, directly launches templates with number keys
 (see Creation). Browsers on a Mac use Ctrl+Shift as well, leaving their Cmd+digits free for tabs and zoom.
+
+Cmd+X in the Mac desktop app, or Ctrl+Shift+X in browsers, begins a quick-launch template sequence (see Creation). Text
+fields keep their normal Cut or text-direction key; the terminal accepts the sequence prefix.
 
 Cmd+K on macOS, Ctrl+Shift+K elsewhere, opens a quick switcher in the web UI and desktop app, including from a focused
 terminal. It does nothing while another modal is open or before sign-in and preferences loading finish. Type a

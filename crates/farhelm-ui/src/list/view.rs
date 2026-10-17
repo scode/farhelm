@@ -957,6 +957,7 @@ pub(crate) fn ListView(
     // Quick launch owns one fetch/mount/submit handoff. New still composes the
     // request; this flag only keeps its fields hidden until a fallback is needed.
     let mut quick_launch_pending = use_signal(|| false);
+    let mut launch_sequence = use_context::<crate::launch_sequence::LaunchSequence>().0;
     let mut auto_launch = use_signal(|| false);
     // One opening generation fences the fresh read and any queued DOM submit.
     // Ordinary New, Clone/Replace and Templates revoke it synchronously.
@@ -3506,6 +3507,54 @@ pub(crate) fn ListView(
     });
 
     rsx! {
+        // Relays remain enabled while armed state catches up in the DOM.
+        // Their live signal guards preserve prefix/digit/Enter event order
+        // even when all three arrive before the first indicator render.
+        button {
+            class: "launch-sequence-trigger", "data-sequence-action": "begin",
+            r#type: "button", hidden: true, tabindex: "-1",
+            disabled: quick_launch_pending() || show_create() || templates_open() || busy,
+            onclick: move |_| {
+                if !*quick_launch_pending.peek() && !*show_create.peek()
+                    && !*templates_open.peek() && !ops.busy_now() {
+                    launch_sequence.set(Some(Vec::new()));
+                }
+            },
+        }
+        for key in super::templates::NUMBER_KEYS {
+            button {
+                key: "sequence-{key}", class: "launch-sequence-trigger",
+                "data-sequence-action": "digit", "data-number-key": "{key}",
+                r#type: "button", hidden: true, tabindex: "-1",
+                onclick: move |_| {
+                    if let Some(queue) = launch_sequence.write().as_mut() {
+                        queue.push(Some(key.into()));
+                    }
+                },
+            }
+        }
+        button {
+            class: "launch-sequence-trigger", "data-sequence-action": "bolt",
+            r#type: "button", hidden: true, tabindex: "-1",
+            onclick: move |_| {
+                if let Some(queue) = launch_sequence.write().as_mut() { queue.push(None); }
+            },
+        }
+        button {
+            class: "launch-sequence-trigger", "data-sequence-action": "launch",
+            r#type: "button", hidden: true, tabindex: "-1",
+            onclick: move |_| {
+                let queued = launch_sequence.write().take();
+                if let Some(queue) = queued.filter(|queue| !queue.is_empty()) {
+                    quick_launch.call(queue);
+                }
+            },
+        }
+        button {
+            class: "launch-sequence-trigger", "data-sequence-action": "cancel",
+            r#type: "button", hidden: true, tabindex: "-1",
+            onclick: move |_| launch_sequence.set(None),
+        }
         button {
             class: "quick-launch-trigger", r#type: "button", hidden: true, tabindex: "-1",
             "data-opening-generation": "{opening_generation()}",
