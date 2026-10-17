@@ -1665,6 +1665,50 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
   }
 });
 
+/** Simulate desktop timing by queueing two arrow requests in one script turn
+ * before independently focusing the fourth item. The web renderer cannot prove
+ * the desktop in-flight marker, but it must discard unsent work as well as the
+ * remembered destination; otherwise focus jumps back before the next arrow. */
+test("menu arrows follow independent focus during a queued burst (desktop timing simulation)", async ({ page, request }) => {
+  const session = await createSession(request, {
+    title: `menu-independent-focus-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+  });
+  try {
+    await hideSeenState(page);
+    await pinAutoSelect(page, session.id);
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsListSettled(page);
+    await waitForSessionRevealed(page, session.id);
+    await openRowMenu(target);
+    const items = target.getByRole("menuitem");
+    await expect(items).toHaveCount(7);
+    await expect(items.nth(0)).toBeFocused();
+    await expect(items.nth(3)).toHaveAccessibleName("replace with");
+    await expect(items.nth(4)).toHaveAccessibleName("replace");
+
+    await items.nth(0).evaluate((first) => {
+      const menu = first.closest('[role="menu"]')!;
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", bubbles: true }));
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", bubbles: true }));
+      (menu.querySelectorAll('[role="menuitem"]')[3] as HTMLElement).focus();
+    });
+    // Let queued renderer work drain before asserting focus, so an immediate
+    // assertion cannot pass just before an uncancelled request pulls it back.
+    await page.evaluate(() =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    );
+    await expect(items.nth(3), "independent focus must survive queued arrow work").toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(items.nth(4)).toBeFocused();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
 /**
  * Opening the menu ENTERS it, the menu is a single tab stop, and the keys
  * it does not claim stay native.

@@ -339,6 +339,7 @@ fn use_bar_menu(layout_epoch: ReadSignal<u64>, name: &'static str) -> BarMenuSta
     let mut item_handles = use_signal(HashMap::new);
     let focus_queue = MenuFocusQueue {
         target: use_signal(|| None::<Rc<MountedData>>),
+        in_flight: use_signal(|| None),
         draining: use_signal(|| false),
     };
     let state = BarMenuState {
