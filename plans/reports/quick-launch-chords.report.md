@@ -88,3 +88,67 @@ The second corrected a test that had cancelled a sequence by clicking before it 
 corrected notice dismissal on incidental clicks and covered the existing button and keyboard choice paths. Final reviews
 found no actionable issues. A separate fresh own-model scope review after the repeated notice corrections found no
 substantial unnecessary complexity. Commit and PR wording passed fresh cold reads.
+
+### Landing
+
+Landed on its own in round 83, as #2220, #2225 and #2228, merged bottom-up and unchanged from what the report describes.
+
+#### What landed since the stack was based, and whether it interacted
+
+Only plan-queue bookkeeping reached main between this stack's base (main `54f43703`, which already included the
+keyboard-scroll audit the report discusses) and its landing, so the landing rebase was clean and every PR's diff is
+identical to the one the executor delivered. The base already held the related keyboard and launcher work: the WebKit
+input-method guard (#2194), the existing template number shortcuts, the menu focus fix (#2176), the keyboard-reachable
+scroll regions (#2190, #2222), the launcher fixes and initial prompts (#2160 to #2164, #2202, #2203) and template name
+escaping (#2204). The landing monitor read the stack against them, and a fresh-context reviewer did the same
+independently. Neither found an interaction:
+
+- The new key-sequence listener is installed right after the input-method guard and reads its result: while an input
+  method is composing it starts nothing and cancels an active sequence without swallowing the key. While a sequence is
+  active it blocks the later number-shortcut, quick-switcher and quick-launch listeners, so a queued key cannot also
+  launch on its own.
+- A sequence starts only outside text fields (the terminal counts as outside), and any open dialog, click, window blur
+  or unrelated key cancels it.
+- Each template still goes through the same apply path as before, one at a time, so initial prompts, escaped names and
+  the protection against starting a retried launch twice behave as they did. A refused template keeps its error and
+  stops the rest of the sequence.
+- The new script is loaded the same way as the existing number-shortcut and input-method scripts, so the desktop app and
+  the browser get the same code.
+
+The reviewer also found `refactor:` right for #2220. Its one visible difference is for two incomplete template shapes: a
+template set to run a command that names an agent but leaves the command empty, and a command-only template with no
+launch kind. Quick launch now opens the session launcher for them directly instead of trying to launch first and falling
+back there, with the same result.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-ups
+
+- The Mac app has not been checked: whether Cmd+X outside a text field reaches Farhelm before the Edit menu's Cut. The
+  report already lists this as a manual Mac check.
+- SPEC.md, the docs pages and the changelog entry say "Ctrl+Shift+X in browsers", but the desktop app on other systems
+  uses it too; "everywhere else", as the number-shortcut wording puts it, would be exact.
+- The "cannot launch on its own" banner also appears for ⚡ alone with an incomplete template, and for a one-template
+  sequence, where it tells the user to use the prefix they just used. SPEC.md describes it only for a single number key.
+- If a sequence that includes ⚡ fails because a number is unbound, Templates also shows the "Mark a template with ⚡"
+  hint, even when one is marked.
+- Templates can call a template launchable when the launch check does not, for example a template set to run a command
+  that names an agent but leaves the command empty; its number key then shows the "cannot launch on its own" banner.
+  Before this stack it also ended in the session launcher.
+- The Templates help paragraph does not yet mention partial-template keys or sequences.
+
+#### Checks
+
+- Run now: none. Main gained only plan-queue bookkeeping since the base.
+- Reused, from the executor's runs (the report gives each run's revision and why it still applies): the browser run of
+  the quick-launch and template specs on Chromium and WebKit `38187e1e-3f90-4958-85ad-bfd12b0c2a38` (146 passed, final
+  tree), the focused partial-template cases `a9c5cf74-8105-4f53-9267-b61aeb138f3f`, the UI unit run
+  `bc799848-40e3-4b10-b25b-29ea3a8c6eaa` (514 passed, taken before the last small edits), the JavaScript harness
+  `7c20425f-d7d6-4e89-a9e3-36e3732e441b` (286 passed, taken at the sequence slice), and the builds and static checks the
+  report lists. All of these ran before the executor rebased onto the keyboard-scroll audit; after that rebase only a
+  compile check and formatting ran, with each PR's diff unchanged. The landing rebase changed nothing further.
+- Skipped: everything the report skipped, for the reasons it gives.
+
+Nothing in the executor's report became untrue at landing.
