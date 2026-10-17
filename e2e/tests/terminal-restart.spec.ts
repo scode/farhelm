@@ -1110,34 +1110,17 @@ test("a restart whose response is lost still recovers the terminal", async ({
   }
 });
 
-// MT-4 (manual testing): restarting a live session left the red "Detached:
-// session restarted" banner painted over a terminal that had, by the time
-// a human noticed it, already reattached and was working fine — typing
-// round-tripped, output rendered, the banner just never went away. Root
-// cause was `#term-banner` (farhelm-ui/src/lib.rs) living OUTSIDE the
-// `#terminal` div terminal.js remounts, so nothing about a later mount
-// ever told a PRIOR mount's sticky banner to clear (terminal.js's
-// `showBanner` is deliberately sticky FOR THE LIFE OF ITS OWN SOCKET, so a
-// takeover reason survives the generic close that follows it — see that
-// function's docs — but nothing was clearing it for the NEXT socket
-// either). The fix hooks the new socket's `onopen` — a transport-level
-// signal (the upgrade completed), not proof the supervisor-side attach
-// succeeded; clearing there is still honest because a failed attach
-// closes that same socket and its own close handler re-banners.
-//
-// This is exactly the restart sequence that produces the bug: a live
-// agent's restart tears the OLD attachment down with reason "session
-// restarted" (`detach_for_restart`, farhelm-supervisor/src/service.rs)
-// before the new one ever exists. Proving the banner APPEARED cannot be a
-// locator poll — the fix clears it as soon as the new socket opens, which
-// on loopback routinely beats Playwright's first poll, so the transient
-// visible state is unobservable from outside (this test flaked exactly
-// that way when it polled). A MutationObserver installed before the page
-// loads records every banner transition instead, so the assertion reads
-// the recorded history: shown with the exact restart reason, then hidden
-// once the relaunch is confirmed live — the real sticky-then-clear
-// sequence, with no window for the poll to miss.
-test("a restarted session's banner clears once the new attachment is live", async ({
+/**
+ * Restart must recover a live terminal without flashing a red detach banner.
+ *
+ * This began as a regression for a stale restart banner that survived a
+ * successful reattachment. Recoverable drops now use the calm reconnecting
+ * surface (SPEC.md, Session list), so even a transient red banner is wrong.
+ * Observe banner transitions throughout the restart: a final hidden-state
+ * assertion alone would miss a flash. Fresh ready output and an input round
+ * trip prove recovery rather than accepting a silent, disconnected terminal.
+ */
+test("a restarted session reconnects without a detach banner", async ({
   page,
   request,
 }) => {
@@ -1152,17 +1135,17 @@ test("a restarted session's banner clears once the new attachment is live", asyn
       (window as any).__armBannerLog = () => {
         const el = document.getElementById("term-banner");
         if (!el) throw new Error("no term-banner to observe");
-        new MutationObserver(() => {
-          (window as any).__bannerLog.push({
-            shown: el.style.display === "block",
-            text: el.textContent,
-          });
+        new MutationObserver((records) => {
+          // Old values retain a flash even when show and clear occur in
+          // one task, before the observer can sample the final display.
+          const shown = el.style.display === "block" || records.some((record) =>
+            /(?:^|;)\s*display\s*:\s*block\s*(?:;|$)/.test(record.oldValue ?? "")
+          );
+          (window as any).__bannerLog.push(shown);
         }).observe(el, {
           attributes: true,
           attributeFilter: ["style"],
-          childList: true,
-          characterData: true,
-          subtree: true,
+          attributeOldValue: true,
         });
       };
     });
@@ -1190,23 +1173,6 @@ test("a restarted session's banner clears once the new attachment is live", asyn
 
     await restartIdleAgent(page, { afterInput: true });
 
-    // The banner's appearance is read from the observer's recorded
-    // history (see the doc comment above for why a locator poll cannot
-    // see it): the old attachment's detach must have painted the banner
-    // with the restart's exact reason at SOME point, however briefly.
-    await expect
-      .poll(
-        async () =>
-          await page.evaluate(() =>
-            (window as any).__bannerLog.some(
-              (e: { shown: boolean; text: string }) =>
-                e.shown && e.text.includes("Detached: session restarted"),
-            ),
-          ),
-        { timeout: 15_000, message: "the restart's detach banner was recorded" },
-      )
-      .toBe(true);
-
     // The relaunch comes up in the SAME (reused) terminal, so its ready
     // banner is the SECOND occurrence in the buffer — the same anchor the
     // confirm test above uses to prove the new run actually printed
@@ -1218,8 +1184,7 @@ test("a restarted session's banner clears once the new attachment is live", asyn
       )
       .toBeGreaterThanOrEqual(2);
 
-    // The bug: the OLD attachment's detach banner stayed painted over a
-    // terminal that is now genuinely live again.
+    // A settled, live attachment must not retain a stale detach banner.
     await expect(page.locator("#term-banner")).toBeHidden({ timeout: 15_000 });
 
     // And "live" is proven functionally, not just by the banner's
@@ -1228,6 +1193,10 @@ test("a restarted session's banner clears once the new attachment is live", asyn
     await page.keyboard.type("post-restart-roundtrip");
     await page.keyboard.press("Enter");
     await waitForTermText(page, "echo:post-restart-roundtrip", 10_000);
+    expect(
+      await page.evaluate(() => (window as any).__bannerLog.some((shown: boolean) => shown)),
+      "restart recovery must not show a red detach banner, even briefly",
+    ).toBe(false);
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
