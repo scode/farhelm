@@ -397,11 +397,12 @@ impl Field {
     }
 
     /// Unsafe text is a display-only escape, never a replacement draft value.
-    /// Single-line inputs can erase controls and conceal host-supplied model or
-    /// folder text. Keep the raw seed untouched until the field is removed or
-    /// replaced through another explicit control, including a model suggestion.
+    /// Single-line inputs can erase controls and conceal host-supplied model,
+    /// folder or session-name text. Keep the raw seed untouched until the field
+    /// is removed or replaced through another explicit control, including a model suggestion.
     fn escaped_read_only_value(self, f: &TemplateFields) -> Option<String> {
         let value = match self {
+            Self::Name => f.name.as_deref(),
             Self::Prompt => f.prompt.as_deref(),
             Self::Command => f.command.as_deref(),
             Self::Resume => f.resume_command.as_ref().and_then(|v| v.as_deref()),
@@ -834,8 +835,8 @@ fn Choice(
 /// Changes only update the draft; they never clear another field to make it fit.
 /// Text fields keep literal commands, paths, model IDs and chosen names:
 /// browser correction and remembered form values must not rewrite them.
-/// Unsafe model, destination and command text is escaped and read-only so a
-/// browser edit cannot silently change its bytes. The draft keeps the original
+/// Unsafe model, destination, command and session-name text is escaped and
+/// read-only so a browser edit cannot silently change its bytes. The draft keeps the original
 /// until an explicit replacement; old commands still reach save validation raw.
 #[component]
 fn FieldEditor(
@@ -990,9 +991,9 @@ fn FieldEditor(
         Field::Name => rsx! {
             label { class: "templates-field",
                 span { "session name" }
-                input { class: "templates-session-name", value: current.name.unwrap_or_default(), disabled, placeholder: "review",
+                input { class: "templates-session-name", value: escaped.unwrap_or_else(|| current.name.unwrap_or_default()), disabled, readonly: text_read_only, placeholder: "review",
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                    "data-tooltip": "session name: the name this template puts in the launcher", oninput: move |e| draft.with_mut(|d| d.fields.name = Some(e.value())),
+                    "data-tooltip": "session name: the name this template puts in the launcher", oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.name = Some(e.value())); } },
                 }
             }
         },
@@ -1761,7 +1762,7 @@ mod tests {
     }
 
     /// All single-line peer-text fields share the read-only boundary, so a
-    /// model or folder cannot conceal bytes that commands already protect.
+    /// model, folder or session name cannot conceal bytes that commands protect.
     /// Ordinary Unicode, absent values and resets must stay editable.
     #[test]
     fn unsafe_editor_values_require_read_only_escaped_display() {
@@ -1771,6 +1772,7 @@ mod tests {
             ("first\r\nsecond", "first<U+000D><U+000A>second"),
         ] {
             let fields = TemplateFields {
+                name: Some(raw.into()),
                 model: Some(Some(raw.into())),
                 destination: Some(TemplateDestination::Folder(raw.into())),
                 command: Some(raw.into()),
@@ -1778,6 +1780,7 @@ mod tests {
                 ..Default::default()
             };
             for field in [
+                Field::Name,
                 Field::Model,
                 Field::Destination,
                 Field::Command,
@@ -1801,6 +1804,7 @@ mod tests {
         }
         for raw in ["", "ordinary model", "/tmp/项目", "literal<U+200B>"] {
             let fields = TemplateFields {
+                name: Some(raw.into()),
                 model: Some(Some(raw.into())),
                 destination: Some(TemplateDestination::Folder(raw.into())),
                 command: Some(raw.into()),
@@ -1808,6 +1812,7 @@ mod tests {
                 ..Default::default()
             };
             for field in [
+                Field::Name,
                 Field::Model,
                 Field::Destination,
                 Field::Command,
@@ -1822,6 +1827,7 @@ mod tests {
             ..Default::default()
         };
         for field in [
+            Field::Name,
             Field::Model,
             Field::Destination,
             Field::Command,

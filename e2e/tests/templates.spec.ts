@@ -24,11 +24,11 @@ async function deleteTemplate(request: APIRequestContext, name: string) {
   expect(response.ok() || response.status() === 404, `deleting template ${name}`).toBe(true);
 }
 
-/** Older stored commands must reach save validation unchanged. The current
+/** Older stored commands and session names must reach save validation unchanged. The current
  * API deliberately refuses these values, so the existing list interception
  * supplies an old-rules row; any attempted PUT is counted and refused.
  */
-for (const field of ["command", "resume_command"] as const) {
+for (const field of ["command", "resume_command", "name"] as const) {
   test(`older template ${field} stays read-only without bypassing save refusal`, async ({ page }) => {
     const name = `legacy-command-${field}-${Date.now()}`;
     const fields = { kind: "command", yolo: false, command: "echo safe", resume_command: "echo resume", [field]: "echo 'first\r\nsecond'" };
@@ -47,7 +47,7 @@ for (const field of ["command", "resume_command"] as const) {
     const dialog = page.locator(".templates-dialog");
     await expect(dialog.locator(".templates-sidebar")).toHaveAttribute("aria-busy", "false");
     await dialog.locator(".templates-row-name").getByText(name, { exact: true }).click();
-    const command = dialog.locator(field === "command" ? ".templates-command" : ".templates-resume");
+    const command = dialog.locator(field === "name" ? ".templates-session-name" : field === "command" ? ".templates-command" : ".templates-resume");
     const other = dialog.locator(field === "command" ? ".templates-resume" : ".templates-command");
     await expect(command).toHaveJSProperty("readOnly", true);
     await expect(other).toBeEditable();
@@ -59,9 +59,11 @@ for (const field of ["command", "resume_command"] as const) {
     await page.keyboard.press("End");
     await page.keyboard.type("changed");
     await expect(command).toHaveValue(rendered);
+    // Saving an unrelated edit must still validate the untouched raw value.
+    await other.fill("echo updated");
     await dialog.locator(".templates-save").click();
     await expect(dialog.locator(".templates-error").last()).toContainText("control or invisible formatting characters");
-    expect(writes, "the untouched raw command must still fail local shape validation").toBe(0);
+    expect(writes, "the untouched raw field must still fail local shape validation").toBe(0);
   });
 }
 
@@ -169,7 +171,15 @@ for (const [field, value] of [
     await row.click();
     await expect(row).toHaveAttribute("aria-pressed", "true");
     // Repairing the draft cannot make the stored snapshot restorable.
-    if (field === "name") await dialog.locator(".templates-session-name").fill("repaired draft");
+    if (field === "name") {
+      await expect(dialog.locator(".templates-session-name")).toHaveJSProperty("readOnly", true);
+      await dialog.getByRole("button", { name: "remove session name", exact: true }).click();
+      await addField(dialog, "session name");
+      const input = dialog.locator(".templates-session-name");
+      await expect(input).toBeEditable();
+      await input.fill("repaired draft");
+      await expect(input).toHaveValue("repaired draft");
+    }
     const remove = dialog.locator(".templates-delete");
     await expect(remove).toHaveText("delete permanently");
     await expect(remove).toHaveAttribute("data-tooltip", /current save rules.*undo is not available/);
