@@ -1771,6 +1771,11 @@ Delete action with its ordinary confirmation and busy rules. With no session ope
 menu has no Close Window item, leaving Cmd+W to session deletion; the window close button and Cmd+Q still close the app.
 The browser chord leaves text editors other than the terminal alone. A visible modal keeps keyboard ownership.
 
+Cmd+L in the Mac desktop app, or Ctrl+Shift+L in browsers, opens Rename for the open session, including when its row is
+filtered out of the sidebar. Closing that shortcut-opened dialog returns focus to the terminal. Both session shortcuts
+work from terminal focus without sending their chord to the program, ignore repeat and composition, and appear in the
+relevant tooltips: Delete on the header button, Rename only on the open session's row-menu item.
+
 Cmd+0–9 in the Mac desktop app, or Ctrl+Shift+0–9 in every other client, directly launches templates with number keys
 (see Creation). Browsers on a Mac use Ctrl+Shift as well, leaving their Cmd+digits free for tabs and zoom.
 

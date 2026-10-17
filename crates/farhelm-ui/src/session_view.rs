@@ -568,6 +568,9 @@ pub(crate) fn SessionView(
     /// `AppBody`'s selected session itself, read so this view can follow a
     /// sidebar rename of the session it shows (see the selection effect).
     selection: ReadSignal<Option<Session>>,
+    /// Raw Rename seed shared with the sidebar without changing selection.
+    /// Detail refreshes must not trigger the selection observer's read fence.
+    mut open_session_title: Signal<Option<(String, String)>>,
     /// One-shot bridge to the list's existing clone composer.
     prefill_request: Signal<Option<crate::list::HeaderPrefillRequest>>,
     /// One-shot bridge to the list's delete path, for the header's delete
@@ -1161,6 +1164,26 @@ pub(crate) fn SessionView(
             current.write().title = title;
         }
         rename_detail(Trigger::Explicit);
+    });
+
+    // Publish only accepted view state, including external renames received
+    // while the sidebar hides this session. This is deliberately not a
+    // selection write: the observer above treats those as newer navigation
+    // evidence and fences/refetches detail. Navigation seeds this bridge
+    // synchronously, and an old keyed view cannot overwrite its successor.
+    use_effect(move || {
+        let shown = current.read();
+        if !selection
+            .peek()
+            .as_ref()
+            .is_some_and(|selected| selected.id == shown.id)
+        {
+            return;
+        }
+        let title = Some((shown.id.clone(), shown.title.clone()));
+        if *open_session_title.peek() != title {
+            open_session_title.set(title);
+        }
     });
 
     // Whether the session currently READS stale, as a memo rather than a

@@ -108,6 +108,8 @@ struct RenameEditor {
     current_title: String,
     generation: u64,
     unavailable: bool,
+    /// Shortcut editors return to the terminal; row editors keep their opener.
+    shortcut: bool,
 }
 
 /// Whether a request result still owns the editor generation it started.
@@ -157,18 +159,19 @@ fn rename_focus_return_state(generation: u64, editor: Option<&RenameEditor>) -> 
     }
 }
 
-/// Focus a rename editor's opener after its owning dialog has unmounted.
+/// Return a completed rename to its row menu or the selected terminal.
 ///
 /// Callers run this only from the post-render focus-return effect, after the
 /// dialog's focus event recorded ownership and a matching generation closed.
 /// The browser-side body check is the final user-focus guard: an unrelated
 /// control reached after close must always keep focus.
-fn focus_rename_toggle(id: &str) {
+fn focus_rename_destination(id: &str, shortcut: bool) {
     let id = serde_json::to_string(id).expect("session ids serialize as JSON strings");
     document::eval(&format!(
         r#"(() => {{
             const active = document.activeElement;
             if (active !== document.body && active !== document.documentElement) return;
+            if ({shortcut}) {{ window.farhelmTerm?.focusSelected(); return; }}
             const id = {id};
             document.querySelector(`[data-session-id="${{CSS.escape(id)}}"] .session-row-menu`)
                 ?.focus({{ preventScroll: true }});
@@ -702,6 +705,9 @@ pub(crate) fn ListView(
     /// captured prop value would be as old as the render that made the
     /// closure) and the auto-select effect tracks it.
     selected: ReadSignal<Option<String>>,
+    /// The open view publishes its raw title independently of sidebar filters.
+    /// The selection's original snapshot may predate another client's rename.
+    open_session_title: ReadSignal<Option<(String, String)>>,
     /// The fleet's emptiness as the last committed listing proved it —
     /// `None` until a listing lands. `AppBody` renders the right pane's
     /// placeholder from this: "no active sessions" may only be claimed on
@@ -901,11 +907,11 @@ pub(crate) fn ListView(
     // mounted. Busy controls remain focusable, so only a real move outside
     // ends ownership. The return request is consumed after unmount.
     let mut rename_focus_owned = use_signal(|| false);
-    let mut rename_focus_return = use_signal(|| None::<(String, u64)>);
+    let mut rename_focus_return = use_signal(|| None::<(String, u64, bool)>);
     use_effect(move || {
         let intent = rename_focus_return();
         let editor = rename_editor();
-        let Some((id, generation)) = intent else {
+        let Some((id, generation, shortcut)) = intent else {
             return;
         };
         match rename_focus_return_state(generation, editor.as_ref()) {
@@ -917,7 +923,7 @@ pub(crate) fn ListView(
             RenameFocusReturn::Ready => {}
         }
         rename_focus_return.set(None);
-        focus_rename_toggle(&id);
+        focus_rename_destination(&id, shortcut);
     });
     // The optimistic rename corrections `apply_optimistic_renames` paints
     // over the server's listing, keyed by session id and carrying the read
@@ -2668,7 +2674,7 @@ pub(crate) fn ListView(
     // Opening Rename owns one editor above the keyed rows. The source menu
     // closes before the dialog mounts, so no fixed-position popup remains to
     // reappear after completion or detach while the list reorders.
-    let on_rename_start = move |(id, title): (String, String)| {
+    let on_rename_start = move |(id, title, shortcut): (String, String, bool)| {
         // The shared token counts too: the disabled attribute on the menu's
         // rename control is cosmetic (a dispatched synthetic click still
         // reaches this handler), and opening the field while the other
@@ -2700,6 +2706,7 @@ pub(crate) fn ListView(
             current_title: title,
             generation,
             unavailable: false,
+            shortcut,
         }));
         if menu_open.peek().as_deref() == Some(id.as_str()) {
             menu_open.set(None);
@@ -2728,6 +2735,7 @@ pub(crate) fn ListView(
         if editor.generation != generation || editor.unavailable {
             return;
         }
+        let shortcut = editor.shortcut;
         let id = editor.id;
         if !begin_row_op(&id) {
             return;
@@ -2768,7 +2776,7 @@ pub(crate) fn ListView(
                     // return focus over a control the user has since reached.
                     if rename_result_owns_editor(rename_editor.peek().as_ref(), generation) {
                         if rename_focus_owned() {
-                            rename_focus_return.set(Some((id.clone(), generation)));
+                            rename_focus_return.set(Some((id.clone(), generation, shortcut)));
                         }
                         rename_editor.set(None);
                         rename_error.set(None);
@@ -3246,6 +3254,7 @@ pub(crate) fn ListView(
     let confirm_replace = use_callback(confirm_replace);
     let cancel_replace = use_callback(cancel_replace);
     let on_rename_start = use_callback(on_rename_start);
+    let on_rename_row = use_callback(move |(id, title)| on_rename_start.call((id, title, false)));
     let on_rename_submit = use_callback(on_rename_submit);
     let on_rename_cancel = use_callback(move |generation| {
         let current_editor = rename_editor.peek().clone();
@@ -3255,7 +3264,7 @@ pub(crate) fn ListView(
         {
             // Both cancellation paths originate inside the dialog: a click
             // on Cancel or an ordinary Escape from one of its controls.
-            rename_focus_return.set(Some((editor.id, generation)));
+            rename_focus_return.set(Some((editor.id, generation, editor.shortcut)));
             rename_editor.set(None);
             rename_error.set(None);
         }
@@ -3512,6 +3521,10 @@ pub(crate) fn ListView(
         });
     });
 
+    // A navigation can precede the keyed view's first publishing effect. An
+    // old title must never let this shortcut rename the previous selection.
+    let rename_target =
+        use_memo(move || open_session_title().filter(|(id, _)| selected().as_ref() == Some(id)));
     rsx! {
         // Relays remain enabled while armed state catches up in the DOM.
         // Their live signal guards preserve prefix/digit/Enter event order
@@ -3560,6 +3573,17 @@ pub(crate) fn ListView(
             class: "launch-sequence-trigger", "data-sequence-action": "cancel",
             r#type: "button", hidden: true, tabindex: "-1",
             onclick: move |_| launch_sequence.set(None),
+        }
+        // The current session, rather than a visible row, owns this target.
+        // The common opener still enforces admission at actual click time.
+        button {
+            class: "session-rename-trigger", r#type: "button", hidden: true, tabindex: "-1",
+            disabled: busy || rename_target.read().is_none() || rename_editor.read().is_some(),
+            onclick: move |_| {
+                if let Some((id, title)) = rename_target.peek().as_ref() {
+                    on_rename_start.call((id.clone(), title.clone(), true));
+                }
+            },
         }
         button {
             class: "quick-launch-trigger", r#type: "button", hidden: true, tabindex: "-1",
@@ -4238,7 +4262,7 @@ pub(crate) fn ListView(
                                 on_delete,
                                 on_confirm_delete: confirm_delete,
                                 on_cancel_delete: cancel_delete,
-                                on_rename_start,
+                                on_rename_start: on_rename_row,
                                 on_menu_toggle: toggle_menu,
                                 on_bell_toggle: toggle_bell,
                                 on_bell_close: close_bell,
@@ -4265,6 +4289,7 @@ pub(crate) fn ListView(
                         (error_generation == editor.generation).then_some(error)
                     }),
                 generation: editor.generation,
+                shortcut: editor.shortcut,
                 focus_owned: rename_focus_owned,
                 on_submit: on_rename_submit,
                 on_cancel: on_rename_cancel,
@@ -4530,6 +4555,7 @@ mod tests {
             current_title: "original title".to_string(),
             generation: 17,
             unavailable: false,
+            shortcut: false,
         };
         let listing = |sessions, omits_fleet_members| SessionListing {
             sessions,
@@ -4583,6 +4609,7 @@ mod tests {
             current_title: "newer draft source".to_string(),
             generation: 9,
             unavailable: false,
+            shortcut: false,
         };
 
         assert!(rename_result_owns_editor(Some(&editor), 9));

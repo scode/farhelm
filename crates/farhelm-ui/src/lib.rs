@@ -1445,6 +1445,13 @@ pub(crate) const SESSION_DELETE_SHORTCUT: &str = if HAS_NEW_SESSION_SHORTCUT {
     "Ctrl+Shift+Backspace"
 };
 
+/// Rename's advertised key follows the same build choice as its installer.
+pub(crate) const SESSION_RENAME_SHORTCUT: &str = if HAS_NEW_SESSION_SHORTCUT {
+    "⌘L"
+} else {
+    "Ctrl+Shift+L"
+};
+
 /// Give the Mac desktop's Cmd+N the New button's current prefill and busy guard.
 ///
 /// Capture runs before xterm's input handler so the chord cannot reach the
@@ -1596,6 +1603,10 @@ fn AppBody() -> Element {
     });
     let mut current = use_signal(|| None::<Session>);
     use_context_provider(|| launch_sequence::LaunchSequence(Signal::new(None)));
+    // Selection is a navigation snapshot; detail reads live in SessionView.
+    // Keep Rename's raw seed separate so refreshed titles do not masquerade
+    // as navigation writes and fence the detail read that supplied them.
+    let mut open_session_title = use_signal(|| None::<(String, String)>);
     // A keyed SessionView unmounts on navigation; unresolved Replace belongs
     // to the page so retrying from another surface still names the same create.
     use_context_provider(|| list::ReplaceIntent(Signal::new(None)));
@@ -1762,8 +1773,11 @@ fn AppBody() -> Element {
                             // Selection memory lives in `ListView` (it knows
                             // which selections were user-initiated, and writes
                             // those to the helm's shared preference); this
-                            // handler only owns the signal.
-                            on_open: move |session: Session| current.set(Some(session)),
+                            // handler records the selection and its raw Rename seed.
+                            on_open: move |session: Session| {
+                                open_session_title.set(Some((session.id.clone(), session.title.clone())));
+                                current.set(Some(session));
+                            },
                             // The selected session survives sidebar filtering.
                             // Its folder and installation claim must travel
                             // together so New never depends on a visible row.
@@ -1772,6 +1786,7 @@ fn AppBody() -> Element {
                                 .as_ref()
                                 .and_then(list::OpenDestination::of_session),
                             selected: selected_id,
+                            open_session_title,
                             fleet_empty,
                             // A confirmed rename patches the selected session's
                             // TITLE in place — same id, same key, no remount —
@@ -1786,6 +1801,7 @@ fn AppBody() -> Element {
                                 if selected_matches
                                     && let Some(session) = current.write().as_mut()
                                 {
+                                    open_session_title.set(Some((id, title.clone())));
                                     session.title = title;
                                 }
                             },
@@ -1797,6 +1813,7 @@ fn AppBody() -> Element {
                             // for an object this client knows is gone.
                             on_removed: move |id: String| {
                                 if current.peek().as_ref().is_some_and(|session| session.id == id) {
+                                    open_session_title.set(None);
                                     current.set(None);
                                 }
                             },
@@ -1852,8 +1869,12 @@ fn AppBody() -> Element {
                                     key: "{session.id}",
                                     session: session.clone(),
                                     gate: ops::PaneGate::new(page_ops, row_ops),
-                                    on_replaced: move |replacement: Session| current.set(Some(replacement)),
+                                    on_replaced: move |replacement: Session| {
+                                        open_session_title.set(Some((replacement.id.clone(), replacement.title.clone())));
+                                        current.set(Some(replacement));
+                                    },
                                     selection: current,
+                                    open_session_title,
                                     prefill_request,
                                     header_delete,
                                     header_refresh,
