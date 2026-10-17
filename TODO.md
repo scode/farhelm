@@ -45,7 +45,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ## Near term
 
 - **Session action keyboard shortcuts.** Add keyboard shortcuts to delete and rename a session. Consider shortcuts for
-  Restart, Replace, and the other session actions too.
+  Restart, Replace, and the other session actions too. Plan: `plans/queue/session-action-shortcuts.md`.
 
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
@@ -55,11 +55,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Compose quick launch templates with multi-key chords.** Support Emacs-style key sequences that combine a base
   template with a modifier template: "do X, but with Codex". For example, bind the template for X to Cmd-1 and a "use
   Codex" template to Cmd-2, then compose them through the sequence. This captures the concept; the exact keybindings,
-  composition rules, and launch interaction are to be settled during TODO planning.
+  composition rules, and launch interaction are to be settled during TODO planning. Plan:
+  `plans/queue/quick-launch-chords.md`.
 
 - **Name a session while it starts.** Start a session with a rename dialog open, so the session is already starting
   while you type its name. Make this the default for quick launches, where just pressing Enter immediately accepts the
-  default name. Details TBD at plan time.
+  default name. Details TBD at plan time. Plan: `plans/queue/name-session-while-starting.md`.
 
 - **Send a prompt to a running agent from the `farhelm` command.** Let an agent (or a script) send a prompt into another
   session's agent that is already running, through the `farhelm` CLI, and document it in the agent instructions. This is
@@ -140,7 +141,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   localhost on the user's own machine, which is the wrong machine, and SPEC.md notes the same gap for login redirects to
   a localhost callback server on the remote host. Where the offer appears (the link's hover, a click modifier, the link
   permission card), which addresses count as local, how long a tunnel lives, and what it means for a session on the
-  local host are to be decided when the entry is planned.
+  local host are to be decided when the entry is planned. Plan: `plans/queue/tunnel-localhost-links.md`.
 
 - **One-way observed YOLO shield.** The sidebar shield now reads the agent's status line (#2063): seeing a no-checks
   mode turns the shield YOLO, and a later recognized non-YOLO mode restores the launch shield (SPEC.md, Session list,
@@ -166,13 +167,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   move: press Down twice, click the fourth item before both land, press Down, and focus goes back to the fourth item
   instead of the fifth. A full fix needs to know where each focus change came from, which the menus' focus events do not
   say today. Consider whether such a focus-source design is worth it; it would need its own scope and acceptance checks.
+  Plan: `plans/queue/menu-focus-source.md`.
 
 - **Audit scroll regions for keyboard reach.** SPEC.md requires every scrollable region in the GUI to be reachable and
   scrollable with the keyboard alone, WebKit included, with a tab stop of its own when its content holds nothing
   focusable. The keyboard-scroll-regions plan fixed the host plans and the trash list but audited nothing else. Already
   known to break the rule: the SSH connection help area while loading, showing an error or showing no commands, the
   remove-host dialog's body, and the feedback dialog's "sent" message. Audit every scroll region and fix the ones that
-  fall short.
+  fall short. Plan: `plans/queue/keyboard-scroll-audit.md`.
 
 - **Cheaper clones from the repository cache.** Look into whether a managed checkout's clone from the host's repository
   cache can skip most of the compression and delta work git does today, so the clone stage finishes sooner.
