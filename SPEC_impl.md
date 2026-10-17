@@ -155,30 +155,35 @@ First-open dismissal writes through the normal per-field preference queue; help-
 owns both welcome and feedback so their handoff releases isolation and replaces one modal with the other without a
 competing focus-return task.
 
+Helm schema 56 adds nullable `preferences.name_session_on_quick_launch`. Unset and true enable quick-launch naming; only
+false disables it, so upgraded helms have the same default as fresh ones. The Settings switch beside session
+confirmations writes an explicit boolean through the ordinary sparse preference queue. Null restores the enabled default
+and omission preserves the stored choice. Older helms refuse this schema.
+
 The session list's chosen ORDER, last-selected session, compact-row choice, and the launch composer's remembered
 permissions and workspace-trust choices, host confirmation choices, and remembered feedback contact are one preference
 the HELM keeps, in a singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`,
 `remembered_permissions`, `remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`,
-`feedback_contact`, `terminal_link_click`, `skip_session_confirmations`, `quick_launch_template`, `template_shortcuts`,
-`welcome_seen`) behind `GET`/`PUT /api/preferences`, device-authenticated like every other route. The two remembered
-launch fields are written by the helm after a successful user structured launch; no shipped client PUTs them. Workspace
-trust changes only after an explicit Codex, Muse, or Pi choice. An agent-originated create and an unsupported harness
-leave it alone. This makes the remembered values facts of accepted launches rather than claims from one client. Both
-clients read the row once after authentication — `PreferencesGate` holds the authenticated tree, rendering nothing,
-until the read lands, so the sort control and the auto-select effect see the remembered values on their first run and no
-frame shows a default that is then corrected. On desktop the IPC authentication gate already holds the tree and the read
-is one loopback hop, so nothing is visible; in the browser the first paint deliberately waits on that one round trip to
-the helm — a page with a valid credential used to paint its sidebar synchronously from localStorage — so the list never
-appears in an order that then changes. A write is a sparse patch naming only the field the user changed, merged
-per-field by the helm (an absent field is untouched, an explicit `null` clears one), so two clients changing different
-fields at nearly the same time cannot clobber each other; the signal in the page is updated before the request leaves,
-which is what keeps the choice in force when the write fails. Same-field writes are serialized latest-wins in the
-client, so a burst of changes cannot land on the helm in reverse order; the write queue is process state outside the
-remounted tree, and after the browser's credential recovery the gate overlays and replays any local choice whose write
-never got through, so reauthentication cannot roll the current client back to the helm's older row. The desktop app
-never signs in again, so nothing remounts its tree. The seed read runs under a seconds-scale deadline of its own and
-expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty
-seconds.
+`feedback_contact`, `terminal_link_click`, `skip_session_confirmations`, `name_session_on_quick_launch`,
+`quick_launch_template`, `template_shortcuts`, `welcome_seen`) behind `GET`/`PUT /api/preferences`, device-authenticated
+like every other route. The two remembered launch fields are written by the helm after a successful user structured
+launch; no shipped client PUTs them. Workspace trust changes only after an explicit Codex, Muse, or Pi choice. An
+agent-originated create and an unsupported harness leave it alone. This makes the remembered values facts of accepted
+launches rather than claims from one client. Both clients read the row once after authentication — `PreferencesGate`
+holds the authenticated tree, rendering nothing, until the read lands, so the sort control and the auto-select effect
+see the remembered values on their first run and no frame shows a default that is then corrected. On desktop the IPC
+authentication gate already holds the tree and the read is one loopback hop, so nothing is visible; in the browser the
+first paint deliberately waits on that one round trip to the helm — a page with a valid credential used to paint its
+sidebar synchronously from localStorage — so the list never appears in an order that then changes. A write is a sparse
+patch naming only the field the user changed, merged per-field by the helm (an absent field is untouched, an explicit
+`null` clears one), so two clients changing different fields at nearly the same time cannot clobber each other; the
+signal in the page is updated before the request leaves, which is what keeps the choice in force when the write fails.
+Same-field writes are serialized latest-wins in the client, so a burst of changes cannot land on the helm in reverse
+order; the write queue is process state outside the remounted tree, and after the browser's credential recovery the gate
+overlays and replays any local choice whose write never got through, so reauthentication cannot roll the current client
+back to the helm's older row. The desktop app never signs in again, so nothing remounts its tree. The seed read runs
+under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a stalled preference endpoint
+cannot blank the page for the funnel's full sixty seconds.
 
 The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
 number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers

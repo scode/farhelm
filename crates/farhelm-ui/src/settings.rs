@@ -71,10 +71,14 @@ pub(crate) fn SettingsDialog(
     let base = use_context::<ApiBase>().0;
     let setup_base = base.clone();
     let session_base = base.clone();
+    let naming_base = base.clone();
     let mut preferences = use_context::<SharedPreferences>();
     let setup = preferences.0.read().skip_host_setup_confirmation == Some(true);
     let remove = preferences.0.read().skip_host_remove_confirmation == Some(true);
     let skip_sessions = preferences.0.read().skip_session_confirmations == Some(true);
+    // The positive naming preference defaults on for upgraded helms too;
+    // treating an absent value like the confirmation opt-outs would disable it.
+    let name_quick_launches = preferences.0.read().name_session_on_quick_launch != Some(false);
     // Superseded writes also report false. Only the latest click may explain
     // its failure, including when an intervening click opted out again.
     let mut session_generation = use_signal(|| 0_u64);
@@ -165,6 +169,27 @@ pub(crate) fn SettingsDialog(
                             p { class: "host-settings-help app-settings-error", role: "alert",
                                 "Confirmations may still be off for this helm. Try again."
                             }
+                        }
+                        label {
+                            class: "app-settings-choice",
+                            "data-tooltip": "offer to name a quick-launched session while its agent starts",
+                            span { "name sessions on quick launch" }
+                            input {
+                                r#type: "checkbox",
+                                class: "host-settings-switch",
+                                checked: name_quick_launches,
+                                aria_describedby: "quick-launch-naming-help",
+                                onchange: move |event| {
+                                    preferences.0.write().name_session_on_quick_launch = Some(event.checked());
+                                    store_preference(
+                                        &naming_base,
+                                        PreferenceValue::NameSessionOnQuickLaunch(event.checked()),
+                                    );
+                                },
+                            }
+                        }
+                        p { id: "quick-launch-naming-help", class: "host-settings-help",
+                            "Offer to name a quick-launched session while its agent starts. Enter keeps its default name. This choice applies to this helm; other open clients pick it up when they reload."
                         }
                     }
                     section { class: "host-settings-section", aria_label: "hosts",

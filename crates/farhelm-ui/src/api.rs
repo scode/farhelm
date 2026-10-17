@@ -394,6 +394,9 @@ pub(crate) struct Preferences {
     /// Skip everyday session questions; supervisor guards and YOLO still apply.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) skip_session_confirmations: Option<bool>,
+    /// Unset enables naming on fresh and upgraded helms; only false opts out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) name_session_on_quick_launch: Option<bool>,
     /// Shared quick-launch mark, separate from a template editor's fields.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) quick_launch_template: Option<String>,
@@ -667,6 +670,7 @@ pub(crate) enum PreferenceField {
     HostRemoveConfirmation,
     HostSetupConfirmation,
     SessionConfirmations,
+    NameSessionOnQuickLaunch,
     QuickLaunchTemplate,
     TemplateShortcuts,
     FeedbackContact,
@@ -691,6 +695,7 @@ impl PreferenceField {
             PreferenceField::HostRemoveConfirmation => "skip_host_remove_confirmation",
             PreferenceField::HostSetupConfirmation => "skip_host_setup_confirmation",
             PreferenceField::SessionConfirmations => "skip_session_confirmations",
+            PreferenceField::NameSessionOnQuickLaunch => "name_session_on_quick_launch",
             PreferenceField::QuickLaunchTemplate => "quick_launch_template",
             PreferenceField::TemplateShortcuts => "template_shortcuts",
             PreferenceField::FeedbackContact => "feedback_contact",
@@ -716,6 +721,7 @@ pub(crate) enum PreferenceValue {
     HostRemoveConfirmation(bool),
     HostSetupConfirmation(bool),
     SessionConfirmations(bool),
+    NameSessionOnQuickLaunch(bool),
     /// Explicit clear removes the sole mark without changing template fields.
     QuickLaunchTemplate(Option<String>),
     /// Empty clears every key; each write replaces the entire shared map.
@@ -747,6 +753,7 @@ impl PreferenceValue {
             Self::HostRemoveConfirmation(_) => PreferenceField::HostRemoveConfirmation,
             Self::HostSetupConfirmation(_) => PreferenceField::HostSetupConfirmation,
             Self::SessionConfirmations(_) => PreferenceField::SessionConfirmations,
+            Self::NameSessionOnQuickLaunch(_) => PreferenceField::NameSessionOnQuickLaunch,
             Self::QuickLaunchTemplate(_) => PreferenceField::QuickLaunchTemplate,
             Self::TemplateShortcuts(_) => PreferenceField::TemplateShortcuts,
             Self::FeedbackContact(_) => PreferenceField::FeedbackContact,
@@ -768,6 +775,7 @@ impl PreferenceValue {
             | Self::Compact(value)
             | Self::HostRemoveConfirmation(value)
             | Self::SessionConfirmations(value)
+            | Self::NameSessionOnQuickLaunch(value)
             | Self::HostSetupConfirmation(value) => serde_json::json!(value),
         }
     }
@@ -787,6 +795,9 @@ impl PreferenceValue {
             }
             Self::HostSetupConfirmation(value) => seed.skip_host_setup_confirmation = Some(*value),
             Self::SessionConfirmations(value) => seed.skip_session_confirmations = Some(*value),
+            Self::NameSessionOnQuickLaunch(value) => {
+                seed.name_session_on_quick_launch = Some(*value)
+            }
             Self::QuickLaunchTemplate(value) => seed.quick_launch_template = value.clone(),
             Self::TemplateShortcuts(value) => seed.template_shortcuts = value.clone(),
             Self::FeedbackContact(value) => seed.feedback_contact = value.clone(),
@@ -871,6 +882,7 @@ struct PreferenceWrites {
     host_remove_confirmation: FieldWrite,
     host_setup_confirmation: FieldWrite,
     session_confirmations: FieldWrite,
+    name_session_on_quick_launch: FieldWrite,
     quick_launch_template: FieldWrite,
     template_shortcuts: FieldWrite,
     feedback_contact: FieldWrite,
@@ -888,6 +900,7 @@ impl PreferenceWrites {
             PreferenceField::HostRemoveConfirmation => &mut self.host_remove_confirmation,
             PreferenceField::HostSetupConfirmation => &mut self.host_setup_confirmation,
             PreferenceField::SessionConfirmations => &mut self.session_confirmations,
+            PreferenceField::NameSessionOnQuickLaunch => &mut self.name_session_on_quick_launch,
             PreferenceField::QuickLaunchTemplate => &mut self.quick_launch_template,
             PreferenceField::TemplateShortcuts => &mut self.template_shortcuts,
             PreferenceField::FeedbackContact => &mut self.feedback_contact,
@@ -1038,6 +1051,7 @@ impl PreferenceWrites {
             PreferenceField::HostRemoveConfirmation => &self.host_remove_confirmation,
             PreferenceField::HostSetupConfirmation => &self.host_setup_confirmation,
             PreferenceField::SessionConfirmations => &self.session_confirmations,
+            PreferenceField::NameSessionOnQuickLaunch => &self.name_session_on_quick_launch,
             PreferenceField::QuickLaunchTemplate => &self.quick_launch_template,
             PreferenceField::TemplateShortcuts => &self.template_shortcuts,
             PreferenceField::FeedbackContact => &self.feedback_contact,
@@ -1143,6 +1157,7 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
         PreferenceField::HostRemoveConfirmation,
         PreferenceField::HostSetupConfirmation,
         PreferenceField::SessionConfirmations,
+        PreferenceField::NameSessionOnQuickLaunch,
         PreferenceField::QuickLaunchTemplate,
         PreferenceField::TemplateShortcuts,
         PreferenceField::FeedbackContact,
@@ -5802,6 +5817,30 @@ mod preference_write_tests {
         assert_eq!(queue.dirty(ask.field()), None);
         ask.overlay(&mut seed);
         assert_eq!(seed.skip_session_confirmations, Some(false));
+    }
+
+    /// Naming's explicit opt-out must survive credential recovery independently
+    /// of confirmation choices; false must never disappear as an absent value.
+    #[farhelm_testtrace::test]
+    fn quick_launch_naming_has_an_independent_replay_slot() {
+        let mut queue = PreferenceWrites::default();
+        let naming = PreferenceValue::NameSessionOnQuickLaunch(false);
+        assert_eq!(naming.field().key(), "name_session_on_quick_launch");
+        assert_eq!(naming.wire_value(), serde_json::json!(false));
+        assert!(queue.record(naming.clone()));
+        assert!(queue.record(PreferenceValue::SessionConfirmations(true)));
+        assert!(!queue.finished(naming.field(), &naming, false));
+        let mut seed = Preferences::default();
+        queue.dirty(naming.field()).unwrap().overlay(&mut seed);
+        assert_eq!(seed.name_session_on_quick_launch, Some(false));
+        assert_eq!(seed.skip_session_confirmations, None);
+        assert_eq!(queue.begin_replay(naming.field()), Some(naming.clone()));
+        assert!(!queue.finished(naming.field(), &naming, true));
+        assert_eq!(queue.dirty(naming.field()), None);
+        let enabled = PreferenceValue::NameSessionOnQuickLaunch(true);
+        assert_eq!(enabled.wire_value(), serde_json::json!(true));
+        enabled.overlay(&mut seed);
+        assert_eq!(seed.name_session_on_quick_launch, Some(true));
     }
 
     /// A failed link choice survives reauthentication and serializes as its

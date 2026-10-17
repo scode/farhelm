@@ -7199,6 +7199,7 @@ mod tests {
             feedback_contact: None,
             terminal_link_click: None,
             skip_session_confirmations: None,
+            name_session_on_quick_launch: None,
             quick_launch_template: None,
             template_shortcuts: Default::default(),
             welcome_seen: None,
