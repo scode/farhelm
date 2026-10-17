@@ -2190,6 +2190,8 @@ mod tests {
             // go, including the session-confirmation choice added in schema 48:
             // the test compares the result with the frozen v26 DDL, which
             // has none of them.
+            // Nullable additions still change that shape even when unset;
+            // remove tunnel consent and quick-launch naming before rewinding.
             conn.execute_batch(
                 "DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
@@ -2206,6 +2208,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN terminal_link_click;
                  ALTER TABLE preferences DROP COLUMN welcome_seen;
                  ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN tunnel_consent;
+                 ALTER TABLE preferences DROP COLUMN name_session_on_quick_launch;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;

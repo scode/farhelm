@@ -1025,6 +1025,8 @@ export interface Preferences {
   skip_host_setup_confirmation?: boolean;
   /** Everyday session opt-out, independent of host and YOLO authority. */
   skip_session_confirmations?: boolean;
+  /** Unset enables naming after quick launch; only false opts out. */
+  name_session_on_quick_launch?: boolean;
   /** Sole shared shortcut template; template fields never contain this mark. */
   quick_launch_template?: string;
   /** Shared whole-map physical digit bindings, independent of the quick mark. */
@@ -1064,6 +1066,7 @@ export async function patchPreferences(
     skip_host_remove_confirmation?: boolean | null;
     skip_host_setup_confirmation?: boolean | null;
     skip_session_confirmations?: boolean | null;
+    name_session_on_quick_launch?: boolean | null;
     quick_launch_template?: string | null;
     template_shortcuts?: Record<string, string> | null;
     feedback_contact?: string | null;
@@ -1102,6 +1105,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
     skip_host_remove_confirmation: null,
     skip_host_setup_confirmation: null,
     skip_session_confirmations: null,
+    name_session_on_quick_launch: null,
     quick_launch_template: null,
     template_shortcuts: null,
     feedback_contact: null,
