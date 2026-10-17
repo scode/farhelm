@@ -26,6 +26,7 @@ import {
 import { requireHelmBuild } from "./helpers/helm-build";
 import { routeGate } from "./helpers/route-gate";
 import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
+import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
 
 /** Live helm identity copied onto every route response this suite fabricates. */
 let HELM_BUILD = "";
@@ -631,6 +632,8 @@ for (const phone of [false, true]) {
    * Initial focus keeps its ring without a covering tooltip, but subsequent
    * hover and keyboard navigation must still explain the answers.
    * Dismissing through the new header must retire the offer without a write.
+   * A short viewport also proves keyboard access to the overflowing text-only
+   * plan: WebKit needs a tab stop on the scroll owner, not on the footer.
    */
   test(`host-setup-layout ${phone ? "phone" : "desktop"} keeps answers and exact plan text`, async ({ page, request }, testInfo) => {
     const remote = destination(testInfo, `layout-${phone ? "phone" : "desktop"}`);
@@ -661,6 +664,9 @@ for (const phone of [false, true]) {
     await expectHostAnswers(dialog, ["cancel", "set up, don't ask again", "set up"], phone);
     await expectPlanCopyAndIndent(dialog.locator(".provisioning-plan"), planned.confirmation);
     await testInfo.attach(`host-setup-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
+    await page.setViewportSize({ width: phone ? 390 : 1100, height: 420 });
+    await expectKeyboardScroll(page, dialog.locator(".host-settings-dismiss"), dialog.getByRole("region", { name: "host setup plan", exact: true }));
+    await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
     await expectCancelTooltipReturns(page, dialog.getByRole("button", { name: "cancel", exact: true }), dialog.getByRole("button", { name: "set up", exact: true }));
     await dialog.getByRole("button", { name: "cancel host setup", exact: true }).click();
     await expect(dialog).toHaveCount(0);

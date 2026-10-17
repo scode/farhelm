@@ -3296,6 +3296,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   min-height: 0;
   overflow: auto;
 }
+/* Plan regions have no focusable text. Keep their keyboard ring inside
+   the scrollport so the dialog frame cannot clip it. */
+.host-dialog-framed > .host-settings-body[tabindex="0"]:focus-visible {
+  outline-offset: -2px;
+}
 
 /* The hint describes a choice, but is outside the answer row so it cannot
    push one answer off the common baseline. Only host confirmations use this

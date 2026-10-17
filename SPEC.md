@@ -1216,6 +1216,9 @@ the edge to reset it, or focus the separator and use Left and Right to step by 1
 like terminal text size: it is about the screen in front of the user, rather than a preference all clients should share.
 The main pane keeps its 320px floor; a narrower window scrolls horizontally.
 
+Every scrollable region in the GUI can be reached and scrolled with the keyboard alone in every engine Farhelm ships on,
+WebKit included. A region whose content holds nothing focusable gets its own tab stop with an accessible name.
+
 Pinned sessions appear first in the sidebar, with each group preserving the chosen list order below. A pin is shared
 helm data, so every client agrees without a private rank; it works even when the session's host is unreachable. Host
 selection and other filters still apply. Pins have no manual or pin-time order. Under most recent activity, even a stale

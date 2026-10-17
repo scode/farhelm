@@ -1,4 +1,5 @@
 import { chooseLauncherHost } from "./helpers/host-picker";
+import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
 import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
 // =====================================================================
 // Multi-host: the hosts panel, the stale list, and host management
@@ -3859,6 +3860,8 @@ test.describe("multi-host", () => {
    * rest of the suite once the row is restored.
    * Initial Uninstall focus stays visibly outlined and quiet; later hover and
    * keyboard help remain available while the user reads the real plan.
+   * The overflowing plan must also take Tab focus and native scrolling keys;
+   * its sibling answer buttons cannot provide that access in WebKit.
    */
   test("uninstall-remote-host: the plan names the kept data, confirming removes the host", async ({
     page,
@@ -3912,6 +3915,9 @@ test.describe("multi-host", () => {
         await expectUninstallText(dialog.locator(".provisioning-plan"), confirmation);
         await testInfo.attach(`host-uninstall-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
       }
+      await page.setViewportSize({ width: 390, height: 420 });
+      await expectKeyboardScroll(page, dialog.locator(".host-settings-dismiss"), dialog.getByRole("region", { name: "host uninstall plan", exact: true }));
+      await page.setViewportSize({ width: 1100, height: 850 });
       await expectCancelTooltipReturns(page, dialog.locator(".uninstall-cancel"), dialog.locator(".uninstall-confirm"));
       await dialog.getByRole("button", { name: "cancel Farhelm uninstall", exact: true }).click();
       await expect(dialog).toHaveCount(0);
