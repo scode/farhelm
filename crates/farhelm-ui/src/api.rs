@@ -368,6 +368,9 @@ impl ListSort {
 /// gets everywhere else in this codebase.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
 pub(crate) struct Preferences {
+    /// Only a successfully acknowledged true value permits native tunnels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tunnel_consent: Option<bool>,
     /// Shared dismissal of the managed-checkout Claude trust hint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) claude_trust_hint_dismissed: Option<bool>,
@@ -4260,6 +4263,95 @@ pub(crate) enum AnswerOutcome {
     /// expired, or withdrawn), which the helm says with 410 Gone. Nothing was
     /// approved, and the next listing drops the card.
     Gone,
+}
+
+/// One native listener. Its opaque id is scoped to its session at the server.
+#[cfg(native_desktop)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+pub(crate) struct TunnelInfo {
+    pub id: String,
+    pub local_port: u16,
+    pub remote_port: u16,
+}
+
+/// Availability is independent of consent and host connectivity.
+#[cfg(native_desktop)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub(crate) struct SessionTunnels {
+    pub available: bool,
+    pub host_name: String,
+    pub consent: bool,
+    #[serde(skip_serializing)]
+    pub tunnels: Vec<TunnelInfo>,
+}
+
+/// Read local listener state even while the remote session is offline.
+#[cfg(native_desktop)]
+pub(crate) async fn fetch_tunnels(base: &str, session: &str) -> Result<SessionTunnels, String> {
+    let url = format!(
+        "{base}/api/sessions/{}/tunnels",
+        encode_path_segment(session)
+    );
+    let response = send(client().get(&url)).await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("GET", &url, response).await);
+    }
+    response
+        .json()
+        .await
+        .map_err(|error| format!("could not read open tunnels: {error}"))
+}
+
+/// Open through the server's native capability; the response never needs a second opener.
+#[cfg(native_desktop)]
+pub(crate) async fn open_tunnel(base: &str, session: &str, target: &str) -> Result<(), String> {
+    let url = format!(
+        "{base}/api/sessions/{}/tunnels/open",
+        encode_path_segment(session)
+    );
+    let response = send(
+        client()
+            .post(&url)
+            .json(&serde_json::json!({"url": target})),
+    )
+    .await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("POST", &url, response).await);
+    }
+    Ok(())
+}
+
+/// Closing is session-scoped and idempotent, including while the host is offline.
+#[cfg(native_desktop)]
+pub(crate) async fn close_tunnel(base: &str, session: &str, id: &str) -> Result<(), String> {
+    let url = format!(
+        "{base}/api/sessions/{}/tunnels/{}",
+        encode_path_segment(session),
+        encode_path_segment(id)
+    );
+    let response = send(client().delete(&url)).await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("DELETE", &url, response).await);
+    }
+    Ok(())
+}
+
+/// Persist the security choice before changing its UI mirror or acting on it.
+/// A disabling write also closes every listener server-side. This field never
+/// enters the ordinary best-effort queue, whose replay could restore revoked consent.
+#[cfg(native_desktop)]
+pub(crate) async fn write_tunnel_consent(base: &str, allowed: bool) -> Result<(), String> {
+    let url = format!("{base}/api/preferences");
+    let response = send(
+        client()
+            .put(&url)
+            .json(&serde_json::json!({"tunnel_consent": allowed})),
+    )
+    .await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("PUT", &url, response).await);
+    }
+    Ok(())
 }
 
 /// Answer one waiting agent request (`POST /api/approvals/{id}`).

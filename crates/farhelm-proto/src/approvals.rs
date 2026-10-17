@@ -79,6 +79,9 @@ pub enum ApprovalAction {
         url: String,
         local_network: bool,
         preapproved: bool,
+        /// Helm-computed offer, independent of consent. Older cards omit it.
+        #[serde(default)]
+        tunnel_available: bool,
     },
     /// A new session: `farhelm spawn`, `farhelm agent create`, or
     /// `farhelm agent clone`.
@@ -181,6 +184,9 @@ pub struct ApprovalAnswerRequest {
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalAnswer {
     Allow,
+    /// Open this remote loopback URL through a consented native tunnel.
+    /// This grants no persistent host permission and never opens the raw URL.
+    TunnelAndOpen,
     /// Turn on the requesting host's "run farhelm commands from this host
     /// without asking" setting, then allow this request.
     AlwaysAllow,
@@ -189,6 +195,26 @@ pub enum ApprovalAnswer {
 
 #[cfg(test)]
 mod tests {
+    /// Old card payloads must not advertise a new native capability, while the
+    /// new answer needs its own wire tag so it cannot be mistaken for raw Allow.
+    #[test]
+    fn tunnel_offer_defaults_off_and_answer_has_a_distinct_wire_tag() {
+        let action = serde_json::from_value::<super::ApprovalAction>(serde_json::json!({
+            "kind": "open_url", "url": "http://localhost/", "local_network": true, "preapproved": false
+        })).unwrap();
+        assert!(matches!(
+            action,
+            super::ApprovalAction::OpenUrl {
+                tunnel_available: false,
+                ..
+            }
+        ));
+        assert_eq!(
+            serde_json::to_value(super::ApprovalAnswer::TunnelAndOpen).unwrap(),
+            "tunnel_and_open"
+        );
+    }
+
     /// A page loaded before prompt support must fail to decode this card;
     /// a silently ignored optional field would let it approve unseen text.
     #[test]

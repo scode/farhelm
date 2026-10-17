@@ -7203,6 +7203,7 @@ mod tests {
             template_shortcuts: Default::default(),
             welcome_seen: None,
             claude_trust_hint_dismissed: None,
+            tunnel_consent: None,
         };
         assert_eq!(
             super::initial_structured_permissions(&with(Some("yolo"))),

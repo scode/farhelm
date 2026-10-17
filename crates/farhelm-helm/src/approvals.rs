@@ -90,6 +90,7 @@ const ORIGIN_RECHECK: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Verdict {
     Allow,
+    TunnelAndOpen,
     Deny,
     /// The asking session is being deleted.
     SessionDeleted,
@@ -166,7 +167,7 @@ impl Approvals {
 
     /// The origin and recorded identity of the entry `id`, if it is still
     /// waiting, without settling it.
-    fn origin_of(&self, id: &str) -> Option<(AgentOrigin, Option<String>, ApprovalAction)> {
+    fn origin_of(&self, id: &str) -> Option<(AgentOrigin, Option<String>, ApprovalAction, String)> {
         self.lock()
             .pending
             .values()
@@ -176,6 +177,7 @@ impl Approvals {
                     entry.origin,
                     entry.identity.clone(),
                     entry.view.action.clone(),
+                    entry.asking_session.clone(),
                 )
             })
     }
@@ -300,31 +302,56 @@ pub(crate) async fn ask(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
-    mut action: ApprovalAction,
+    action: ApprovalAction,
 ) -> anyhow::Result<()> {
+    ask_with_answer(state, origin, asking_session, action)
+        .await
+        .map(|_| ())
+}
+
+/// A successful answer retains how the user chose to open a link.
+/// Ordinary verbs use `ask`; only the browser handler acts on the tunnel case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Allowed {
+    Raw,
+    Tunnel,
+}
+
+/// Preserve the distinct tunnel verdict through the ordinary approval lifecycle.
+/// Native preapproved links still return Raw immediately, without a card.
+pub(crate) async fn ask_with_answer(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking_session: &str,
+    mut action: ApprovalAction,
+) -> anyhow::Result<Allowed> {
     let hosts = state.store.list_hosts().await?;
     let Some(row) = hosts.iter().find(|row| row.id == origin.host) else {
         return Err(crate::sessions::no_such_host(origin.host));
     };
     match &mut action {
         ApprovalAction::OpenUrl {
+            url,
             local_network,
             preapproved,
-            ..
+            tunnel_available,
         } => {
+            *tunnel_available = state.link_opener.is_some()
+                && row.kind == crate::store::HostKind::Ssh
+                && crate::tunnels::classify_url(url).is_ok();
             let allowed = if *local_network {
                 row.local_links_without_asking
             } else {
                 row.links_without_asking
             };
             if allowed && state.link_opener.is_some() {
-                return Ok(());
+                return Ok(Allowed::Raw);
             }
             // Web clients still need a click to preserve browser user activation. This
             // reduced card waives the trust question, never the gesture needed to open.
             *preapproved = allowed;
         }
-        _ if row.commands_without_asking => return Ok(()),
+        _ if row.commands_without_asking => return Ok(Allowed::Raw),
         _ => {}
     }
     if !gui_connected(state) {
@@ -397,7 +424,8 @@ pub(crate) async fn ask(
     };
     tracing::info!(approval = seq, outcome = ?ending, "an agent approval request ended");
     match ending {
-        Ending::Answered(Some(Verdict::Allow)) => Ok(()),
+        Ending::Answered(Some(Verdict::Allow)) => Ok(Allowed::Raw),
+        Ending::Answered(Some(Verdict::TunnelAndOpen)) => Ok(Allowed::Tunnel),
         Ending::Answered(Some(Verdict::Deny)) => Err(refusal(
             ErrorKind::Unauthorized,
             "the user declined this request in Farhelm; nothing was done".to_string(),
@@ -538,6 +566,9 @@ pub(crate) async fn list_approvals(
 /// open: the request can expire in the instant between the setting being
 /// stored and the approval, leaving the setting on with the request refused
 /// as not answered. That is accepted; the user did ask for the setting.
+/// TunnelAndOpen grants no host setting. Native capability, the narrow URL
+/// target, the requesting connection/session ownership and recorded consent
+/// must all still hold before that answer removes the pending entry.
 pub(crate) async fn answer_approval(
     State(state): State<std::sync::Arc<AppState>>,
     AxPath(id): AxPath<String>,
@@ -547,8 +578,58 @@ pub(crate) async fn answer_approval(
         let verdict = match request.answer {
             ApprovalAnswer::Allow => Verdict::Allow,
             ApprovalAnswer::Deny => Verdict::Deny,
+            ApprovalAnswer::TunnelAndOpen => {
+                let Some((origin, _, action, asking)) = state.approvals.origin_of(&id) else {
+                    return gone(&id);
+                };
+                // Validate before taking the entry: an invalid answer must leave the
+                // request answerable. The manager repeats consent/ownership checks
+                // when opening, so revocation cannot race into a new listener.
+                let eligible = match action {
+                    ApprovalAction::OpenUrl { url, .. } => {
+                        state.link_opener.is_some()
+                            && crate::tunnels::classify_url(&url).is_ok()
+                            && crate::agent_requests::origin_is_live(&state, origin)
+                            && match state.store.list_hosts().await {
+                                Ok(rows) => rows.iter().any(|row| {
+                                    row.id == origin.host && row.kind == crate::store::HostKind::Ssh
+                                }),
+                                Err(error) => return http_error(error),
+                            }
+                    }
+                    _ => false,
+                };
+                if !eligible {
+                    return http_error(refusal(
+                        ErrorKind::Conflict,
+                        "this request cannot open through a tunnel".into(),
+                    ));
+                }
+                match crate::browser::tunnel_origin_matches(&state, origin, &asking).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        return http_error(refusal(
+                            ErrorKind::Conflict,
+                            "the requesting session no longer belongs to this host connection"
+                                .into(),
+                        ));
+                    }
+                    Err(error) => return http_error(error),
+                }
+                match state.store.preferences().await {
+                    Ok(preferences) if preferences.tunnel_consent == Some(true) => {}
+                    Ok(_) => {
+                        return http_error(refusal(
+                            ErrorKind::Conflict,
+                            "allow tunnels in Farhelm before opening this link".into(),
+                        ));
+                    }
+                    Err(error) => return http_error(error),
+                }
+                Verdict::TunnelAndOpen
+            }
             ApprovalAnswer::AlwaysAllow => {
-                let Some((origin, identity, action)) = state.approvals.origin_of(&id) else {
+                let Some((origin, identity, action, _)) = state.approvals.origin_of(&id) else {
                     return gone(&id);
                 };
                 if !crate::agent_requests::origin_is_live(&state, origin) {
@@ -776,6 +857,294 @@ mod tests {
             .expect("the ask task did not panic")
     }
 
+    /// Observe the actual browser handler's pending card before answering it.
+    /// A feed subscription installed first makes readiness independent of scheduling.
+    async fn pending_browser(
+        harness: &rest_harness::Harness,
+        origin: AgentOrigin,
+        url: String,
+    ) -> (
+        tokio::task::JoinHandle<anyhow::Result<farhelm_proto::AgentReply>>,
+        String,
+    ) {
+        let mut changes = harness.state.manager.events().subscribe();
+        let state = Arc::clone(&harness.state);
+        let task = tokio::spawn(async move {
+            crate::browser::open_url(&state, origin, "remote-session", url).await
+        });
+        let id = tokio::time::timeout(STEP, async {
+            loop {
+                if let Some(card) = harness.state.approvals.list().first() {
+                    break card.id.clone();
+                }
+                assert!(
+                    !task.is_finished(),
+                    "browser handler ended before showing its card"
+                );
+                changes
+                    .changed()
+                    .await
+                    .expect("approval feed remains alive");
+            }
+        })
+        .await
+        .expect("browser card did not become ready");
+        (task, id)
+    }
+
+    /// Tunnel answers cannot approve other operations or bypass consent. A refusal
+    /// must preserve the pending card so the user can still choose Open or Deny.
+    #[farhelm_testtrace::test]
+    async fn tunnel_answers_leave_ineligible_and_unconsented_cards_pending() {
+        let opened = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = opened.clone();
+        let (builder, remote) = rest_harness::FleetBuilder::new()
+            .await
+            .link_opener(Arc::new(move |_| {
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }))
+            .local(rest_harness::HostScript {
+                sessions: vec![rest_harness::session("local-session", 1_700_000_000)],
+                ..rest_harness::HostScript::default()
+            })
+            .await
+            .ssh(
+                "remote.example",
+                rest_harness::HostScript {
+                    sessions: vec![rest_harness::session("remote-session", 1_700_000_000)],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(remote).await;
+        let local = rest_harness::local_id(&harness.store).await;
+        harness.await_refreshed(local).await;
+        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let origin = live_origin(&harness, remote);
+        assert_eq!(
+            harness.store.preferences().await.unwrap().tunnel_consent,
+            None
+        );
+        for action in [
+            stop_action(),
+            ApprovalAction::OpenUrl {
+                url: "https://example.test/".into(),
+                local_network: false,
+                preapproved: false,
+                tunnel_available: true,
+            },
+            ApprovalAction::OpenUrl {
+                url: "http://localhost:5173/".into(),
+                local_network: true,
+                preapproved: false,
+                tunnel_available: true,
+            },
+        ] {
+            let (task, id) = waiting_for_action(&harness, origin, "remote-session", action).await;
+            assert_eq!(
+                answer(&harness, &id, "tunnel_and_open").await.0,
+                axum::http::StatusCode::CONFLICT
+            );
+            assert!(
+                harness
+                    .state
+                    .approvals
+                    .list()
+                    .iter()
+                    .any(|card| card.id == id)
+            );
+            assert!(
+                !task.is_finished(),
+                "refusal must not settle the parked handler"
+            );
+            assert_eq!(
+                answer(&harness, &id, "deny").await.0,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            assert!(ended(task).await.is_err());
+        }
+        assert_eq!(opened.load(std::sync::atomic::Ordering::SeqCst), 0);
+        // Consent cannot turn a local session or another host's asking id into
+        // a remote authority grant. The valid native/remote URL above remains
+        // separately covered by the unconsented case before this write.
+        assert_eq!(
+            request(
+                &harness,
+                "PUT",
+                "/api/preferences",
+                Some(serde_json::json!({"tunnel_consent": true}))
+            )
+            .await
+            .0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        for asking_origin in [origin, live_origin(&harness, local)] {
+            let (task, id) = waiting_for_action(
+                &harness,
+                asking_origin,
+                "local-session",
+                ApprovalAction::OpenUrl {
+                    url: "http://localhost:5173/".into(),
+                    local_network: true,
+                    preapproved: false,
+                    tunnel_available: true,
+                },
+            )
+            .await;
+            assert_eq!(
+                answer(&harness, &id, "tunnel_and_open").await.0,
+                axum::http::StatusCode::CONFLICT
+            );
+            assert!(
+                harness
+                    .state
+                    .approvals
+                    .list()
+                    .iter()
+                    .any(|card| card.id == id)
+            );
+            assert!(!task.is_finished());
+            assert_eq!(
+                answer(&harness, &id, "deny").await.0,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            assert!(ended(task).await.is_err());
+        }
+        assert_eq!(opened.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// Ordinary Open and TunnelAndOpen must select mutually exclusive native sinks.
+    /// Reserving the service port forces fallback and distinguishes the rewritten URL
+    /// from both the raw address and an incorrectly assumed same-port listener.
+    #[farhelm_testtrace::test]
+    async fn tunnel_and_raw_approval_open_exactly_the_chosen_target_once() {
+        let service = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let port = service.local_addr().unwrap().port();
+        let opened = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = opened.clone();
+        let (builder, remote) = rest_harness::FleetBuilder::new()
+            .await
+            .link_opener(Arc::new(move |url| {
+                seen.lock().unwrap().push(url.to_string());
+                Ok(())
+            }))
+            .ssh(
+                "remote.example",
+                rest_harness::HostScript {
+                    sessions: vec![rest_harness::session("remote-session", 1_700_000_000)],
+                    ..rest_harness::HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(remote).await;
+        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let origin = live_origin(&harness, remote);
+        assert_eq!(
+            request(
+                &harness,
+                "PUT",
+                "/api/preferences",
+                Some(serde_json::json!({"tunnel_consent": true}))
+            )
+            .await
+            .0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let raw = format!("http://localhost:{port}/path?q=1#part");
+        let (task, id) = pending_browser(&harness, origin, raw.clone()).await;
+        assert_eq!(
+            answer(&harness, &id, "allow").await.0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        tokio::time::timeout(STEP, task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(*opened.lock().unwrap(), vec![raw.clone()]);
+        let (task, id) = pending_browser(&harness, origin, raw.clone()).await;
+        assert!(matches!(
+            harness.state.approvals.list()[0].action,
+            ApprovalAction::OpenUrl {
+                tunnel_available: true,
+                ..
+            }
+        ));
+        assert_eq!(
+            answer(&harness, &id, "tunnel_and_open").await.0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        tokio::time::timeout(STEP, task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let targets = opened.lock().unwrap().clone();
+        assert_eq!(
+            targets.len(),
+            2,
+            "tunneling must not also invoke the raw opener"
+        );
+        assert_eq!(targets[0], raw);
+        let tunneled = url::Url::parse(&targets[1]).unwrap();
+        assert_eq!(tunneled.host_str(), Some("127.0.0.1"));
+        assert_ne!(tunneled.port_or_known_default(), Some(port));
+        assert_eq!(tunneled.path(), "/path");
+        assert_eq!(tunneled.query(), Some("q=1"));
+        assert_eq!(tunneled.fragment(), Some("part"));
+    }
+
+    /// A standalone helm cannot gain a native capability through an answer payload.
+    /// The rejected answer leaves the original browser card available to answer normally.
+    #[farhelm_testtrace::test]
+    async fn standalone_tunnel_answer_keeps_the_browser_card_waiting() {
+        let harness = rest_harness::idle_helm().await;
+        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let origin = local_origin(&harness).await;
+        let (task, id) = waiting_for_action(
+            &harness,
+            origin,
+            "sess-1",
+            ApprovalAction::OpenUrl {
+                url: "http://localhost/".into(),
+                local_network: true,
+                preapproved: false,
+                tunnel_available: true,
+            },
+        )
+        .await;
+        assert!(matches!(
+            harness.state.approvals.list()[0].action,
+            ApprovalAction::OpenUrl {
+                tunnel_available: false,
+                ..
+            }
+        ));
+        assert_eq!(
+            answer(&harness, &id, "tunnel_and_open").await.0,
+            axum::http::StatusCode::CONFLICT
+        );
+        assert!(
+            harness
+                .state
+                .approvals
+                .list()
+                .iter()
+                .any(|card| card.id == id)
+        );
+        assert!(!task.is_finished());
+        assert_eq!(
+            answer(&harness, &id, "deny").await.0,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert!(ended(task).await.is_err());
+    }
+
     /// The kind and message of a refusal `ask` made itself.
     struct Refusal {
         kind: ErrorKind,
@@ -936,6 +1305,7 @@ mod tests {
             .into(),
             local_network,
             preapproved: false,
+            tunnel_available: false,
         };
         let (task, id) = waiting_for_action(&harness, origin, "sess-1", action(false)).await;
         assert!(
@@ -1016,6 +1386,7 @@ mod tests {
                     .into(),
                     local_network,
                     preapproved: false,
+                    tunnel_available: false,
                 },
             )
             .await;

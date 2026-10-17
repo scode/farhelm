@@ -81,6 +81,21 @@ fn focus_restart_with_trigger() {
     ));
 }
 
+/// Remount native listener state when ownership changes, even for a retained session id.
+#[component]
+fn NativeTunnelStrip(session: Session) -> Element {
+    #[cfg(native_desktop)]
+    {
+        let owner = format!("{:?}:{:?}", session.host, session.host_identity);
+        rsx! { crate::tunnels::TunnelStrip { key: "{owner}", session: session.id } }
+    }
+    #[cfg(not(native_desktop))]
+    {
+        let _ = session;
+        rsx! {}
+    }
+}
+
 /// Explain the first fact that prevents editing a resumed launch.
 ///
 /// Agent launches with a stored resume command can enter a user-named target
@@ -1832,6 +1847,7 @@ pub(crate) fn SessionView(
         // remote-host compromise into control of the local helm API.
         let mut specs = vec![serde_json::json!({
             "el": AGENT_TERMINAL_ELEMENT_ID,
+            "sessionId": spec_session_id,
             "unavailable": session.stale,
             "banner": AGENT_BANNER_ELEMENT_ID,
             // Where this terminal's connecting placeholder is written
@@ -1871,6 +1887,7 @@ pub(crate) fn SessionView(
         for id in mountable {
             specs.push(serde_json::json!({
                 "el": tab_terminal_element_id(id),
+                "sessionId": spec_session_id,
                 "unavailable": session.stale,
                 "banner": tab_banner_element_id(id),
                 "connecting": tab_connecting_element_id(id),
@@ -2946,6 +2963,7 @@ pub(crate) fn SessionView(
                     }
                 }
             }
+            NativeTunnelStrip { session: shown.clone() }
             // Retain the whole surface through outages, but never invent a
             // screen for a fresh stale view or attach a rebooted terminal.
             if keep_terminal_surface(&shown, relaunched(), had_terminal()) {

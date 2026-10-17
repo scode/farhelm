@@ -2561,6 +2561,9 @@
     render();
 
     return {
+      // Shared terminal failures belong to the same retained status surface as
+      // attachment failures; a missing native bridge must remain visible too.
+      reportError: fail,
       dispose() {
         disposed = true;
         el.removeEventListener("paste", onPaste, true);
@@ -3589,6 +3592,36 @@
         // A file hover never qualifies for withholding program input.
         let hoveredWebLink = false;
         const linkClickMode = () => window.farhelmTerminalLinkClickMode || 'intercept';
+        const nativeLinks = typeof window[WEBVIEW_DEVICE_SECRET] === 'string';
+        const tunnelState = () => nativeLinks ? window.farhelmTunnelSessions?.[spec.sessionId] : null;
+        const tunnelHint = uri => {
+          const state = tunnelState();
+          const target = window.farhelmTerminalLinks.tunnelTarget(uri);
+          return state?.available && target && linkClickMode() !== 'program'
+            ? { port: target.port, host: state.host_name } : null;
+        };
+        // OSC and prose links share all policy, including the exact release
+        // token. Peer data crosses the Rust channel as values, never source.
+        const activateWebLink = (event, uri, validated = false) => window.farhelmTerminalLinks.activateWebLink({
+          validated,
+          uri, native: nativeLinks, remote: !!tunnelState()?.available,
+          button: event.button, metaKey: event.metaKey, ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey, altKey: event.altKey,
+          click: linkGesture.isClick(event), selection: !!term.getSelection(), mode: linkClickMode(),
+        }, window.farhelmTerminalLinks.openTerminalUrl, target => {
+          if (typeof window.farhelmTunnelOpen === 'function') {
+            try {
+              window.farhelmTunnelOpen({ session_id: spec.sessionId, url: target, generation: tunnelState().generation });
+              return;
+            } catch {
+              // A channel that disappeared after the function check has the
+              // same visible failure as an absent bridge, never a raw open.
+            }
+          }
+          const message = 'Tunneling is unavailable in this window. Reopen Farhelm and try again.';
+          if (attachments) attachments.reportError(message);
+          else paintBanner(spec.banner, message, false);
+        });
         term = new Terminal({
           // At most the tmux history floor (`HISTORY_LIMIT`,
           // farhelm-supervisor/src/tmux.rs), never more: PLAN_M2_5.md
@@ -3651,7 +3684,7 @@
               // can consume a drag without creating any local selection.
               if (!linkGesture.isClick(event) || term.getSelection()) return;
               const target = window.farhelmTerminalFiles.oscTarget(uri);
-              if (target?.kind === 'web' && linkClickMode() !== 'program') window.farhelmTerminalLinks.openTerminalUrl(uri);
+              if (target?.kind === 'web') activateWebLink(event, uri, true);
               // Both OSC and prose paths use the addon's native modifier rule.
               else if (target?.kind === 'file') fileLinks.download(target.path, event);
             },
@@ -3664,7 +3697,7 @@
               if (target?.kind === 'file') fileLinks.hover(event, target.path, null, range, links.linkRowText(term, range));
               else if (target?.kind === 'web') {
                 const hoverText = links.linkHoverText(term, range);
-                links.showLinkTarget(event, uri, term.element, hoverText.text, hoverText.kind === 'fragment');
+                links.showLinkTarget(event, uri, term.element, hoverText.text, hoverText.kind === 'fragment', tunnelHint(uri));
               }
             },
             leave() {
@@ -3734,18 +3767,18 @@
             // xterm checks link identity at press/release, not movement. Keep
             // both guards: mouse reporting suppresses local selection, while
             // a plain click clears an old selection before this release.
-            if (!linkGesture.isClick(event) || term.getSelection() || linkClickMode() === 'program') return;
             // The second boundary (the addon's default matcher is the
             // first): http(s) with a host, or nothing opens — printed
             // `javascript:`/`data:`/`file:` text is never clickable (see
             // terminal-links.js for the full four-check rationale).
-            if (!window.farhelmTerminalLinks.isPlainWebUrl(uri)) return;
-            window.farhelmTerminalLinks.openTerminalUrl(uri);
+            activateWebLink(event, uri);
           }, {
-            hover(_event, uri) {
+            hover(event, uri) {
               hoveredWebLink = window.farhelmTerminalLinks.isPlainWebUrl(uri);
+              const hint = tunnelHint(uri);
+              if (hint) window.farhelmTerminalLinks.showLinkTarget(event, uri, term.element, null, false, hint);
             },
-            leave() { hoveredWebLink = false; },
+            leave() { hoveredWebLink = false; window.farhelmTerminalLinks.hideLinkTarget(term.element); },
           }),
         );
         term.loadAddon(fileLinks);

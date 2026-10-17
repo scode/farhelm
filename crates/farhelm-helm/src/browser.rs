@@ -95,9 +95,10 @@ fn local_ipv4(ip: Ipv4Addr) -> bool {
 ///
 /// Web Allow/Open already ran synchronously in the user's click handler. A native failure is
 /// returned to the requesting CLI; no URL or opener error is written to the session's terminal
-/// except the CLI's own short refusal.
+/// except the CLI's own short refusal. A tunnel answer delegates its sole open
+/// to the tunnel manager; it must never fall through to the ordinary raw sink.
 pub(crate) async fn open_url(
-    state: &AppState,
+    state: &Arc<AppState>,
     origin: AgentOrigin,
     session: &str,
     url: String,
@@ -109,7 +110,7 @@ pub(crate) async fn open_url(
             message: message.to_string(),
         })
     })?;
-    crate::approvals::ask(
+    let answer = crate::approvals::ask_with_answer(
         state,
         origin,
         session,
@@ -117,18 +118,33 @@ pub(crate) async fn open_url(
             url: url.clone(),
             local_network: permission == BrowserPermission::LocalNetwork,
             preapproved: false,
+            tunnel_available: false,
         },
     )
     .await?;
     if !crate::agent_requests::origin_is_live(state, origin) {
         anyhow::bail!("the requesting host's connection changed before the link could open; retry");
     }
-    if let Some(opener) = state.link_opener.clone() {
+    if answer == crate::approvals::Allowed::Tunnel {
+        crate::tunnels::open_agent_url(state, origin, session, &url).await?;
+    } else if let Some(opener) = state.link_opener.clone() {
         tokio::task::spawn_blocking(move || opener(&url))
             .await?
             .map_err(|_| anyhow::anyhow!("the default browser could not open the link"))?;
     }
     Ok(AgentReply::UrlOpened {})
+}
+
+/// A remote supervisor names its own asking session, never a session on another host.
+/// Fleet routing alone cannot establish that trust boundary: the native terminal's
+/// user request may route any selected session, while an agent request has an origin.
+pub(crate) async fn tunnel_origin_matches(
+    state: &AppState,
+    origin: AgentOrigin,
+    session: &str,
+) -> anyhow::Result<bool> {
+    let (claim, client) = crate::sessions::route_session(state, session).await?;
+    Ok(claim.host == origin.host && client.connection_id() == origin.connection)
 }
 
 #[cfg(test)]

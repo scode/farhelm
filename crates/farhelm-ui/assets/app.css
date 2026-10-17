@@ -7687,3 +7687,59 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
+/* Local listener controls remain outside the offline terminal's inert area. */
+.session-tunnels {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-size: 12px;
+}
+.session-tunnel-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--radius-lg);
+  padding: 1px 4px 1px 9px;
+  background: var(--bg-2);
+}
+.session-tunnel-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.tunnel-consent-dialog {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-dialog);
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+.tunnel-consent-backdrop { z-index: 50; }
+.tunnel-consent-dialog h2,
+.tunnel-consent-dialog p { margin: 0; }
+.tunnel-error-notice {
+  position: fixed;
+  z-index: 1100;
+  bottom: 16px;
+  right: 16px;
+  max-width: min(480px, calc(100vw - 32px));
+  padding: 12px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid currentColor;
+}
+.session-tunnel-error { color: var(--fg-0); padding: 4px 12px; }

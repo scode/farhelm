@@ -273,6 +273,29 @@ pub(crate) async fn open_url(
     session: &str,
     raw: &str,
 ) -> anyhow::Result<OpenedTunnel> {
+    open_from(state, session, raw, None).await
+}
+
+/// Bind an approved agent link to its requesting host's exact routed connection.
+/// A browser-side route check can precede adoption or reconnect while this call
+/// waits for consent serialization; authorization must use our publication route.
+pub(crate) async fn open_agent_url(
+    state: &Arc<AppState>,
+    origin: crate::agent_requests::AgentOrigin,
+    session: &str,
+    raw: &str,
+) -> anyhow::Result<OpenedTunnel> {
+    open_from(state, session, raw, Some(origin)).await
+}
+
+/// A terminal gesture authorizes its selected session; an agent grant is host-scoped.
+/// Both paths otherwise share the same consent, publication and opener lifecycle.
+async fn open_from(
+    state: &Arc<AppState>,
+    session: &str,
+    raw: &str,
+    expected: Option<crate::agent_requests::AgentOrigin>,
+) -> anyhow::Result<OpenedTunnel> {
     let opener = state
         .link_opener
         .clone()
@@ -286,7 +309,15 @@ pub(crate) async fn open_url(
                 "accept the tunnel security warning before opening a tunnel",
             ));
         }
-        let (owner, _) = crate::sessions::route_session(state, session).await?;
+        let (owner, client) = crate::sessions::route_session(state, session).await?;
+        if expected.is_some_and(|origin| {
+            origin.host != owner.host || origin.connection != client.connection_id()
+        }) {
+            return Err(refusal(
+                ErrorKind::Conflict,
+                "the requesting session no longer belongs to this host connection; retry",
+            ));
+        }
         let host = state
             .store
             .list_hosts()
@@ -1552,5 +1583,106 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    /// A grant from host A cannot become a tunnel to host B while creation
+    /// waits behind consent serialization. Both connections remain alive;
+    /// the refusal must follow the actual publication route, not host loss.
+    #[farhelm_testtrace::test]
+    async fn agent_origin_cannot_follow_session_reassignment_while_waiting_for_admission() {
+        use std::future::Future;
+        let opened = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = opened.clone();
+        let (builder, first) = FleetBuilder::new()
+            .await
+            .link_opener(Arc::new(move |_| {
+                observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }))
+            .ssh(
+                "first.example",
+                HostScript {
+                    identity: None,
+                    sessions: vec![rest_harness::session("remote-session", 1)],
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let (builder, second) = builder
+            .ssh(
+                "second.example",
+                HostScript {
+                    identity: None,
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(first).await;
+        harness.await_refreshed(second).await;
+        consent(&harness, json!(true)).await;
+        let (owner, client) = crate::sessions::route_session(&harness.state, "remote-session")
+            .await
+            .unwrap();
+        assert_eq!(owner.host, first);
+        let origin = crate::agent_requests::AgentOrigin {
+            host: first,
+            connection: client.connection_id(),
+        };
+        assert!(
+            crate::browser::tunnel_origin_matches(&harness.state, origin, "remote-session")
+                .await
+                .unwrap()
+        );
+
+        let gate = harness.state.tunnels.mutation.lock().await;
+        let mut opening = Box::pin(open_agent_url(
+            &harness.state,
+            origin,
+            "remote-session",
+            "http://localhost:5173/",
+        ));
+        {
+            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(opening.as_mut().poll(&mut context).is_pending());
+        }
+        let mut revisions = harness.manager.events().subscribe();
+        harness.fleet.edit(first, |script| script.sessions.clear());
+        harness.fleet.edit(second, |script| {
+            script
+                .sessions
+                .push(rest_harness::session("remote-session", 2))
+        });
+        harness.manager.refresh_now(first);
+        harness.manager.refresh_now(second);
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if let Ok((claim, _)) =
+                    crate::sessions::route_session(&harness.state, "remote-session").await
+                    && claim.host == second
+                {
+                    break;
+                }
+                revisions.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("the second host must become the coherent session owner");
+        assert!(
+            crate::agent_requests::origin_is_live(&harness.state, origin),
+            "the old connection must still be alive"
+        );
+        drop(gate);
+        assert_eq!(
+            crate::error_kind(
+                &opening
+                    .await
+                    .err()
+                    .expect("the old grant cannot authorize host B")
+            ),
+            ErrorKind::Conflict
+        );
+        assert!(harness.state.tunnels.list("remote-session").is_empty());
+        assert_eq!(opened.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }

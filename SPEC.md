@@ -1685,7 +1685,24 @@ whatever the agent renders is what you see. There is no composer, no message abs
   chooses its own line breaks can still split a lookalike into pieces that are not joined (separate hyperlinks, say) and
   that do not look like web addresses on their own, and the ordinary display, which always names the real host, is what
   remains. The hover display is the whole safeguard. Plain URLs printed as text need no such display, because what is
-  shown is what opens.
+  shown is what opens, apart from the remote-localhost tunnel hint below.
+
+- In the Mac app, a loopback link in a remote session's terminal offers Cmd-click to tunnel and open it in the browser.
+  Its hover names the host and port, explains that a plain click still opens on the Mac, and preserves any OSC hyperlink
+  mismatch warning. The offer applies to `localhost` and its subdomains, `127.0.0.0/8`, `::1`, `0.0.0.0` and `::`, not
+  LAN addresses or other single-label names. A tunnel listens on `127.0.0.1` on the Mac, using the remote port number
+  when free and otherwise an available port. The opened URL uses that IPv4 literal and the actual local port, preserving
+  the rest of the URL. Bytes travel over Farhelm's existing helm-to-supervisor connection to the supervisor's loopback;
+  this is raw TCP, including WebSockets, with no HTTP rewriting. Named localhost and wildcard addresses try IPv4 then
+  IPv6 loopback; an explicit loopback IP is used as given. Browser clients and sessions on the local host have no offer,
+  and a standalone helm refuses tunnel requests. Before the first tunnel opens, the user must accept the security
+  warning in Security below. This choice is a shared helm preference, off until accepted; Settings shows it and can turn
+  it off, closing existing tunnels. A later tunnel request then needs the warning again. Each tunnel is kept only in
+  helm memory until the session is deleted, Farhelm quits, or the user closes it. Restarting or stopping the agent does
+  not close it. Reopening a link for the same session and loopback target reuses its tunnel. A host disconnect fails new
+  connections until the host returns; an existing TCP stream is never replayed. A strip under the session header shows
+  one local-port → host-port chip per tunnel, with a close button. The list and close actions stay available while the
+  host is disconnected. This feature does not forward login callbacks.
 
 - File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
   paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;
@@ -2178,8 +2195,9 @@ Callers that wait for that command, such as Python's webbrowser and xdg-open, ob
 crate launches it in the background and reports success before a user answers; Codex's browser-login path uses that
 crate and cannot report a later refusal. Not every harness reads BROWSER as a command template: Claude Code 2.1.296 on
 Linux passes its entire value as an executable name, so this template does not forward its native opener; an agent can
-still invoke `farhelm agent open-url` directly. A login redirect to localhost on the remote host still cannot complete
-from the user's local browser; forwarding a link does not forward its callback server.
+still invoke `farhelm agent open-url` directly. A login redirect to localhost on the remote host is not forwarded
+automatically; opening a link does not itself connect a remote login callback to the user's browser. Login-callback
+forwarding remains outside the localhost-tunnel feature.
 
 **Open links without asking** covers public addresses. **Open local-network links without asking** covers literal
 loopback, private and link-local IPv4/IPv6, IPv4 0/8, CGNAT and multicast/reserved high ranges, unspecified and
@@ -2195,6 +2213,13 @@ therefore arrive after the link has opened. The desktop page opens nothing itsel
 desktop's native callback after approval. With the matching permission on, the desktop opens immediately without a card,
 while a web client still shows the full URL with Open and Dismiss. Dismiss refuses the request. A standalone helm never
 opens a browser on the server. A web client whose pop-up is blocked cannot reliably detect that failure.
+
+For a loopback URL from a remote session in the Mac app, the card offers **Tunnel and open** first, alongside the
+ordinary raw-link answer. It names the remote host and port, and explains that opening directly reaches the Mac instead.
+The tunnel answer follows the same consent warning and lifetime as a terminal Cmd-click; the helm opens only the
+rewritten tunnel URL. It grants no host-wide link or command permission. An answer on a noneligible card or without
+recorded consent is refused without settling the pending request. Existing permissions that open a native link without a
+card still open the raw URL; they do not automatically create tunnels.
 
 While requests wait, the GUI shows one expanded card centered at the top of the main area, below the session's tabs when
 a session is open and clear of the sidebar and the terminal's prompt. The oldest request opens first. Other requests
@@ -2450,11 +2475,13 @@ The [maintainer-confirmed decisions](#maintainer-confirmed-decisions) below defi
 trust between hosts, and the user's approval that agent-requested actions across hosts need. Apply those boundaries when
 interpreting the transport and credential rules here.
 
-Steady-state operation between Farhelm's own components has exactly two network edges — the browser to a standalone helm
-(token-authenticated) and the helm to each supervisor (SSH) — plus the desktop app's deliberately local loopback edge.
-Besides provisioning's release downloads (see [Topology](#topology)), three more kinds of outbound connection exist.
-When the user sends feedback, the helm posts that submission, and nothing else, to the project's feedback endpoint (see
-[Feedback](#feedback)); that happens only on explicit user action. And the installed desktop app's updater (see
+Steady-state operation between Farhelm's own components uses the browser to a standalone helm (token-authenticated) and
+the helm to each supervisor (SSH), plus the desktop app's deliberately local loopback edge. User-opened localhost
+tunnels add a loopback listener on the Mac and a supervisor connection to a loopback service on the session host; the
+bytes between machines still ride the existing helm-to-supervisor connection. Besides provisioning's release downloads
+(see [Topology](#topology)), three more kinds of outbound connection exist. When the user sends feedback, the helm posts
+that submission, and nothing else, to the project's feedback endpoint (see [Feedback](#feedback)); that happens only on
+explicit user action. And the installed desktop app's updater (see
 [Installation and updates](#installation-and-updates)) asks get.farhelm.io which stable release is the latest, reads
 `/advisories` and its signature for release withdrawals, and, when it is newer, verifies that release's signed checksums
 and its installer against the keys compiled into the app before running the installer, which downloads the release's
@@ -2530,12 +2557,14 @@ Further requirements:
 - Provisioning rides the user's existing SSH access — their keys, agent, and config. Farhelm stores no SSH credentials
   of its own. Confirmed 2026-10-01: the config governs reaching and authenticating to the host (keys, the agent used to
   authenticate, ProxyJump, Match blocks), not what rides Farhelm's connections. Whatever the config says, Farhelm's own
-  ssh connections, the supervisor connection and every provisioning step alike, never forward the agent, X11 or ports,
-  and override the settings that would replace or wrap Farhelm's own remote command: a `RemoteCommand`, a forced
-  terminal, and a `LocalCommand`. A remote host therefore cannot reach the helm machine's ssh agent, display or local
-  ports through a connection that stays up around the clock. Accepted: right after an upgrade, a helm started within a
-  minute of the previous version stopping (the desktop app reopened, or a helm run by hand) can attach to a shared ssh
-  connection the previous version left open, and port forwards that connection set up last until it closes.
+  ssh connections, the supervisor connection and every provisioning step alike, disable SSH agent, X11 and port
+  forwarding, and override the settings that would replace or wrap Farhelm's own remote command: a `RemoteCommand`, a
+  forced terminal, and a `LocalCommand`. A remote host therefore cannot reach the helm machine's ssh agent, display or
+  local ports through SSH forwarding on a connection that stays up around the clock. Explicit localhost tunnels are a
+  separate, consented raw-TCP relay inside Farhelm's protocol, from the Mac to the session host's loopback only.
+  Accepted: right after an upgrade, a helm started within a minute of the previous version stopping (the desktop app
+  reopened, or a helm run by hand) can attach to a shared ssh connection the previous version left open, and port
+  forwards that connection set up last until it closes.
 - Agent credentials (e.g. Claude subscription auth) live on the host running the agent, in the agent's own standard
   configuration. The system must not extract, proxy, or repurpose agent OAuth credentials. Claude Code authenticates
   directly with a consumer subscription, unmodified.
@@ -2790,7 +2819,8 @@ the session's Unix account can read is in reach; the hover shows the host, resol
 download it. Confirmed 2026-10-14: only an explicit Cmd-click in the desktop app (Ctrl-click on non-macOS desktop
 builds) also opens the completed local save with the default app, and only for final .md or .txt extensions, ignoring
 case. No other file type is opened; a plain click or any browser click only downloads. HTML is deliberately excluded:
-opening it in the default browser would let an agent's page run scripts and navigate outside the link permissions. The
+opening it in the default browser would let an agent's page run scripts and navigate outside the link permissions
+without the separate localhost-tunnel consent. This file-opening restriction remains even when tunnels are enabled. The
 desktop app deliberately does not set the macOS quarantine flag on downloaded files, so these saves do not carry the
 "downloaded from the internet" prompt a browser save would carry. The click authorizes this transfer across the host
 boundary, including for agent-controlled files.
@@ -2799,8 +2829,17 @@ Opening a link is another bounded effect across the host boundary. Only an admit
 browser, after an Allow/Open click or under the requesting host's matching link permission. With **Open local-network
 links without asking** on, a remote host can make the desktop user's browser load addresses on the user's own machine or
 network without a click. In a web client the permission still leaves an Open click. Neither permission authorizes other
-commands, file access or clipboard reads. Login redirects to `localhost` on the remote host still cannot complete from
-the user's local browser; forwarding those callbacks is outside this feature.
+commands, file access or clipboard reads. Login redirects to `localhost` on the remote host are not forwarded
+automatically; forwarding those callbacks is outside the localhost-tunnel feature.
+
+Localhost tunnels deliberately extend that browser boundary. Before enabling them, a prominent warning must explain that
+a tunneled page is served from `127.0.0.1` on the Mac: cookies are not isolated by port, so it can read cookies from
+other services on that address; the browser treats it as a local page and skips private-network checks. The tunnel's
+loopback listener has no authentication and accepts connections from any program on the Mac, like SSH port forwarding.
+The helm's same-site navigation hardening also means an ordinary link from another `127.0.0.1` page cannot open a
+standalone helm on that Mac. The user accepted these consequences for this feature; consent is off until they accept the
+warning, and Settings can revoke it and close the tunnels. A tunnel does not give a supervisor an arbitrary network
+dialer: only the helm may open a relay, and the supervisor independently confines its destination to loopback.
 
 A program in an attached remote terminal may write the viewer machine's system clipboard through OSC 52, without a
 separate local selection or copy gesture. This is an explicitly allowed, bounded effect across the remote-host boundary,

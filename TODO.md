@@ -126,14 +126,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a tag is never deleted or reused. Work out what GitHub rulesets, bypass lists or a separate agent identity can enforce
   without blocking the PR flow.
 
-- **Tunnel and open a localhost link.** When a session's terminal shows a link to localhost (a dev server the agent just
-  started, say), offer "tunnel and open in browser": forward a port from the user's machine to that port on the
-  session's host, then open the forwarded address in the browser. Today a localhost link printed on a remote host opens
-  localhost on the user's own machine, which is the wrong machine, and SPEC.md notes the same gap for login redirects to
-  a localhost callback server on the remote host. Where the offer appears (the link's hover, a click modifier, the link
-  permission card), which addresses count as local, how long a tunnel lives, and what it means for a session on the
-  local host are to be decided when the entry is planned. Plan: `plans/queue/tunnel-localhost-links.md`.
-
 - **One-way observed YOLO shield.** The sidebar shield now reads the agent's status line (#2063): seeing a no-checks
   mode turns the shield YOLO, and a later recognized non-YOLO mode restores the launch shield (SPEC.md, Session list,
   the paragraph on reading the permission mode from the status line). The intent was that this reading only ever moves
