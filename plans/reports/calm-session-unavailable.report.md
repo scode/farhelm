@@ -101,3 +101,70 @@ found no remaining actionable issue. A fresh review on the executing session's i
 scope and found no unnecessary complexity. The executor checked the cited mechanisms and owns the runtime evidence; the
 source and scope reviewers ran no tests. A fresh gpt-6.1-sol medium reader passed the commit and PR wording.
 Implementation work was not delegated.
+
+### Landing
+
+Landed in round 77, as #2198, first of the round's two plans and unchanged from what the report describes.
+
+#### What landed since the PR was based, and whether it interacted
+
+Since this PR's base, main gained the cancelled-download fix (#2197), which changes the helm's download bookkeeping, and
+three specification-only changes (#2193, #2195, #2196) about Claude settings edits, stale views across GUIs and the
+trash's scale limit. The round's other plan, the explicit bare-repository policy fix for checkouts (#2199), lands right
+after this one. The landing monitor read them against this PR, and a fresh-context reviewer did the same independently.
+Neither found an interaction:
+
+- The new stale-views rule (#2195) covers a view that misses a change saved from another GUI. The outage card reacts to
+  the host becoming unavailable, which is a different event. This PR keeps SPEC.md's sentence that changes from any
+  client appear in other clients automatically, one of the live-update rules #2195 preserves, and its automatic retry
+  still never takes a session from another window.
+- The Claude settings (#2193) and trash (#2196) changes touch neither the session view nor host outages.
+- The download fix only changes what the helm cleans up when a file download is cancelled before the host accepts it.
+  During an outage the panes are inert, so no new download starts from the frozen screen, and one already in flight
+  fails when the connection dies, as before.
+- The checkout fix touches only how the supervisor creates checkouts. A failed checkout still shows as the existing
+  failed-checkout state, never as the outage card.
+
+The landing rebase was clean, and the PR's diff is identical to the one the executor delivered. Its SPEC.md and
+SPEC_impl.md edits merged without conflict alongside the three specification changes above.
+
+#### Fixes made during the landing
+
+None.
+
+#### Documentation
+
+The PR updates the docs page **Work in a session**, under **When the connection drops**. No preview server was started.
+The reviewer noted three small points on that page, none blocking:
+
+- It drops "The agent keeps running on its host the whole time" in favor of a link to the page on what survives what,
+  which is still a stub, so readers currently lose that reassurance. Dropping it is defensible because a host reboot
+  does end the agent.
+- "Reattaches by itself" leaves out SPEC.md's two exceptions: it will not take the session back from another window, and
+  a session whose host rebooted shows its interrupted card instead.
+- The page writes the button as "Reconnect now" (capitalized because it now starts the sentence), while the interface
+  shows "reconnect now".
+
+One leftover in SPEC_impl.md: its paragraph on viewing session details during an outage still says they are viewable
+"behind the host-unreachable notice", a phrase SPEC.md no longer uses.
+
+None of these was fixed at landing, because they are wording choices rather than errors that break anything. A small
+documentation follow-up could restore the reassurance that a supervisor outage leaves the agent running (until the page
+on what survives what is written), mention the two reattach exceptions, and change the SPEC_impl.md phrase to "behind
+the outage card".
+
+#### Checks
+
+- Run now, at the rebased tip: `dprint check` on SPEC.md, SPEC_impl.md and TODO.md, and
+  `python3 scripts/check-agents-md.py`, both clean, to cover the three specification changes merged alongside it.
+- Reused, because the landing rebase left the PR's diff unchanged, and what joined its base is either specification-only
+  or, for #2197, confined to cancelling a file download in the helm, which none of these tests exercise: the passing
+  runs the report lists, including the outage and replay browser run `1af9034c-87fc-43d3-a2ca-d071215b9c00` (58 passed),
+  the corrected outage cases `607ef26b-1604-448d-9a0f-6ae8ceb58a68`, the full reconnect spec
+  `3a1c28bb-8a78-4ba3-895f-e726008090f9`, the UI unit run `74451d6c-d9f4-4b13-9b8f-5cb3788fc777`, the JavaScript harness
+  `1684e05a-bdc9-46c7-a0ca-475fefbf2552` and the real SSH update test `9949f3d3-0ae9-4b25-a4f0-c4a93281818a`, plus its
+  builds and static checks. The report explains which of those ran before its last JavaScript corrections and why they
+  still apply.
+- Skipped: everything the report skipped, for the reasons it gives. The Mac desktop app was not exercised.
+
+Nothing in the executor's report became untrue at landing.
