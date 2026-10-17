@@ -157,6 +157,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   tests that fake a keydown with `isComposing: true` do not show the Mac app is fixed, because real WebKit never sends
   one.
 
+- **A calm message while a supervisor upgrades.** While a host's supervisor is being upgraded, a bunch of yellow text
+  flickers on screen, which looks like a bug rather than an expected step. Replace it with one clear message that looks
+  intentional and says the host is updating. First reproduce an upgrade and list exactly which messages appear, where,
+  and in what order, then see whether they can give way to that one message.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
