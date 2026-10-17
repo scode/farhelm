@@ -1661,13 +1661,15 @@ fn clone_with_repo_cache(
         run_preparation_child_process(&mut init, "cache init")?;
 
         let mut fetch = launch_child_command(std::ffi::OsStr::new("git"), spec);
+        // This is our own bare cache, named explicitly so Git's
+        // safe.bareRepository=explicit policy need not be relaxed.
         fetch
             .args([
                 "-c",
                 "gc.autoDetach=false",
                 "-c",
                 "maintenance.autoDetach=false",
-                "-C",
+                "--git-dir",
             ])
             .arg(cache)
             .args([
@@ -3763,7 +3765,7 @@ printf 'AGENT-RAN\n'
                 "gc.autoDetach=false",
                 "-c",
                 "maintenance.autoDetach=false",
-                "-C",
+                "--git-dir",
                 cache,
                 "fetch",
                 "--prune",
@@ -4353,6 +4355,129 @@ printf 'AGENT-RAN\n'
             std::fs::read_to_string(Path::new(&fixture.preparation.cwd).join("tracked.txt"))
                 .unwrap(),
             "fixture content\n"
+        );
+    }
+
+    /// Hosts with explicit-only bare repository discovery must still prepare
+    /// fresh checkouts. The policy stays enabled for the real shim's fetch and
+    /// reference clone; reaching Ready with the tracked file and agent marker
+    /// proves neither stage bypassed the cache or stopped at an error.
+    #[farhelm_testtrace::test]
+    fn d2_real_git_prepares_checkout_with_explicit_bare_policy() {
+        let setup = tempfile::tempdir().unwrap();
+        let work = setup.path().join("work");
+        let bare = setup.path().join("upstream.git");
+        let config = setup.path().join("gitconfig");
+        std::fs::write(&config, "[safe]\n\tbareRepository = explicit\n").unwrap();
+        // Keep fixture and shim Git configuration identical, without changing
+        // the test process or borrowing the operator's repository settings.
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .env("GIT_CONFIG_GLOBAL", &config)
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .output()
+                .expect("run isolated fixture Git")
+        };
+        std::fs::create_dir(&work).unwrap();
+        std::fs::write(work.join("tracked.txt"), "explicit policy content\n").unwrap();
+        for args in [
+            vec!["init", "-q", work.to_str().unwrap()],
+            vec!["-C", work.to_str().unwrap(), "add", "."],
+            vec![
+                "-C",
+                work.to_str().unwrap(),
+                "-c",
+                "user.name=fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-qm",
+                "fixture",
+            ],
+            vec![
+                "clone",
+                "--bare",
+                "-q",
+                work.to_str().unwrap(),
+                bare.to_str().unwrap(),
+            ],
+        ] {
+            let output = git(&args);
+            assert!(output.status.success(), "fixture Git {args:?}: {output:?}");
+        }
+        let refused = git(&[
+            "-C",
+            bare.to_str().unwrap(),
+            "rev-parse",
+            "--is-bare-repository",
+        ]);
+        assert!(
+            !refused.status.success(),
+            "premise: implicit bare discovery must be refused"
+        );
+        assert!(
+            String::from_utf8_lossy(&refused.stderr).contains("safe.bareRepository"),
+            "premise: refusal must come from the explicit policy: {refused:?}"
+        );
+        let rewrite = format!("url.{}.insteadOf", bare.display());
+        assert!(
+            git(&[
+                "config",
+                "--file",
+                config.to_str().unwrap(),
+                &rewrite,
+                "https://github.com/example/repo.git"
+            ])
+            .status
+            .success()
+        );
+
+        let fixture = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
+        fixture.install_script(
+            "fake-agent",
+            "#!/bin/sh\nprintf 'EXPLICIT-POLICY-AGENT-RAN\\n'\n",
+        );
+        assert!(
+            !fixture.preparation.repo_cache_path.exists(),
+            "premise: cache starts absent"
+        );
+        let child_path = format!(
+            "{}:{}",
+            fixture.bin_dir().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let (report, terminal, status) = fixture.run_shim_in_child_with(
+            Some(std::ffi::OsStr::new(&child_path)),
+            &[
+                ("GIT_CONFIG_GLOBAL", config.as_os_str()),
+                ("GIT_CONFIG_SYSTEM", std::ffi::OsStr::new("/dev/null")),
+                ("GIT_CONFIG_COUNT", std::ffi::OsStr::new("0")),
+            ],
+            &[
+                "GIT_DIR",
+                "GIT_WORK_TREE",
+                "GIT_COMMON_DIR",
+                "GIT_INDEX_FILE",
+                "GIT_CONFIG_PARAMETERS",
+            ],
+        );
+        assert!(
+            status.success() && report.is_empty(),
+            "preparation failed: {report} {terminal}"
+        );
+        assert_eq!(fixture.state().unwrap(), PreparationState::Ready);
+        assert!(
+            terminal.contains("EXPLICIT-POLICY-AGENT-RAN"),
+            "agent did not run: {terminal}"
+        );
+        assert!(fixture.preparation.repo_cache_path.join("objects").is_dir());
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&fixture.preparation.cwd).join("tracked.txt"))
+                .unwrap(),
+            "explicit policy content\n"
         );
     }
 

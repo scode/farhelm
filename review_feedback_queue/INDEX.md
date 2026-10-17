@@ -13,9 +13,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`claude-trust-cleanup-delays-desktop-start.md`](claude-trust-cleanup-delays-desktop-start.md) — Retrying trust
   cleanup behind a stale vendor lock can exceed the app's startup deadline.
 
-- [`bare-cache-fetch-conflicts-with-explicit-git-policy.md`](bare-cache-fetch-conflicts-with-explicit-git-policy.md) —
-  Hosts using Git’s safe.bareRepository=explicit setting cannot launch sessions in fresh GitHub checkouts.
-
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
   Repeated update or removal planning can leave adding, updating, and removing hosts stuck until the helm restarts, even
   after the pages close.
