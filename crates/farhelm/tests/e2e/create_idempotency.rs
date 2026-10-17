@@ -923,14 +923,15 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
         )
         .await
         .expect_err("~ must refuse when the supervisor's home is unusable");
+    // The outer error reports durable refusal; the typed supervisor error
+    // beneath it carries the diagnosis that the reservation must replay.
+    let refused_error = refused
+        .downcast_ref::<SupervisorError>()
+        .expect("the refusal carries a SupervisorError");
     assert!(
-        refused.to_string().contains("home"),
+        refused_error.message.contains("home"),
         "the refusal must name the home problem: {refused:#}"
     );
-    let refused_kind = refused
-        .downcast_ref::<SupervisorError>()
-        .expect("the refusal carries a SupervisorError")
-        .kind;
 
     let home = farhelm_teststate::tempdir().expect("home");
     std::fs::create_dir(home.path().join("ws")).expect("workdir");
@@ -960,17 +961,15 @@ async fn a_keyed_tilde_refusal_replays_after_the_home_appears() {
     // freshly generated home error would happen to contain "home" too,
     // and idempotency does not promise "some failure", it promises THAT
     // failure.
+    let replayed_error = replayed
+        .downcast_ref::<SupervisorError>()
+        .expect("the replay carries a SupervisorError");
     assert_eq!(
-        replayed.to_string(),
-        refused.to_string(),
+        replayed_error.message, refused_error.message,
         "the replay must be byte-for-byte the original refusal"
     );
     assert_eq!(
-        replayed
-            .downcast_ref::<SupervisorError>()
-            .expect("the replay carries a SupervisorError")
-            .kind,
-        refused_kind,
+        replayed_error.kind, refused_error.kind,
         "the replay must carry the original error kind"
     );
     let conflict = client2
