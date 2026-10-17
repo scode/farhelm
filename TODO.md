@@ -137,10 +137,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through the public buffer API. Nothing has been filed upstream; filing is the maintainer's call. Farhelm vendors
   xterm.js unmodified, so an upstream fix arrives only with a stable release.
 
-- **Escape the session name in "save as template".** The template editor now shows invisible and direction-changing
-  characters in a template's model and folder as visible escapes (#2087), but a session name copied from a cloned remote
-  session into "save as template" is still shown raw in the editor. Plan: `plans/queue/template-name-escape.md`.
-
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
