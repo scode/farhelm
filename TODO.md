@@ -52,6 +52,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Follow up on the recent quick launch system so an agent can populate the templates.
 
+- **Name a session while it starts.** Start a session with a rename dialog open, so the session is already starting
+  while you type its name. Make this the default for quick launches, where just pressing Enter immediately accepts the
+  default name. Details TBD at plan time.
+
+- **Send a prompt to a running agent from the `farhelm` command.** Let an agent (or a script) send a prompt into another
+  session's agent that is already running, through the `farhelm` CLI, and document it in the agent instructions. This is
+  the CLI and agent part of "Inject commands into agents" (Maybe later), which also covers a UI button. The
+  initial-prompt plan (`agent-delete-and-prompt`) only covers a prompt given at creation, on the agent's command line; a
+  running agent can only be reached through its terminal, which SPEC.md says needs reliable detection that the agent is
+  ready for input.
+
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
   the keyboard quick switcher. The nearest thing today is Stop followed later by Restart, which ends the agent but keeps
