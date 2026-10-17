@@ -44,6 +44,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Fix launcher keyboard focus and Enter.** Clicking the background between fields clears the selection; clicking again
+  appears to select the whole dialog. Enter does not launch in either state and seems to require a focused control. Make
+  Enter launch when the dialog is ready, including after clicking between fields.
+
 - **Official support for agent wrappers.** Allow running an agent through a wrapper while treating it exactly like the
   real agent. Details TBD; the maintainer knows what they want here. Ask before designing or implementing it.
 
