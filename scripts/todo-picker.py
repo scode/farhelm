@@ -6,6 +6,16 @@ bucket, clicks "Copy code", and pastes a line like `todo-plan near-term: pin-rus
 the agent session, which then plans those entries. The page exists because choosing from a long bucket by typing entry
 names back is slow and error prone, while ticking boxes is not.
 
+Each entry also has a comment box, so the maintainer can say what they want from an entry while choosing it rather than
+waiting for the planning questions. A ticked entry's comment follows the first line of the code as a `<slug>: <comment>`
+paragraph, with any further lines of the comment indented by two spaces; comments on unticked entries are left out, and
+typing a comment ticks its entry. Here's what a pasted code with one comment looks like:
+
+    todo-plan near-term: pin-rust-toolchain, upgrade-epochs
+
+    upgrade-epochs: start with the desktop app
+      and leave supervisors for a second plan
+
 NOTE: This script does not write the summaries. An agent reads each entry and writes a short label and a one-to-two
 sentence summary, in product terms, into a JSON file. The script only guarantees that the file covers exactly the
 bucket's entries, renders it, and serves it. Here's the TLDR of the two steps:
@@ -276,6 +286,10 @@ ul.tasks { list-style: none; padding-left: .2em; }
 ul.tasks li { display: flex; gap: .6em; align-items: flex-start; }
 ul.tasks li + li { margin-top: .7em; }
 ul.tasks input { accent-color: var(--accent); margin-top: .4em; flex: none; }
+ul.tasks .entry { flex: 1; min-width: 0; }
+ul.tasks textarea { display: block; width: 100%; margin-top: .3em; font: inherit; font-size: .9em; color: var(--fg);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: .35em .6em; resize: vertical; }
+ul.tasks textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .actions { display: flex; gap: .8em; align-items: center; flex-wrap: wrap; margin-top: 1.5em; }
 .actions button { font: inherit; padding: .4em 1em; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--accent); background: var(--accent); color: var(--surface); }
@@ -288,15 +302,33 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 # text. It is shown on the page as well as copied, because the clipboard API can refuse and the maintainer can still
 # select the text by hand. The textarea fallback covers browsers that withhold navigator.clipboard outside a secure
 # context, which happens when the page is reached through a non-loopback name.
+#
+# Comments go below the first line, one paragraph per ticked entry in page order, in the shape the module docstring
+# shows. Continuation lines are indented so that a comment line which happens to start with another entry's slug and a
+# colon cannot be mistaken for that entry's comment. Typing in a comment ticks its entry, because a comment on an entry
+# that is not planned would be dropped from the code and the maintainer would not notice.
 PAGE_JS = """
 const prefix = document.body.dataset.prefix;
 const boxes = [...document.querySelectorAll('ul.tasks input[type=checkbox]')];
+const notes = new Map([...document.querySelectorAll('ul.tasks textarea')].map(t => [t.dataset.slug, t]));
 const codeEl = document.getElementById('code');
 const statusEl = document.getElementById('status');
 function currentCode() {
   const picked = boxes.filter(b => b.checked).map(b => b.value);
-  return picked.length ? prefix + ' ' + picked.join(', ') : '';
+  if (!picked.length) return '';
+  const lines = [prefix + ' ' + picked.join(', ')];
+  for (const slug of picked) {
+    const note = notes.get(slug).value.trim();
+    if (!note) continue;
+    const [first, ...rest] = note.split(/\\r?\\n/);
+    lines.push('', slug + ': ' + first, ...rest.map(l => l.trim() ? '  ' + l : ''));
+  }
+  return lines.join('\\n');
 }
+notes.forEach((t, slug) => t.addEventListener('input', () => {
+  if (t.value.trim()) document.getElementById(slug).checked = true;
+  render();
+}));
 function render() { codeEl.textContent = currentCode() || '(nothing selected)'; statusEl.textContent = ''; }
 async function copy(text) {
   try { await navigator.clipboard.writeText(text); return true; }
@@ -312,7 +344,11 @@ document.getElementById('copy').addEventListener('click', async () => {
   if (!code) { statusEl.textContent = 'Tick at least one entry first.'; return; }
   statusEl.textContent = (await copy(code)) ? 'Copied.' : 'Copy failed; select the code below by hand.';
 });
-document.getElementById('clear').addEventListener('click', () => { boxes.forEach(b => { b.checked = false; }); render(); });
+document.getElementById('clear').addEventListener('click', () => {
+  boxes.forEach(b => { b.checked = false; });
+  notes.forEach(t => { t.value = ''; });
+  render();
+});
 render();
 """
 
@@ -332,8 +368,10 @@ def render_page(bucket: str, items: list[Item]) -> str:
             open_group = item.group
         slug = html.escape(item.slug)
         body.append(
-            f'<li><input type="checkbox" id="{slug}" value="{slug}"><label for="{slug}">'
-            f"<strong>{inline(item.label)}.</strong> {inline(item.tldr)}</label></li>"
+            f'<li><input type="checkbox" id="{slug}" value="{slug}"><div class="entry"><label for="{slug}">'
+            f"<strong>{inline(item.label)}.</strong> {inline(item.tldr)}</label>"
+            f'<textarea data-slug="{slug}" rows="1" aria-label="Comment on {html.escape(item.label)}"'
+            ' placeholder="Comment (optional)"></textarea></div></li>'
         )
     if body:
         body.append("</ul>")
@@ -352,8 +390,8 @@ def render_page(bucket: str, items: list[Item]) -> str:
 <main>
 <p class="eyebrow">Farhelm TODO.md · {html.escape(bucket)}</p>
 <h1>What should get planned?</h1>
-<p class="lede">Tick the entries to plan, copy the code, and paste it back into the session.
-Entries that already have a plan are not listed.</p>
+<p class="lede">Tick the entries to plan, add a comment to any of them if you like, copy the code, and paste it
+back into the session. Entries that already have a plan are not listed.</p>
 {chr(10).join(body)}
 <div class="actions">
 <button type="button" id="copy">Copy code</button>
