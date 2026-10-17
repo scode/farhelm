@@ -4,6 +4,9 @@
 //! confirmations and immediate single deletes freeze IDs and connection incarnations, while the supervisor
 //! rechecks ownership before any mutation. Read generations prevent an earlier
 //! count/measurement from restoring entries removed by this client's cleanup.
+//! The list has its own named tab stop: its actions can all be disabled while
+//! a read is pending, but keyboard users must still be able to scroll the
+//! retained host information in WebKit.
 
 use crate::hosts::HostsRead;
 use crate::icons::{BranchIcon, TrashIcon};
@@ -629,7 +632,7 @@ pub(super) fn TrashControl(
                             }
                         }
                     }
-                    div { class: "checkout-trash-body",
+                    div { class: "checkout-trash-body", tabindex: "0", role: "region", aria_label: "archived checkouts",
                     if let Some(confirm) = confirmation().filter(|confirm| confirm.host.is_none()) {
                         ConfirmBand { confirm, busy, submit_disabled: busy || gate.busy(), oncancel: move |_| cancel_confirmation(confirmation), onsubmit: submit }
                     }

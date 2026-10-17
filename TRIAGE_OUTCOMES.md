@@ -15477,7 +15477,8 @@
 - Completion criteria: with every action in the trash list disabled and the list overflowing, a keyboard-only user can
   Tab into the list and scroll it. A WebKit browser regression does exactly that; run it through the recorder on
   Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/keyboard-scroll-regions.md`.
+- Execution: complete in change `pzqxkvmnxkkxwvonwwwnsvmlmxuukxzq`, bookmark
+  `plan/keyboard-scroll-regions/02-trash-list`, https://github.com/scode/farhelm/pull/2191/changes.
 
 ## host-plans-cannot-receive-keyboard-scroll-focus.md
 

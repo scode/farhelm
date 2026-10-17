@@ -52,9 +52,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`checkout-folder-save-trims-literal-path.md`](checkout-folder-save-trims-literal-path.md) — Saving an existing
   checkout-folder setting can change which directory it names, even without editing it.
 
-- [`trash-body-lacks-keyboard-scroll-focus.md`](trash-body-lacks-keyboard-scroll-focus.md) — Keyboard-only users can
-  lose access to offscreen host information when all trash actions are disabled.
-
 - [`short-main-pane-hides-approval-requests.md`](short-main-pane-hides-approval-requests.md) — In a sufficiently short
   window, waiting approval requests disappear until the user enlarges the window or changes the selected session.
 

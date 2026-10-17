@@ -7,8 +7,47 @@ import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { localHostId, patchPreferences, readPreferences, stubFeed } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
+import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
 
 installTerminalSuiteHooks();
+
+/**
+ * A pending measurement disables every action inside the retained list, so no
+ * child can accidentally supply keyboard access for its scroll owner. Tab from
+ * the pinned Close button must still reach and scroll that overflowing list in
+ * WebKit as well as Chromium; no pointer or script scroll substitutes for it.
+ */
+test("trash list stays keyboard-scrollable while every list action is disabled", async ({ page, request }) => {
+  await stubArchives(page, request, ["keyboard-local"], 20);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let measuring = false;
+  await page.route("**/api/checkout-trash/list", async (route) => {
+    if (route.request().postDataJSON().measure_sizes) {
+      measuring = true;
+      await held;
+    }
+    await route.fallback();
+  });
+  try {
+    await page.setViewportSize({ width: 360, height: 400 });
+    await page.goto("/");
+    await expect(page.locator(".checkout-trash-button")).toHaveAttribute("data-count", "20");
+    await page.locator(".checkout-trash-button").click();
+    const dialog = page.locator(".checkout-trash-dialog");
+    await expect.poll(() => measuring, { message: "measurement remains held during keyboard input" }).toBe(true);
+    await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(20);
+    const region = dialog.getByRole("region", { name: "archived checkouts", exact: true });
+    const actions = region.getByRole("button");
+    expect(await actions.count(), "the list contains disabled actions, not an empty placeholder").toBeGreaterThan(0);
+    for (const action of await actions.all()) await expect(action).toBeDisabled();
+    await expectKeyboardScroll(page, dialog.locator(".trash-close"), region);
+    for (const action of await actions.all()) await expect(action).toBeDisabled();
+  } finally {
+    release();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+});
 
 /**
  * Keep the real local identity and add only display-only connected remotes.
