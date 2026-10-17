@@ -497,10 +497,7 @@ pub(super) fn omp_runtime_tui_grammar(link: &ChainLink) -> Result<(), String> {
             "the OMP runtime's command line is not valid UTF-8; the report is refused".to_string(),
         );
     };
-    match crate::agent_kind::omp::omp_tui_args_decision(&decoded) {
-        crate::agent_kind::omp::OmpInjection::Inject { .. } => Ok(()),
-        crate::agent_kind::omp::OmpInjection::Leave(reason) => Err(format!(
-            "the live OMP runtime no longer describes an interactive conversation: {reason}"
-        )),
-    }
+    crate::agent_kind::omp::omp_runtime_tui_args(&decoded).map_err(|reason| {
+        format!("the live OMP runtime no longer describes an interactive conversation: {reason}")
+    })
 }

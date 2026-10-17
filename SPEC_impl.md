@@ -3630,6 +3630,11 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   the helm derives a delete guard from the target state shown on its approval card and passes it unchanged to the
   supervisor. Without the flag, anything alive is refused. UI and agent deletes share the helm's approval denial,
   teardown and best-effort local cleanup; Replace shares the successful local cleanup after inheriting its pin.
+- `farhelm agent create` and ordinary `farhelm spawn` accept mutually exclusive `--prompt` and `--prompt-file` (`-`
+  reads stdin). Shared flag parsing materializes at most one launch budget of UTF-8 text, allowing newline and tab but
+  refusing other controls. Template writes use that same field, and listings include its text. The prompt travels beside
+  the reusable launch, through `CreateExtras` and `CreateSession` to `CreateInputs`. The supervisor appends its
+  per-harness literal arguments only after cwd and Farhelm-argument expansion, in the shim spec for this create.
 - `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`, and
   `farhelm agent restart --session <id> [--stop-if-running]` — the in-session ACTING CLI, on the same relay and
   credential. Every target is explicit, including a deliberate self-action. Rename compares the observed title and
@@ -4845,6 +4850,15 @@ Conflict when held. This prevents two sessions' crossing deletes from each waiti
 including requests carried by different helms. UI deletion and Replace keep their ordinary waiting behavior. Self-delete
 is refused at both relay and helm before destructive dispatch, because the relay holds that same fence for its own
 request and deletion would revoke its credential before returning.
+
+The same protocol bump adds the optional one-time create prompt. Prompt-free retry encodings stay byte-for-byte
+unchanged. Prompt-bearing ordinary and named creates bind their text separately from launch; fresh-checkout recovery
+retains its accepted prompt in its versioned reservation snapshot. An agent's frozen request digest includes explicit
+prompt edits through template-field serialization. A new `agent_prompt_request_v1` reservation holds that digest plus
+the resolved prompt's hash: completed replay compares request digests, pending recovery also compares prompt hashes.
+Deletion tombstones retain only the normalized request identity. A prompt-bearing approval uses `LaunchWithPrompt`, so
+an older UI refuses its unknown kind rather than approving an unseen first message. Template fields already refuse
+unknown fields. Both cards render the full message through the escaped multiline peer block.
 
 What a card shows is what an approval does. Launches are resolved fully before the card, and the dispatched launch is
 the one shown. The agent YOLO rule (`yolo_guard::check_agent`) runs before the card, after it, and again at dispatch: on

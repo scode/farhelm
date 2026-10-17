@@ -20,9 +20,8 @@ use super::connection::{
     set_attachment_paused, spawn_admitted,
 };
 use super::core::{
-    CreateInputs, RequestError, SessionEntry, Supervisor, agent_request_fingerprint,
-    create_fingerprint, ensure_title_printable, error_kind, truncate_for_error,
-    unknown_pane_owner_refusal,
+    CreateInputs, RequestError, SessionEntry, Supervisor, create_fingerprint,
+    ensure_title_printable, error_kind, truncate_for_error, unknown_pane_owner_refusal,
 };
 use super::launch_artifacts::{
     cleanup_launch_artifacts, read_launch_sentinel, sentinel_could_still_apply,
@@ -254,6 +253,7 @@ fn create_launch(
 /// a field that widens what replays, be honored here without an authority
 /// check of its own.
 struct CreateRequest {
+    prompt: Option<String>,
     named_start: Option<farhelm_proto::NamedConversationStart>,
     parent: Option<String>,
     cwd: String,
@@ -295,6 +295,7 @@ async fn handle_create_session(
     admission: CreateAdmission,
 ) {
     let CreateRequest {
+        prompt,
         named_start,
         parent,
         cwd,
@@ -325,6 +326,10 @@ async fn handle_create_session(
             return;
         }
     };
+    if let Err(message) = mode.validate_initial_prompt(prompt.as_deref(), named_start.is_some()) {
+        reply_error(tx, req_id, ErrorKind::InvalidRequest, message).await;
+        return;
+    }
     if let Some(named) = &named_start {
         let refusal = if github_checkout.is_some() || request_fingerprint.is_some() {
             Some(
@@ -402,11 +407,12 @@ async fn handle_create_session(
                 .expect("named start serializes")
                 .len()
         })
+        + prompt.as_deref().map_or(0, str::len)
         + checkout_bytes
         + title.as_deref().map_or(0, str::len);
     let refusal = if field_len > CREATE_FIELD_CAP {
         Some(format!(
-            "parent, cwd, launch, title, and checkout fields together are {field_len} bytes, \
+            "parent, cwd, launch, title, initial prompt, and checkout fields together are {field_len} bytes, \
              exceeding the {CREATE_FIELD_CAP}-byte limit"
         ))
     } else if template_elements > RESUME_TEMPLATE_ELEMENT_CAP {
@@ -436,13 +442,14 @@ async fn handle_create_session(
     let idempotency = intent_key.map(|intent_key| IntentClaim {
         intent_key,
         fingerprint: match request_fingerprint.as_deref() {
-            Some(digest) => agent_request_fingerprint(digest),
+            Some(digest) => super::core::agent_create_fingerprint(digest, prompt.as_deref()),
             None if named_start.is_some() => super::core::named_create_fingerprint(
                 parent.as_deref(),
                 &cwd,
                 &mode,
                 title.as_deref(),
                 named_start.as_ref().expect("named branch"),
+                prompt.as_deref(),
             ),
             None => create_fingerprint(
                 github_checkout.as_ref(),
@@ -450,6 +457,7 @@ async fn handle_create_session(
                 &cwd,
                 &mode,
                 title.as_deref(),
+                prompt.as_deref(),
             ),
         },
         dedup_scope: admission.dedup_scope(),
@@ -457,6 +465,7 @@ async fn handle_create_session(
     match sup
         .create_session_admitted(
             CreateInputs {
+                prompt,
                 named_start,
                 cwd: &cwd,
                 parent,
@@ -2413,6 +2422,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             send_reply(ctx.tx, &ControlMsg::BrowserForwardingSet { req_id }).await;
         }
         ControlMsg::CreateSession {
+            prompt,
             named_start,
             req_id,
             parent,
@@ -2441,6 +2451,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             // refused by the HELM, which owns raw repo text; the
             // supervisor sees only resolved payloads.)
             let request = CreateRequest {
+                prompt,
                 named_start,
                 parent,
                 cwd,
@@ -4062,6 +4073,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    prompt: None,
                     named_start: None,
                     req_id,
                     parent: None,
@@ -5926,6 +5938,7 @@ mod tests {
         handle_restricted_control(
             &sup,
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: 42,
                 parent: Some("forged-parent".to_string()),
@@ -6081,6 +6094,7 @@ mod tests {
         handle_restricted_control(
             &sup,
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: 63,
                 parent: Some("checkout-parent".to_string()),
@@ -6199,6 +6213,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: 66,
                 parent: None,
@@ -7460,6 +7475,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    prompt: None,
                     named_start: None,
                     req_id,
                     parent: None,
@@ -7749,6 +7765,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: 98,
                 parent: None,
@@ -7815,6 +7832,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: 97,
                 parent: None,
@@ -7876,6 +7894,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id,
                 parent: None,
@@ -7967,6 +7986,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    prompt: None,
                     named_start: None,
                     req_id,
                     parent: None,
@@ -8031,6 +8051,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: 4,
                 parent: None,
@@ -8099,6 +8120,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    prompt: None,
                     named_start: None,
                     req_id,
                     parent: None,

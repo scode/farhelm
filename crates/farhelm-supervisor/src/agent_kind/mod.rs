@@ -56,7 +56,10 @@
 //! - **What a launch can choose.** Exhaustive `LaunchHarness` methods in
 //!   `farhelm-proto/src/launch.rs` (`agent_kind`, `offers_model`,
 //!   `offers_effort`, `offers_permission`, `offers_workspace_trust`,
-//!   `offers_only_yolo`). The helm's release catalog and argv compiler stay
+//!   `offers_only_yolo`, `supports_initial_prompt`). Literal prompt arguments
+//!   come from `LaunchHarness::initial_prompt_arguments` in proto and are
+//!   appended by `Supervisor::spawn_agent` only after placeholder and hook
+//!   expansion. The helm's release catalog and argv compiler stay
 //!   in
 //!   `farhelm-helm/src/launches.rs`: exhaustive matches for the program
 //!   name and the model, effort, and YOLO flags; guarded flags are shared with

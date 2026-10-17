@@ -2567,6 +2567,10 @@ pub enum ControlMsg {
     /// the helm fingerprints by the request the agent sent instead
     /// (`request_fingerprint`).
     CreateSession {
+        /// Literal first message, appended only after the chosen start argv's
+        /// Farhelm placeholders have been expanded. Never part of stored launch.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt: Option<String>,
         req_id: u64,
         /// One-time named start. It never replaces the durable launch or a
         /// captured identity; named creates refuse new managed checkouts.
@@ -4666,6 +4670,7 @@ mod tests {
             },
         };
         let with_payload = ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id: 30,
             parent: None,
@@ -4689,6 +4694,7 @@ mod tests {
         old_shape["github_checkout"] = serde_json::Value::Null;
         let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
         let ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             github_checkout,
             ..
@@ -4710,6 +4716,7 @@ mod tests {
         }
         let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
         let ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             github_checkout,
             ..
@@ -4920,6 +4927,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_request_fingerprint_is_omitted_when_unset() {
         let create = |request_fingerprint: Option<String>| ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id: 1,
             parent: None,
@@ -6426,6 +6434,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_agent_launch_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id: 1,
             parent: None,
@@ -6502,6 +6511,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_command_launch_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id: 2,
             parent: None,
@@ -6559,6 +6569,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_inherited_spawn_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id: 4,
             parent: Some("parent-1".to_string()),
@@ -6612,6 +6623,7 @@ mod tests {
             (None, false),
         ] {
             let msg = ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: 3,
                 parent: None,
@@ -6662,6 +6674,7 @@ mod tests {
         });
         let decoded: ControlMsg = serde_json::from_value(minimal).unwrap();
         let ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             parent,
             launch,

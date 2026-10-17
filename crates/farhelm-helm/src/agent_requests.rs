@@ -1356,6 +1356,7 @@ async fn create_for_agent(
         asking_session,
         LaunchApproval {
             verb,
+            prompt: resolved.resolution.prompt.clone(),
             host: resolved.host,
             host_name: resolved.host_name.clone(),
             cwd: resolved.resolution.cwd.clone(),
@@ -1403,6 +1404,7 @@ async fn create_checkout_for_agent(
     let resolution = resolved.resolution;
     let repo = resolution
         .github_repo
+        .clone()
         .expect("managed destination selected");
     crate::yolo_guard::check_agent(state, claim.host, &resolution.launch).await?;
     // Unkeyed requests never reconcile; their identity still has to satisfy
@@ -1439,6 +1441,7 @@ async fn create_checkout_for_agent(
         asking_session,
         LaunchApproval {
             verb: LaunchVerb::Create,
+            prompt: resolution.prompt.clone(),
             host: claim.host,
             host_name: resolved.host_name.clone(),
             cwd: preview.binding.cwd.clone(),
@@ -1465,10 +1468,10 @@ async fn create_checkout_for_agent(
             &client,
             farhelm_proto::GithubCheckoutRequest {
                 repo,
-                title: resolution.title,
+                title: resolution.title.clone(),
                 preview: Some(preview),
             },
-            resolution.launch,
+            resolution,
             intent_key,
             identity,
         )
@@ -1593,6 +1596,7 @@ fn inherited_spawn_resolution(
         host: origin.host,
         host_name,
         resolution: crate::agent_launch::Resolution {
+            prompt: None,
             cwd,
             github_repo: None,
             launch,
@@ -1606,6 +1610,8 @@ fn inherited_spawn_resolution(
 /// Everything an agent's new session would be, for the approval card and
 /// the YOLO rule.
 struct LaunchApproval {
+    /// The exact message this card approves, separate from reusable commands.
+    prompt: Option<String>,
     verb: LaunchVerb,
     host: HostId,
     host_name: String,
@@ -1641,14 +1647,37 @@ async fn approve_launch(
     // row now. A row can be retargeted or adopt a new install while the user
     // takes their time, and the approval was for the machine on the card.
     let target_before = state.manager.status(host).map(|status| status.incarnation);
-    let action = ApprovalAction::Launch {
-        verb: approval.verb,
-        host_name: approval.host_name,
-        cwd: approval.cwd,
-        repo: approval.repo,
-        title: approval.title,
-        launch: approval.launch,
-        source: approval.source,
+    let LaunchApproval {
+        prompt,
+        verb,
+        host_name,
+        cwd,
+        repo,
+        title,
+        launch: approved_launch,
+        source,
+        ..
+    } = approval;
+    let action = match prompt {
+        Some(prompt) => ApprovalAction::LaunchWithPrompt {
+            prompt,
+            verb,
+            host_name,
+            cwd,
+            repo,
+            title,
+            launch: approved_launch,
+            source,
+        },
+        None => ApprovalAction::Launch {
+            verb,
+            host_name,
+            cwd,
+            repo,
+            title,
+            launch: approved_launch,
+            source,
+        },
     };
     approved(state, origin, asking_session, action).await?;
     if state.manager.status(host).map(|status| status.incarnation) != target_before {
@@ -1832,6 +1861,7 @@ async fn dispatch_agent_create(
             &claim,
             &client,
             crate::sessions::CreateSpec {
+                prompt: resolution.prompt,
                 named_start: None,
                 cwd: resolution.cwd,
                 mode: resolution.launch,
@@ -1999,7 +2029,7 @@ async fn write_template_for_agent(
     // The write lands only on the template the card was built from: another
     // agent's create of the same name, or a GUI edit made while the card
     // waited, refuses this one instead of being overwritten by it.
-    let unchanged = crate::templates::Precondition::Unchanged(before.map(|t| t.fields));
+    let unchanged = crate::templates::Precondition::Unchanged(before.map(|t| Box::new(t.fields)));
     if !crate::templates::store_template(state, template.clone(), unchanged).await? {
         return Err(template_changed());
     }
@@ -2042,7 +2072,7 @@ async fn delete_template_for_agent(
     );
     // Only the definition the card showed is deleted; one that changed or
     // went away while the card waited is reported as changed.
-    let unchanged = crate::templates::Precondition::Unchanged(Some(existing.fields));
+    let unchanged = crate::templates::Precondition::Unchanged(Some(Box::new(existing.fields)));
     if !crate::templates::remove_template(state, name, unchanged).await? {
         return Err(template_changed());
     }
@@ -2086,6 +2116,7 @@ fn merge_template_fields(
     edits: farhelm_proto::launcher::TemplateFields,
 ) -> farhelm_proto::launcher::TemplateFields {
     let farhelm_proto::launcher::TemplateFields {
+        prompt,
         kind,
         agent,
         model,
@@ -2101,6 +2132,7 @@ fn merge_template_fields(
         name,
     } = edits;
     farhelm_proto::launcher::TemplateFields {
+        prompt: prompt.or(existing.prompt),
         kind: kind.or(existing.kind),
         agent: agent.or(existing.agent),
         model: model.or(existing.model),
@@ -2288,6 +2320,7 @@ async fn clone_for_agent(
         asking_session,
         LaunchApproval {
             verb: LaunchVerb::Clone,
+            prompt: None,
             host,
             host_name: host_name.clone(),
             cwd: cwd.clone(),
@@ -2337,6 +2370,7 @@ async fn clone_for_agent(
             &claim,
             &client,
             crate::sessions::CreateSpec {
+                prompt: None,
                 named_start: None,
                 cwd,
                 mode,
@@ -5123,6 +5157,7 @@ mod tests {
     /// sent the wrong bundle and echoed the right row back.
     #[derive(Debug, Clone)]
     struct SeenCreate {
+        prompt: Option<String>,
         cwd: String,
         launch: Option<farhelm_proto::SessionLaunch>,
         title: Option<String>,
@@ -5181,6 +5216,7 @@ mod tests {
             while let Ok(Some(frame)) = reader.read_frame().await {
                 let reply = match parse_control(&frame).expect("decode request") {
                     ControlMsg::CreateSession {
+                        prompt,
                         named_start: None,
                         req_id,
                         cwd,
@@ -5192,6 +5228,7 @@ mod tests {
                         ..
                     } => {
                         recorded.lock().expect("seen mutex").push(SeenCreate {
+                            prompt,
                             cwd: cwd.clone(),
                             launch: launch.clone(),
                             title: title.clone(),
@@ -7083,6 +7120,82 @@ mod tests {
             "{outcome:?}"
         );
         assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    /// A prompt is authorized as full message data, then sent unchanged beside
+    /// the reusable launch. The scripted peer proves transport, not delivery
+    /// to an installed vendor agent; the supervisor argv tests own that boundary.
+    #[farhelm_testtrace::test]
+    async fn initial_prompt_create_cards_show_and_dispatch_the_same_message() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, local, _) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        const MESSAGE: &str = "--literal\n{farhelm_args}\n\tlast line";
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Create {
+                        host: Some("user@builder".into()),
+                        templates: vec![],
+                        edits: farhelm_proto::launcher::TemplateFields {
+                            agent: Some(farhelm_proto::LaunchHarness::Codex),
+                            prompt: Some(MESSAGE.into()),
+                            destination: Some(
+                                farhelm_proto::launcher::TemplateDestination::Folder(
+                                    "/work".into(),
+                                ),
+                            ),
+                            ..Default::default()
+                        },
+                        intent_key: None,
+                        confirm_yolo: false,
+                        spawn: None,
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert!(
+            matches!(&card.action, ApprovalAction::LaunchWithPrompt { prompt, .. } if prompt == MESSAGE)
+        );
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "no dispatch before approval"
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "{outcome:?}"
+        );
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].prompt.as_deref(), Some(MESSAGE));
+        assert!(
+            !serde_json::to_string(&sent[0].launch)
+                .unwrap()
+                .contains("--literal")
+        );
     }
 
     /// Only the originating host can recover its approved managed create.

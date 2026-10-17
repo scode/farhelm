@@ -460,7 +460,10 @@ fn CardDetail(row: CardRow) -> Element {
         CardRow::Block(label, text) => rsx! {
             div { class: "approval-card-row approval-card-full approval-card-command",
                 dt { "{label}" }
-                dd { PeerBlock { class: "approval-card-block", text } }
+                dd { PeerBlock {
+                    class: if label == "initial prompt" { "approval-card-block approval-card-prompt" } else { "approval-card-block" },
+                    text
+                } }
             }
         },
         CardRow::Note(label, words) => rsx! {
@@ -527,6 +530,7 @@ fn action_kind(action: &ApprovalAction) -> &'static str {
     match action {
         ApprovalAction::OpenUrl { .. } => "open_url",
         ApprovalAction::Launch { .. } => "launch",
+        ApprovalAction::LaunchWithPrompt { .. } => "launch_with_prompt",
         ApprovalAction::Rename { .. } => "rename",
         ApprovalAction::Stop { .. } => "stop",
         ApprovalAction::Delete { .. } => "delete",
@@ -543,12 +547,24 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
         ApprovalAction::Launch {
             verb: LaunchVerb::Spawn | LaunchVerb::Create,
             ..
+        }
+        | ApprovalAction::LaunchWithPrompt {
+            verb: LaunchVerb::Spawn | LaunchVerb::Create,
+            ..
         } => "start a new session",
         ApprovalAction::Launch {
             verb: LaunchVerb::SpawnInherited,
             ..
+        }
+        | ApprovalAction::LaunchWithPrompt {
+            verb: LaunchVerb::SpawnInherited,
+            ..
         } => "start a new session running the asking session's own launch",
         ApprovalAction::Launch {
+            verb: LaunchVerb::Clone,
+            ..
+        }
+        | ApprovalAction::LaunchWithPrompt {
             verb: LaunchVerb::Clone,
             ..
         } => "start a copy of a session",
@@ -593,6 +609,15 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
             launch,
             source,
             ..
+        }
+        | ApprovalAction::LaunchWithPrompt {
+            host_name,
+            cwd,
+            repo,
+            title,
+            launch,
+            source,
+            ..
         } => {
             if let Some(source) = source {
                 session_rows(
@@ -616,6 +641,9 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
                 None => rows.push(CardRow::Note("title", "generated")),
             }
             launch_rows(launch, Runs::Start, &mut rows);
+            if let ApprovalAction::LaunchWithPrompt { prompt, .. } = action {
+                rows.push(CardRow::Block("initial prompt", prompt.clone()));
+            }
             // Farhelm's own verdict only where it has one: a command launch's
             // YOLO is the agent's unchecked claim, already shown as "asserted
             // YOLO", and restating it here in Farhelm's words would present
@@ -823,6 +851,9 @@ fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
 
 /// Every field a template sets, command text included.
 fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Vec<CardRow>) {
+    if let Some(prompt) = &fields.prompt {
+        rows.push(CardRow::Block("initial prompt", prompt.clone()));
+    }
     if let Some(kind) = &fields.kind {
         rows.push(CardRow::Value("launch kind", word(kind)));
     }

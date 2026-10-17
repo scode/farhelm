@@ -102,6 +102,18 @@ pub enum ApprovalAction {
         /// The session a clone copies.
         source: Option<ApprovalSession>,
     },
+    /// A distinct tag makes older UIs refuse a prompt-bearing request rather
+    /// than silently hide the first message while still offering Allow.
+    LaunchWithPrompt {
+        verb: LaunchVerb,
+        host_name: String,
+        cwd: String,
+        repo: Option<String>,
+        title: Option<String>,
+        launch: SessionLaunch,
+        source: Option<ApprovalSession>,
+        prompt: String,
+    },
     /// `farhelm agent rename`.
     Rename {
         target: ApprovalSession,
@@ -173,4 +185,48 @@ pub enum ApprovalAnswer {
     /// without asking" setting, then allow this request.
     AlwaysAllow,
     Deny,
+}
+
+#[cfg(test)]
+mod tests {
+    /// A page loaded before prompt support must fail to decode this card;
+    /// a silently ignored optional field would let it approve unseen text.
+    #[test]
+    fn initial_prompt_cards_fail_an_older_action_decoder() {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum OlderAction {
+            Launch {},
+        }
+        let card = super::ApprovalAction::LaunchWithPrompt {
+            verb: super::LaunchVerb::Create,
+            host_name: "host".into(),
+            cwd: "/work".into(),
+            repo: None,
+            title: None,
+            source: None,
+            launch: crate::SessionLaunch::Agent {
+                selection: crate::LaunchSelection {
+                    harness: crate::LaunchHarness::Codex,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                    permission_flags: None,
+                    workspace_trust: None,
+                },
+                start: vec![
+                    "codex".into(),
+                    crate::session_launch::FARHELM_ARGS_PLACEHOLDER.into(),
+                ],
+                resume: None,
+            },
+            prompt: "first\nsecond".into(),
+        };
+        let value = serde_json::to_value(&card).unwrap();
+        assert_eq!(
+            serde_json::from_value::<super::ApprovalAction>(value.clone()).unwrap(),
+            card
+        );
+        assert!(serde_json::from_value::<OlderAction>(value).is_err());
+    }
 }

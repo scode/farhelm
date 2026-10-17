@@ -7102,6 +7102,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* First messages can use the entire launch budget. Keep every line available
+   for approval while leaving the card's other facts and answer controls in reach. */
+.approval-card-prompt {
+  max-height: 20rem;
+  overflow: auto;
+}
 .approval-waiting {
   display: flex;
   flex: 0 0 auto;

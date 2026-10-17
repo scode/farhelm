@@ -1591,9 +1591,11 @@ pub(crate) fn create_fingerprint(
     cwd: &str,
     launch: &SessionLaunch,
     title: Option<&str>,
+    prompt: Option<&str>,
 ) -> String {
     if let Some(checkout) = checkout {
         return serde_json::to_string(&FreshCreateFingerprint::GithubCheckout {
+            prompt: prompt.map(str::to_owned),
             parent: parent.map(str::to_owned),
             requested_cwd: cwd.to_owned(),
             launch: launch.clone(),
@@ -1602,8 +1604,19 @@ pub(crate) fn create_fingerprint(
         })
         .expect("a fingerprint of strings and options always serializes");
     }
-    serde_json::to_string(&("session_launch_v1", parent, cwd, title, launch))
-        .expect("a fingerprint of strings and options always serializes")
+    let ordinary = serde_json::to_string(&("session_launch_v1", parent, cwd, title, launch))
+        .expect("a fingerprint of strings and options always serializes");
+    bind_prompt_fingerprint(ordinary, prompt)
+}
+
+/// Preserve every prompt-free retry encoding byte for byte. A first message
+/// changes request identity without changing the session's durable launch.
+fn bind_prompt_fingerprint(ordinary: String, prompt: Option<&str>) -> String {
+    match prompt {
+        None => ordinary,
+        Some(prompt) => serde_json::to_string(&("prompt_session_launch_v1", ordinary, prompt))
+            .expect("prompt fingerprint serializes"),
+    }
 }
 
 /// Bind a named start into retries without changing any value-less encoding.
@@ -1616,9 +1629,12 @@ pub(crate) fn named_create_fingerprint(
     launch: &SessionLaunch,
     title: Option<&str>,
     named: &farhelm_proto::NamedConversationStart,
+    prompt: Option<&str>,
 ) -> String {
-    serde_json::to_string(&("named_session_launch_v1", parent, cwd, title, launch, named))
-        .expect("named create inputs always serialize")
+    let ordinary =
+        serde_json::to_string(&("named_session_launch_v1", parent, cwd, title, launch, named))
+            .expect("named create inputs always serialize");
+    bind_prompt_fingerprint(ordinary, prompt)
 }
 
 /// Validate the transient selector at the supervisor's admission boundary.
@@ -1696,14 +1712,36 @@ pub(crate) fn agent_request_fingerprint(digest: &str) -> String {
         .expect("a fingerprint of two strings always serializes")
 }
 
+/// Keep request replay independent of template resolution, while retaining
+/// enough of the first message to refuse a changed pending launch. The message
+/// itself belongs only to the create, never the durable session launch.
+pub(crate) fn agent_create_fingerprint(digest: &str, prompt: Option<&str>) -> String {
+    match prompt {
+        None => agent_request_fingerprint(digest),
+        Some(prompt) => {
+            serde_json::to_string(&("agent_prompt_request_v1", digest, prompt_digest(prompt)))
+                .expect("agent prompt fingerprint serializes")
+        }
+    }
+}
+
+/// Hash literal message bytes for equality without retaining its text in a
+/// permanent agent-request reservation. Newline and tab remain significant.
+fn prompt_digest(prompt: &str) -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(prompt.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// The discriminant [`agent_request_fingerprint`] writes first.
 const AGENT_REQUEST_TAG: &str = "agent_request_v1";
 
 /// Whether a stored fingerprint is an agent's request fingerprint, whose
 /// retry may resolve to another launch than the attempt it matches.
 fn is_agent_request_fingerprint(fingerprint: &str) -> bool {
-    serde_json::from_str::<(String, String)>(fingerprint)
-        .is_ok_and(|(tag, _)| tag == AGENT_REQUEST_TAG)
+    crate::store::agent_request_parts(fingerprint).is_some()
 }
 
 /// Serializes creates that share an intent key, so concurrent retries of
@@ -2083,6 +2121,9 @@ fn unrecorded_outcome(original: anyhow::Error, settle: anyhow::Error) -> anyhow:
 /// checked" — `Supervisor::launch_session` performs no validation of its
 /// own and would have no way to.
 struct LaunchRequest {
+    /// Transient input applied after placeholder expansion, never persisted
+    /// in the session's launch. Pending create retries retain it separately.
+    prompt: Option<String>,
     /// Named creates use resume-phase hook policy without storing their selector.
     named: bool,
     /// Direct organizational parentage, persisted verbatim with the child.
@@ -2161,6 +2202,7 @@ struct LaunchRequest {
 /// than the session (and are deliberately absent from the fingerprint),
 /// since the launch does need them.
 pub(crate) struct CreateInputs<'a> {
+    pub(crate) prompt: Option<String>,
     /// One-time start only; the ordinary launch still supplies durable choices.
     pub(crate) named_start: Option<farhelm_proto::NamedConversationStart>,
     pub(crate) cwd: &'a str,
@@ -2200,6 +2242,10 @@ enum FreshCreateFingerprint {
     /// than treated as a new key (SPEC_impl.md, "Launch-kinds reservations").
     #[serde(rename = "github_checkout_v4")]
     GithubCheckout {
+        /// Required to recover a create that was interrupted before spawning.
+        /// Absence preserves older reservations' exact encoding and meaning.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt: Option<String>,
         parent: Option<String>,
         requested_cwd: String,
         launch: SessionLaunch,
@@ -7194,6 +7240,7 @@ impl Supervisor {
             };
         }
         let FreshCreateFingerprint::GithubCheckout {
+            prompt,
             parent,
             requested_cwd,
             launch,
@@ -7212,6 +7259,7 @@ impl Supervisor {
         }
         self.create_session_admitted(
             CreateInputs {
+                prompt,
                 named_start: None,
                 cwd: &requested_cwd,
                 parent,
@@ -7348,6 +7396,7 @@ impl Supervisor {
     ) -> anyhow::Result<SessionInfo> {
         self.create_session(
             CreateInputs {
+                prompt: None,
                 named_start: None,
                 cwd,
                 parent: None,
@@ -7400,6 +7449,7 @@ impl Supervisor {
     /// spawn bundles alike.
     async fn validate_create(&self, inputs: CreateInputs<'_>) -> anyhow::Result<LaunchRequest> {
         let CreateInputs {
+            prompt,
             named_start,
             cwd,
             parent,
@@ -7459,6 +7509,9 @@ impl Supervisor {
         // body and the helm's stderr/journal.
         launch
             .validate_new()
+            .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        launch
+            .validate_initial_prompt(prompt.as_deref(), named_start.is_some())
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
         let argv = create_start_argv(&launch, named_start.as_ref(), github_checkout.is_some())
             .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
@@ -7577,6 +7630,7 @@ impl Supervisor {
                 .await?;
         }
         Ok(LaunchRequest {
+            prompt,
             named: named_start.is_some(),
             parent,
             destination,
@@ -7983,6 +8037,13 @@ impl Supervisor {
         inputs: CreateInputs<'_>,
         reservation: &Reservation,
     ) -> anyhow::Result<LaunchRequest> {
+        if let Some((_, recorded_prompt)) =
+            crate::store::agent_request_parts(&reservation.fingerprint)
+            && recorded_prompt != inputs.prompt.as_deref().map(prompt_digest)
+        {
+            return Err(RequestError::new(ErrorKind::Conflict,
+                "this intent key's interrupted attempt recorded a different initial prompt; send a new key to create from the request as it resolves now").into());
+        }
         let row = self
             .store
             .session(&reservation.session_id)
@@ -8135,6 +8196,9 @@ impl Supervisor {
                             format!("the interrupted attempt's recorded launch: {message}"),
                         )
                     })?;
+            row.launch
+                .validate_initial_prompt(inputs.prompt.as_deref(), inputs.named_start.is_some())
+                .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
             // Same shared rule the raw path applies, for the reason this
             // function's docs give about the database being a trust boundary:
             // `''` and an embedded NUL both survive a round trip through
@@ -8161,6 +8225,7 @@ impl Supervisor {
                     .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
             }
             Ok(LaunchRequest {
+                prompt: inputs.prompt,
                 named: inputs.named_start.is_some(),
                 parent: row.parent,
                 // Fresh origins recover their original resolution; borrowers
@@ -8299,7 +8364,11 @@ impl Supervisor {
         // A deleted session's reservation keeps only a digest of its
         // fingerprint (`store::tombstone_fingerprint`); a retry of the same
         // request still matches it and gets the deleted session's answer.
-        let same_request = reservation.fingerprint == claim.fingerprint
+        let same_agent_request = crate::store::agent_request_parts(&reservation.fingerprint)
+            .zip(crate::store::agent_request_parts(&claim.fingerprint))
+            .is_some_and(|(recorded, requested)| recorded.0 == requested.0);
+        let same_request = same_agent_request
+            || reservation.fingerprint == claim.fingerprint
             || reservation.fingerprint == crate::store::tombstone_fingerprint(&claim.fingerprint);
         if !same_request {
             return Resolution::Answer(Box::new(Err(RequestError::new(
@@ -8878,6 +8947,7 @@ impl Supervisor {
         _guards: &CreateGuards,
     ) -> anyhow::Result<SessionInfo> {
         let LaunchRequest {
+            prompt,
             named,
             parent,
             cwd,
@@ -9643,6 +9713,15 @@ impl Supervisor {
                 SpawnTarget::NewSession,
                 launch_scope.as_deref(),
                 preparation,
+                prompt.as_deref().map(|text| {
+                    (
+                        info.launch
+                            .agent_selection()
+                            .expect("prompt validated against an agent launch")
+                            .harness,
+                        text,
+                    )
+                }),
             )
             .await;
         let (pane, spec_path, status_file_path, hooked) = match spawned {
@@ -11280,6 +11359,7 @@ impl Supervisor {
                 // Ready one never clones again) — this parameter belongs to
                 // the create path only. The refusal wiring arrives with the
                 // restart-against-preparation slice.
+                None,
                 None,
             )
             .await;
@@ -13660,6 +13740,7 @@ impl Supervisor {
         target: SpawnTarget<'_>,
         scope: Option<&str>,
         preparation: Option<crate::launch::CheckoutPreparation>,
+        initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
     ) -> Result<Spawned, SpawnFailure> {
         // Placeholder substitution is the FIRST transformation and hook
         // injection the second, so the injected tail — literals this crate
@@ -13676,11 +13757,10 @@ impl Supervisor {
         } else {
             argv
         };
-        // The last thing done to the argv before it is written down —
-        // after the fill above, and nothing after it: the spec on disk is
-        // what the shim execs, so the flags have to be in it, and putting
-        // the injection here is what lets the shim stay ignorant of hooks
-        // entirely. The two locator-reporting kinds each need their OWN
+        // Hook arguments follow placeholder substitution; the one-time
+        // literal prompt follows both. The spec is what the shim execs,
+        // so composing everything here keeps the shim ignorant of hooks
+        // and prompt placement. The two locator-reporting kinds each need their OWN
         // vendor's artifact published; one vendor's asset can never serve
         // the other because the reporters carry different event surfaces
         // and different `vendor` payloads.
@@ -13705,6 +13785,17 @@ impl Supervisor {
         };
         let (argv, env, hooked, hook_skip) =
             self.with_farhelm_args(argv, args_mode, snapshot, vendor_extension.as_deref(), id);
+        // The message is literal user data, including whole arguments that
+        // resemble {cwd} or {farhelm_args}. Append it only after both fills;
+        // neither hooks nor a later Restart may reinterpret or repeat it.
+        let mut argv = argv;
+        if let Some((harness, text)) = initial_prompt {
+            argv.extend(
+                harness
+                    .initial_prompt_arguments(text)
+                    .expect("initial prompt capability validated before launch"),
+            );
+        }
         let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
         // Derived the SAME way the shim derives it from its own copy of
         // `spec_path` (`launch::status_path_for_spec`) — never computed
@@ -15364,6 +15455,160 @@ pub(crate) mod tests {
         );
     }
 
+    /// A prompt is create-only data, including on pending recovery. A changed
+    /// template must not substitute a different first message after a crash;
+    /// completed replay and deleted-key identity still follow the original request.
+    #[farhelm_testtrace::test]
+    async fn initial_prompt_retry_keeps_request_identity_and_refuses_changed_pending_text() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let cwd = state.path().join("work");
+        std::fs::create_dir(&cwd).unwrap();
+        let cwd = cwd.to_str().unwrap();
+        let digest = "e".repeat(64);
+        let original = agent_create_fingerprint(&digest, Some("first\nmessage"));
+        let changed = agent_create_fingerprint(&digest, Some("other message"));
+        assert_ne!(original, changed);
+        assert_eq!(
+            crate::store::agent_request_parts(&original).unwrap().0,
+            digest
+        );
+        for next in [&changed, &agent_request_fingerprint(&digest)] {
+            assert_eq!(
+                crate::store::tombstone_fingerprint(&original),
+                crate::store::tombstone_fingerprint(next)
+            );
+        }
+        let mut reservation = Reservation {
+            intent_key: "message-key".into(),
+            fingerprint: original,
+            session_id: "interrupted".into(),
+            tmux_name: "fh-interrupted".into(),
+            dedup_scope: DedupScope::Permanent,
+            outcome: ReservationOutcome::Pending,
+        };
+        assert!(sup.store.session("interrupted").await.unwrap().is_none());
+        let inputs = |prompt: &str| CreateInputs {
+            prompt: Some(prompt.into()),
+            named_start: None,
+            cwd,
+            parent: None,
+            github_checkout: None,
+            launch: named_test_launch(),
+            title: None,
+            cols: 80,
+            rows: 24,
+        };
+        let recovered = sup
+            .validate_retry(inputs("first\nmessage"), &reservation)
+            .await
+            .unwrap();
+        assert_eq!(recovered.prompt.as_deref(), Some("first\nmessage"));
+        assert!(
+            !serde_json::to_string(&recovered.launch)
+                .unwrap()
+                .contains("first")
+        );
+        let refusal = sup
+            .validate_retry(inputs("other message"), &reservation)
+            .await
+            .err()
+            .unwrap();
+        assert!(format!("{refusal:#}").contains("different initial prompt"));
+        reservation.outcome = ReservationOutcome::Failed {
+            kind: ErrorKind::InvalidRequest,
+            message: "original refusal".into(),
+        };
+        let claim = IntentClaim {
+            intent_key: reservation.intent_key.clone(),
+            fingerprint: changed,
+            dedup_scope: DedupScope::Permanent,
+        };
+        let Resolution::Answer(answer) = sup.resolve_reservation(reservation, &claim).await else {
+            panic!("a settled request must replay rather than relaunch");
+        };
+        assert!(format!("{:#}", answer.err().unwrap()).contains("original refusal"));
+    }
+
+    /// The published shim spec is the execution boundary: a prompt matching
+    /// a placeholder must stay literal after both cwd and hook expansion.
+    /// Stop at the existing pre-tmux fault seam so this test starts no vendor
+    /// process; a later launch without a prompt must publish none of its text.
+    #[farhelm_testtrace::test]
+    async fn initial_prompt_is_appended_after_expansion_only_for_its_create() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                launch_shell: Some("/bin/sh".into()),
+                faults: FaultHooks {
+                    replacement_fault: Some(Arc::new(|stage| {
+                        assert_eq!(stage, ReplacementStage::BeforeCreation);
+                        Err(anyhow::anyhow!("stop before tmux"))
+                    })),
+                    ..FaultHooks::default()
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let launch = named_test_launch();
+        let snapshot = IntegrationSnapshot::of(&launch);
+        for (generation, prompt) in [
+            Some("{cwd}"),
+            Some("{farhelm_args}"),
+            Some("-p\nsecond"),
+            None,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let outcome = sup
+                .spawn_agent(
+                    "prompt-spec",
+                    "credential",
+                    generation as i64,
+                    "unused",
+                    vec!["agent".into(), "{cwd}".into(), "{farhelm_args}".into()],
+                    &snapshot,
+                    FarhelmArgsMode::of(&launch, crate::agent_kind::LaunchPhase::Start),
+                    state.path().to_str().unwrap(),
+                    80,
+                    24,
+                    SpawnTarget::ExistingSession("unused"),
+                    None,
+                    None,
+                    prompt.map(|text| (LaunchHarness::Claude, text)),
+                )
+                .await;
+            let Err(SpawnFailure::Tmux {
+                spec_path,
+                tmux_attempted: false,
+                ..
+            }) = outcome
+            else {
+                panic!("the fixture must stop after spec publication and before tmux");
+            };
+            let spec: crate::launch::LaunchSpec =
+                serde_json::from_slice(&std::fs::read(spec_path).unwrap()).unwrap();
+            assert_eq!(spec.argv[1], state.path().to_str().unwrap());
+            match prompt {
+                Some(text) => assert_eq!(&spec.argv[spec.argv.len() - 2..], ["--", text]),
+                None => {
+                    assert!(!spec.argv.iter().any(|arg| arg == "-p\nsecond"
+                        || arg == "{cwd}"
+                        || arg == "{farhelm_args}"));
+                    assert!(!spec.argv.iter().any(|arg| arg == "--"));
+                }
+            }
+        }
+    }
+
     /// A valid ordinary agent launch for admission tests that never spawn.
     /// Its program is deliberately synthetic: these tests inspect durable
     /// request/argv boundaries without executing an installed vendor agent.
@@ -15406,7 +15651,8 @@ pub(crate) mod tests {
                 .filled_named_resume_argv("target")
                 .unwrap(),
         };
-        let fingerprint = named_create_fingerprint(None, &cwd, &ordinary, Some("named"), &named);
+        let fingerprint =
+            named_create_fingerprint(None, &cwd, &ordinary, Some("named"), &named, None);
         sup.store
             .insert_session(
                 StoredSession {
@@ -15447,6 +15693,7 @@ pub(crate) mod tests {
             "fixture binds the original named request"
         );
         let inputs = CreateInputs {
+            prompt: None,
             named_start: Some(named.clone()),
             cwd: &cwd,
             parent: None,
@@ -15477,11 +15724,11 @@ pub(crate) mod tests {
         changed.argv[2] = "other".into();
         assert_ne!(
             fingerprint,
-            named_create_fingerprint(None, &cwd, &ordinary, Some("named"), &changed)
+            named_create_fingerprint(None, &cwd, &ordinary, Some("named"), &changed, None)
         );
         assert_ne!(
             fingerprint,
-            create_fingerprint(None, None, &cwd, &ordinary, Some("named"))
+            create_fingerprint(None, None, &cwd, &ordinary, Some("named"), None)
         );
     }
 
@@ -16145,6 +16392,7 @@ pub(crate) mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    prompt: None,
                     named_start: None,
                     cwd,
                     parent: None,
@@ -19230,6 +19478,7 @@ pub(crate) mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    prompt: None,
                     named_start: None,
                     cwd: cwd.to_str().expect("UTF-8 fixture path"),
                     parent: None,
@@ -23832,6 +24081,7 @@ exit 0
                 SpawnTarget::NewSession,
                 None,
                 None,
+                None,
             ),
             async {
                 // Panics in here are caught, never left to unwind
@@ -25179,6 +25429,7 @@ exit 0
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: 1,
                 parent: None,
@@ -25449,7 +25700,7 @@ exit 0
         launch: &SessionLaunch,
         title: Option<&str>,
     ) -> String {
-        create_fingerprint(None, parent, cwd, launch, title)
+        create_fingerprint(None, parent, cwd, launch, title, None)
     }
 
     /// [`create_fingerprint`] of the plain command launch
@@ -26015,6 +26266,7 @@ exit 0
         let created = sup
             .create_session(
                 CreateInputs {
+                    prompt: None,
                     named_start: None,
                     github_checkout: None,
                     cwd: &cwd,
@@ -26068,6 +26320,7 @@ exit 0
         let refused = sup
             .create_session(
                 CreateInputs {
+                    prompt: None,
                     named_start: None,
                     github_checkout: None,
                     cwd: &cwd,
@@ -26108,6 +26361,7 @@ exit 0
             .expect("supervisor");
         let refusal = match sup
             .validate_create(CreateInputs {
+                prompt: None,
                 named_start: None,
                 github_checkout: None,
                 cwd: &cwd,
@@ -26159,6 +26413,7 @@ exit 0
             .expect("supervisor");
         let refusal = match sup
             .validate_create(CreateInputs {
+                prompt: None,
                 named_start: None,
                 github_checkout: None,
                 cwd: &cwd,
@@ -26207,6 +26462,7 @@ exit 0
             .expect("supervisor");
         let resolved = sup
             .validate_create(CreateInputs {
+                prompt: None,
                 named_start: None,
                 github_checkout: None,
                 cwd: &cwd,
@@ -26277,6 +26533,7 @@ exit 0
             let created = sup
                 .create_session(
                     CreateInputs {
+                        prompt: None,
                         named_start: None,
                         github_checkout: None,
                         cwd: &cwd,
@@ -26365,6 +26622,7 @@ exit 0
         let mut tasks = tokio::task::JoinSet::new();
         let launch_dir = state.path().join("launch");
         let request = |req_id: u64, yolo: bool| ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id,
             parent: None,
@@ -26510,6 +26768,7 @@ exit 0
         let other = "b".repeat(64);
         let request = |req_id: u64, command: &str, key: Option<&str>, digest: &str| {
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id,
                 parent: None,
@@ -27182,6 +27441,7 @@ exit 0
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    prompt: None,
                     named_start: None,
                     req_id,
                     parent: None,
@@ -27234,6 +27494,7 @@ exit 0
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: 6,
                 parent: None,
@@ -27297,6 +27558,7 @@ exit 0
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                prompt: None,
                 named_start: None,
                 req_id: 1,
                 parent: None,
@@ -27376,6 +27638,7 @@ exit 0
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
         let request = |req_id: u64, title: &str| ControlMsg::CreateSession {
+            prompt: None,
             named_start: None,
             req_id,
             parent: None,
@@ -28018,6 +28281,7 @@ exit 0
         let created = sup
             .create_session(
                 CreateInputs {
+                    prompt: None,
                     named_start: None,
                     github_checkout: None,
                     cwd: &cwd,
@@ -28486,6 +28750,7 @@ exit 0
         let reply = sup
             .launch_reserved(
                 LaunchRequest {
+                    prompt: None,
                     named: false,
                     parent: None,
                     destination: DestinationResolution::Existing,
@@ -28783,6 +29048,7 @@ exit 0
             .expect("supervisor");
         let create = match sup
             .validate_create(CreateInputs {
+                prompt: None,
                 named_start: None,
                 github_checkout: None,
                 cwd: &cwd,
@@ -30656,6 +30922,7 @@ exit 0
         let info = sup
             .create_session(
                 CreateInputs {
+                    prompt: None,
                     named_start: None,
                     github_checkout: None,
                     cwd: "/",
@@ -30822,6 +31089,7 @@ exit 0
                 checkout.preview.cwd = preview.cwd.clone();
                 let launch = sup
                     .validate_create(CreateInputs {
+                        prompt: None,
                         named_start: None,
                         cwd: "",
                         parent: None,
@@ -30886,6 +31154,7 @@ exit 0
             checkout.preview.cwd = preview.cwd.clone();
             let launch = sup
                 .validate_create(CreateInputs {
+                    prompt: None,
                     named_start: None,
                     cwd: "",
                     parent: None,
@@ -31210,10 +31479,17 @@ exit 0
             start: vec!["same-command".into(), "{farhelm_args}".into()],
             resume: None,
         };
-        let original = create_fingerprint(Some(&checkout), None, "", &agent(None), None);
+        let original = create_fingerprint(Some(&checkout), None, "", &agent(None), None, None);
         assert_ne!(
             original,
-            create_fingerprint(Some(&checkout), None, "", &agent(Some("explicit")), None),
+            create_fingerprint(
+                Some(&checkout),
+                None,
+                "",
+                &agent(Some("explicit")),
+                None,
+                None
+            ),
             "the selection is bound even when the commands are identical"
         );
         let launch = declared_command(
@@ -31227,8 +31503,10 @@ exit 0
             "requested-cwd",
             &launch,
             Some("accepted-title"),
+            None,
         );
         let FreshCreateFingerprint::GithubCheckout {
+            prompt,
             parent,
             requested_cwd,
             launch: recovered,
@@ -31251,6 +31529,7 @@ exit 0
                 &requested_cwd,
                 &recovered,
                 title.as_deref(),
+                prompt.as_deref(),
             ),
             "recovery must reconstruct all accepted inputs"
         );
@@ -31269,11 +31548,11 @@ exit 0
         let root = tempfile::tempdir().unwrap();
         let checkout = checkout_fixture(root.path());
         let launch = SessionLaunch::plain_command("accepted-command");
-        let encoded = create_fingerprint(Some(&checkout), None, "", &launch, None);
+        let encoded = create_fingerprint(Some(&checkout), None, "", &launch, None, None);
         let mut unknown: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         unknown["kind"] = serde_json::json!("github_checkout_future");
         assert!(serde_json::from_value::<FreshCreateFingerprint>(unknown).is_err());
-        let existing = create_fingerprint(None, None, "/work", &launch, None);
+        let existing = create_fingerprint(None, None, "/work", &launch, None, None);
         assert!(serde_json::from_str::<FreshCreateFingerprint>(&existing).is_err());
         let mut v3: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         let object = v3.as_object_mut().unwrap();
@@ -31384,6 +31663,7 @@ exit 0
             None,
             "/work",
             &SessionLaunch::plain_command("agent"),
+            None,
             None,
         );
         for (key, fingerprint) in [
@@ -31812,6 +32092,7 @@ exit 0
             "",
             &SessionLaunch::plain_command("agent"),
             None,
+            None,
         )
     }
 
@@ -31825,6 +32106,7 @@ exit 0
     ) -> anyhow::Result<SessionInfo> {
         sup.create_session(
             CreateInputs {
+                prompt: None,
                 named_start: None,
                 cwd: "",
                 parent: None,
@@ -33925,6 +34207,7 @@ exit 0
         let origin = sup
             .create_session(
                 CreateInputs {
+                    prompt: None,
                     named_start: None,
                     cwd: "",
                     parent: None,
@@ -34286,6 +34569,7 @@ exit 0
             let refusal = sup
                 .create_session(
                     CreateInputs {
+                        prompt: None,
                         named_start: None,
                         cwd: cwd.to_str().unwrap(),
                         parent: None,

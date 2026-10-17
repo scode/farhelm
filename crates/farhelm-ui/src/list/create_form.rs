@@ -464,6 +464,7 @@ fn launcher_snapshot(
         LaunchTab::Command => LauncherKind::Command,
     };
     LauncherState {
+        prompt: None,
         kind: Some(kind_now),
         harness: *t.structured_harness.peek(),
         model: t.structured_model.peek().as_ref().map(|model| {

@@ -992,6 +992,8 @@ impl RetiredCreateFields {
 
 #[derive(Deserialize)]
 pub(crate) struct CreateReq {
+    /// Sent only by this create, never retained as a recent setup or launch.
+    prompt: Option<String>,
     /// A selector for this start only, never part of history or templates.
     conversation: Option<String>,
     cwd: String,
@@ -1084,7 +1086,7 @@ pub(crate) struct CreateReq {
 /// a different request, never launched twice (SPEC_impl.md, "Launch-kinds
 /// reservations").
 fn fresh_create_request_identity(req: &CreateReq) -> String {
-    serde_json::to_string(&(
+    let ordinary = serde_json::to_string(&(
         "github_create_request_v2",
         &req.cwd,
         &req.launch,
@@ -1094,7 +1096,14 @@ fn fresh_create_request_identity(req: &CreateReq) -> String {
         &req.expected_incarnation,
         &req.github_checkout,
     ))
-    .expect("create request identity contains only serializable fields")
+    .expect("create request identity contains only serializable fields");
+    match &req.prompt {
+        None => ordinary,
+        Some(prompt) => {
+            serde_json::to_string(&("prompt_github_create_request_v1", ordinary, prompt))
+                .expect("prompt request identity serializes")
+        }
+    }
 }
 
 /// Verify the original preview's installation before any intent lookup.
@@ -1580,6 +1589,7 @@ pub(crate) async fn create_session(
             &claim,
             &client,
             CreateSpec {
+                prompt: req.prompt,
                 named_start,
                 cwd: req.cwd,
                 mode,
@@ -1656,6 +1666,7 @@ pub(crate) async fn do_create_session(
     spec: CreateSpec,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
     let CreateSpec {
+        prompt,
         named_start,
         cwd,
         mode,
@@ -1672,6 +1683,8 @@ pub(crate) async fn do_create_session(
         spawned,
         request_fingerprint,
     } = spec;
+    mode.validate_initial_prompt(prompt.as_deref(), named_start.is_some())
+        .map_err(invalid_request)?;
     // Before any bookkeeping or dispatch: a YOLO launch on a host that asks before YOLO
     // launches is refused unless the caller confirmed it (see `yolo_guard`). An agent's
     // create has no confirmation to give and is held to the agent rule instead, here at
@@ -1714,6 +1727,7 @@ pub(crate) async fn do_create_session(
             cols,
             rows,
             CreateExtras {
+                prompt,
                 named_start,
                 intent_key,
                 github_checkout: github_checkout.clone(),
@@ -1857,6 +1871,8 @@ async fn accept_created_session(
 /// would be a second shape to keep in step with the supervisor's create
 /// message, which is the drift this function exists to prevent.
 pub(crate) struct CreateSpec {
+    /// One-time literal message, transported beside the reusable launch.
+    pub(crate) prompt: Option<String>,
     /// Resolved transient argv; the mode remains the ordinary stored launch.
     pub(crate) named_start: Option<farhelm_proto::NamedConversationStart>,
     pub(crate) cwd: String,
@@ -2108,6 +2124,7 @@ async fn create_fresh_session_resolved(
         claim,
         client,
         CreateSpec {
+            prompt: req.prompt,
             named_start: None,
             cwd: req.cwd,
             mode,
@@ -2182,11 +2199,12 @@ pub(crate) async fn create_agent_checkout(
     claim: &manager::SessionClaim,
     client: &SupervisorClient,
     checkout: farhelm_proto::GithubCheckoutRequest,
-    mode: SessionLaunch,
+    resolution: crate::agent_launch::Resolution,
     intent_key: Option<String>,
     client_identity: String,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
     let req = CreateReq {
+        prompt: resolution.prompt,
         conversation: None,
         cwd: String::new(),
         launch: None,
@@ -2211,7 +2229,7 @@ pub(crate) async fn create_agent_checkout(
             client_identity,
             accept_result: None,
             origin: CreateOrigin::Agent,
-            resolved_mode: Some(mode),
+            resolved_mode: Some(resolution.launch),
         },
     )
     .await
@@ -3334,6 +3352,7 @@ pub(crate) async fn do_replace_session(
         &claim,
         &client,
         CreateSpec {
+            prompt: None,
             named_start,
             cwd,
             mode,

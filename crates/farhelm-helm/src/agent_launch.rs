@@ -35,6 +35,8 @@ use crate::hosts::{HostStateView, HostView};
 /// request, not by this (`agent_requests::AgentRequestDigest`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Resolution {
+    /// Transient first message, kept outside the compiled reusable launch.
+    pub(crate) prompt: Option<String>,
     pub(crate) cwd: String,
     /// A fresh checkout destination. Its exact cwd is previewed only after
     /// keyed recovery, so an accepted retry does not propose another clone.
@@ -87,6 +89,7 @@ pub(crate) fn template_host_row<'v>(views: &'v [HostView], identity: &str) -> Op
 fn flag_for(field: &str) -> &'static str {
     match field {
         "model" => "--model",
+        "initial prompt" => "--prompt/--prompt-file",
         "effort" => "--effort",
         "permissions" => "--permissions",
         "workspace trust" => "--trust",
@@ -234,7 +237,17 @@ pub(crate) fn resolve(
         }
     };
     let launch = crate::sessions::resolve_launch_request(request)?;
+    // Switching tabs retains the inactive agent draft, just like its model
+    // and effort. Only the active tab contributes create inputs.
+    let prompt = match state.kind.unwrap_or(LauncherKind::Agent) {
+        LauncherKind::Agent => state.prompt,
+        LauncherKind::Command => None,
+    };
+    launch
+        .validate_initial_prompt(prompt.as_deref(), false)
+        .map_err(invalid)?;
     Ok(Resolution {
+        prompt,
         cwd,
         github_repo,
         launch,
@@ -245,6 +258,56 @@ pub(crate) fn resolve(
 
 #[cfg(test)]
 mod tests {
+    /// Templates and explicit flags share one prompt field; later edits win
+    /// without turning that transient message into the session's launch argv.
+    #[test]
+    fn initial_prompt_resolution_is_transient_and_explicit_flags_win() {
+        let saved = template(
+            "message",
+            TemplateFields {
+                agent: Some(LaunchHarness::Codex),
+                prompt: Some("template text".into()),
+                destination: folder("/work"),
+                ..Default::default()
+            },
+        );
+        let resolved = resolve(
+            &[saved],
+            &["message".into()],
+            &TemplateFields {
+                prompt: Some("--literal\nsecond".into()),
+                ..Default::default()
+            },
+            &[],
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(resolved.prompt.as_deref(), Some("--literal\nsecond"));
+        assert!(
+            !serde_json::to_string(&resolved.launch)
+                .unwrap()
+                .contains("--literal")
+        );
+        let refused = resolve(
+            &[],
+            &[],
+            &TemplateFields {
+                command: Some("sh".into()),
+                yolo: Some(false),
+                kind: Some(LauncherKind::Command),
+                prompt: Some("text".into()),
+                destination: folder("/work"),
+                ..Default::default()
+            },
+            &[],
+            false,
+            false,
+        )
+        .unwrap_err();
+        assert!(format!("{refused:#}").contains("--prompt"));
+    }
+
     use super::*;
     use farhelm_proto::{LaunchEffort, LaunchHarness};
 

@@ -761,7 +761,9 @@ fn parse_trust(value: &str) -> Result<Choice<bool>, String> {
 
 /// The ids of every [`LaunchFlags`] argument, which `spawn --inherit-agent`
 /// conflicts with: a spawn either reuses its own launch or describes one.
-const LAUNCH_FLAG_IDS: [&str; 11] = [
+const LAUNCH_FLAG_IDS: [&str; 13] = [
+    "prompt",
+    "prompt_file",
     "templates",
     "agent",
     "model",
@@ -787,6 +789,14 @@ const LAUNCH_FLAG_IDS: [&str; 11] = [
 /// resolving them by order.
 #[derive(clap::Args, Debug, Clone, Default)]
 struct LaunchFlags {
+    /// First message, sent once when the new session starts. Newlines and
+    /// tabs are allowed; other control characters are refused.
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true, value_parser = parse_initial_prompt)]
+    prompt: Option<String>,
+    /// Read the first message from a UTF-8 file, or - for stdin (64 KiB
+    /// launch budget). Cannot be combined with --prompt.
+    #[arg(long, value_name = "PATH", allow_hyphen_values = true, conflicts_with = "prompt", value_parser = read_initial_prompt)]
+    prompt_file: Option<String>,
     /// Apply a launch template by its exact name; repeat to apply several,
     /// in order. `farhelm agent templates` lists them.
     #[arg(long = "template", value_name = "NAME", allow_hyphen_values = true)]
@@ -836,7 +846,9 @@ struct LaunchFlags {
 impl LaunchFlags {
     /// Whether any launch flag was given.
     fn any(&self) -> bool {
-        !self.templates.is_empty()
+        self.prompt.is_some()
+            || self.prompt_file.is_some()
+            || !self.templates.is_empty()
             || self.agent.is_some()
             || self.model.is_some()
             || self.effort.is_some()
@@ -861,6 +873,7 @@ impl LaunchFlags {
     ) -> farhelm_proto::launcher::TemplateFields {
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
         TemplateFields {
+            prompt: self.prompt.clone().or_else(|| self.prompt_file.clone()),
             permission_flags: None,
             kind: self.command.as_ref().map(|_| LauncherKind::Command),
             agent: self.agent,
@@ -889,6 +902,30 @@ impl LaunchFlags {
             name: title,
         }
     }
+}
+
+/// Keep CLI and wire validation on the same literal-message contract.
+fn parse_initial_prompt(text: &str) -> Result<String, String> {
+    farhelm_proto::launcher::check_initial_prompt(text)?;
+    Ok(text.to_string())
+}
+
+/// Read at most one launch budget plus one byte, including for stdin.
+/// Parsing materializes the file once, so the relayed request and retry digest
+/// describe its contents rather than a path that could change before approval.
+fn read_initial_prompt(path: &str) -> Result<String, String> {
+    use std::io::Read;
+    let reader: Box<dyn Read> = if path == "-" {
+        Box::new(std::io::stdin())
+    } else {
+        Box::new(std::fs::File::open(path).map_err(|e| format!("cannot read prompt file: {e}"))?)
+    };
+    let mut text = String::new();
+    reader
+        .take((farhelm_proto::launcher::TEMPLATE_FIELDS_CAP + 1) as u64)
+        .read_to_string(&mut text)
+        .map_err(|e| format!("cannot read a UTF-8 prompt: {e}"))?;
+    parse_initial_prompt(&text)
 }
 
 #[derive(Subcommand)]
