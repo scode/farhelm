@@ -44,6 +44,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Session action keyboard shortcuts.** Add a keyboard shortcut to delete a session. Consider shortcuts for Restart,
+  Replace, and the other session actions too.
+
+- **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
+  sessions without a managed checkout too, by retaining their metadata.
+
 - Follow up on the recent quick launch system so an agent can populate the templates.
 
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
