@@ -581,6 +581,7 @@ async fn handshake_with_hello<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     // notices the peer's version differs from its own.
     let _ = writer
         .write_control(&ControlMsg::Error {
+            create_unaccepted: false,
             req_id: 0,
             message: skew.to_string(),
             // This side's own refusal to proceed, not a complaint about
@@ -650,6 +651,7 @@ mod tests {
             let _their_hello = r.read_frame().await.unwrap().unwrap();
             let refusal = parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
             let ControlMsg::Error {
+                create_unaccepted: false,
                 req_id: 0,
                 kind: ErrorKind::Internal,
                 message: refusal_text,

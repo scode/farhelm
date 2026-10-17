@@ -203,7 +203,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_52` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_53` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -214,7 +214,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 52;
+pub const PROTOCOL_VERSION: u32 = 53;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -3579,6 +3579,11 @@ pub enum ControlMsg {
     /// SPEC.md requires concrete, actionable errors, so it travels
     /// unabridged from the supervisor to the client.
     Error {
+        /// A keyed create durably failed with no surviving session or checkout.
+        /// False is deliberately inconclusive: it must not retire an unresolved
+        /// key. Only the create reply path can establish this proof.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        create_unaccepted: bool,
         /// 0 when the error is not tied to a specific request.
         req_id: u64,
         message: String,
@@ -4159,6 +4164,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn error_kind_json_shape_is_pinned() {
         let msg = ControlMsg::Error {
+            create_unaccepted: false,
             req_id: 7,
             message: "no such session: abc".to_string(),
             kind: ErrorKind::NotFound,
@@ -4186,6 +4192,7 @@ mod tests {
             ErrorKind::CheckoutConflict
         );
         let unauthorized = ControlMsg::Error {
+            create_unaccepted: false,
             req_id: 8,
             message: "session credential rejected".to_string(),
             kind: ErrorKind::Unauthorized,
@@ -4201,6 +4208,35 @@ mod tests {
             serde_json::from_value::<ControlMsg>(expected).unwrap(),
             unauthorized
         );
+    }
+
+    /// The refusal proof is opt-in metadata, preserving the original error.
+    /// An absent field is inconclusive, never permission to mint another key.
+    #[farhelm_testtrace::test]
+    fn create_refusal_proof_defaults_false_and_round_trips_true() {
+        let mut json = serde_json::json!({
+            "type": "error", "req_id": 7,
+            "message": "session folder is missing", "kind": "invalid_request",
+        });
+        let without = serde_json::from_value::<ControlMsg>(json.clone()).unwrap();
+        assert!(matches!(
+            without,
+            ControlMsg::Error {
+                create_unaccepted: false,
+                ..
+            }
+        ));
+        assert_eq!(serde_json::to_value(without).unwrap(), json);
+        json["create_unaccepted"] = serde_json::json!(true);
+        let proof = serde_json::from_value::<ControlMsg>(json.clone()).unwrap();
+        assert!(matches!(
+            proof,
+            ControlMsg::Error {
+                create_unaccepted: true,
+                ..
+            }
+        ));
+        assert_eq!(serde_json::to_value(proof).unwrap(), json);
     }
 
     /// `Hello::host_identity` (PLAN_M6.md item 1), golden-pinned in both
@@ -4832,8 +4868,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_52() {
-        assert_eq!(PROTOCOL_VERSION, 52);
+    fn protocol_version_is_pinned_at_53() {
+        assert_eq!(PROTOCOL_VERSION, 53);
     }
 
     /// Delete must retain mutation fencing and approval time, with distinct
@@ -5080,6 +5116,7 @@ mod tests {
                 // The old peer's refusal: an error, then the connection
                 // closes (the writer is dropped at scope exit).
                 w.write_control(&ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id: 0,
                     message: "protocol version mismatch".to_string(),
                     kind: ErrorKind::Internal,
@@ -7521,6 +7558,7 @@ mod tests {
         assert_eq!(
             ControlMsg::Error {
                 req_id: 13,
+                create_unaccepted: false,
                 message: "boom".to_string(),
                 kind: ErrorKind::Internal,
             }

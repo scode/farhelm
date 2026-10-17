@@ -1525,11 +1525,22 @@ The helm applies this at its HTTP boundary. `SupervisorError` records whether th
 it from a supervisor's `ControlMsg::Error` reply, and `http_error` translates a supervisor-decided kind through
 `supervisor_reply_status`, where each arm says why its status is the right one given that the supervisor is untrusted. A
 supervisor's `Unauthorized` becomes 502, never 401. Signals that make a client act on its own state are produced only by
-the helm's own reasoning: the device-authentication 401 comes only from the auth middleware, the definitely- unaccepted
-create outcome only for a local failure or a supervisor's `CheckoutConflict` (whose mkdir it owns), and the
-stale-connection precondition only as a header from the helm's own precondition check, never from anything a supervisor
-wrote in a message body. The agent relay's error classification (`error_kind`) and the terminal WebSocket were not
-audited against this rule when it was written.
+the helm's own reasoning: the device-authentication 401 comes only from the auth middleware, the definitely-unaccepted
+create outcome only for a local failure, a supervisor's `CheckoutConflict` (whose mkdir it owns), or the narrowly scoped
+create-refusal proof below, and the stale-connection precondition only as a header from the helm's own precondition
+check, never from anything a supervisor wrote in a message body. The agent relay's error classification (`error_kind`)
+and the terminal WebSocket were not audited against this rule when it was written.
+
+Protocol 53 adds `create_unaccepted` to the existing `Error` reply. An ordinary keyed create can set it only when the
+reservation matches the full request (including its tombstone digest after store reopening) and key lifetime, has
+settled `Failed`, and has no surviving session row. The ordinary rollback paths settle that state only after confirming
+nothing is running; a retained or ambiguous launch does not qualify. Managed-checkout and agent-request recovery
+encodings are excluded. This is reply metadata: the stored refusal and its same-key replay do not change. Missing proof,
+including a failed proof lookup, stays inconclusive. The helm accepts this host-local statement only on a
+`CreateSession` reply and translates it to its existing definitely-unaccepted HTTP marker. A flag on a failed Delete
+cannot retire a successful replacement's identity. The UI already drops a Replace identity on that marker, so repairing
+a missing folder and pressing Replace again starts a fresh attempt without weakening recovery after an uncertain or
+partially successful attempt.
 
 `SessionInfo::last_work_started_at` is the millisecond ordering key for the session list's stable work bursts. It was
 added within protocol version 20 under the same additive rule: absent decodes to zero, and zero falls back to

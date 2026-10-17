@@ -86,6 +86,7 @@ async fn mock_cleanup_cancels_response_backpressure() {
     let socket = state.path().join("mock.sock");
     let (done, owner) = mock_supervisor(&socket, |_| {
         let reply = ControlMsg::Error {
+            create_unaccepted: false,
             req_id: 1,
             kind: farhelm_proto::ErrorKind::InvalidRequest,
             message: "x".repeat(4 * 1024 * 1024),
@@ -850,6 +851,7 @@ fn an_untrustworthy_reply_fails_with_nothing_on_stdout() {
     // rendered verbatim rather than treated as a protocol violation.
     let bare_error = agent_run_against("hosts", |_| {
         Some(ControlMsg::Error {
+            create_unaccepted: false,
             req_id: 0,
             message: "the session credential is invalid".to_string(),
             kind: ErrorKind::Unauthorized,

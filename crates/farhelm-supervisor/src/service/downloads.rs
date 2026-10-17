@@ -286,6 +286,7 @@ async fn stream(
 /// Preserve request correlation and the repository's ordinary error mapping.
 fn refusal(req_id: u64, error: &anyhow::Error) -> ControlMsg {
     ControlMsg::Error {
+        create_unaccepted: false,
         req_id,
         kind: error_kind(error),
         message: format!("{error:#}"),

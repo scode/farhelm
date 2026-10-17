@@ -5692,6 +5692,7 @@ mod tests {
                 }
                 let reply = match current.browser_error {
                     Some(message) => ControlMsg::Error {
+                        create_unaccepted: false,
                         req_id,
                         message,
                         kind: ErrorKind::Internal,
@@ -5760,6 +5761,7 @@ mod tests {
     fn list_reply(script: &Script, req_id: u64) -> ControlMsg {
         if let Some(message) = &script.list_error {
             return ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: message.clone(),
                 kind: ErrorKind::Internal,

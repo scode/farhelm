@@ -1666,6 +1666,7 @@ mod tests {
             );
             writer
                 .write_control(&ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id,
                     message: SENTINEL.to_string(),
                     kind: ErrorKind::NotFound,
@@ -1730,6 +1731,7 @@ mod tests {
             };
             writer
                 .write_control(&ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id,
                     message: "scripted refusal".to_string(),
                     kind,

@@ -352,7 +352,7 @@ async fn oversized_file_refusals_preserve_the_shared_connection() {
         );
         peer.control(&message).await;
         assert!(
-            matches!(peer.next_control(10).await, ControlMsg::Error { req_id: id, kind: ErrorKind::Internal, message } if id == req_id && message.contains("exceeding"))
+            matches!(peer.next_control(10).await, ControlMsg::Error { req_id: id, kind: ErrorKind::Internal, message, .. } if id == req_id && message.contains("exceeding"))
         );
     }
     peer.control(&ControlMsg::StatFile {

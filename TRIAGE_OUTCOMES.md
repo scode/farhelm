@@ -15420,7 +15420,8 @@
   starts a fresh attempt from both the sidebar and the header; a partial success or unclear outcome still reuses its
   identity. A regression removes the session folder, sees the refusal, restores the folder, retries and observes one
   replacement; run it through the recorder. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/replace-retry-identity.md`.
+- Execution: change `lzwkqynymvkzkuzmxlnvwzuuusrztpkk`; bookmark `plan/replace-retry-identity/02-refusal-recovery`;
+  draft PR [#2206](https://github.com/scode/farhelm/pull/2206/changes).
 
 ## replace-retry-key-splits-across-controls.md
 
@@ -15445,8 +15446,8 @@
 - Completion criteria: SPEC.md states the same-operation principle; a regression commits the first replacement, fails
   its deletion, retries through the other control and observes exactly one replacement, in both directions; run it
   through the recorder on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: change `zqswvnzwyolkxutmskxpkukztownsplz`; bookmark `plan/replace-retry-identity/01-shared-identity`;
-  draft PR [#2205](https://github.com/scode/farhelm/pull/2205/changes).
+- Execution: change `zqswvnzwyolkxutmskxpkukztownsplz`; bookmark `plan/replace-retry-identity/01-shared-identity`; draft
+  PR [#2205](https://github.com/scode/farhelm/pull/2205/changes).
 
 ## trash-listing-exceeds-control-frame.md
 

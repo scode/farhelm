@@ -450,6 +450,7 @@ async fn upload_transfer(
             let overtaken = reply(
                 priority,
                 &ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id: *req_id,
                     message: e.message,
                     kind: e.kind,
@@ -828,6 +829,7 @@ async fn answer_queued_commits(
             let cancelled = reply(
                 priority,
                 &ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id,
                     message: message.to_string(),
                     kind,
@@ -1130,6 +1132,7 @@ async fn commit_upload(
                 priority,
                 &ControlMsg::Error {
                     req_id,
+                    create_unaccepted: false,
                     message: if signal.session_gone {
                         format!(
                             "session {} was deleted while this upload was in flight; nothing \
@@ -1186,6 +1189,7 @@ async fn commit_upload(
         let overtaken = reply(
             priority,
             &ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: refusal.message,
                 kind: refusal.kind,
@@ -1223,6 +1227,7 @@ async fn commit_upload(
             reply(
                 priority,
                 &ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id,
                     message: if signal.session_gone {
                         format!(
@@ -1267,6 +1272,7 @@ async fn commit_upload(
             return reply(
                 priority,
                 &ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id,
                     message: e,
                     kind: ErrorKind::Internal,
@@ -1291,6 +1297,7 @@ async fn commit_upload(
         return reply(
             priority,
             &ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: format!(
                     "this upload published under a path that is not valid UTF-8 ({}), which \

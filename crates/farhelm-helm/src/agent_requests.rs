@@ -4543,6 +4543,7 @@ mod tests {
             };
             writer
                 .write_control(&ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id,
                     message: SENTINEL.to_string(),
                     kind: ErrorKind::InvalidRequest,
@@ -5238,6 +5239,7 @@ mod tests {
                         });
                         match refusal.clone() {
                             Some(message) => ControlMsg::Error {
+                                create_unaccepted: false,
                                 req_id,
                                 message,
                                 kind: ErrorKind::InvalidRequest,
