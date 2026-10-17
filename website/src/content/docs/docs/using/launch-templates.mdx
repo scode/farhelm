@@ -62,6 +62,15 @@ Templates to help you choose one. Renaming keeps the mark; deleting clears it, a
 The quick switcher's **Quick launch** row does the same thing. In Firefox, Ctrl+Shift+P may open a private window instead;
 use that row there. The shortcut leaves an open dialog alone.
 
+After a quick launch, Rename opens with the session's name selected while the agent is already starting. Enter keeps
+the name; typing replaces it, and Enter saves it. Escape or **cancel** keeps the name too. Closing Rename takes you to
+the new terminal. This also happens for number shortcuts and combined launch sequences, even when a template supplied
+the name. If the session launcher opened first, it already offered the name field and Rename does not open again.
+
+In Settings, beside **skip session confirmations**, **name sessions on quick launch** turns this off. It is on by
+default, and the choice is shared by every window using your helm. Naming a session this way leaves its managed
+checkout's directory unchanged: a directory created as `repo-N` keeps that name.
+
 ## Number shortcuts
 
 Give a template a number key with the key button beside its **⚡**. Cmd+0–9 in the Mac app, or Ctrl+Shift+0–9

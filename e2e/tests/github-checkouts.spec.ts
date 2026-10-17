@@ -29,7 +29,8 @@ for (const collide of [false, true]) {
   /** The hidden composer must obtain the actual current preview before it
    * submits. A real clone proves the success path; occupying that exact offer
    * proves that the shortcut spends its attempt and exposes the ordinary retry
-   * instead of silently choosing another directory. */
+   * instead of silently choosing another directory. Naming the accepted session
+   * changes its title while the managed checkout keeps the offered folder. */
   test(`quick launch waits for a managed preview and ${collide ? "reveals its path race" : "starts directly"}`, async ({ page, request }) => {
     const fixture = await checkoutFixture(collide ? "quick-race" : "quick-managed");
     const name = `quick-checkout-${Date.now()}`;
@@ -86,18 +87,35 @@ for (const collide of [false, true]) {
         await expect(form.locator(".launch-composer-checkout-preview")).toContainText(path.join(fixture.root, `${fixture.repoName}-2`));
         await expect(form.locator(".create-session-submit")).toBeEnabled();
         expect(bodies).toHaveLength(1);
+        await expect(page.locator(".rename-dialog")).toHaveCount(0);
         expect(await fs.readFile(path.join(occupied, "foreign"), "utf8")).toBe("preserve quick-launch collision\n");
       } else {
         await expect.poll(() => ids.length, { message: "the single shortcut create was accepted" }).toBe(1);
         await expect(form).toHaveCount(0);
         expect(bodies).toHaveLength(1);
         expect(bodies[0]).toMatchObject({ launch: { harness: "codex", permissions: "guarded" }, github_checkout: { repo: fixture.repo } });
-        await assertCheckout(page, request, fixture, ids[0], occupied, true);
+        const dialog = page.locator(".rename-dialog");
+        const field = dialog.locator(".rename-input");
+        const defaultTitle = `${fixture.repoName}-1`;
+        await expect(dialog).toBeVisible();
+        await expect(field).toHaveValue(defaultTitle);
+        await expect(field).toBeFocused();
+        await expect.poll(() => field.evaluate((node: HTMLTextAreaElement) => ({
+          start: node.selectionStart, end: node.selectionEnd,
+        })), { message: "the generated checkout name is fully selected" }).toEqual({ start: 0, end: defaultTitle.length });
+        const title = `${name}-named`;
+        await page.keyboard.type(title);
+        await expect(field).toHaveValue(title);
+        await page.keyboard.press("Enter");
+        await expect(dialog).toHaveCount(0);
+        const session = await assertCheckout(page, request, fixture, ids[0], occupied, true);
+        expect(session.title).toBe(title);
+        expect(await fs.readdir(fixture.root), "naming leaves the checkout's generated folder intact")
+          .toEqual([defaultTitle]);
       }
     } finally {
       gate.release();
-      await page.unroute("**/api/github-checkout-preview");
-      await page.unroute("**/api/sessions");
+      await page.unrouteAll({ behavior: "wait" });
       for (const id of ids.reverse()) await cleanupSession(request, id);
       await patchPreferences(request, { quick_launch_template: null });
       await request.delete(`/api/templates/${name}`);
