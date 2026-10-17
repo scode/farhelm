@@ -604,6 +604,11 @@ pub(super) fn HostSettingsDialog(
                     on_dismiss: move |_| on_close.call(()),
                 }
                 div { class: "host-settings-body",
+                // Saving disables the body's controls. Keep its text reachable
+                // until those controls can serve as keyboard entry points again.
+                tabindex: if busy { Some("0") } else { None },
+                role: if busy { Some("region") } else { None },
+                aria_label: if busy { Some("host settings") } else { None },
                 {outcome_for(None)}
                 if manageable || alias_supported {
                 section { class: "host-settings-section", aria_label: "Connection",
@@ -835,6 +840,7 @@ pub(super) fn HostRemoveDialog(
                     },
                 }
                 div { class: "host-settings-body",
+                    tabindex: "0", role: "region", aria_label: "host removal details",
                     p { class: "host-remove-explanation",
                         "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them."
                     }

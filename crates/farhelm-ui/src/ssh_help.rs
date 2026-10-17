@@ -48,6 +48,18 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
             ));
         })
     });
+    // Loading, refusals and empty command sets leave this body with only
+    // text. Once copy buttons exist they provide its keyboard entry point.
+    let has_commands = result
+        .read()
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .is_some_and(|help| {
+            help.hosts
+                .iter()
+                .chain(help.extra.iter().filter(|_| extra_requested))
+                .any(|host| host.sessions.is_some() || host.setup.is_some())
+        });
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             div { class: "app-settings-dialog ssh-help-dialog host-dialog-framed", role: "dialog",
@@ -62,6 +74,9 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
                     on_dismiss: move |_| on_close.call(()),
                 }
                 div { class: "host-settings-body ssh-help-body",
+                    tabindex: if !has_commands { Some("0") } else { None },
+                    role: if !has_commands { Some("region") } else { None },
+                    aria_label: if !has_commands { Some("ssh connection help") } else { None },
                     p {
                         "Farhelm connects without prompting, so it cannot answer a second factor or other approval on every ssh login. Run both commands in a terminal "
                         if cfg!(all(native_desktop, target_os = "macos")) { strong { "on this Mac" } }

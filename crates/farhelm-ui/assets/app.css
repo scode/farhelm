@@ -3304,8 +3304,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   min-height: 0;
   overflow: auto;
 }
-/* Plan regions have no focusable text. Keep their keyboard ring inside
+/* Text-only regions have no focusable controls. Keep their keyboard ring inside
    the scrollport so the dialog frame cannot clip it. */
+.host-settings-refreshed > .host-settings-body[tabindex="0"]:focus-visible,
 .host-dialog-framed > .host-settings-body[tabindex="0"]:focus-visible {
   outline-offset: -2px;
 }
@@ -7129,6 +7130,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   max-height: 20rem;
   overflow: auto;
 }
+.approval-card-prompt:focus-visible { outline-offset: -2px; }
 .approval-waiting {
   display: flex;
   flex: 0 0 auto;
@@ -7642,7 +7644,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 .ssh-help-command pre {
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   padding: 0.75rem;
   background: var(--bg-1);
   border: 1px solid var(--border);
