@@ -143,15 +143,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through the public buffer API. Nothing has been filed upstream; filing is the maintainer's call. Farhelm vendors
   xterm.js unmodified, so an upstream fix arrives only with a stable release.
 
-- **Consider letting menu arrows follow focus moved mid-navigation.** The session, host, app bar and templates menus
-  remember where the last arrow press was headed, so rapid presses survive late focus updates. The fix that landed in
-  #2176 forgets that destination once the latest arrow move lands, so focus moved by a pointer or screen reader wins
-  after navigation settles. While arrow presses are still landing, the remembered destination still overrides such a
-  move: press Down twice, click the fourth item before both land, press Down, and focus goes back to the fourth item
-  instead of the fifth. A full fix needs to know where each focus change came from, which the menus' focus events do not
-  say today. Consider whether such a focus-source design is worth it; it would need its own scope and acceptance checks.
-  Plan: `plans/queue/menu-focus-source.md`.
-
 - **Cheaper clones from the repository cache.** Look into whether a managed checkout's clone from the host's repository
   cache can skip most of the compression and delta work git does today, so the clone stage finishes sooner.
 

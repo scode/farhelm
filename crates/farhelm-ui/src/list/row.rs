@@ -1208,6 +1208,7 @@ pub(super) fn SessionRow(
     // interleaving it exists to prevent.
     let focus_queue = MenuFocusQueue {
         target: use_signal(|| None::<Rc<MountedData>>),
+        in_flight: use_signal(|| None),
         draining: use_signal(|| false),
     };
     // Bumped on every FRESH open (the toggle's `onclick`, opening branch

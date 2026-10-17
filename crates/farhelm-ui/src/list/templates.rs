@@ -125,6 +125,7 @@ fn NumberShortcutMenu(
     let mut intent = use_signal(|| None::<MenuOpenIntent>);
     let focus = MenuFocusQueue {
         target: use_signal(|| None),
+        in_flight: use_signal(|| None),
         draining: use_signal(|| false),
     };
     let mut generation = use_signal(|| 0_u64);

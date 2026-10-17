@@ -2900,6 +2900,7 @@ fn HostRow(
     let mut open_intent = use_signal(|| None::<MenuOpenIntent>);
     let focus_queue = MenuFocusQueue {
         target: use_signal(|| None::<Rc<MountedData>>),
+        in_flight: use_signal(|| None),
         draining: use_signal(|| false),
     };
     let open_generation = use_signal(|| 0_u64);
