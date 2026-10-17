@@ -15291,3 +15291,246 @@
 - Execution: complete in jj change `rwyskqpzslmnqpnlqmmvwrwmnpwwqols`, bookmark
   `plan/checkout-retry-helm-namespace/01-helm-namespace`,
   [PR #2172](https://github.com/scode/farhelm/pull/2172/changes).
+
+## download-cancel-retains-pending-admission.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main; not run, and memory growth was not measured. When a terminal file
+  download is cancelled before it starts (for example the browser drops the download request while the helm is still
+  asking the supervisor to begin it), the helm's guard in `crates/farhelm-helm/src/client/downloads.rs` retires the
+  download route and sends AbortDownload, but never removes the pending `BeginDownload` request. The supervisor handles
+  AbortDownload by dropping the route, which aborts its task (`crates/farhelm-supervisor/src/service/downloads.rs`); if
+  that happens before the task sends DownloadStarted or a refusal, no reply ever comes. The helm removes a pending
+  request only on a reply or on connection teardown, so each such cancellation leaves one entry until the host
+  reconnects. The helm's download HTTP handler awaits `begin_download` directly, so ordinary browser cancellation
+  reaches this. Spec: SPEC_impl.md, "Supervisor metadata retention and nonresponse": "This exception does not excuse
+  unbounded accumulation during ordinary operation with a correctly behaving supervisor." The supervisor here behaves as
+  designed: an aborted download is deliberately not answered. The earlier decision on
+  `cancelled-request-leaks-pending-entry.md` covers selectively nonresponding supervisors and chose not to add general
+  cancellation cleanup, so it does not cover this case, and the fix must stay specific to downloads.
+- Decision: on 2026-10-16 the user asked which untriaged items meet both "it's CLEARLY A problem to be fixed according
+  to the spec, it needs no judgement from me" and "it's a reasonably straightforward fix that doesn't cause complexity
+  or scope creep", reviewed the session's assessment that this item meets both, and said "record triage outcome the ones
+  that met criteria." Planned fix: either the helm retires the pending `BeginDownload` entry when the download guard is
+  dropped before a reply (a drop-time cleanup task like the existing `cancel_download`; a late reply to an id that is no
+  longer pending is already dropped silently), or the supervisor answers an AbortDownload whose download has not replied
+  yet. Complexity gate: download-specific. No change to the shared request path's semantics, no general cancellation
+  cleanup, no new timeouts or quotas. If the fix needs either, stop and return the item to the maintainer.
+- Completion criteria: cancelling a download admission before the supervisor replies leaves no pending request behind on
+  the live connection. A regression cancels admission in that window and asserts the pending entry is gone; run it
+  through the recorder. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## bare-cache-fetch-conflicts-with-explicit-git-policy.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed. When a host's Git is configured with `safe.bareRepository=explicit`, every session launched
+  into a fresh GitHub checkout fails at its clone stage. The supervisor fetches into its per-host bare repository cache
+  with `git ... -C <cache> fetch` (`crates/farhelm-supervisor/src/launch.rs`, the shim's cache fetch); `-C` makes Git
+  discover the bare repository, which that policy refuses, while `--git-dir` names it explicitly and is allowed. A cache
+  failure fails the clone stage with no fallback (SPEC.md), so no checkout, hook or agent runs. The reviewer's
+  recorder-backed probe on Git 2.43.0 returned 128 for the `-C` fetch and 0 for the `--git-dir` fetch. That fetch is the
+  only place the supervisor reaches the cache with `-C`; `git clone --reference <cache>` passes the cache as a path; a
+  pre-triage check on 2026-10-15 reported that it also succeeds under the policy, which this session did not repeat.
+  SPEC_impl.md prescribes the current command line literally
+  (`git -c gc.autoDetach=false -c maintenance.autoDetach=false -C <cache> fetch --prune ...`), so the code matches the
+  spec and the spec's command line changes with it. Neither spec addresses this Git setting. No Planned item, BUGS.md
+  entry or filter covers it.
+- Decision: on 2026-10-16 the user asked which untriaged items meet both "it's CLEARLY A problem to be fixed according
+  to the spec, it needs no judgement from me" and "it's a reasonably straightforward fix that doesn't cause complexity
+  or scope creep", reviewed the session's assessment that this item meets both, with the caveat that SPEC_impl.md's
+  command line changes too, and said "record triage outcome the ones that met criteria." Principle for the spec: the
+  supervisor names its own bare cache explicitly, so a host's restrictive bare-repository policy keeps working and is
+  never overridden. Planned fix: select the cache with `--git-dir <cache>` instead of `-C <cache>` in the shim's fetch,
+  update the exact-argv test, and update the command line in SPEC_impl.md with half a sentence on why. Complexity gate:
+  that fetch's arguments, its tests, and the SPEC_impl.md command block. Never relax the user's policy (no
+  `-c safe.bareRepository=all`), and do not audit other Git safety settings. If the clone or another cache step also
+  fails under the policy and needs more than naming the cache explicitly, stop and return the item to the maintainer.
+- Completion criteria: a fresh-checkout launch succeeds on a host whose Git sets `safe.bareRepository=explicit`. A
+  real-Git regression in the launch tests' isolated Git environment sets the policy and runs the shim's cache fetch and
+  clone, asserting both succeed; run it through the recorder. SPEC_impl.md shows the new command line. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## claude-trust-publish-after-lock-takeover.md
+
+- Outcome: `fix spec`.
+- Assessment: partly correct. With the opt-in Claude trust setting on, Farhelm edits Claude's settings file under the
+  lock Claude uses for it. The writer checks the lock's age (under 4 s), the lock's identity and the file's identity,
+  then renames its replacement into place with no further guard, so a writer frozen past Claude's stale-lock threshold
+  between those checks and the rename can overwrite a Claude save made in that gap. That window is inherent to a
+  mkdir-style lock with a stale timeout, and Claude's own writers have the same exposure. Unverified: Claude 2.1.300's
+  actual stale-lock takeover and timing (the vendor binary was not inspected), whether any realistic stall lands in a
+  window of a few system calls, and what a lost Claude update can hold. SPEC.md's caveats name Claude's unlocked exit
+  save and future vendor changes, not this trigger.
+- Decision: on 2026-10-16 the user chose to document it as an accepted limit, saying: "This was an intentional
+  risk/trade-off during design and is intentiona[l]." Principle for the spec: Farhelm follows Claude's advisory lock the
+  way Claude's own writers do, so a Farhelm writer stalled past Claude's stale-lock threshold can lose an update in
+  either direction; this is an accepted trade-off of editing Claude's file, not a defect to narrow.
+- Completion criteria: SPEC.md's Claude trust caveats (and SPEC_impl.md's matching passage, if it lists the accepted
+  vendor races) state that limit beside the unlocked exit-save race. No code change. Remove the feedback file and its
+  index entry.
+- Execution: pending.
+
+## claude-trust-settings-misses-invalidation.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by reading current main; no browser reproduction. Settings loads the two shared Claude trust
+  values (the automatic-trust switch and the hint dismissal) once and reloads only after its own save, while the hint
+  band above the terminal reloads on every session update. An already-open Settings in one window therefore keeps
+  showing the old values after another window changes them, until it is reopened. Toggling then saves the user's chosen
+  value, so nothing changes against their intent. Only another GUI can change these values, the other Settings sections
+  also load once, and SPEC_impl.md says other clients' Settings choices are picked up on reload. The conflict is the
+  trust section's sentence "Other clients observe saved changes through the normal invalidation feed", which sits in the
+  hint-band paragraph and reads as covering the dialog too.
+- Decision: on 2026-10-16 the user chose to clarify the sentence and asked to strengthen the general rule: "I don't know
+  why these things keep coming up. Can we strengthen the "one gui at a time" thing somehow to avoid this and similar
+  things constantly raised? This should just be triaged w/o my judgement or not [filed] to begin with by agents."
+  Principle for the spec: SPEC.md "One GUI at a time" says explicitly that with several GUIs open, a view already open
+  in one GUI need not reflect a change saved from another until it is reopened or the page reloads, unless the spec
+  names that view's live update explicitly; a finding whose only trigger is a second GUI showing older state is covered
+  by that rule, not a defect. The existing limits still hold: correct behavior alongside the command line and agents,
+  the session view's multi-client rules, and destructive prompts' preconditions.
+- Completion criteria: the trust section's sentence says invalidation updates the hint band and Settings shows current
+  values when opened; "One GUI at a time" gains the stale-open-view rule above, worded so a reviewer or triager can
+  apply it without asking the maintainer. No code change. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## replace-retries-replay-settled-create-failure.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main; no runtime reproduction. Plain Replace keeps its request identity after
+  any refusal that lacks the helm's definitely-not-created marker, and the helm sets that marker only for its own
+  checkout-conflict, YOLO and fresh-checkout refusals. The supervisor durably records a validation refusal (for example
+  a missing session folder) and replays it for the same identity without re-checking, so after the user fixes the cause
+  an ordinary retry keeps returning the old error. A page reload, switching to another source's Replace or reopening the
+  session view clears it, and nothing says so. The earlier fix for lost Replace retries introduced this, and its
+  completion criterion said a deliberate new Replace after an acknowledged result gets a new identity.
+- Decision: on 2026-10-16 the user chose "Mark settled refusals as not created". Planned fix: the supervisor tells the
+  helm when a keyed create was refused and recorded as failed before anything started, and the helm adds the
+  definitely-not-created marker so the UI drops the identity; partial successes and unclear outcomes keep it. Complexity
+  gate: a reply field (or equivalent signal) across supervisor, helm and UI plus the UI's existing marker handling; the
+  supervisor's durable replay of keyed creates stays as it is. If the fix needs to change that replay or how identities
+  are stored, stop and return the item to the maintainer.
+- Completion criteria: after a Replace refused before creating anything, fixing the cause and pressing Replace again
+  starts a fresh attempt from both the sidebar and the header; a partial success or unclear outcome still reuses its
+  identity. A regression removes the session folder, sees the refusal, restores the folder, retries and observes one
+  replacement; run it through the recorder. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## replace-retry-key-splits-across-controls.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading current main; no runtime reproduction. Replace can be started from the sidebar row or
+  from the session header (and the interrupted-session card), and each keeps its own unresolved request identity. If the
+  first Replace created the replacement but could not remove the original (a "created the replacement but could not
+  remove the original" refusal keeps the identity, as does a lost reply), retrying from the other control sends a new
+  identity and the supervisor starts a second replacement agent in the same folder. That breaks SPEC.md's rule that one
+  intended create yields one session or a clear error, never two silently, and leaves a gap in the earlier fix
+  (`plain-replace-loses-retry-identity.md`). The header's identity also lives in a per-session view, so navigating away
+  and back likely loses it.
+- Decision: on 2026-10-16 the user chose "Share retry identity per source", adding: "This is also a spec change. If
+  multiple buttons exist to do _exactly the same thing_, they should be treated the same except as absolutely required
+  at the GUI level." Principle for the spec: controls that perform exactly the same operation on the same target behave
+  identically and share that operation's state, such as an unresolved retry identity or a pending confirmation, and
+  differ only where the GUI strictly requires it. Planned fix: hold the unresolved Replace identity in page-level state
+  keyed by the source session, used by the sidebar, the header and the interrupted card, with one rule for when it is
+  dropped. This knowingly goes past the earlier fix's gate of keeping the key in each control's existing state.
+  Complexity gate: UI only, in the session list, session view and the page-level state they already share. No helm or
+  supervisor change. If it needs either, stop and return the item to the maintainer.
+- Completion criteria: SPEC.md states the same-operation principle; a regression commits the first replacement, fails
+  its deletion, retries through the other control and observes exactly one replacement, in both directions; run it
+  through the recorder on Chromium and WebKit. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## trash-listing-exceeds-control-frame.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed mechanism, much narrower than presented. Each host sends its whole archive listing in one reply,
+  an oversized reply (over 8 MiB) is replaced by an error, and the trash dialog needs the full listing to offer any
+  delete, so such a host could be neither listed nor cleaned from Farhelm. The app already disables bulk and
+  single-entry delete above 10,000 archives (the batch limit SPEC_impl.md accepts), and an ordinary entry is about 300
+  bytes, so the reply limit is reached below that count only when average archive paths are many hundreds of bytes long.
+  Nobody built such a trash to observe it. No data is lost.
+- Decision: on 2026-10-16 the user chose "Declare the scale out of scope". Principle for the spec: the trash is built
+  for archive collections well below the 10,000-archive cleanup limit with ordinary path lengths; a host beyond that
+  scale may be unlistable in the app, and supporting it is not a goal.
+- Completion criteria: the trash section of SPEC.md or SPEC_impl.md states that intended scale and that a host beyond it
+  may be unlistable. No code change. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## trash-body-lacks-keyboard-scroll-focus.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed structurally on current main; the WebKit behavior was not reproduced. The trash dialog's list is
+  its own scroller with no tab stop, its buttons go disabled while hosts are unreachable, listings failed, the
+  reachability refresh failed, or an operation runs, and Close sits outside it in the header. When the list is taller
+  than the dialog in those states, a keyboard-only user of the desktop app or Safari has nothing inside it to focus and
+  cannot scroll to the content below the fold; WebKit does not make such scrollers keyboard-focusable (WebKit bug
+  277290). The dialog layout filter in FILTER.md does not apply, since it excludes content a keyboard-only user cannot
+  reach. The UI has no keyboard-focusable scroll area yet, so this sets the pattern.
+- Decision: on 2026-10-16 the user chose "Same remedy as host plans". On the host plan finding, left undecided, they
+  noted that keyboard-reachable scrolling should be standard in every GUI component. Planned fix: give the trash list a
+  tab stop (`tabindex="0"`), a region role and an accessible name, with a visible focus style. Complexity gate: the
+  trash list's markup and its focus style. If the host plan finding is decided first as a general rule, follow that
+  decision; otherwise do not widen this change to other dialogs.
+- Completion criteria: with every action in the trash list disabled and the list overflowing, a keyboard-only user can
+  Tab into the list and scroll it. A WebKit browser regression does exactly that; run it through the recorder on
+  Chromium and WebKit. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## host-plans-cannot-receive-keyboard-scroll-focus.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed structurally on current main; the WebKit behavior was not reproduced in the shipped app. Setting
+  up or uninstalling Farhelm on a host shows the helm's full plan in a dialog whose header and footer are pinned and
+  whose plan area alone scrolls. That area has no tab stop and nothing focusable inside it, the dialog clips its
+  overflow, and focus starts on a footer button. When the plan is taller than the space left (a short window, enlarged
+  text, long paths), a keyboard-only user of the desktop app or Safari cannot scroll it, because WebKit does not make
+  such scrollers keyboard-focusable (WebKit bug 277290); Chromium and Firefox do. SPEC_impl.md requires the full
+  concrete action list to be shown before touching the host, but neither spec mentions keyboard access, and the UI has
+  no keyboard-focusable scroll area yet. The dialog layout filter in FILTER.md does not apply, since it excludes content
+  a keyboard-only user cannot reach.
+- Decision: on 2026-10-16 the user, having first left this for later with the comment "This also seems like a SPEC
+  thing. We should just have this always be the case as standard in all GUI components.", clarified: "for the host plans
+  finding, i meant to close that out but then ALSO make it a spec change". Principle for the spec: every scrollable
+  region in the GUI can be reached and scrolled with the keyboard alone, in every engine Farhelm ships on (WebKit
+  included); a region whose content holds nothing focusable gets its own tab stop with an accessible name. Planned fix:
+  give the plan area of the host setup and uninstall dialogs a tab stop (`tabindex="0"`), a region role and an
+  accessible name, with a visible focus style, sharing the pattern with `trash-body-lacks-keyboard-scroll-focus.md`.
+  Complexity gate: the spec rule, and the plan areas' markup and focus style. Other scroll regions that break the new
+  rule are listed in the PR and reported back as follow-ups, not fixed in this change. If the fix needs more than those
+  attributes and a style, stop and return the item to the maintainer.
+- Completion criteria: SPEC.md (or SPEC_impl.md, wherever the GUI's keyboard rules live) states the principle; with an
+  overflowing plan, a keyboard-only user can Tab into the plan area and scroll it in both the setup and uninstall
+  dialogs. A WebKit browser regression does exactly that; run it through the recorder on Chromium and WebKit. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## claude-trust-cleanup-delays-desktop-start.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main; no runtime reproduction. With the opt-in Claude trust setting on,
+  deleting a session removes its managed checkout's trust entry from Claude's settings file in a background step after
+  Delete replies. If that step fails (Claude's lock held for its whole 12-second budget) or never runs (the supervisor
+  stopped first), a record stays behind, and the only retry is the next supervisor start, before it serves. Startup
+  retries each eligible record serially with the full 12-second lock budget, in each of its two pre-serving passes, so
+  two records behind a held lock spend about 48 seconds, past the desktop app's 35-second wait for its supervisor, and
+  the app reports a startup failure. A lock left behind by a crashed Claude would repeat this on every start (whether
+  Claude 2.1.300 leaves its lock behind on a crash is unverified). For retired records the session row was deleted in
+  the same transaction that retired the checkout, so the session and its notifications no longer exist; notifications
+  about a host or the whole app are a v1 non-goal. A trust entry that is never removed names a folder that no longer
+  exists, and startup already refuses to remove it once another checkout reuses that path.
+- Decision: on 2026-10-16 the user first asked why startup does this cleanup at all, proposed "just not waiting at all
+  on start-up", and then asked for a per-session notification when the lock is held. After the session confirmed that
+  the session behind such a record has already been deleted, so there is nowhere to show a notification, the user
+  decided: "yeah best efort, no notification, skip immediately w/o wait". Planned fix: at supervisor startup, each
+  pending trust removal makes one attempt that does not wait for Claude's lock; if the lock is held, it keeps the record
+  for the next start and logs it, with no user-facing notice. The ordinary post-Delete background removal keeps its
+  current budget. Complexity gate: the startup call path and a zero-wait (or try-once) use of the existing lock attempt;
+  the path-reuse and ownership checks stay as they are. If the fix needs to move cleanup after serving or change the
+  record format, stop and return the item to the maintainer.
+- Completion criteria: with Claude's lock held and several pending trust records, supervisor startup adds no lock wait,
+  the records remain for a later start, and a later start with the lock free removes them. A regression holds the lock,
+  starts the supervisor and checks both; run it through the recorder. Remove the feedback file and its index entry.
+- Execution: pending.
