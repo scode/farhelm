@@ -44,6 +44,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Official support for agent wrappers.** Allow running an agent through a wrapper while treating it exactly like the
+  real agent. Details TBD; the maintainer knows what they want here. Ask before designing or implementing it.
+
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
 
