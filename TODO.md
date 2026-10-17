@@ -44,8 +44,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Session action keyboard shortcuts.** Add a keyboard shortcut to delete a session. Consider shortcuts for Restart,
-  Replace, and the other session actions too.
+- **Session action keyboard shortcuts.** Add keyboard shortcuts to delete and rename a session. Consider shortcuts for
+  Restart, Replace, and the other session actions too.
 
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
