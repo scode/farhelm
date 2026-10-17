@@ -106,3 +106,77 @@ mechanism. Source review is distinct from the recorded runtime evidence above.
 All four commit/PR wordings passed cold reads. Implementation stayed local under no-workhorse mode. Review usage is
 partially recorded privately; native and orchestrator usage was unavailable, and shellout JSON did not echo actual model
 identity. This report passed a separate native cold read for clarity and public-repository hygiene.
+
+### Landing
+
+Landed on its own in round 79, as #2192, #2200, #2202 and #2203, merged bottom-up and back to back. They are unchanged
+from what the report describes apart from one fix made during the landing (below).
+
+#### What landed since the stack was based, and whether it interacted
+
+Only plan-queue bookkeeping reached main between this stack's base and its landing, so the landing rebase was clean. The
+base already held the recent work this stack builds on: the launcher fixes, the per-database agent retry keys, the
+non-waiting Claude trust cleanup at supervisor startup, the calm outage card and the WebKit input-method guard. The
+landing monitor read the stack against them, and a fresh-context reviewer did the same independently. Neither found an
+interaction. The launcher sends the same prompt whether or not it first had to wait for a retry key, the retry keys
+themselves are unchanged, the delete path does not use startup cleanup, and the new prompt box keeps the input-method
+guard and its own Enter behavior.
+
+The reviewer also checked upgrade compatibility. #2192 raises the protocol to 52, as earlier protocol additions did, and
+#2200 adds its prompt fields under the same version; both changelog entries and the report say remote hosts need an
+Update. The supervisor's stored data gains no new tables. Its records of creates, kept so a retried create is
+recognized, use a new form when the create carries a prompt, and records written before the upgrade still read
+unchanged. Because only the whole stack is consistent at protocol 52, the four PRs landed back to back with no release
+cut between them.
+
+#### Fix made during the landing: Replace with dropped the initial prompt
+
+The launcher's Replace with dialog offers the initial-prompt box and sends what the user typed. For a replacement in a
+folder, the helm forwarded the chosen conversation but created the new session with no prompt, so the user's first
+message was silently dropped; a replacement into a managed checkout already kept it. That contradicted the report, which
+says a message entered for Replace with is sent to the new session, and the launcher's own design in SPEC_impl.md, which
+sends the prompt in Replace with requests. No test covered it.
+
+The landing changed the helm to take the prompt from the Replace with request and pass it to the same create an ordinary
+launch uses, which validates it against the agent and includes it in the retry identity. A plain Replace still sends no
+prompt. A new helm test, added to #2203, sends a Replace with request carrying a multi-line prompt and checks that the
+supervisor receives it exactly. It failed against the code before the fix, run `ae4a31ee-a39a-43a4-883b-9abc9dcf856e`,
+on that assertion. A second fresh-context reviewer checked the fix and the test and found no issues.
+
+#### Possible follow-ups
+
+- An empty prompt is sent as a real prompt. It can come from a template that sets an empty prompt on purpose, to clear
+  an earlier template's message, or from `--prompt ""`. The agent is then started with an empty prompt argument, and the
+  approval card shows an empty message block. How each agent handles an empty prompt argument is unverified. Treating an
+  empty prompt as absent when the request is built, while templates keep the empty value as their clearing edit, would
+  avoid it.
+- The report does not cover downgrading, and a downgrade has two sharp edges. On a downgraded helm, a single template
+  carrying a prompt makes the whole template list fail to load, so `tl:` and `--template` stop working until that
+  template is deleted. A downgraded supervisor refuses to retry an interrupted fresh-checkout create that carried a
+  prompt, which is the safe direction.
+- The supervisor's retry record for a create keeps the full prompt text on disk until the session is deleted when the
+  create came from the interface or made a fresh managed checkout; a create an agent requested keeps only a hash of it.
+- Minor: an oversized `--prompt-file` cut in the middle of a character reports a UTF-8 error instead of the size limit.
+  A code comment on the helm's Replace still says a plain Replace recreates exactly the retry identity of the source's
+  own create, which is no longer exact when the source started with a prompt or a named conversation.
+
+#### Checks
+
+- Run now, on the stack with the landing fix: the helm's Replace tests, including the new one, through the test recorder
+  with the pinned nextest and tmux, four slots and no retries:
+  `cargo nextest run -p farhelm-helm --lib -E 'test(replace)'`. 41 of 41 passed, run
+  `3e90908b-3226-41ea-934f-b98bf8005fb0`. The new test against the unfixed code, run
+  `ae4a31ee-a39a-43a4-883b-9abc9dcf856e`, failed on the intended assertion and then hit the runner's slow-test limit,
+  because the test's stand-in supervisor stopped before replying; that is expected for a deliberately broken build.
+- Run now: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings` and the isolated `python -B scripts/check-test-sleeps.py` (302 delays,
+  none missing a reason), all clean.
+- Reused: the executor's recorded runs listed in the report, including its final rebased-tree Rust run
+  `9655bee7-7ade-4ff4-9e43-1b6aa4bb6b2e` and browser run `ae221883-1b47-42cc-8c54-29305250b7c9`, both on the base this
+  stack landed on, and its builds, Markdown formatting and changelog-format checks. The landing fix changes only the
+  helm's Replace path and its tests, which the run above covers, and no Markdown, changelog entry or interface code.
+- Skipped: everything the report skipped, for the reasons it gives. No real vendor prompt was submitted, as the report
+  says.
+
+Apart from the Replace with claim, which was untrue for folder destinations until this landing fixed it, nothing in the
+report became untrue.
