@@ -45,11 +45,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ## Near term
 
 - **Let agents delete sessions.** Agents can currently stop sessions but cannot delete them. Add session deletion to the
-  CLI and agent instructions so an agent can remove a session rather than only stopping it.
+  CLI and agent instructions so an agent can remove a session rather than only stopping it. Plan:
+  `plans/queue/agent-delete-and-prompt.md`.
 
 - **Supply an initial prompt when creating a session.** Allow an initial prompt to be injected when creating a session
   through the CLI, and document it in the agent instructions. Consider initial-prompt support in the launcher GUI as
-  well. The separate "Inject commands into agents" item covers commands sent to sessions that are already running.
+  well. The separate "Inject commands into agents" item covers commands sent to sessions that are already running. Plan:
+  `plans/queue/agent-delete-and-prompt.md`.
 
 - Follow up on the recent quick launch system so an agent can populate the templates.
 
@@ -146,7 +148,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Escape the session name in "save as template".** The template editor now shows invisible and direction-changing
   characters in a template's model and folder as visible escapes (#2087), but a session name copied from a cloned remote
-  session into "save as template" is still shown raw in the editor.
+  session into "save as template" is still shown raw in the editor. Plan: `plans/queue/template-name-escape.md`.
 
 - **Make input-method guards work in WebKit.** Escape or Enter that ends an input-method composition should only end the
   composition, but WebKit (the Mac app and Safari) ends composition before the keydown of the key that ends it, so that
@@ -155,12 +157,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   very likely does nothing in the Mac app, and the same gap affects about 25 other input-method guards across the UI,
   including that panel's earlier composing-Enter fix. Dig into a WebKit-proof approach and apply it everywhere. Browser
   tests that fake a keydown with `isComposing: true` do not show the Mac app is fixed, because real WebKit never sends
-  one.
+  one. Plan: `plans/queue/webkit-ime-guards.md`.
 
 - **A calm message while a supervisor upgrades.** While a host's supervisor is being upgraded, a bunch of yellow text
   flickers on screen, which looks like a bug rather than an expected step. Replace it with one clear message that looks
   intentional and says the host is updating. First reproduce an upgrade and list exactly which messages appear, where,
-  and in what order, then see whether they can give way to that one message.
+  and in what order, then see whether they can give way to that one message. Plan:
+  `plans/queue/calm-session-unavailable.md`.
 
 ## Doc todo
 
@@ -477,6 +480,12 @@ are large mostly because of their tests.
   changelog docstring and the cross-protocol test pruning that shared this entry are done.
 
 ## Maybe later
+
+- **Let an agent delete its own session.** `farhelm agent delete` refuses a session's own id (plan
+  `agent-delete-and-prompt`), because the request holds a lock keyed by the asking session that the delete would wait
+  on, and the session's credential is revoked mid-request; SPEC.md declines `farhelm agent replace` for the same reason.
+  Allowing it needs a shape where the helm answers first and deletes afterwards. Decided 2026-10-16 while planning agent
+  deletion.
 
 - **Reconsider an ordered WebSocket channel between the GUI and the helm.** On 2026-10-15 the maintainer chose ordering
   in the GUI instead (a request waits only for this GUI's unanswered saves; plan `ordered-gui-helm-requests`), after a
