@@ -15319,7 +15319,7 @@
 - Completion criteria: cancelling a download admission before the supervisor replies leaves no pending request behind on
   the live connection. A regression cancels admission in that window and asserts the pending entry is gone; run it
   through the recorder. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/download-cancel-pending-entry.md`.
 
 ## bare-cache-fetch-conflicts-with-explicit-git-policy.md
 
@@ -15350,7 +15350,7 @@
   real-Git regression in the launch tests' isolated Git environment sets the policy and runs the shim's cache fetch and
   clone, asserting both succeed; run it through the recorder. SPEC_impl.md shows the new command line. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/bare-cache-explicit-git-dir.md`.
 
 ## claude-trust-publish-after-lock-takeover.md
 
@@ -15370,7 +15370,7 @@
 - Completion criteria: SPEC.md's Claude trust caveats (and SPEC_impl.md's matching passage, if it lists the accepted
   vendor races) state that limit beside the unlocked exit-save race. No code change. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-rules-oct16.md`.
 
 ## claude-trust-settings-misses-invalidation.md
 
@@ -15394,7 +15394,7 @@
 - Completion criteria: the trust section's sentence says invalidation updates the hint band and Settings shows current
   values when opened; "One GUI at a time" gains the stale-open-view rule above, worded so a reviewer or triager can
   apply it without asking the maintainer. No code change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-rules-oct16.md`.
 
 ## replace-retries-replay-settled-create-failure.md
 
@@ -15416,7 +15416,7 @@
   starts a fresh attempt from both the sidebar and the header; a partial success or unclear outcome still reuses its
   identity. A regression removes the session folder, sees the refusal, restores the folder, retries and observes one
   replacement; run it through the recorder. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/replace-retry-identity.md`.
 
 ## replace-retry-key-splits-across-controls.md
 
@@ -15441,7 +15441,7 @@
 - Completion criteria: SPEC.md states the same-operation principle; a regression commits the first replacement, fails
   its deletion, retries through the other control and observes exactly one replacement, in both directions; run it
   through the recorder on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/replace-retry-identity.md`.
 
 ## trash-listing-exceeds-control-frame.md
 
@@ -15457,7 +15457,7 @@
   scale may be unlistable in the app, and supporting it is not a goal.
 - Completion criteria: the trash section of SPEC.md or SPEC_impl.md states that intended scale and that a host beyond it
   may be unlistable. No code change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-spec-rules-oct16.md`.
 
 ## trash-body-lacks-keyboard-scroll-focus.md
 
@@ -15477,7 +15477,7 @@
 - Completion criteria: with every action in the trash list disabled and the list overflowing, a keyboard-only user can
   Tab into the list and scroll it. A WebKit browser regression does exactly that; run it through the recorder on
   Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/keyboard-scroll-regions.md`.
 
 ## host-plans-cannot-receive-keyboard-scroll-focus.md
 
@@ -15505,7 +15505,7 @@
   overflowing plan, a keyboard-only user can Tab into the plan area and scroll it in both the setup and uninstall
   dialogs. A WebKit browser regression does exactly that; run it through the recorder on Chromium and WebKit. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/keyboard-scroll-regions.md`.
 
 ## claude-trust-cleanup-delays-desktop-start.md
 
@@ -15533,4 +15533,4 @@
 - Completion criteria: with Claude's lock held and several pending trust records, supervisor startup adds no lock wait,
   the records remain for a later start, and a later start with the lock free removes them. A regression holds the lock,
   starts the supervisor and checks both; run it through the recorder. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/claude-trust-startup-no-wait.md`.
