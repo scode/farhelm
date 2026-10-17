@@ -622,6 +622,14 @@ agent choice is independent of that destination:
   paths may be absolute or relative to the session directory; a leading tilde is refused because it does not expand. New
   managed-checkout destinations and command launches refuse a selector. Goose, Muse, Cursor and OpenCode show that
   Farhelm will not capture the named conversation and later Restart will be unavailable.
+- Initial prompt: the agent tab's right column offers a resizable multiline **initial prompt** box directly after the
+  conversation selector for supported agents. Its help says "Sent once, as &lt;agent&gt;'s first message when it starts.
+  Restart, Clone and Replace do not send it again." The summary adds `prompt: N lines` for a nonempty message. Enter
+  edits the message without launching. Goose, Pi and command launches offer no box. The draft survives recent-setup
+  selection and switching tabs; unsupported selections omit it from the request. A Clone or Replace-with prefill clears
+  it. Template messages with invisible formatting are shown escaped and read-only until explicitly cleared; ordinary
+  newlines and tabs remain editable. The message travels with the create request, including managed checkouts and named
+  conversations where supported, and its exact value is part of retry identity.
 - Command launch: a command launch takes a command line, which may reference the session's working directory as `{cwd}`
   as a whole argument, and a required YOLO assertion: the user states whether the command bypasses human, classifier,
   AI-reviewer and sandbox safety checks, and Farhelm believes the statement. Farhelm never reads a command line to

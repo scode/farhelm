@@ -3649,6 +3649,126 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
 
     peer.await.unwrap();
 }
+
+/// A "replace with" body's initial prompt reaches the replacement's create.
+///
+/// Why: the launcher's Replace with dialog offers the initial-prompt box and
+/// sends what the user typed in the same body an ordinary create uses. Before
+/// this was pinned, the helm forwarded the conversation id but created the
+/// replacement with no prompt, so a folder replacement silently dropped the
+/// user's first message while the same request through a managed checkout kept
+/// it. What: the supervisor's `CreateSession` carries the body's exact
+/// multiline prompt for a prompt-capable agent launch, and the source is still
+/// deleted afterwards.
+#[farhelm_testtrace::test]
+async fn a_replace_with_body_forwards_its_initial_prompt_to_the_create() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    const PROMPT: &str = "first message\n\twith a second line";
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(
+        client_side,
+        vec![rest_harness::session("sess-1", 1_700_000_000)],
+    )
+    .await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            prompt,
+            req_id,
+            cwd,
+            ..
+        } = request
+        else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(
+            prompt.as_deref(),
+            Some(PROMPT),
+            "the replacement must start with the prompt the Replace with body carried"
+        );
+        assert_eq!(cwd, "/replaced-with");
+        let created = SessionInfo {
+            screen_yolo: false,
+            claude_trust_prompt: false,
+            agent_kind: farhelm_proto::AgentKind::Generic,
+            parent: None,
+            id: "sess-2".into(),
+            title: "replaced-with-title".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
+            creation_seq: None,
+            cwd: "/replaced-with".into(),
+            canonical_cwd: None,
+            invocation: "codex".into(),
+            launch: farhelm_proto::SessionLaunch::plain_command("codex"),
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            github_repo: None,
+            working_copy: None,
+            notifications: Vec::new(),
+        };
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = request
+        else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        writer
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                archived: false,
+                notice: None,
+            })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({
+            "with": {
+                "cwd": "/replaced-with",
+                "launch": { "harness": "codex", "model": null, "effort": null, "permissions": null },
+                "title": "replaced-with-title",
+                "prompt": PROMPT,
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
+    assert_eq!(session.id, "sess-2");
+
+    peer.await.unwrap();
+}
+
 /// "Replace with" keeps the source's own host: SPEC.md draws that line
 /// explicitly (clone is the way to a different host), and this pins the
 /// helm-side refusal that enforces it — a 409 before either the create or
