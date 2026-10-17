@@ -3205,8 +3205,8 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   across two reads it could pair a fresh `Connected` with a dead connection, which is precisely how an operation gets
   routed onto a corpse. Creation takes the target host in the body (defaulting to the local row, the tail of SPEC.md's
   own creation default) and refuses a non-connected one as a precondition failure. Reading a session's DETAIL is the one
-  route a non-connected host does not refuse: SPEC.md requires a stale session's metadata to be viewable behind the
-  host-unreachable notice, so that read is served from the cache and marked stale, while a reachable host's detail is
+  route a non-connected host does not refuse: SPEC.md requires a stale session's metadata to remain available beside the
+  calm card naming the cause, so that read is served from the cache and marked stale, while a reachable host's detail is
   always fetched live — the cache exists for the stale list, not as a general serving layer. The live path reads the
   owner's whole list, which is the only list the wire serves.
 - `POST /api/sessions/{id}/replace` (SPEC.md's "replace") is a composition of the create and delete this section already
