@@ -154,6 +154,15 @@ class RenderingTest(unittest.TestCase):
             self.assertIn(f'value="{item.slug}"', page)
         self.assertIn("<h2>Small</h2>", page)
 
+    def test_every_item_has_a_comment_box_tied_to_its_slug(self):
+        """The page's script finds an entry's comment by slug, so a missing or mislabeled box would drop a comment."""
+        doc, _ = picker.skeleton(TODO, "Near term")
+        bucket, items = picker.validate(TODO, filled(doc))
+        page = picker.render_page(bucket, items)
+        self.assertEqual(page.count("<textarea "), len(items))
+        for item in items:
+            self.assertIn(f'<textarea data-slug="{item.slug}"', page)
+
 
 if __name__ == "__main__":
     unittest.main()
