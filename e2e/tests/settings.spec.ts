@@ -30,7 +30,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await page.setViewportSize({ width, height: 560 });
     await gear.click();
     await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
-    await expect(dialog.getByRole("checkbox")).toHaveCount(10);
+    await expect(dialog.getByRole("checkbox")).toHaveCount(11);
     await page.evaluate(() => document.fonts.ready);
     expect(await body.locator(":scope > section > h3").allTextContents()).toEqual([
       "sessions", "hosts", "terminal links", "managed checkouts", "sounds", "ntfy alerts",
@@ -80,13 +80,48 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
   // every section enough height, independently of the phone overflow proof.
   await page.setViewportSize({ width: 1280, height: 4000 });
   await gear.click();
-  await expect(dialog.getByRole("checkbox")).toHaveCount(10);
+  await expect(dialog.getByRole("checkbox")).toHaveCount(11);
   const tall = await body.evaluate((el) => ({ content: el.scrollHeight, height: el.clientHeight }));
   expect(tall.height).toBeGreaterThan(0);
   expect(tall.content, "a tall window must fit the settings without scrolling").toBeLessThanOrEqual(tall.height);
   await dialog.screenshot({ path: testInfo.outputPath("settings-pinned-tall.png") });
   await close.click();
   await expect(gear).toBeFocused();
+});
+
+/** Naming defaults on without writing a choice during Settings open. The real
+ * route and a reload distinguish durable opt-out from an optimistic checkbox;
+ * session confirmations stay independent of this adjacent switch.
+ */
+test("quick-launch naming defaults on and its settings switch persists independently", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  const gear = page.getByRole("button", { name: "settings", exact: true });
+  const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+  const naming = dialog.getByRole("checkbox", { name: "name sessions on quick launch", exact: true });
+  try {
+    for (const value of [null, true, false]) {
+      await patchPreferences(request, { name_session_on_quick_launch: value });
+      expect((await readPreferences(request)).name_session_on_quick_launch ?? null).toBe(value);
+      await page.goto("/");
+      await gear.click();
+      await expect(naming).toBeChecked({ checked: value !== false });
+      expect((await readPreferences(request)).name_session_on_quick_launch ?? null).toBe(value);
+      await dialog.getByRole("button", { name: "close", exact: true }).click();
+    }
+    await gear.click();
+    await expect(naming).not.toBeChecked();
+    for (const value of [true, false]) {
+      await naming.setChecked(value);
+      await expect.poll(async () => (await readPreferences(request)).name_session_on_quick_launch).toBe(value);
+      expect((await readPreferences(request)).skip_session_confirmations).toBe(previous.skip_session_confirmations);
+      await dialog.getByRole("button", { name: "close", exact: true }).click();
+      await page.reload();
+      await gear.click();
+      await expect(naming).toBeChecked({ checked: value });
+    }
+  } finally {
+    await patchPreferences(request, { name_session_on_quick_launch: previous.name_session_on_quick_launch ?? null });
+  }
 });
 
 /** Read the protected public shape to verify persistence independently of the
