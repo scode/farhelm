@@ -5304,6 +5304,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   box-shadow: var(--shadow-dialog);
 }
 
+/* The two-column launcher now includes a one-time prompt and trust choices.
+   Keep a 24px desktop margin instead of spending five percent of the window
+   above and below it; the ordinary populated form must fit at 1440×900. */
+@media (min-width: 1000px) {
+  .launch-composer-backdrop { --dialog-vertical-margin: 24px; }
+}
+
 /* Permission escalation owns one visible recovery window. The constant
    lifetime animation is its clock, including under reduced motion; CSS
    pauses it for pointer/focus ownership and the existing inactive-window
@@ -5420,7 +5427,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   gap: 20px 32px;
 }
 
-/* Each column carries the 20px section rhythm itself: its children used to
+/* Each column carries its section rhythm itself: its children used to
    be direct children of the form and inherited its flex gap, and a plain
    wrapper would let harness, model, and the segmented pair touch. The
    columns stretch to equal height, so `align-content: start` keeps the
@@ -5430,6 +5437,19 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   display: grid;
   align-content: start;
   gap: 20px;
+}
+
+/* Conversation and initial-prompt fields add sections to the choices side.
+   Keep the gaps and label spacing compact so workspace trust still fits in
+   the resting 900px-tall dialog, without hiding fields or shrinking controls. */
+.launch-composer-column-choices {
+  gap: 8px;
+}
+.launch-composer-column-choices .launch-composer-choice {
+  gap: 6px;
+}
+.launch-composer-column-choices .launch-composer-section-label {
+  margin-bottom: 0;
 }
 
 /* The structured destination is one fact split across host and folder. Keep
@@ -5673,11 +5693,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   font-size: 0.85rem;
 }
 
-/* A first message is prose. Preserve its lines and allow resizing without
-   widening the launcher's right column or turning Enter into submission. */
+/* A first message is prose. Start compact enough to keep the populated
+   launcher within a 900px-tall window; vertical resizing still gives longer
+   drafts room without widening the right column or making Enter submit. */
 .initial-prompt {
   resize: vertical;
-  min-height: 100px;
+  min-height: 80px;
   padding: 8px 12px;
   line-height: 1.45;
 }
