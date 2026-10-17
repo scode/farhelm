@@ -2205,3 +2205,29 @@ named by the run IDs and may expire.
 Class: unknown
 
 Cause: unknown
+
+## 2026-10-17 — `skip session confirmations walks row header interrupted card and tab actions` (e2e/tests/session-confirmations.spec.ts)
+
+Deflake sweep `46d1a087-c154-4eb6-b578-0efa669129e6` failed this test in Chromium in browser run
+`d01a19ad-811c-4dae-90b8-2c22a70ab473`: its 120-second test deadline expired, with a reported duration of 123.544
+seconds. WebKit passed in 15.891 seconds. Isolated classification reruns `c6df2c8c-703b-4aaa-999b-973a7f39e14f`,
+`c700a168-b773-4d9c-876c-ce30419149b6`, and `a9b44f05-c440-4b08-8acd-0e65a27a4979` failed, passed, and failed,
+respectively. Nine other browser outcomes failed in the battery; a shared cause is not established. The retained error
+does not identify the stalled action. Disposition: open in TODO.md and excluded from future sweeps; no additional
+reproduction or fix attempted.
+
+```text
+Test timeout of 120000ms exceeded.
+```
+
+Clean tested commit `7b3d44d6fea3a675af7d5fa0f6152dba7ead8f1d`, Linux x86_64, kernel 6.8.0-146-generic, Playwright
+1.64.0. Selection: browser suite on both engines excluding known flakes, one worker, zero retries; classification
+selected this test. Recorded tmux 3.7c executable SHA256
+`9c9de4e62ccc96452850ac7eabed0352eac2c8798fa90057e8a1b9fbf02a867a`, locale `C.UTF-8`. Ambient `FARHELM_*` names were
+scrubbed; only recorder-owned `FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` were supplied. Concurrent
+load, compiler and browser build identities are unavailable. No earlier entry for this test was found. Evidence remains
+in private temporary recorder directories named by the run IDs and may expire.
+
+Class: unknown
+
+Cause: unknown
