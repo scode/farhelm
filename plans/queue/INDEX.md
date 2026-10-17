@@ -7,5 +7,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `calm-session-unavailable.md` — Session pane: one calm "session unavailable" card instead of red and amber error text whenever the supervisor is out of reach
 - [pending] `replace-retry-identity.md` — Replace retries: one retry identity per source, and a fresh attempt after a definite refusal (2 outcomes, each gated)
 - [landing 9b4d95] `triage-spec-rules-oct16.md` — Spec rules from the 2026-10-16 triage: Claude lock trade-off, stale views in a second GUI, trash scale (3 outcomes, each gated)
-- [pending] `claude-trust-startup-no-wait.md` — Supervisor startup no longer waits on Claude's settings lock for leftover trust cleanup (1 outcome, gated)
+- [in-flight 133e84] `claude-trust-startup-no-wait.md` — Supervisor startup no longer waits on Claude's settings lock for leftover trust cleanup (1 outcome, gated)
 - [in-flight 0ca962] `bare-cache-explicit-git-dir.md` — Fresh GitHub checkouts work on hosts with Git's explicit bare-repository policy (1 outcome, gated)
