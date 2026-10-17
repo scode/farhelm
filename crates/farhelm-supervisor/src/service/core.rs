@@ -5580,14 +5580,20 @@ impl Supervisor {
     /// Keep startup's state-directory claim inside the filesystem worker.
     /// Cancelling construction cannot let a successor reuse a checkout path
     /// while a surviving blocking remover still acts on the old trust record.
-    async fn remove_startup_preparation_trust(state_dir: &Path, id: &str) -> anyhow::Result<()> {
+    /// Startup passes zero lock wait; the explicit budget also lets the
+    /// cancellation fixture hold the worker at vendor contention deterministically.
+    async fn remove_startup_preparation_trust(
+        state_dir: &Path,
+        id: &str,
+        lock_wait: Duration,
+    ) -> anyhow::Result<()> {
         let (ownership, _) = StateDirOwnership::claim(state_dir)?
             .context("Claude trust recovery requires state-directory ownership")?;
         let state_dir = state_dir.to_owned();
         let id = id.to_owned();
         tokio::task::spawn_blocking(move || {
             let _ownership = ownership;
-            crate::launch::remove_preparation_trust_sync(&state_dir, &id)
+            crate::launch::remove_preparation_trust_sync(&state_dir, &id, lock_wait)
         })
         .await
         .context("startup Claude trust cleanup worker panicked")?
@@ -5720,7 +5726,8 @@ impl Supervisor {
                 if absent
                     && !reused
                     && let Err(error) =
-                        Self::remove_startup_preparation_trust(state_dir, &row.id).await
+                        Self::remove_startup_preparation_trust(state_dir, &row.id, Duration::ZERO)
+                            .await
                 {
                     warn!(working_copy = %row.id, error = %error, "retired checkout Claude trust cleanup failed at startup");
                 }
@@ -5769,7 +5776,8 @@ impl Supervisor {
                 }
             }
             if archived
-                && let Err(error) = Self::remove_startup_preparation_trust(state_dir, &row.id).await
+                && let Err(error) =
+                    Self::remove_startup_preparation_trust(state_dir, &row.id, Duration::ZERO).await
             {
                 warn!(working_copy = %row.id, error = %error, "reconciled checkout Claude trust cleanup failed at startup");
             }
@@ -15260,6 +15268,8 @@ pub(crate) mod tests {
     /// Cancelling startup does not cancel an already scheduled blocking edit.
     /// A successor must still be refused the OS lock until that edit finishes,
     /// even after the constructor and its async cleanup waiter have disappeared.
+    /// An injected wait budget holds this worker at the vendor lock; production
+    /// startup's zero budget must not turn the ownership assertion into a race.
     #[farhelm_testtrace::test]
     async fn startup_trust_worker_retains_ownership_after_cancellation() {
         use std::future::Future;
@@ -15309,6 +15319,7 @@ pub(crate) mod tests {
         let mut removal = Box::pin(Supervisor::remove_startup_preparation_trust(
             state.path(),
             &id,
+            Duration::from_secs(12),
         ));
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         assert!(removal.as_mut().poll(&mut context).is_pending());
@@ -25022,7 +25033,7 @@ exit 0
     /// the point by which [`Supervisor::serve`] has published the Running
     /// record. The task is returned so the caller can abort it; `StateDir`'s
     /// drop reaps the tmux server.
-    async fn serve_until_answering(
+    pub(crate) async fn serve_until_answering(
         sup: &Arc<Supervisor>,
     ) -> tokio::task::JoinHandle<anyhow::Result<()>> {
         let serving = Arc::clone(sup);

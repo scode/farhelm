@@ -1927,16 +1927,17 @@ file is left absent.
 
 The removal record stores the canonical file, selected lock alias, and canonical project key in the existing preparation
 record, durably before the edit. Claude 2.1.300 explicitly uses `<selected-config-path>.lock` even for a symlink, so the
-integration shares that mkdir lock while replacing the canonical target and preserving the symlink. It retries
-contention for twelve seconds without stealing any lock, reads at most 16 MiB from a regular file under the lock,
-requires object-shaped configuration/projects/project, and changes only `hasTrustDialogAccepted`. A missing
-projects/project object is created for the opt-in. Removal deletes only that key, preserving even empty objects. A
-same-directory temporary file receives the original mode, is written and fsynced, renamed atomically, and followed by
-directory fsync. Publication refuses a replaced target/lock or a lock held for four seconds, leaving margin before
-Claude's ten-second stale-lock threshold. Temporary files and owned locks are cleaned on error. The advisory lock has
-the same accepted limit as Claude's own writers: a writer stalled past Claude's stale-lock threshold can publish an old
-snapshot after another writer takes over, losing an update in either direction. Claude's unlocked exit-save race and
-vendor format changes remain explicit limits too; none of these checks proves compatibility forever.
+integration shares that mkdir lock while replacing the canonical target and preserving the symlink. Launch and
+post-Delete edits retry contention for twelve seconds; startup cleanup tries the lock once without waiting. Neither
+steals a lock. The edit reads at most 16 MiB from a regular file under the lock, requires object-shaped
+configuration/projects/project, and changes only `hasTrustDialogAccepted`. A missing projects/project object is created
+for the opt-in. Removal deletes only that key, preserving even empty objects. A same-directory temporary file receives
+the original mode, is written and fsynced, renamed atomically, and followed by directory fsync. Publication refuses a
+replaced target/lock or a lock held for four seconds, leaving margin before Claude's ten-second stale-lock threshold.
+Temporary files and owned locks are cleaned on error. The advisory lock has the same accepted limit as Claude's own
+writers: a writer stalled past Claude's stale-lock threshold can publish an old snapshot after another writer takes
+over, losing an update in either direction. Claude's unlocked exit-save race and vendor format changes remain explicit
+limits too; none of these checks proves compatibility forever.
 
 Confirmed archive or missing-source retirement schedules removal off the Delete reply path. The worker retains directory
 admission until it settles, preventing reuse while an old remover can still touch that path's key; terminal I/O and
@@ -1944,7 +1945,8 @@ listing use neither this guard nor the vendor lock. No-record checkouts retain o
 Refused/released archives retain trust. Successful removal clears the record before private metadata cleanup, while
 failure is logged and retains evidence. Exclusive startup retries retired records only when the original path is absent
 and no active registry row claims it, and removes trust after successful pending-archive reconciliation. It never
-retries an old removal against a reused path.
+retries an old removal against a reused path. A busy vendor lock is logged and leaves the record for a later startup,
+without a user-facing notice.
 
 `ClaudeReader::trust_prompt` refines only the captured question, its answer labels and dialog footer, excluding an
 ordinary input box. A run-scoped sample bool is false after reload/replacement or failed capture, is shared by renames,

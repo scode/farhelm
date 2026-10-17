@@ -10,9 +10,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## High priority: material UX degradation
 
-- [`claude-trust-cleanup-delays-desktop-start.md`](claude-trust-cleanup-delays-desktop-start.md) — Retrying trust
-  cleanup behind a stale vendor lock can exceed the app's startup deadline.
-
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
   Repeated update or removal planning can leave adding, updating, and removing hosts stuck until the helm restarts, even
   after the pages close.

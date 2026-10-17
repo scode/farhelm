@@ -1271,9 +1271,12 @@ pub fn read_preparation_state(
 /// vendor filesystem mutation can still run.
 /// Clearing the record after removal prevents a later retry from removing
 /// a newer trust choice at the same path.
+/// The contention budget belongs to the caller: startup tries once, while
+/// post-Delete cleanup can wait off the reply path. Failure retains the record.
 pub(crate) fn remove_preparation_trust_sync(
     state_dir: &Path,
     working_copy_id: &str,
+    lock_wait: Duration,
 ) -> anyhow::Result<()> {
     let state_path = preparation_state_path(state_dir, working_copy_id);
     let Some(mut record) = read_preparation_state(&state_path, working_copy_id)? else {
@@ -1282,7 +1285,11 @@ pub(crate) fn remove_preparation_trust_sync(
     if record.claude_trust.is_none() {
         return Ok(());
     }
-    crate::agent_kind::claude::trust::edit(record.claude_trust.as_ref(), false)?;
+    crate::agent_kind::claude::trust::edit_with_budget(
+        record.claude_trust.as_ref(),
+        false,
+        lock_wait,
+    )?;
     record.claude_trust = None;
     crate::files::write_durable_sync(
         &state_path,
