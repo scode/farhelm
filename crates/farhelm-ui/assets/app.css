@@ -3956,7 +3956,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 .compact-qualifier .qualifier-glyph[data-glyph="stale"] {
-  color: var(--warn);
+  color: var(--fg-1);
 }
 
 /* Status detail is a grid sibling so its copy can span under both trailing
@@ -4261,6 +4261,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   animation: none;
 }
 
+/* A cached status is no longer evidence for any live status color. */
+.session-row.stale .status-badge .status-dot,
+.stale-metadata .status-badge .status-dot {
+  color: var(--fg-2);
+}
+
 /* Someone who asked their system for less motion gets a steady dot. The
    status is still fully readable — the color says running and the hidden
    word says it in text — so nothing is lost by standing the pulse down,
@@ -4430,7 +4436,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 .stale-badge {
-  color: var(--warn);
+  color: var(--fg-1);
 }
 
 /* ===== Hosts panel ================================================ */
@@ -5070,23 +5076,6 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   margin-top: 4px;
 }
 
-/* A stale session's notice (SPEC.md: metadata behind a clear notice, and
-   no terminal). It takes the terminal's place in the layout rather than
-   floating over it, which is why it can wrap freely and does not need the
-   overlay discipline `.banner` has. Amber for the same reason the stale
-   badge is: the host is being re-probed and nothing has failed.
-
-   Compact (12px, tight padding) since the header consolidation, but NOT
-   truncated: this is a conditional band explaining why there is no
-   terminal, and a sentence naming the host's actual phase is the whole
-   point of it. It costs the steady state nothing because it only exists
-   while the host is gone. */
-.host-stale-notice {
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--warn);
-  background: var(--bg-1);
-}
 
 /* The surface an interrupted session gets INSTEAD of terminal panes: the
    host rebooted and took the terminal, so there is nothing to attach and
@@ -6560,58 +6549,72 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--fg-dim);
 }
 
-/* The reconnect surface (PLAN_M6.md item 7): the same placeholder element,
-   wearing a different face while a terminal recovers from transport loss.
-
-   It has to be VISUALLY DISTINCT from the catch-up placeholder above,
-   because the two say opposite things about how worried to be — one is
-   the ordinary thing every reattach does, the other is a connection that
-   dropped. So this one is warmer in color and, unlike the plain
-   placeholder, carries a control. It stops short of the banner's red:
-   nothing is broken yet, and the terminal is expected back on its own.
-
-   The dimmed background is what the plain placeholder deliberately does
-   not have, and it earns it here: a recovery can outlast a replay by
-   minutes, over a last screen that is now stale, and the fade is what
-   keeps that frozen content from reading as live. */
+/* Host and browser outages share Delete's accent card and scrim. The
+   browser card owns its button; a stale-host card has no retry control. */
+.session-unavailable-overlay,
 .terminal-connecting.terminal-reconnecting {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--scrim);
-  color: var(--warn-bright);
+  padding: 20px;
+  pointer-events: auto;
 }
-
-/* The manual control on that surface. Interactivity is restored for the
-   BUTTON alone: its host keeps `pointer-events: none` (see above), so a
-   recovering pane swallows nothing else — and, unlike everything else the
-   placeholder has ever held, this one exists to be clicked.
-
-   It DOES carry `.btn` (terminal.js sets `className = "btn
-   terminal-reconnect-now"`), so it inherits the ghost tier's geometry and
-   transition for free — only the COLOR needs overriding here, via
-   `border-color` rather than a full `border` shorthand that would just
-   restate the width and style `.btn` already set. The override exists
-   because this control sits on the warm scrim over a reconnecting
-   terminal rather than the sheet's neutral chrome: a transparent border
-   would have nothing but its own text to separate it from that colored
-   surface, and the neutral hover/focus fill `.btn` gives every other
-   ghost control would read as barely-there against the warm background
-   too. Both `:hover` and `:focus-visible` restate the warm fill
-   explicitly — same-specificity, same-pseudo-count rules only fall back
-   to source order, and `.btn` declares no dedicated `:focus-visible`
-   variant of its own to lose to, so a control that restated only `:hover`
-   would keep the warm fill for a mouse click yet silently revert to the
-   neutral one the instant a keyboard user tabbed onto it. */
+.session-unavailable-card {
+  max-width: min(42rem, 100%);
+  padding: 14px 20px;
+  background: var(--bg-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  overflow-wrap: anywhere;
+}
+.session-unavailable-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+}
+.session-unavailable-heading .delete-spinner {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+.session-unavailable-explanation {
+  margin-top: 9px;
+  color: var(--fg-1);
+  font-size: 12px;
+}
+.session-unavailable-detail {
+  margin-top: 7px;
+  color: var(--fg-2);
+  font-size: 11.5px;
+}
 .terminal-reconnect-now {
   margin-top: 10px;
-  pointer-events: auto;
   font-size: 12px;
   padding: 1px 8px;
-  border-color: var(--warn-bright);
-  color: var(--fg-bright);
 }
-
-.terminal-reconnect-now:hover:not(:disabled),
-.terminal-reconnect-now:focus-visible:not(:disabled) {
-  background: var(--warn-fill-hover);
+/* A host card owns the surface while the listing is stale. The browser
+   ladder continues underneath it, with its own counters kept private. */
+.terminal-panes[data-unavailable="true"] .terminal-connecting,
+.terminal-panes[data-unavailable="true"] .banner {
+  display: none !important;
+}
+.tab-strip[inert] {
+  opacity: 0.45;
+}
+/* Kept beside the replacement mount so replay can stay hidden without
+   hiding the old screen. Visibility still inherits from its selected pane. */
+.terminal-pane > .terminal-snapshot {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 .attach-error {

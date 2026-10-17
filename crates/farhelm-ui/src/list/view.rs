@@ -4137,6 +4137,7 @@ pub(crate) fn ListView(
                                         .find(|host| Some(host.id) == session.host).map(|host| host.icon).unwrap_or_default(),
                                     host_color: hosts.read().hosts().unwrap_or_default().iter()
                                         .find(|host| Some(host.id) == session.host).map(|host| host.color).unwrap_or_default(),
+                                    unavailable_cause: crate::hosts::session_unavailable_cause(hosts.read().lookup(session.host)),
                                     // Formatted HERE, not in the row: see
                                     // `RowState::activity` for why the
                                     // clock's tick must not reach a row

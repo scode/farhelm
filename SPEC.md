@@ -1341,12 +1341,19 @@ version, identity, session count, remedies, diagnostics, and provisioning progre
 neutral secondary tier for routine row actions and the normal blue tier for popup affirmatives, while the host selector
 stays a native control; session creation remains the blue primary action. Destructive confirmations use the danger tier,
 and explicit menu, tab, and composer controls retain their purpose-built styling. Sessions on an unreachable host stay
-in the list from the helm's last-known knowledge (which survives helm restarts), clearly marked stale, rather than
-vanishing. Lifecycle operations against an unreachable host are refused with a clear error; nothing queues for later
-delivery in v1. Opening such a session shows its metadata — title, directory, last-known status — behind a clear
-host-unreachable notice; there is no terminal to show and no pretense of one. Changes made from any client — creates,
-renames, stops, deletes, status transitions — appear in all other connected clients automatically; the agent-spawn
-behavior below is one instance of this general rule, not a special case.
+in the list from the helm's last-known knowledge (which survives helm restarts), with a neutral cause mark such as
+`waiting for supervisor` or `host needs update`, rather than vanishing. Compact rows carry the same cause in accessible
+text and hover help. Lifecycle operations against an unreachable host are refused with a clear error; nothing queues for
+later delivery in v1. Such a session shows one calm accent card naming the cause, with the helm's remedy and smaller
+diagnostics beneath it. Its metadata — title, directory, last-known status — remains available, with last-known status
+and age in exactly one band. A terminal already open keeps its last screen and tab strip dimmed and inert beneath the
+card, clearly no longer live. A session opened while unreachable has no terminal or tab strip. When the host returns,
+retained terminals retry promptly and automatically without displacing another client. A rebooted session still shows
+its interrupted card. Browser transport loss uses the same card with `Session unavailable — reconnecting` and a neutral
+`reconnect now` button; recoverable drops show no red detach banner. Final takeover and stall decisions retain their
+explicit banners. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all
+other connected clients automatically; the agent-spawn behavior below is one instance of this general rule, not a
+special case.
 
 ### Status
 
@@ -1383,8 +1390,8 @@ states keep their complete wording visible, including exit code, stop annotation
 mode uses distinct stopped, exited, interrupted, and error icons; those details remain in accessible text and tooltips
 without expanding the row. Ended icons do not have the live dot's mark-read action. The pulse is a claim about the
 present, so it stands down wherever the status is a last-known report rather than a live one: a session on an
-unreachable host shows a still dot whatever its status says. Looping indicators such as the running pulse change in a
-few discrete steps per second rather than continuously, and all of them stand still while the Farhelm window is not
+unreachable host shows a grey, still dot whatever its status says. Looping indicators such as the running pulse change
+in a few discrete steps per second rather than continuously, and all of them stand still while the Farhelm window is not
 focused or not visible, to save CPU and battery.
 
 The dot's colour is one of four, not three: running pulses green; waiting is red, since it is the one live status that

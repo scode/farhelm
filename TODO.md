@@ -150,12 +150,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   characters in a template's model and folder as visible escapes (#2087), but a session name copied from a cloned remote
   session into "save as template" is still shown raw in the editor. Plan: `plans/queue/template-name-escape.md`.
 
-- **A calm message while a supervisor upgrades.** While a host's supervisor is being upgraded, a bunch of yellow text
-  flickers on screen, which looks like a bug rather than an expected step. Replace it with one clear message that looks
-  intentional and says the host is updating. First reproduce an upgrade and list exactly which messages appear, where,
-  and in what order, then see whether they can give way to that one message. Plan:
-  `plans/queue/calm-session-unavailable.md`.
-
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.

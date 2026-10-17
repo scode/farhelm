@@ -1593,12 +1593,26 @@
       // the structure once. `textContent` first, so nothing a previous
       // state left behind survives underneath it.
       node.textContent = "";
+      const card = document.createElement("div");
+      card.className = "session-unavailable-card";
+      const heading = document.createElement("div");
+      heading.className = "session-unavailable-heading";
+      const spinner = document.createElement("span");
+      spinner.className = "delete-spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      heading.appendChild(spinner);
+      heading.appendChild(document.createTextNode("Session unavailable — reconnecting"));
+      card.appendChild(heading);
+      const explanation = document.createElement("div");
+      explanation.className = "session-unavailable-explanation";
+      explanation.textContent = "This view reattaches by itself when the connection is back.";
+      card.appendChild(explanation);
       line = document.createElement("div");
-      line.className = "terminal-reconnect-status";
-      node.appendChild(line);
+      line.className = "terminal-reconnect-status session-unavailable-detail";
+      card.appendChild(line);
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "btn terminal-reconnect-now";
+      button.className = "btn btn-neutral terminal-reconnect-now";
       button.textContent = controls.text.manual || "reconnect now";
       // Farhelm's own hover tooltip (tooltip.js) reads this; every control
       // in the page carries one, including the two this script builds.
@@ -1607,10 +1621,12 @@
       // stays true across every rebuild of the recovery behind it, and
       // `reconnectNow` looks the current one up.
       button.addEventListener("click", () => farhelmTerm.reconnectNow(controller.el));
-      node.appendChild(button);
+      card.appendChild(button);
+      node.appendChild(card);
     }
     line.textContent = fillTemplate(template, values);
-    node.style.display = "block";
+    node.querySelector(".session-unavailable-explanation").hidden = !controls.auto;
+    node.style.display = "flex";
   }
 
   /**
@@ -1703,11 +1719,11 @@
    * and an automatic attempt can be refused for exactly that reason
    * (`if_unowned`) — so tearing the screen down before the attach resolves
    * would leave the loser staring at an empty pane with a banner over it.
-   * The held terminal is hidden while a replacement occupies the element,
-   * disposed if the recovery succeeds, and put back if it ends any other
-   * way (`cancelReconnect`). Later attempts hold nothing: the screen worth
-   * keeping is the one the user actually had, not the empty grid of the
-   * attempt before.
+   * The held terminal stays visible beside the hidden replacement mount,
+   * is disposed when replacement replay reveals, and is put back if the
+   * recovery ends any other way (`cancelReconnect`). Later attempts hold
+   * nothing: the screen worth keeping is the one the user actually had,
+   * not the empty grid of the attempt before.
    *
    * `manual` separates the two kinds of attempt, and the difference is a
    * correctness one rather than bookkeeping. An AUTOMATIC attempt attaches
@@ -1752,12 +1768,10 @@
    * which way — because the held screen (`runReconnect`) has to go
    * somewhere, and the three answers are genuinely different:
    *
-   * - `"confirmed"`: the attach is proved. The held screen is stale now
-   *   and is disposed, and the surface is deliberately LEFT UP for the
-   *   island to take down at its reveal — a flush of a deep replay is real
-   *   work, and clearing here would show a blank pane for the length of it
-   *   where leaving the recovery line says something true for exactly that
-   *   long.
+   * - `"confirmed"`: live replay has reached reveal. The held screen is
+   *   disposed, and the island takes the surface down in that same reveal.
+   *   Proof at marker receipt alone is too early: a deep replay can still
+   *   be flushing into the hidden replacement.
    * - `"restore"`: the recovery ended without a working attachment — a
    *   takeover, a stall, a refusal. The unproven island is torn down and
    *   the held screen comes back, which is SPEC.md's non-live snapshot for
@@ -1782,7 +1796,8 @@
       // has to keep `sync()` from quietly reattaching what a decision just
       // detached (see `tombstones`).
       farhelmTerm.unmount(el);
-      held.element.style.display = "";
+      document.getElementById(el)?.appendChild(held.element);
+      held.element.classList.remove("terminal-snapshot");
       tombstones.set(el, {
         term: held,
         path: controller.path,
@@ -2871,8 +2886,8 @@
      * diff is computed here rather than in Rust).
      *
      * Each spec is `{el, banner, status, connecting, notice, copyHint,
-     * path, gen, primary, focus}`: the DOM element to mount into, the element
-     * its detach/error banner writes to, the element its attachment progress
+     * path, gen, primary, focus, unavailable}`: the DOM element to mount
+     * into, the element its detach/error banner writes to, the element its attachment progress
      * and failures write to, the element its connecting placeholder writes
      * to while it catches up (PLAN_M5.md item 5), the element its "this drag
      * did not copy" notice writes to and the agent's own copy instruction
@@ -2880,7 +2895,9 @@
      * the session's agent does not change), the helm WebSocket path (already
      * carrying `?tab=`/`?lease=`), a remount counter, whether this island
      * owns the legacy singleton globals, and whether it should hold
-     * keyboard focus.
+     * keyboard focus, and whether its host is currently unavailable. The
+     * availability edge nudges recovery and completes a reveal whose focus
+     * was blocked by the stale pane's inert ancestor.
      *
      * `attach` is the paste/drop policy every island of this view shares
      * (farhelm-ui/src/attachments.rs) — one object rather than a copy per
@@ -2923,6 +2940,12 @@
       // intent: its terminals take the session even from another window.
       // Read before `lastSync` is set below.
       const opening = lastSync === null;
+      // Host recovery is news that can skip a slow probe deadline, never
+      // user intent to take control. The existing automatic path owns the
+      // if_unowned refusal and the takeover latch; do not bypass either.
+      const recovered = new Set((lastSync?.specs ?? [])
+        .filter((spec) => spec.unavailable && specs.some((next) => next.el === spec.el && !next.unavailable))
+        .map((spec) => spec.el));
       // Only the agent's explicit Restart changes gen. Remember it across
       // empty desired sets (e.g. an interrupted agent) so a restart is still
       // attended when its terminal reappears, without granting tabs that intent.
@@ -3028,6 +3051,19 @@
       }
 
       for (const spec of specs) {
+        const controller = reconnects.get(spec.el);
+        if (controller) {
+          controller.spec = spec;
+          if (recovered.has(spec.el) && !controller.attempting && !takeover && reconnectControls()?.auto) {
+            if (controller.timer !== null) clearTimeout(controller.timer);
+            controller.timer = null;
+            runReconnect(controller, false);
+          }
+        }
+        // Replay can reveal while the stale pane is still inert. Its
+        // focus attempt then does nothing; the availability edge is the
+        // first chance to finish that handoff without remounting it.
+        if (recovered.has(spec.el)) islands.get(spec.el)?.focusAfterAvailability();
         // Anything still in `islands` here matched on identity above, and
         // anything still in `pendings` is already waiting for exactly this
         // spec — in both cases there is nothing to do.
@@ -3045,6 +3081,9 @@
         // (`reclaim`, or leaving and reopening) or a genuine identity
         // change buries it.
         if (tombstoned(spec)) continue;
+        // A stale view retains existing islands but never opens a socket
+        // for a newly discovered tab against an unavailable host.
+        if (spec.unavailable) continue;
         if (takeover) {
           // Discovered, rendered, and explained — but not attached. Left
           // to the placeholder rather than silently blank, because a tab
@@ -4165,6 +4204,9 @@
         // byte, or the marker. See `endCatchUp` for why an idle timeout
         // alone must not be read as a working attachment.
         let attachProved = false;
+        // Replay can also end because a socket died. Only a live ending
+        // may retire recovery when its write callback finally reveals.
+        let recoveryConfirmed = false;
 
         /**
          * Record that this attach is REAL — a replay byte or the marker —
@@ -4192,7 +4234,7 @@
           if (ended) return;
           attachProved = true;
           if (catchingUp) return;
-          cancelReconnect(spec.el, "confirmed");
+          recoveryConfirmed = true;
           reveal(false);
         }
 
@@ -4332,7 +4374,13 @@
           // that gets here (see `armIdleTimer`); it is treated as a failed
           // attempt, and `noteAttachProved` is what un-sticks the terminal
           // if evidence turns up late after all.
-          if (!attachProved && reconnecting(spec.el)) return;
+          // A marker can queue this callback just before the socket dies.
+          // That death has already advanced recovery; the old flush must
+          // neither retire its controller nor hide its new outage card.
+          if (reconnecting(spec.el) && (!attachProved || ended)) return;
+          // Keep the last screen until replacement replay is actually
+          // painted, rather than disposing it when the marker only arrives.
+          if (recoveryConfirmed) cancelReconnect(spec.el, "confirmed");
           revealed = true;
           term.scrollToBottom();
           const buffer = term.buffer.active;
@@ -4401,6 +4449,17 @@
           // caught above, but guard the container too for safety).
           const otherIsland = active.closest(".terminal");
           return !(otherIsland && otherIsland !== el);
+        }
+
+        /**
+         * Finish a reveal whose focus was blocked by the stale pane's inert
+         * ancestor. Availability alone proves neither a live attachment nor
+         * an unclaimed keyboard, so reuse the reveal guard after both checks.
+         */
+        function focusAfterAvailability() {
+          if (revealed && alive && !ended && ws.readyState === WebSocket.OPEN && takesFocus()) {
+            term.focus();
+          }
         }
 
         /**
@@ -4516,9 +4575,7 @@
           // among those the marker stands alone while the three
           // degradations need bytes to have actually arrived.
           const live = ["marker", "size", "chunks", "idle"].includes(reason);
-          if (live && (reason === "marker" || attachProved)) {
-            cancelReconnect(spec.el, "confirmed");
-          }
+          recoveryConfirmed = live && (reason === "marker" || attachProved);
           const chunks = replayChunks;
           const total = replayBytes;
           replayChunks = [];
@@ -4777,7 +4834,7 @@
               // reap promises silence, so it is the one detach that paints
               // nothing, once its attachment had worked (see
               // DETACH_CODE_TAB_CLOSED).
-              if (!silentDetach) showBanner(`Detached: ${msg.reason}`, lost);
+              if (!silentDetach && decisionDetach) showBanner(`Detached: ${msg.reason}`, lost);
             }
             return;
           }
@@ -5619,6 +5676,7 @@
           attachments,
           stopCopyOnSelect,
           testHook,
+          focusAfterAvailability,
           // Everything `unmount()` needs to leave the catch-up
           // presentation behind: the invalidation that stops deferred work
           // — the catch-up's timer and reveal, and the heartbeat's two
@@ -5758,15 +5816,15 @@
       island.ws.onclose = null;
       island.ws.close();
       // `keepTerm` is a reconnect attempt asking for this island's rendered
-      // screen to OUTLIVE its teardown (`runReconnect`): the xterm instance
-      // and its DOM stay, hidden, so a refused attempt can put them back
-      // instead of leaving the user an empty pane under a banner. Hidden
-      // rather than left visible because the replacement mounts into the
-      // same element and two stacked screens is not a state anyone can
-      // read; the recovery surface covers the pane meanwhile. Whoever asked
-      // owns the disposal from here (`cancelReconnect`).
+      // screen to OUTLIVE its teardown (`runReconnect`). Recovery owns
+      // disposal or restoration from here (`cancelReconnect`); the normal
+      // island teardown still closes its socket and removes its listeners.
       if (island.keepTerm) {
-        island.term.element.style.display = "none";
+        // Move the frozen screen beside the mount point: hiding the new
+        // replay must not hide its predecessor too. The pane still owns
+        // visibility, so a background tab cannot paint over the active one.
+        island.term.element.classList.add("terminal-snapshot");
+        document.getElementById(el)?.parentElement.appendChild(island.term.element);
       } else {
         island.term.dispose();
       }

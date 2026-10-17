@@ -28,9 +28,9 @@ import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipRetu
 // skipping the bugs it exists to catch. In CI, where self-ssh is
 // provisioned, an absent fleet FAILS (`requireFleet`).
 //
-// Nothing here reads terminal scrollback. Keeping these tests in their own
-// file also contains their deliberate fleet mutations behind this file's
-// reset and restoration hooks.
+// Outage recovery reads its own session's replay and live echo. Keeping
+// these tests in their own file contains their deliberate fleet mutations
+// behind this file's reset and restoration hooks.
 // =====================================================================
 
 import { expect, test, newObservedContext } from "./helpers/evidence";
@@ -47,6 +47,7 @@ import {
   openRowMenu,
   selfSshAvailable,
   stubFeed,
+  holdReads,
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 import path from "node:path";
@@ -62,6 +63,7 @@ import {
   fulfillAsHelm,
   helmBuild,
   installTerminalSuiteHooks,
+  reconnectTimingsFromNextLoad,
   LIVE_BADGE,
   rowByTitle,
   sharedSessionRow,
@@ -2782,6 +2784,170 @@ test.describe("multi-host", () => {
     }
   });
 
+  /**
+   * A restart keeps the old screen visible and returns through a prompt,
+   * non-displacing attachment. The long probe deadline makes a missing
+   * host-recovery nudge fail, instead of passing on an ordinary ladder tick.
+   * A bounded observer also catches the short red-banner flash before stale.
+   */
+  test("supervisor-outage: retain the screen behind one calm card and reattach promptly", async ({ page, request }) => {
+    requireFleet();
+    test.setTimeout(180_000);
+    const preferences = await readPreferences(request);
+    await reconnectTimingsFromNextLoad(page, { delaysMs: [50], probeIntervalMs: 30_000 });
+    const remote = await apiRemoteHost(request);
+    const session = await createResumableSession(request, {
+      cwd: "/tmp",
+      title: `supervisor-outage-${Date.now()}`,
+      host: remote.id,
+    });
+    try {
+      await page.goto("/");
+      const row = rowByTitle(page, session.title);
+      await row.locator(".session-row-open").click();
+      await waitForSessionRevealed(page, session.id);
+      await waitForTermText(page, "FAKE-AGENT READY");
+      await page.evaluate(() => {
+        const win = window as any;
+        win.__outageOriginal = win.__farhelmTerm;
+        const banners: string[] = [];
+        const observer = new MutationObserver(() => {
+          for (const node of document.querySelectorAll(".terminal-pane > .banner")) {
+            if (node.textContent?.trim() && banners.length < 16) banners.push(node.textContent.trim());
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+        win.__outageObservation = { banners, observer };
+      });
+      await killRemoteSupervisor();
+      const card = page.locator(".host-stale-notice");
+      await expect(card.locator(".session-unavailable-heading")).toHaveText("Session unavailable — waiting for supervisor", { timeout: 30_000 });
+      await expect(card.locator(".session-unavailable-detail")).not.toBeEmpty();
+      await expect(card.locator("button")).toHaveCount(0);
+      await expect(page.locator("#terminal")).toHaveCount(1);
+      await expect(page.locator(".tab-strip")).toHaveJSProperty("inert", true);
+      await expect(page.locator(".terminal-pane.selected")).toHaveJSProperty("inert", true);
+      // Establish the slow-probe premise before restoration. A retained DOM
+      // node alone would also accept an invisible/disposed xterm instance.
+      await expect(page.locator("#term-connecting")).toHaveAttribute("data-reconnect-phase", "probing");
+      await expect(page.locator(".terminal-snapshot")).toBeVisible();
+      expect(await page.evaluate(() => (window as any).__outageOriginal.element.isConnected)).toBe(true);
+      await expect(page.locator(".terminal-pane > .banner")).toBeHidden();
+      await expect(page.locator("#term-connecting")).toBeHidden();
+      await expect(row.locator(".stale-badge")).toHaveText("waiting for supervisor");
+      await expect(row.locator(".stale-badge")).toHaveCSS("color", await card.locator(".session-unavailable-explanation").evaluate((node) => getComputedStyle(node).color));
+      await expect(card.locator(".session-unavailable-heading")).toHaveCSS("color", await card.evaluate((node) => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--accent)";
+        node.appendChild(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      }));
+      await page.getByRole("checkbox", { name: "compact", exact: true }).check();
+      await expect(row.locator(".compact-qualifier")).toHaveText("waiting for supervisor");
+      await expect(row.locator(".compact-qualifier")).toHaveAttribute("data-tooltip", /waiting for supervisor.*last-known/);
+      await page.getByRole("checkbox", { name: "compact", exact: true }).uncheck();
+      await expect(page.getByRole("checkbox", { name: "compact", exact: true })).toBeFocused();
+      const dot = await row.locator(".status-dot").evaluate((node) => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--fg-2)";
+        node.appendChild(probe);
+        const result = {
+          animation: getComputedStyle(node).animationName,
+          color: getComputedStyle(node).color,
+          expected: getComputedStyle(probe).color,
+        };
+        probe.remove();
+        return result;
+      });
+      expect(dot.animation).toBe("none");
+      expect(dot.color).toBe(dot.expected);
+      await test.info().attach("supervisor-outage", { body: await page.screenshot(), contentType: "image/png" });
+      await restoreRemoteSupervisor(request);
+      await expect(card).toHaveCount(0, { timeout: 10_000 });
+      await waitForSessionRevealed(page, session.id, { timeout: 10_000 });
+      await waitForTermText(page, "FAKE-AGENT READY", 10_000);
+      await expect(page.locator(".terminal-snapshot")).toHaveCount(0);
+      // The compact checks deliberately left focus on that input. Recovery
+      // must respect it; typing into the terminal is a new user action here.
+      await expect(page.getByRole("checkbox", { name: "compact", exact: true })).toBeFocused();
+      await page.locator("#terminal").click();
+      const marker = `after-outage-${Date.now()}`;
+      await page.keyboard.type(marker);
+      await page.keyboard.press("Enter");
+      await waitForTermText(page, `echo:${marker}`);
+      expect(await page.evaluate(() => {
+        const observation = (window as any).__outageObservation;
+        observation.observer.disconnect();
+        return observation.banners;
+      })).toEqual([]);
+    } finally {
+      if (!(await remoteSupervisorAlive())) await restoreRemoteSupervisor(request);
+      await cleanupSession(request, session.id);
+      await patchPreferences(request, { compact: preferences.compact });
+    }
+  });
+
+  /**
+   * Terminal recovery and the detail reader are independent. A replay may
+   * finish beneath the stale pane's inert ancestor, where focus cannot
+   * land. Releasing fresh detail must finish that handoff without a click.
+   */
+  test("supervisor-outage: focus returns when replay precedes fresh detail", async ({ page, request }) => {
+    requireFleet();
+    test.setTimeout(180_000);
+    await reconnectTimingsFromNextLoad(page, { delaysMs: [50], probeIntervalMs: 250 });
+    const remote = await apiRemoteHost(request);
+    const session = await createResumableSession(request, {
+      cwd: "/tmp",
+      title: `outage-focus-${Date.now()}`,
+      host: remote.id,
+    });
+    let reads: Awaited<ReturnType<typeof holdReads>> | undefined;
+    try {
+      await page.goto("/");
+      await rowByTitle(page, session.title).locator(".session-row-open").click();
+      await waitForSessionRevealed(page, session.id);
+      await waitForTermText(page, "FAKE-AGENT READY");
+      // Establish the keyboard owner before the outage. Only the recovery
+      // handoff below must happen without a click.
+      await page.locator("#terminal").click();
+      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      await page.evaluate(() => {
+        (window as any).__beforeOutageWs = (window as any).__farhelmIslands.terminal.ws;
+      });
+      await killRemoteSupervisor();
+      const card = page.locator(".host-stale-notice");
+      await expect(card).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator(".terminal-pane.selected")).toHaveJSProperty("inert", true);
+      reads = await holdReads(page, (url) => url.pathname === `/api/sessions/${session.id}`);
+      await reads.waitForCaptures(1);
+      await restoreRemoteSupervisor(request);
+      await expect.poll(() => page.evaluate(() => {
+        const win = window as any;
+        const island = win.__farhelmIslands?.terminal;
+        return !!island && island.ws !== win.__beforeOutageWs &&
+          island.ws.readyState === WebSocket.OPEN && island.test.replay.revealed;
+      }), { timeout: 20_000, message: "replay must reveal before the stale detail read is released" }).toBe(true);
+      await expect(card).toBeVisible();
+      await expect(page.locator(".terminal-pane.selected")).toHaveJSProperty("inert", true);
+      await expect(page.locator("#terminal .xterm-helper-textarea")).not.toBeFocused();
+      reads.releaseAll();
+      await expect(card).toHaveCount(0, { timeout: 10_000 });
+      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      const marker = `after-inert-${Date.now()}`;
+      await page.keyboard.type(marker);
+      await page.keyboard.press("Enter");
+      await waitForTermText(page, `echo:${marker}`);
+    } finally {
+      // A held response can otherwise keep page teardown waiting forever.
+      reads?.releaseAll();
+      if (!(await remoteSupervisorAlive())) await restoreRemoteSupervisor(request);
+      await cleanupSession(request, session.id);
+    }
+  });
+
   // A host that GOES AWAY, driven for real: the harness's remote supervisor
   // is killed, and everything that follows from that — the row's phase,
   // its sessions' staleness, what an operation against them does, and what
@@ -2901,11 +3067,9 @@ test.describe("multi-host", () => {
       ).not.toBeEmpty();
     });
 
-    // SPEC.md: "Opening such a session shows its metadata — title,
-    // directory, last-known status — behind a clear host-unreachable
-    // notice; there is no terminal to show." All three clauses are
-    // asserted, the last one negatively: no terminal element at all, rather
-    // than a terminal that happens to be blank.
+    // Opening an already-stale row has no previous screen to retain.
+    // Metadata stays available, but neither an empty terminal nor a tab
+    // strip may pretend this view has attached to the unreachable host.
     test("stale-session-metadata-view: metadata behind the notice, and no terminal", async ({
       page,
     }) => {
@@ -2939,13 +3103,11 @@ test.describe("multi-host", () => {
 
       const notice = page.locator(".host-stale-notice");
       await expect(notice).toBeVisible();
-      // The host is named, and by its ACTUAL state rather than a generic
-      // "unreachable" — a skewed or identity-frozen host reaching this
-      // surface must not be described as merely down, and the only way to
-      // keep that true is to render the phase the helm reports.
+      // The headline is stable through retries; the host and its concrete
+      // transport evidence remain in the smaller diagnostic tier.
       await expect(notice).toContainText(info.remote_ssh);
-      await expect(notice).toContainText("unreachable, retrying");
-      await expect(notice).toContainText("no terminal");
+      await expect(notice.locator(".session-unavailable-heading")).toHaveText("Session unavailable — waiting for supervisor");
+      await expect(notice.locator(".session-unavailable-detail")).not.toBeEmpty();
 
       expect(
         await page.locator(".terminal").count(),

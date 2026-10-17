@@ -126,28 +126,28 @@ const _: () = assert!(HEARTBEAT_IDLE_MS + HEARTBEAT_TIMEOUT_MS <= 30_000);
 /// because the single most valuable piece of information here is that the
 /// user does not have to do anything. `{n}`/`{of}` are substituted by
 /// terminal.js.
-const ATTEMPTING_TEXT: &str = "connection lost — reconnecting (attempt {n} of {of})…";
+const ATTEMPTING_TEXT: &str = "reconnecting (attempt {n} of {of})…";
 
 /// What the surface says BETWEEN attempts during the active window.
 ///
 /// The countdown is stated as it was scheduled rather than ticked down: a
 /// per-second repaint of a terminal overlay buys nothing a user is
 /// watching for, and the number's job is to say "soon, and by itself".
-const WAITING_TEXT: &str = "connection lost — reconnecting in {seconds}s (attempt {n} of {of})…";
+const WAITING_TEXT: &str = "reconnecting in {seconds}s (attempt {n} of {of})…";
 
 /// What the surface says while a background probe is in flight.
 ///
 /// No attempt number: past the active window the count is a number nobody
 /// is counting, and a rising one would read as escalating failure rather
 /// than as patience.
-const PROBING_TEXT: &str = "connection lost — checking whether this terminal is reachable again…";
+const PROBING_TEXT: &str = "checking whether this terminal is reachable again…";
 
 /// What the surface says between background probes.
 ///
 /// The promise it makes is the one that matters overnight: nothing more is
 /// required of the user, and this terminal reattaches itself when the
 /// connection comes back.
-const PROBING_WAITING_TEXT: &str = "connection lost — retrying every {seconds}s; this terminal \
+const PROBING_WAITING_TEXT: &str = "retrying every {seconds}s; this terminal \
                                     reattaches on its own once the connection is back";
 
 /// What the surface says when automatic recovery is OFF because the helm
@@ -158,7 +158,7 @@ const PROBING_WAITING_TEXT: &str = "connection lost — retrying every {seconds}
 /// degradation SPEC.md's version rule forbids. Both remedies are offered
 /// in the order they should be tried: the button gets this terminal back
 /// now, and the reload gets the whole page onto the matching build.
-const MANUAL_ONLY_TEXT: &str = "connection lost — this page and the helm report different builds, \
+const MANUAL_ONLY_TEXT: &str = "this page and the helm report different builds, \
                                 so this terminal will not reconnect on its own; press reconnect \
                                 now, or reload the page";
 
