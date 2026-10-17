@@ -58,3 +58,39 @@ found no actionable findings. It checked the download-specific complexity gate, 
 lock lifetimes, the live-connection test premise and documentation. Its review was static; the recorder runs above are
 separate execution evidence. The required blind wording review also passed with a fresh reader after an initial reader
 invalidated its blind phase by looking at the diff early. No scope expansion or fallback was needed.
+
+### Landing
+
+Landed in round 76, as #2197, first of the round's two plans and unchanged from what the report describes.
+
+#### What landed since the PR was based, and whether it interacted
+
+The only code that reached main between this PR's base and its landing was the WebKit input-method key guard (#2194),
+which changes keyboard handling in the browser interface only. The round's other plan, triage-spec-rules-oct16, changes
+only specification text about Claude settings edits, stale views across GUIs and the trash's scale limit, and landed
+after this one. I read the WebKit change and the other plan's three spec edits against this PR, and a fresh-context
+reviewer did the same independently. Neither found an interaction, and the landing rebase was clean, with the PR
+byte-identical to the head the executor delivered.
+
+The reviewer also checked the fix against the helm's request tracking. Request numbers are never reused, so clearing a
+cancelled download's entry can never touch a later request. A reply that arrives for an entry already cleared is still
+dropped quietly rather than treated as a misbehaving supervisor. SPEC_impl.md accepts leftover request records only when
+a misbehaving supervisor never answers; a user cancelling a download is ordinary operation, so that allowance did not
+cover this case.
+
+#### Fixes made during the landing
+
+None. Terminal file downloads first shipped in v0.26.1, so the PR's own changelog entry, filed as a fix, is right.
+
+#### Checks
+
+- Run now: none.
+- Reused: the download regression run `a008cd76-9f90-41ea-a19e-a526b25248e0` and the wider helm download test run
+  `9634874e-fb65-4996-be3d-f18343a19972` (15 passed), plus the report's clippy, formatting, Markdown formatting,
+  changelog-format and test-sleep checks. They covered the reviewed source the report names, on the base before #2194.
+  Their coverage still applies because the landing rebase left the PR byte-identical, and the only code that joined its
+  base, #2194, changes keyboard handling in the browser interface and none of the helm's download or request code.
+- Skipped: browser, desktop, supervisor runtime and the full Rust suite, for the reasons the report gives. As the report
+  says, the fix is shown by the request records, not by a measured drop in process memory.
+
+Nothing in the executor's report became untrue at landing.
