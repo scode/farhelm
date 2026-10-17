@@ -5323,6 +5323,15 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--fg-0);
   animation: permission-banner-slide 200ms ease-out, permission-banner-lifetime 8s linear;
 }
+.partial-template-banner {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent-fill);
+  color: var(--fg-0);
+}
+.partial-template-banner strong { display: block; margin-bottom: 6px; }
 .permission-escalation-banner > span { flex: 1 1 320px; font-weight: 600; }
 .permission-escalation-banner:hover,
 .permission-escalation-banner:focus-within { animation-play-state: paused; }

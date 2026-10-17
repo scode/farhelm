@@ -106,7 +106,7 @@ fn rename_number_binding(bindings: &mut BTreeMap<String, String>, old: &str, new
 #[component]
 fn NumberShortcutMenu(
     name: String,
-    eligible: bool,
+    launchable: bool,
     disabled: bool,
     bindings: BTreeMap<String, String>,
     layout_epoch: ReadSignal<u64>,
@@ -169,7 +169,7 @@ fn NumberShortcutMenu(
             Some("9"),
             Some("0"),
         ],
-        |key| eligible || key.is_none(),
+        |_| true,
     );
     let wiring = MenuWiring {
         order,
@@ -203,31 +203,29 @@ fn NumberShortcutMenu(
         });
     };
     let key_text = number_chord(bound.as_deref().unwrap_or(" –"));
-    let tooltip = if !eligible && bound.is_some() {
-        format!(
-            "{} is set to start this template right away, without opening New. Only one template can hold each key. This template now chooses neither an agent nor a command; click to remove its key.",
-            number_chord(bound.as_deref().unwrap())
-        )
-    } else if !eligible {
-        "A number shortcut starts a session from this template right away, without opening New. Only one template can hold each key. Can't set one: this template chooses neither an agent nor a command.".into()
+    let state = bound.as_ref().map_or_else(
+        || "Click to give this template a number key.".into(),
+        |key| {
+            format!(
+                "{} is set; click to change or remove it.",
+                number_chord(key)
+            )
+        },
+    );
+    let behavior: String = if launchable {
+        "A number shortcut starts a session from this template right away, without opening New."
+            .into()
     } else {
-        let state = bound.as_ref().map_or_else(
-            || "Click to give this template a number key.".into(),
-            |key| {
-                format!(
-                    "{} is set; click to change or remove it.",
-                    number_chord(key)
-                )
-            },
-        );
         format!(
-            "A number shortcut starts a session from this template right away, without opening New. Only one template can hold each key. {state}"
+            "This template cannot launch on its own. Its key opens New with it applied; {} starts a sequence to combine it with other templates.",
+            crate::launch_sequence::PREFIX_CHORD
         )
     };
+    let tooltip = format!("{behavior} Only one template can hold each key. {state}");
     rsx! {
         span { class: "templates-number-control", "data-row-menu-key": "{menu_key}",
             button { r#type: "button", class: "templates-number-key",
-                disabled: disabled || (!eligible && bound.is_none()),
+                disabled,
                 aria_label: "number shortcut {display_peer(&name)}", aria_haspopup: "menu", aria_expanded: open(),
                 "data-bound": bound.is_some(),
                 "data-tooltip": "{tooltip}",
@@ -1636,7 +1634,7 @@ pub(super) fn TemplatesDialog(
                                             }
                                             NumberShortcutMenu {
                                                 key: "number-{template.name}", name: template.name.clone(),
-                                                eligible: quick_launch_eligible(&template.fields), disabled: disabled || templates.pending(),
+                                                launchable: quick_launch_eligible(&template.fields), disabled: disabled || templates.pending(),
                                                 bindings: preferences.0.read().template_shortcuts.clone(),
                                                 layout_epoch, dialog_epoch,
                                                 on_choose: { let name = template.name.clone(); move |key| bind_key.call((name.clone(), key)) },

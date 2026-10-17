@@ -2398,6 +2398,10 @@ pub(super) fn CreateSessionForm(
     /// each preceding edit before the next template is validated against it.
     #[props(default)]
     initial_templates: Vec<farhelm_proto::launcher::LaunchTemplate>,
+    /// Explain why a single partial-template key opened a visible draft.
+    /// The notice belongs to this opening, never to a later Clone/Replace seed.
+    #[props(default)]
+    partial_template_name: Option<String>,
     /// Quick launch submits this ordinary draft once, after its template and
     /// prerequisites settle. Failures reveal the same mounted form for retry.
     auto_launch: Signal<bool>,
@@ -2896,6 +2900,15 @@ pub(super) fn CreateSessionForm(
     let mut pending_initial_action = use_signal(move || initial_action);
     let mut pending_initial_templates =
         use_signal(move || std::collections::VecDeque::from(initial_templates));
+    // This opening's explanation survives automatic replay, then gives way
+    // to the user's edits. It is not part of the remembered launcher draft.
+    let has_partial_template = partial_template_name.is_some();
+    let mut partial_template_hint = use_signal(move || has_partial_template);
+    let mut partial_hint_timer_started = use_signal(|| false);
+    let partial_template_label = partial_template_name
+        .as_deref()
+        .map(display_peer)
+        .unwrap_or_default();
     // Cloned rather than borrowed into the effect below: `hosts` is this
     // component's own prop (not a `Signal`, so it cannot be `Copy`-captured
     // the way the surrounding signals are), and the render body further
@@ -2910,6 +2923,7 @@ pub(super) fn CreateSessionForm(
             if prefill.is_some() {
                 pending_initial_action.set(None);
                 pending_initial_templates.write().clear();
+                partial_template_hint.set(false);
                 auto_launch_pending.set(false);
                 quick_launch_hidden.set(false);
             }
@@ -3646,6 +3660,7 @@ pub(super) fn CreateSessionForm(
                 return false;
             }
             promote_history_snapshot(offered_history, create_target(), history.clone());
+            partial_template_hint.set(false);
             let mut selection = crate::launch_composer::select_recent(&entry);
             selection.permissions = crate::launch_composer::normalized_permissions(
                 selection.harness,
@@ -3820,6 +3835,7 @@ pub(super) fn CreateSessionForm(
             promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
             match option {
                 crate::launch_composer::ModelOption::HarnessDefault => {
+                    partial_template_hint.set(false);
                     structured_model.set(None);
                     structured_model_raw_seed.set(None);
                     structured_model_edited.set(false);
@@ -3830,6 +3846,7 @@ pub(super) fn CreateSessionForm(
                     model_open.set(false);
                 }
                 crate::launch_composer::ModelOption::Model { id, harness } => {
+                    partial_template_hint.set(false);
                     let switch_before = capture_permission_switch(undo_targets);
                     // A pick within the chosen harness is what the old model
                     // chip did: keep the harness, and clear an effort the
@@ -4158,6 +4175,9 @@ pub(super) fn CreateSessionForm(
                 .as_ref()
                 .map(std::slice::from_ref)
                 .unwrap_or(&templates_now);
+            if captured.is_none() {
+                partial_template_hint.set(false);
+            }
             let automatic_permission = match &result {
                 crate::launch_composer::ComposerSearchResult::Template(name) => available_templates
                     .iter()
@@ -4253,6 +4273,7 @@ pub(super) fn CreateSessionForm(
         if !draft_transition_allowed(ops) {
             return;
         }
+        partial_template_hint.set(false);
         promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
         invalidate_directory_browse(
             browse_generation,
@@ -4332,6 +4353,7 @@ pub(super) fn CreateSessionForm(
             if !draft_transition_allowed(ops) {
                 return;
             }
+            partial_template_hint.set(false);
             let switch_before = capture_permission_switch(undo_targets);
             promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
             let selection = LaunchSelection {
@@ -4400,6 +4422,7 @@ pub(super) fn CreateSessionForm(
         if !draft_transition_allowed(ops) {
             return;
         }
+        partial_template_hint.set(false);
         promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
         if *launch_tab.peek() != tab {
             intent_key.set(None);
@@ -4513,6 +4536,7 @@ pub(super) fn CreateSessionForm(
         if !draft_transition_allowed(ops) {
             return;
         }
+        partial_template_hint.set(false);
         let next_host = Some(id);
         chosen_host.set(next_host);
         // A queued history callback can run before rerender.
@@ -4588,6 +4612,7 @@ pub(super) fn CreateSessionForm(
         if !draft_transition_allowed(ops) || destination_draft.peek().is_managed() {
             return;
         }
+        partial_template_hint.set(false);
         let path = match choice {
             FolderChoice::Recent { cwd, target } => {
                 if !admit_history_destination(
@@ -4686,6 +4711,8 @@ pub(super) fn CreateSessionForm(
                 composer_search_open.set(false);
                 evt.stop_propagation();
             },
+            oninput: move |_| partial_template_hint.set(false),
+            onchange: move |_| partial_template_hint.set(false),
             onkeydown: move |evt| {
                 // Native text-field and action-button submission has no choice
                 // handler. Keep a held or composing Enter from launching there.
@@ -5361,6 +5388,24 @@ pub(super) fn CreateSessionForm(
                     }
                 });
             },
+            if partial_template_hint() && pending_initial_templates.read().is_empty() {
+                div { class: "partial-template-banner", role: "alert",
+                    onmounted: move |_| {
+                        // Count visible time, not catalog-loading time. This
+                        // component owns the task, so closing cancels expiry;
+                        // the one-shot fence also tolerates a repeated mount event.
+                        if !*partial_hint_timer_started.peek() {
+                            partial_hint_timer_started.set(true);
+                            spawn(async move {
+                                crate::reader::sleep_ms(6000).await;
+                                partial_template_hint.set(false);
+                            });
+                        }
+                    },
+                    strong { "{partial_template_label} cannot launch on its own." }
+                    span { " Use {crate::launch_sequence::PREFIX_CHORD} to combine template keys, then Enter to launch, or complete this setup below." }
+                }
+            }
             if let Some(notice) = permission_escalation() {
                 div {
                     key: "permission-escalation-{notice.generation}",
@@ -5482,6 +5527,7 @@ pub(super) fn CreateSessionForm(
                             // supplied by the selected session, and clearing
                             // them would turn a quick correction into a new
                             // destination decision.
+                            partial_template_hint.set(false);
                             structured_harness.set(None);
                             structured_model_raw_seed.set(None);
                             structured_model_edited.set(false);
@@ -6107,6 +6153,7 @@ pub(super) fn CreateSessionForm(
                             DestinationTypeControl { managed: checkout_mode, disabled: busy,
                                 on_change: move |managed| {
                                     if !draft_transition_allowed(ops) || managed == destination_draft.peek().is_managed() { return; }
+                                    partial_template_hint.set(false);
                                     remembered_destination.set(None);
                                     promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
                                     invalidate_directory_browse(browse_generation, browse_request, browse_result, browse_error);
@@ -6458,6 +6505,7 @@ pub(super) fn CreateSessionForm(
                                             offered_history, create_target, fetched_history,
                                         );
                                         launch_tab.set(target);
+                                        partial_template_hint.set(false);
                                         intent_key.set(None);
                                         // After the render that moves the
                                         // tab stop, so focus lands on the tab
@@ -6662,6 +6710,7 @@ pub(super) fn CreateSessionForm(
                                 on_model_option: move |option| apply_model_option.call(option),
                                 on_effort: move |effort| {
                                     if !draft_transition_allowed(ops) { return; }
+                                    partial_template_hint.set(false);
                                     promote_fetched_history_snapshot(
                                         offered_history, create_target, fetched_history,
                                     );
@@ -6674,6 +6723,7 @@ pub(super) fn CreateSessionForm(
                                 },
                                 on_permissions: move |permission| {
                                     if !draft_transition_allowed(ops) { return; }
+                                    partial_template_hint.set(false);
                                     promote_fetched_history_snapshot(
                                         offered_history, create_target, fetched_history,
                                     );
@@ -6686,6 +6736,7 @@ pub(super) fn CreateSessionForm(
                                 },
                                 on_workspace_trust: move |choice| {
                                     if !draft_transition_allowed(ops) { return; }
+                                    partial_template_hint.set(false);
                                     promote_fetched_history_snapshot(
                                         offered_history, create_target, fetched_history,
                                     );

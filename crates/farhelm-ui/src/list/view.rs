@@ -954,6 +954,7 @@ pub(crate) fn ListView(
     // names against another fetch could compose a different setup mid-opening.
     let mut initial_quick_templates =
         use_signal(Vec::<farhelm_proto::launcher::LaunchTemplate>::new);
+    let mut initial_partial_template = use_signal(|| None::<String>);
     // Quick launch owns one fetch/mount/submit handoff. New still composes the
     // request; this flag only keeps its fields hidden until a fallback is needed.
     let mut quick_launch_pending = use_signal(|| false);
@@ -3381,6 +3382,7 @@ pub(crate) fn ListView(
             initial_create_error.set(None);
             initial_create_action.set(action);
             initial_quick_templates.set(Vec::new());
+            initial_partial_template.set(None);
             show_create.set(true);
             true
         },
@@ -3444,8 +3446,12 @@ pub(crate) fn ListView(
                     preferences.0.write().template_shortcuts = fresh.template_shortcuts;
                     if let Some(templates) = resolved {
                         if open_new.call(None) {
-                            auto_launch
-                                .set(super::templates::stacked_quick_launch_eligible(&templates));
+                            let launchable =
+                                super::templates::stacked_quick_launch_eligible(&templates);
+                            auto_launch.set(launchable);
+                            if !launchable && templates.len() == 1 {
+                                initial_partial_template.set(Some(templates[0].name.clone()));
+                            }
                             initial_quick_templates.set(templates);
                         }
                     } else {
@@ -3832,6 +3838,7 @@ pub(crate) fn ListView(
                     // switcher opening before the launcher unmounts.
                     initial_action: if clone_prefill().is_none() { initial_create_action() } else { None },
                     initial_templates: if clone_prefill().is_none() { initial_quick_templates() } else { Vec::new() },
+                    partial_template_name: if clone_prefill().is_none() { initial_partial_template() } else { None },
                     // The "replace with" source as the sidebar currently
                     // lists it, so the launcher's warning follows a source
                     // that starts or stops while it is open. While the

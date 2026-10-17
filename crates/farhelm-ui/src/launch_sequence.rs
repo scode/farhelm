@@ -6,6 +6,13 @@ use crate::list::SharedPreferences;
 use crate::peer::display_peer;
 use dioxus::prelude::*;
 
+/// Describe the prefix this build owns; Mac browsers keep the web chord.
+pub(crate) const PREFIX_CHORD: &str = if crate::HAS_NEW_SESSION_SHORTCUT {
+    "⌘X"
+} else {
+    "Ctrl+Shift+X"
+};
+
 /// `None` is idle, an empty vector is an accepted prefix, and each queued
 /// reference is a digit or (`None`) the bolt. Repetition and ordering matter:
 /// composing the same template twice is still two applications.
