@@ -56,4 +56,60 @@ ordinary failure, cross-host effects or database corruption.
 Review and validation were static. No product runtime suite, browser reproduction, real agent turn or live-installation
 action was run, and no previous product-suite results were reused as current passes. Formatting, whitespace, queue/index
 consistency, complete commit assignment and instruction-pointer checks validated the records. No fixes or triage
-outcomes were executed. The review-result change remains a draft for manual merging.
+outcomes were executed. The review-result change was prepared as a draft for manual merging.
+
+## Astra high repeat review
+
+The same range was reviewed again: `991835f826b25bc93eb088f6d3984477a9dc2fab..afc828776596f2e6639d16d4203ccc8b3d0f5862`,
+139 commits. The first result landed as `78394ca6b42d698eb6566654371b27caf02dca54` in
+[PR #2213](https://github.com/scode/farhelm/pull/2213/changes) before this repeat. The checkpoint remains at
+`afc828776596f2e6639d16d4203ccc8b3d0f5862`; neither that result commit nor later main changes belong to this review.
+
+Eight fresh reviewers used `gpt-6-astra` with high reasoning, the unchanged charter and test checklist, the same eight
+commit assignments in the table above, and the same original checkout snapshot. They received no first-pass results. All
+139 individual patches, including deletions and intermediate changes, were read. Five fresh Astra high auditors then
+checked proposed exclusions and substantive follow-ups. Primary assignments matched; follow-up audit work depended on
+the reported candidates. These results describe this one static-review sample.
+
+The first pass retained two records. Astra independently reported both and retained six additional records after
+coverage checks: four source-level issues and two unresolved questions. The table counts records, not reproduced bugs.
+
+| Concern                                                    | First pass                                               | Astra high repeat                                                                              |
+| ---------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Outage-card text outside reachable area                    | Retained, likely `other`                                 | Independently repeated; provenance added                                                       |
+| Menu arrows overriding independent focus                   | Retained, acceptance gap                                 | Repeated; added indefinitely unacknowledged focus-request case                                 |
+| Launcher retaining a settled failed key                    | Not recorded                                             | Added `high`; static mechanism independently confirmed                                         |
+| Separate Replace YOLO questions                            | Not recorded                                             | Added `other`; static state/admission path, live sequence unverified                           |
+| Archive recovery clearing replacement-path trust           | Not recorded                                             | Added `other`; sequential reuse path, vendor sequence unverified                               |
+| File disclosure obscured by approval cards                 | Not recorded                                             | Added conservative `highest`; two source audits, overlap/transfer unverified                   |
+| Refusal proof following incomplete process cleanup         | Excluded for the concrete accepted coincident-fault case | Retained conservative `highest` as unresolved coverage of the new signal                       |
+| OSC filename visual distinction, especially trailing space | Not recorded                                             | Retained provisional `highest` as an unresolved lead; no concrete harmful transfer established |
+
+The additional launcher and confirmation records concern omissions adjacent to the Replace fixes. The archive-recovery
+record concerns a successful pending-archive reconciliation path that lacks the retired-record branch's reused-path
+protection. The disclosure-occlusion record comes from independently investigating a suspected archival follow-up;
+geometry-only admission does not check whether higher approval cards hide the disclosure. These are source findings with
+individual confidence limits, not claims that all were introduced by commits in the reviewed range.
+
+The two additional uncertainty records need separate interpretation. All concrete failed-cleanup examples found already
+have ledger decisions, and SPEC.md accepts coinciding faults leaving work beside a relaunch. The first pass excluded a
+specific combination on that basis; Astra's auditor did not establish that every route qualifying for the new signal
+necessarily meets that exception. No uncovered single-fault execution was established. The filename lead has low
+confidence as a security defect: no collision plus harmful transfer was demonstrated, and the escaping contract does not
+promise universal Unicode distinguishability. Both remain recorded because the independent exclusion verdict was
+ambiguous, not because their strongest security interpretation was proved.
+
+Independent exclusions agreed to the precise repaired or accepted boundaries for registry scoping, deletion consent,
+one-time prompt composition/replay/storage, old-client decoding, template-name rendering, trash confirmations,
+non-displacing recovery, peer-text rendering, Git selectors and trust worker ownership. They also checked the retained
+human release-publication fence, qualified guarded-mode wording and destructive preconditions under stale views.
+Historical proxy, manually retargeted trash symlink, split-link heuristic and deliberate devbuild-environment cases
+matched their exact recorded acceptances. A raw local desktop identity refusal remains a filtered diagnostic issue; that
+conclusion does not accept a remote authorization bypass. None of these exclusions is a general subsystem verdict.
+
+No assigned patch gaps remain. Surrounding modules and coverage sources were inspected selectively; the disclosure
+follow-up additionally inspected the full terminal-file asset, relevant terminal/approval ancestors and click paths.
+Browser/native behavior, vendor parsing and historical private runtime evidence remain unverified. No product runtime,
+browser or vendor-TUI tests were run, and no earlier runtime result was reused as a current pass. The change contains
+queue records, provenance and this comparison only; no fixes or triage decisions were executed. The repeat result is a
+draft PR for separate review and merging.

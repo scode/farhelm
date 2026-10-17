@@ -40,3 +40,20 @@ decision before commissioning a broader focus-source design.
 No runtime tests or assistive-technology reproduction were run. The historical plan's full question and decision were
 read. The independent auditor agreed with the separate refutation of stale focus landing at a repeated position; that
 does not refute this independent-focus case.
+
+## Astra high repeat review: a request can remain unacknowledged
+
+Reviewed commit: 2c2fc63ab9bfc9677e5ad394023d9d3a22b87422. The Astra high repeat reviewer and a fresh Astra high
+exclusion auditor independently retained this case, including a narrower remainder beyond delayed keyboard delivery.
+
+`crates/farhelm-ui/src/menu_panel.rs:545–549` acknowledges that requesting an already-focused item can produce no
+focus-in event. For example, Home on the already-focused first item can leave its request outstanding. Independent focus
+elsewhere does not necessarily retire it, so a later Up can wrap from the first item instead of moving from actual focus
+(`:561–596,647–656`). Native activation remains separate (`:609–612`); an ended session without tabs can be deleted
+without another confirmation (`crates/farhelm-ui/src/list/view.rs:2108–2146`).
+
+The historical decision is genuine acceptance of the pending-focus window. Acceptance of a request remaining pending
+indefinitely because no focus-in occurs is not established. The auditor therefore retained this narrower unresolved
+scope as well as the specification/ledger gap. Suggested bucket remains conservatively `highest`; confidence is likely.
+No browser/assistive-technology sequence or harmful activation was reproduced. This extends the existing finding rather
+than counting the same menu concern twice.

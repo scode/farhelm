@@ -12,6 +12,16 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   arrow moves can still override independent focus before activation; historical acceptance is absent from the
   specification and triage ledger.
 
+- [`settled-refusal-proof-can-follow-incomplete-cleanup.md`](settled-refusal-proof-can-follow-incomplete-cleanup.md) —
+  Failed cleanup can precede a definitive-refusal signal; existing fault acceptances may cover it, but the retry
+  boundary remains unresolved.
+
+- [`approval-cards-can-obscure-file-disclosure.md`](approval-cards-can-obscure-file-disclosure.md) — A terminal file
+  link can remain clickable while an approval card hides its destination disclosure.
+
+- [`file-disclosure-trailing-space-distinction-unverified.md`](file-disclosure-trailing-space-distinction-unverified.md)
+  — Supported OSC filenames may remain visually ambiguous; no concrete misleading transfer was established.
+
 ## High priority: material UX degradation
 
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
@@ -23,6 +33,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`uninstall-race-first-time-service-setup.md`](uninstall-race-first-time-service-setup.md) — Concurrent setup and
   uninstall can leave services pointing at a deleted executable.
+
+- [`launcher-retries-ignore-settled-refusal-proof.md`](launcher-retries-ignore-settled-refusal-proof.md) — An unchanged
+  New, Clone or Replace-with retry can keep replaying a missing-folder failure after the folder is restored.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -97,3 +110,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`outage-card-content-can-overflow-above-view.md`](outage-card-content-can-overflow-above-view.md) — A short terminal
   area or long host error can put the outage explanation and recovery instructions above the reachable view.
+
+- [`replace-yolo-questions-remain-separate.md`](replace-yolo-questions-remain-separate.md) — Equivalent Replace controls
+  can leave separate YOLO questions, with cancellation reflected in only one surface.
+
+- [`archive-recovery-clears-reused-path-trust.md`](archive-recovery-clears-reused-path-trust.md) — Startup recovery of
+  an interrupted archive can erase the trust choice for a different directory subsequently placed at the old path.
