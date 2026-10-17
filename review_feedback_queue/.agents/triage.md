@@ -47,6 +47,37 @@ covered, bring the uncovered part to the user. Briefly report skipped items and 
 undecided item. This is an exception to the per-item decision question in `review_feedback_queue/.agents/triage.md`,
 "Asking for a decision".
 
+## Presenting items on one page
+
+By default, undecided items are triaged on one page rather than one at a time in conversation. The maintainer chose this
+on 2026-10-16. Prepare every item first ("Preparing each item" in this file, including the immediate removal of covered,
+filtered and already-fixed items), then publish one `scode-snippets` snippet holding every item still undecided, and
+give the maintainer its link. Walk through items one at a time in conversation only when the maintainer asks for it.
+
+The page groups items by topic and keeps index order within a group. Each item says, in this order, what goes in a
+conversation under "Asking for a decision" in this file: its number, bucket and feedback filename; a short
+plain-language title; what the feature is; what goes wrong for the user; the assessment with its evidence and what
+remains unverified; the bucket and why; and the recommendation with its reason. Then comes the decision question, with
+one radio option per plausible outcome. Each option has a short label, its outcome value (`discard`, `fix spec`,
+`fix code`, `fix spec+code`, `other`), and a line on what it would change and roughly how much work it is. The
+recommended option comes first and is marked, a "leave for later" option comes last, and a free-text comment field
+follows. Picks and comments survive a reload (per-browser storage is enough). A button at the bottom copies every
+answered item as one `triage-answers` block of text, giving each item's filename, its pick (outcome and label) and its
+comment; items with neither are left out. The `farhelm-triage-judgement-2026-10-15` and
+`farhelm-triage-judgement-2026-10-16` snippets are working examples of the layout and the copy format.
+
+Act on the pasted block item by item:
+
+- a pick is the maintainer's decision, recorded as "Recording the outcome" in this file describes; a comment alongside
+  it is their rationale and scope, preserved in the Decision field in their words, and an instruction in it (a spec
+  principle to add, a wider rule to apply) becomes part of the completion criteria;
+- a comment without a pick is a question or a proposal: answer it in conversation, and record nothing for that item
+  until the maintainer decides;
+- "leave for later", or neither a pick nor a comment, leaves the item undecided in the queue. It is never a `discard`.
+
+Ask in conversation only where a comment is unclear. The pasted block is the decision, so do not ask the maintainer to
+confirm picks before recording them.
+
 ## Asking for a decision
 
 Assume the user knows Farhelm as a tool but has read neither the feedback nor the relevant code. Begin every item with

@@ -160,6 +160,8 @@ Before presenting the first item, read these in full:
 - `review_feedback_queue/FILTER.md`
 - `BUGS.md`
 - `AGENTS.md`, "Talking to the user" (root, already in context for agents started at the checkout root)
+- the `scode-snippets` skill, which publishes the decision page (`review_feedback_queue/.agents/triage.md`, "Presenting
+  items on one page")
 - for each item: its feedback file, the code paths it names, and the authoritative `SPEC.md` and `SPEC_impl.md` sections
 
 Phase files: on deciding that an item needs a focused reproduction or check, read `.agents/validation.md`,
