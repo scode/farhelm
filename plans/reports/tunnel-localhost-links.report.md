@@ -118,3 +118,87 @@ the final Cancel guard; the executor applied that guard and verified the extende
 All required code reviews are complete and their findings are resolved. A separate review at the executing model
 confirmed that the UI corrections fit the agreed scope without another coordination mechanism. Commit and PR wording
 passed separate cold reads. The completion report passed the planning flow's independent cold read after revision.
+
+### Landing
+
+Landed in round 85, as #2219, #2227, #2229 and #2231, merged bottom-up, first of the round's two plans, and unchanged
+from what the report describes.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since this stack's base, main gained the session action shortcuts (#2218, #2221, #2230): Escape for header
+confirmations, Cmd+W or Ctrl+Shift+Backspace to delete the open session, Cmd+L or Ctrl+Shift+L to rename it, and a
+rebuilt Mac menu. The round's other plan, which keeps rapid arrow presses in menus from stepping from the wrong item
+(#2232), lands after this one. The landing monitor read them against this stack, and a fresh-context reviewer did the
+same independently. Neither found an interaction:
+
+- The tunnel consent warning is a modal dialog, so the delete and rename shortcuts do nothing while it is open, and
+  Cmd-click on a link does not match either shortcut. Deleting a session closes its tunnels.
+- The quick-launch key sequence's existing guard against open dialogs also covers the consent warning.
+- The terminal link changes keep the earlier link-safety rules: clicks and drags across links, the setting that hands
+  link clicks to the terminal program, the strict web-address rule, and the wrapped-link mismatch warning still apply,
+  with the tunnel hint added after them. A tunnel request never falls through to opening the raw link.
+- Neither plan branches on a particular agent harness; tunnel checks depend on whether the session's host is remote.
+
+The landing rebase was clean, and every PR's diff is identical to the one the executor delivered.
+
+#### Upgrade and security
+
+#2227 raises the protocol from 53 to 54, because older hosts cannot read the new relay messages, and the helm's database
+moves to schema 55, which adds one consent setting that starts off. Neither 53 nor 54 has shipped (v0.29.0 carries
+protocol 51), so the next release already requires remote hosts to be updated. The changelog entry and the report both
+say so. An older helm refuses the newer database, as after every schema change.
+
+The reviewer checked the security boundary and found nothing unsafe or contradicting SPEC.md. The Mac listeners bind
+`127.0.0.1` only. Tunnels work only in the Mac app; a standalone helm refuses them, and sessions on the local host are
+refused. Consent is checked when a tunnel is created, and turning it off closes every listener and connection. An
+agent's tunnel request is tied to the exact host connection that asked. Both the helm and the supervisor confine the
+target to loopback, and only the helm itself can open a relay, never a session's own connection. #2219 refuses
+cross-port navigation into the helm, and SPEC.md and the security page describe the new trust boundary accurately.
+
+#### Fixes made during the landing
+
+None.
+
+#### A decision for the maintainer
+
+When planning this feature, the maintainer chose that a tunnel takes the same port number on the Mac as the service on
+the host, when that port is free. That number comes from the link, and an agent decides which links it prints, so an
+agent can pick which port on the Mac a tunnel occupies. If a tunnel is still open when a program on the Mac later
+expects that port, for example a login flow that sends the browser to `127.0.0.1:<port>` to finish signing in, the
+browser's request and whatever code it carries go to the session's host instead of that program. Every tunnel still
+takes the user's own Cmd-click or **Tunnel and open**, even after consent, and link permissions never create one. The
+warning says any program on the Mac can connect to a tunnel, but not that a tunnel can take a port a Mac program wanted.
+
+The options: (a) keep the port choice and add that sentence to the warning, a wording-only follow-up; (b) always use a
+free port Farhelm picks, which takes the choice away from the agent but breaks pages whose own links or redirects name
+their original port, since that port on the Mac is not the tunnel; (c) both. The landing monitor recommends (a): it
+keeps the behavior already chosen and closes the gap in what the warning tells the user.
+
+#### Things to keep in mind
+
+- Tunnels are gated on any desktop build rather than the Mac specifically, so a desktop build on another system would
+  show the Mac wording. Only the Mac app ships, so this is a nit.
+- The changelog entry mentions the new refusal of cross-port navigation into the helm only in a later paragraph; the
+  release curation should keep it visible.
+- As the report says, the Mac interaction has not been checked: the hover, Cmd-click, card button, warning, Settings
+  switch and strip, with an updated remote host. That check should also confirm the new session shortcuts stay inert
+  while the warning is open.
+
+#### Checks
+
+- Run now, on main with this stack and the round's other plan merged together locally: `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, and the UI JavaScript
+  harness (`node --test`, 293 passed: the report's 289 plus the shortcuts' new cases). The harness was run directly, not
+  through the recorder, so it has no run id. These show the combined code builds and its JavaScript units pass. Whether
+  the shortcuts stay inert under the tunnel warning rests on the code reading above, not on a test.
+- Reused: every passing recorded run the report lists, including the relay end-to-end run
+  `7700f5a2-73f2-4422-b1d4-595f3810ab77`, the tunnel manager and consent run `8a235500-7a2b-4f5a-b262-7f3e2d3a362f`, the
+  approval and browser-handler run `1a656491-d5a3-408f-8762-4d6ed4d8b420`, and the browser run on Chromium and WebKit
+  `f70644cb-f6bd-4c0d-8b7c-4f53d8e5dbd9` (96 passed), at the revisions the report gives. The Rust runs still apply
+  because nothing that joined the base touches the helm, the supervisor or the protocol. The browser run predates the
+  shortcuts; it is reused because the tunnel interface is Mac-only, so that run only shows browsers are unchanged by
+  this stack. The shortcuts' own browser tests were not re-run on the combined tree.
+- Skipped: everything the report skipped, for the reasons it gives.
+
+Nothing in the executor's report became untrue at landing.
