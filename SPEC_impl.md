@@ -631,8 +631,10 @@ menu.
 Each session confirmation mount schedules focus on its enabled confirming answer, falling back to Cancel if disabled.
 The script supplements native autofocus because browsers can ignore it after a document's first prompt, including when
 an existing question remounts. Confirm buttons consume repeated or composing Enter before native click synthesis: a held
-opening key cannot also answer the question. Host dialogs retain quiet scripted focus and independent Escape selectors;
-trash focuses and scrolls its confirming answer into view. YOLO and Restart with keep their Cancel default.
+opening key cannot also answer the question. A shared header key handler cancels any still-open Restart, Replace or
+Delete question on Escape, releases its lifecycle claim and returns focus to the selected terminal after unmount. Host
+dialogs retain quiet scripted focus and independent Escape selectors; trash focuses and scrolls its confirming answer
+into view. YOLO and Restart with keep their Cancel default.
 
 Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
 appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. In-place

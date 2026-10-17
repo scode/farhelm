@@ -1111,7 +1111,8 @@ nor the Restart with dialog or Replace with launcher. Host setup and removal ret
 After a user explicitly opens a confirmation, keyboard focus starts on its enabled confirming button, so a new Enter
 goes ahead; if that button is disabled, focus starts on Cancel instead. This covers session Delete, Replace, Restart and
 tab close, host setup, removal and uninstall, and permanent trash deletion. Repeated or composing Enter cannot answer
-the new question. The YOLO confirmation and Restart with dialog still start on Cancel.
+the new question. Escape cancels the header's Restart, Replace or Delete question and returns focus to the terminal. The
+YOLO confirmation and Restart with dialog still start on Cancel.
 
 Confirmed 2026-10-01: a destructive confirmation authorizes only what the prompt the user answered said would happen.
 This covers every destructive confirmation (Delete, Restart, Restart with, Replace and Replace with, and permanent
