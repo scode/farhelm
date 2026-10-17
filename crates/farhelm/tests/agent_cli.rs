@@ -779,7 +779,7 @@ fn agent_run_against_frame(
     let (done, thread) = mock_supervisor_frames(&socket, SESSION, reply);
     // These transport tests require an admitted request. Stop names its
     // fixture target explicitly; omission refusal has separate parser tests.
-    let args = if verb == "stop" {
+    let args = if matches!(verb, "stop" | "delete") {
         vec![verb, "--session", "target-session"]
     } else {
         vec![verb]
@@ -1186,25 +1186,80 @@ fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
     assert!(output.stderr.is_empty());
 }
 
-/// Spec: `farhelm agent stop` refuses an omitted `--session` before opening
+/// Spec: `farhelm agent stop` and `delete` refuse an omitted `--session` before opening
 /// the supervisor socket.
 ///
 /// This keeps the command-line boundary from spelling the old implicit-self
 /// request at all. The wire and authority tests separately prove that an old
 /// client cannot bypass this check by sending an omitted-target request.
 #[farhelm_testtrace::test]
-fn stop_without_a_session_is_refused_before_anything_is_sent() {
+fn stop_and_delete_without_a_session_are_refused_before_anything_is_sent() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
-    let output = output_with_timeout(agent_command_with_args(&socket, &["stop"]));
+    for verb in ["stop", "delete"] {
+        let output = output_with_timeout(agent_command_with_args(&socket, &[verb]));
+        assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            stderr.contains("--session"),
+            "the refusal must name it: {stderr}"
+        );
+    }
+}
 
-    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        stderr.contains("--session"),
-        "the refusal must name it: {stderr}"
+/// Delete's CLI preserves explicit consent and reports checkout recovery
+/// advice separately from the machine-readable success line. A lost reply
+/// remains unknown, since a removed session cannot acknowledge a retry.
+#[farhelm_testtrace::test]
+fn delete_transmits_consent_reports_notices_and_keeps_lost_outcomes_unknown() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id,
+            request:
+                AgentVerb::Delete {
+                    session_id,
+                    stop_if_running,
+                },
+            ..
+        } = request
+        else {
+            panic!("expected Delete request, got {request:?}");
+        };
+        assert_eq!(session_id.as_deref(), Some("target-session"));
+        assert!(stop_if_running);
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Deleted {
+                    outcome: farhelm_proto::SessionDeleteOutcome {
+                        notice: Some("checkout preserved\ninspect it".into()),
+                        archived: false,
+                    },
+                },
+            },
+        })
+    });
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["delete", "--session", "target-session", "--stop-if-running"],
+    ));
+    finish_server(done, thread);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "deleted target-session\n"
     );
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "checkout preserved\\ninspect it\n"
+    );
+    let lost = agent_run_against("delete", |_| None);
+    assert!(!lost.status.success());
+    assert!(lost.stdout.is_empty());
+    assert!(String::from_utf8(lost.stderr).unwrap().contains("outcome"));
 }
 /// Spec: a rename confirmation is sanitized through the SAME cell-escaping
 /// the listing tables use — SPEC_impl.md's contract for every dynamic cell
@@ -1491,6 +1546,7 @@ fn instructions_print_every_verb_without_a_session() {
         "sessions",
         "rename",
         "stop",
+        "delete",
         "create",
         "clone",
         "instructions",

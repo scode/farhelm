@@ -640,6 +640,7 @@ enum ReplyKind {
     Session,
     Restarted,
     Stopped,
+    Deleted,
     Created,
     TemplateWritten,
     TemplateDeleted,
@@ -654,6 +655,7 @@ impl ReplyKind {
             farhelm_proto::AgentVerb::OpenUrl { .. } => ReplyKind::UrlOpened,
             farhelm_proto::AgentVerb::Rename { .. } => ReplyKind::Session,
             farhelm_proto::AgentVerb::Stop { .. } => ReplyKind::Stopped,
+            farhelm_proto::AgentVerb::Delete { .. } => ReplyKind::Deleted,
             farhelm_proto::AgentVerb::Restart { .. } => ReplyKind::Restarted,
             // `Created`, not `Session`: the two payloads are identical and
             // the tag is the only thing separating "a row that did not
@@ -679,6 +681,7 @@ impl ReplyKind {
             AgentReply::Session { .. } => ReplyKind::Session,
             AgentReply::Restarted { .. } => ReplyKind::Restarted,
             AgentReply::Stopped {} => ReplyKind::Stopped,
+            AgentReply::Deleted { .. } => ReplyKind::Deleted,
             AgentReply::Created { .. } => ReplyKind::Created,
             AgentReply::TemplateWritten { .. } => ReplyKind::TemplateWritten,
             AgentReply::TemplateDeleted {} => ReplyKind::TemplateDeleted,
@@ -700,6 +703,7 @@ impl ReplyKind {
             ReplyKind::Session => "session row",
             ReplyKind::Restarted => "restarted session row",
             ReplyKind::Stopped => "stop confirmation",
+            ReplyKind::Deleted => "session delete confirmation",
             // "created", not "new": the whole point of this noun is to
             // read differently from `Session`'s in a message that names
             // both, and a reader who sees "session row" against "created

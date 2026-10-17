@@ -247,6 +247,15 @@ enum AgentCmd {
         #[arg(long = "session", allow_hyphen_values = true)]
         session: String,
     },
+    /// Delete an explicitly named session and its stored state; never this session.
+    Delete {
+        /// Exact session id from `farhelm agent sessions`.
+        #[arg(long = "session", allow_hyphen_values = true)]
+        session: String,
+        /// Permit stopping the target's agent and terminal tabs before deletion.
+        #[arg(long)]
+        stop_if_running: bool,
+    },
     /// Restart an explicitly named session, resuming its own conversation.
     Restart {
         /// Exact session id from `farhelm agent sessions`.
@@ -502,6 +511,13 @@ impl AgentCmd {
             }),
             AgentCmd::Stop { session } => Some(farhelm_proto::AgentVerb::Stop {
                 session_id: Some(session.clone()),
+            }),
+            AgentCmd::Delete {
+                session,
+                stop_if_running,
+            } => Some(farhelm_proto::AgentVerb::Delete {
+                session_id: Some(session.clone()),
+                stop_if_running: *stop_if_running,
             }),
             AgentCmd::Restart {
                 session,
@@ -1608,6 +1624,17 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
                 anyhow::bail!("the helm answered stop with something other than confirmation");
             };
             println!("stopped {}", safe_cell(&target_for_reply));
+        }
+        AgentCmd::Delete { session, .. } => {
+            let AgentReply::Deleted { outcome } = reply else {
+                anyhow::bail!("the helm answered delete with something other than confirmation");
+            };
+            println!("deleted {}", safe_cell(&session));
+            if let Some(notice) = outcome.notice {
+                eprintln!("{}", safe_cell(&notice));
+            } else if outcome.archived {
+                eprintln!("managed checkout archived to the trash");
+            }
         }
         AgentCmd::Restart { .. } => {
             let AgentReply::Restarted { session } = reply else {

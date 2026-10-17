@@ -9,10 +9,11 @@ An agent running in a Farhelm session can do more than work in its own terminal.
 uses when you ask it to (with `$farhelm` in your message) but can also run on its own, it can look at your hosts and
 sessions, start new sessions on any host, in an existing directory or a new
 [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), copy a session to the same host or
-another, rename, stop, or restart sessions, and change your [launch templates](/docs/using/launch-templates/). It can
-also ask to open a web link in your browser ([Open links from a remote session](#open-links-from-a-remote-session)).
-Farhelm asks you before any of those changes happens, whoever typed the command; a command you type yourself in a
-session's terminal is asked about the same way. Looking never asks.
+another, rename, stop, restart, or delete sessions, and change your [launch templates](/docs/using/launch-templates/).
+It can also ask to open a web link in your browser
+([Open links from a remote session](#open-links-from-a-remote-session)). Farhelm asks you before any of those changes
+happens, whoever typed the command; a command you type yourself in a session's terminal is asked about the same way.
+Looking never asks.
 
 An agent can only do this from a session that is open in the Farhelm window. If it is not, the agent is told to ask you
 to open it.
@@ -24,7 +25,8 @@ tabs. It leaves the sidebar and the terminal's prompt clear. It says what the ag
 that matter:
 
 - which session asked, and from which host;
-- the session it would act on, for a rename, stop, or restart, and the command a restart would run;
+- the session it would act on, for a rename, stop, restart, or delete, the command a restart would run, and whether a
+  delete would stop the agent or terminal tabs;
 - for a copy of a session, the session being copied;
 - for a new session, the host, the directory, the agent and its choices, the full command it would run and the command a
   later restart would run, and whether it would run in [YOLO mode](/docs/using/start-a-session/#confirm-a-yolo-launch)
@@ -67,12 +69,16 @@ does what it says. Deny cards you no longer want.
 
 If the session that asked is deleted while its card waits, the request is refused.
 
+An agent can delete another session, including its terminal tabs and stored state. It needs `--stop-if-running` when
+anything is still running, and the card says what will stop. It cannot delete its own session; it can still stop its own
+agent and leave the session listed.
+
 ## Stop asking for a host
 
 Each host has a **Run farhelm commands without asking** setting, in its settings next to the YOLO one
 ([Manage hosts](/docs/using/manage-hosts/#host-settings)). Every host starts with it off. Turning it on means agents in
-that host's sessions start, stop, restart, rename, and copy sessions on any of your hosts, and change templates, without
-asking you. Turn it on only for a host whose agents you would let do that unsupervised.
+that host's sessions start, stop, restart, delete, rename, and copy sessions on any of your hosts, and change templates,
+without asking you. Turn it on only for a host whose agents you would let do that unsupervised.
 
 If you **adopt** a host that was reinstalled or replaced at the same address, the setting goes back to off, like the
 YOLO setting and both link settings: you have not decided about the new installation yet.

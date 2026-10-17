@@ -529,6 +529,7 @@ fn action_kind(action: &ApprovalAction) -> &'static str {
         ApprovalAction::Launch { .. } => "launch",
         ApprovalAction::Rename { .. } => "rename",
         ApprovalAction::Stop { .. } => "stop",
+        ApprovalAction::Delete { .. } => "delete",
         ApprovalAction::Restart { .. } => "restart",
         ApprovalAction::TemplateWrite { .. } => "template_write",
         ApprovalAction::TemplateDelete { .. } => "template_delete",
@@ -553,6 +554,7 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
         } => "start a copy of a session",
         ApprovalAction::Rename { .. } => "rename a session",
         ApprovalAction::Stop { .. } => "stop a session's agent",
+        ApprovalAction::Delete { .. } => "delete a session and its stored state",
         ApprovalAction::Restart { .. } => "restart a session, resuming its conversation",
         ApprovalAction::TemplateWrite {
             replaces_existing: false,
@@ -653,6 +655,27 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
                 target,
                 &mut rows,
             );
+        }
+        ApprovalAction::Delete { target, guard } => {
+            session_rows(
+                "session",
+                "session id",
+                Some("session's host"),
+                target,
+                &mut rows,
+            );
+            rows.push(CardRow::Note(
+                "what deletion stops",
+                match guard {
+                    farhelm_proto::DeleteGuard::NothingAlive => {
+                        "nothing; refuse if the agent or any terminal tab is alive"
+                    }
+                    farhelm_proto::DeleteGuard::AgentEnded => {
+                        "terminal tabs; refuse if the agent is running again"
+                    }
+                    farhelm_proto::DeleteGuard::Unconditional => "the agent and all terminal tabs",
+                },
+            ));
         }
         ApprovalAction::Restart {
             target,
@@ -935,6 +958,37 @@ fn word<T: serde::Serialize>(value: &T) -> String {
 mod tests {
     use super::*;
     use farhelm_proto::CommandLaunch;
+
+    /// Delete cards must spell out the scope their guard actually permits.
+    /// A tabs-only warning cannot silently authorize stopping a restarted agent.
+    #[test]
+    fn delete_card_describes_the_authorized_liveness_scope() {
+        for (guard, words) in [
+            (
+                farhelm_proto::DeleteGuard::NothingAlive,
+                "nothing; refuse if the agent or any terminal tab is alive",
+            ),
+            (
+                farhelm_proto::DeleteGuard::AgentEnded,
+                "terminal tabs; refuse if the agent is running again",
+            ),
+            (
+                farhelm_proto::DeleteGuard::Unconditional,
+                "the agent and all terminal tabs",
+            ),
+        ] {
+            let action = ApprovalAction::Delete {
+                target: ApprovalSession {
+                    id: "target".into(),
+                    title: None,
+                    host_name: None,
+                },
+                guard,
+            };
+            assert_eq!(action_kind(&action), "delete");
+            assert!(action_rows(&action).contains(&CardRow::Note("what deletion stops", words)));
+        }
+    }
 
     /// Spec: a command launch's card shows the command and the resume
     /// command in full, and says the YOLO assertion in this UI's own words.

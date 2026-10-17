@@ -405,6 +405,55 @@ async fn an_agent_request_is_answered_by_the_helm_holding_the_attachment() {
     );
 }
 
+/// Delete reaches the attached helm with its explicit target and consent,
+/// and its checkout notice survives both relay hops. A self-delete is refused
+/// locally before the helm is asked, avoiding its own retained request fence.
+#[farhelm_testtrace::test]
+async fn agent_delete_relay_preserves_consent_and_refuses_self() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let token = credential_for(&h, &session.id).await;
+    let reply = AgentReply::Deleted {
+        outcome: farhelm_proto::SessionDeleteOutcome {
+            notice: Some("checkout preserved".into()),
+            archived: false,
+        },
+    };
+    let handler = ScriptedHandler::answering(reply.clone());
+    let helm = connect_helm(&h.sup, handler.clone()).await;
+    let (_channel, _replay, _stream) = helm.attach_live(&session.id, 80, 24).await.unwrap();
+    let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
+    let verb = AgentVerb::Delete {
+        session_id: Some("another-session".into()),
+        stop_if_running: true,
+    };
+    let outcome = outcome_of(peer.ask(&session.id, verb.clone()).await);
+    assert_eq!(outcome, AgentOutcome::Ok { reply });
+    assert_eq!(
+        *handler.asked.lock().unwrap(),
+        vec![(session.id.clone(), verb)]
+    );
+    let refused = outcome_of(
+        peer.ask(
+            &session.id,
+            AgentVerb::Delete {
+                session_id: Some(session.id.clone()),
+                stop_if_running: true,
+            },
+        )
+        .await,
+    );
+    assert!(
+        matches!(refused, AgentOutcome::Err { kind: farhelm_proto::ErrorKind::InvalidRequest, ref message } if message.contains("cannot delete itself")),
+        "{refused:?}"
+    );
+    assert_eq!(
+        handler.asked.lock().unwrap().len(),
+        1,
+        "self-delete must not reach the helm"
+    );
+}
+
 /// Spec: with no helm attached to the session, the peer is refused
 /// `Unavailable` with the relay's own remedy sentence, and no request is
 /// forwarded anywhere.

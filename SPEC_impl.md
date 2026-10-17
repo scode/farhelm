@@ -3625,6 +3625,11 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   rows on stdout and one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no
   timeout of its own: the supervisor bounds the relay and is the only party that can distinguish its two failures (see
   the transport section's version-20 paragraph).
+- `farhelm agent delete --session <id> [--stop-if-running]` — removes an explicitly named session, refusing self-delete.
+  Success prints `deleted <id>` on stdout and any checkout notice on stderr. The relay and helm both refuse self-delete;
+  the helm derives a delete guard from the target state shown on its approval card and passes it unchanged to the
+  supervisor. Without the flag, anything alive is refused. UI and agent deletes share the helm's approval denial,
+  teardown and best-effort local cleanup; Replace shares the successful local cleanup after inheriting its pin.
 - `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`, and
   `farhelm agent restart --session <id> [--stop-if-running]` — the in-session ACTING CLI, on the same relay and
   credential. Every target is explicit, including a deliberate self-action. Rename compares the observed title and
@@ -4833,6 +4838,13 @@ does not work there. The explicit Farhelm verb remains usable. No localhost call
 Deleting a session refuses its waiting requests first and keeps refusing new ones until the delete finishes
 (`Approvals::deny_session`, held for the delete and for a replacement's teardown), so a card for a session that is going
 away cannot be allowed into acting for it.
+
+Protocol 52 adds `AgentVerb::Delete`, `AgentReply::Deleted` and `DeleteSession::refuse_if_agent_request_in_flight`. An
+agent delete sets the flag: the target supervisor tries its existing agent-request fence without waiting, refusing with
+Conflict when held. This prevents two sessions' crossing deletes from each waiting on the other's retained relay fence,
+including requests carried by different helms. UI deletion and Replace keep their ordinary waiting behavior. Self-delete
+is refused at both relay and helm before destructive dispatch, because the relay holds that same fence for its own
+request and deletion would revoke its credential before returning.
 
 What a card shows is what an approval does. Launches are resolved fully before the card, and the dispatched launch is
 the one shown. The agent YOLO rule (`yolo_guard::check_agent`) runs before the card, after it, and again at dispatch: on

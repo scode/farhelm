@@ -1031,6 +1031,7 @@ async fn handle_delete_session(
     req_id: u64,
     session_id: String,
     guard: farhelm_proto::DeleteGuard,
+    refuse_if_agent_request_in_flight: bool,
 ) {
     let mutation_sup = Arc::clone(sup);
     let mutation_id = session_id.clone();
@@ -1050,7 +1051,19 @@ async fn handle_delete_session(
         // to clear means such a mutation always finishes against a session
         // this delete has not yet torn down, rather than the delete
         // invalidating the very credential mid-flight.
-        let _agent_fence = mutation_sup.agent_request_locks.claim(&mutation_id).await;
+        // A relay already holds the asking session's fence. Waiting here
+        // on an agent delete could cycle against the target deleting its
+        // asker, even when the two requests use different helms. Refuse the
+        // contender without releasing either request's authority fence.
+        let _agent_fence = if refuse_if_agent_request_in_flight {
+            let Some(fence) = mutation_sup.agent_request_locks.try_claim(&mutation_id) else {
+                return (Err(RequestError::new(ErrorKind::Conflict,
+                    "the target session has a Farhelm command in flight; nothing was deleted, retry after it finishes".to_string())), None);
+            };
+            fence
+        } else {
+            mutation_sup.agent_request_locks.claim(&mutation_id).await
+        };
         // Admission follows the fence deliberately. This task is already
         // tracked by the connection, so a parked delete remains observable
         // while its permit is held only for teardown and reply delivery after
@@ -1134,7 +1147,7 @@ async fn handle_delete_session(
                 })
         }
         .await;
-        (outcome, permit)
+        (outcome, Some(permit))
     });
     let tx = tx.clone();
     tasks.spawn(async move {
@@ -2639,6 +2652,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             session_id,
             only_if_nothing_alive,
             only_if_agent_ended,
+            refuse_if_agent_request_in_flight,
         } => {
             handle_delete_session(
                 sup,
@@ -2647,6 +2661,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 req_id,
                 session_id,
                 farhelm_proto::DeleteGuard::from_flags(only_if_nothing_alive, only_if_agent_ended),
+                refuse_if_agent_request_in_flight,
             )
             .await
         }
@@ -2896,6 +2911,19 @@ pub(crate) async fn handle_restricted_control(
                     },
                 )
                 .await;
+                return;
+            }
+            // A self-delete would wait on this request's own retained fence
+            // and revoke the credential before its caller could receive success.
+            if matches!(&request, AgentVerb::Delete { session_id: Some(target), .. } if target == &auth.session_id)
+            {
+                send_reply(tx, &ControlMsg::AgentResponse {
+                    req_id,
+                    outcome: farhelm_proto::AgentOutcome::Err {
+                        kind: ErrorKind::InvalidRequest,
+                        message: "a session cannot delete itself; use stop to end its agent while keeping the session".to_string(),
+                    },
+                }).await;
                 return;
             }
             // CLAIMED BEFORE THE CREDENTIAL IS CHECKED, not after, and that
@@ -3236,7 +3264,9 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             }
             Ok(())
         }
-        AgentVerb::Stop { session_id } | AgentVerb::Restart { session_id, .. } => {
+        AgentVerb::Stop { session_id }
+        | AgentVerb::Restart { session_id, .. }
+        | AgentVerb::Delete { session_id, .. } => {
             validate_target(session_id, LIFECYCLE_FLAG, LIFECYCLE_REMEDY)
         }
         AgentVerb::Create {
@@ -4533,6 +4563,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 only_if_nothing_alive: false,
                 only_if_agent_ended: false,
+                refuse_if_agent_request_in_flight: false,
             },
         )
         .await;
@@ -4577,6 +4608,44 @@ mod tests {
         );
     }
 
+    /// Crossing agent deletes must finish their refusals while both asking
+    /// fences remain held. Waiting for either fence would recreate the cycle;
+    /// no session rows are needed because refusal must precede teardown.
+    #[farhelm_testtrace::test]
+    async fn agent_deletes_refuse_crossing_request_fences_without_waiting() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let _first = sup.agent_request_locks.claim("first").await;
+        let _second = sup.agent_request_locks.claim("second").await;
+        assert!(sup.agent_request_locks.try_claim("first").is_none());
+        assert!(sup.agent_request_locks.try_claim("second").is_none());
+        for target in ["second", "first"] {
+            let (mut tasks, mut rx) = dispatch_for_test(
+                &sup,
+                ControlMsg::DeleteSession {
+                    req_id: 1,
+                    session_id: target.into(),
+                    only_if_nothing_alive: false,
+                    only_if_agent_ended: false,
+                    refuse_if_agent_request_in_flight: true,
+                },
+            )
+            .await;
+            tokio::time::timeout(Duration::from_secs(5), tasks.join_next())
+                .await
+                .expect("crossing delete waited on the target's request fence")
+                .unwrap()
+                .unwrap();
+            let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
+            assert!(
+                matches!(reply, ControlMsg::Error { kind: ErrorKind::Conflict, ref message, .. } if message.contains("command in flight")),
+                "{reply:?}"
+            );
+        }
+    }
+
     /// A retained agent fence must not consume the whole handler admission
     /// pool. Eight deletes are enough to exhaust that pool in the old order,
     /// so this test holds one fence, parks eight deletes on it, and proves an
@@ -4603,6 +4672,7 @@ mod tests {
                         session_id: "s1".to_string(),
                         only_if_nothing_alive: false,
                         only_if_agent_ended: false,
+                        refuse_if_agent_request_in_flight: false,
                     },
                 )
                 .await,
@@ -4921,6 +4991,7 @@ mod tests {
                 session_id: "asker".to_string(),
                 only_if_nothing_alive: false,
                 only_if_agent_ended: false,
+                refuse_if_agent_request_in_flight: false,
             },
         )
         .await;
