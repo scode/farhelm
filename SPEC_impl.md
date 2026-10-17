@@ -999,6 +999,16 @@ binding; every unsuccessful create reveals the form even when its old-target ref
 change. The quick-switcher row closes its modal through the existing DOM-removal handoff before using this shortcut
 path.
 
+Successful creation carries one local fact to the list: whether this quick-launch opening never revealed New, read from
+its original quick-launch flag and current hidden state at success. The list selects the accepted session and opens its
+existing rename editor in naming mode in that same completion event, omitting New-button focus. The create operation is
+already released; no rename or user answer gates agent startup. An unset naming preference enables it. The editor keeps
+one naming flag alongside its existing shortcut origin. Naming's generation-checked mount explicitly focuses and selects
+the field once, including later openings in the same document. An unchanged raw title closes without calling rename;
+edited titles keep ordinary validation and refusal behavior. Naming and shortcut editors use the existing
+generation-fenced, post-unmount terminal focus return. The terminal's existing modal guard withholds focus while naming
+is mounted; an unrevealed terminal retains its ordinary reveal-time handoff after early dismissal.
+
 Motivation: xterm.js is the only battle-tested embeddable terminal (VS Code) and full escape-sequence fidelity is a
 SPEC.md requirement. Routing high-frequency PTY output through a reactive framework would be a performance disaster, so
 the bypass is load-bearing, not an optimization. A pure-Rust wasm terminal (alacritty_terminal grid + canvas renderer)

@@ -52,10 +52,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Follow up on the recent quick launch system so an agent can populate the templates.
 
-- **Name a session while it starts.** Start a session with a rename dialog open, so the session is already starting
-  while you type its name. Make this the default for quick launches, where just pressing Enter immediately accepts the
-  default name. Details TBD at plan time. Plan: `plans/queue/name-session-while-starting.md`.
-
 - **Send a prompt to a running agent from the `farhelm` command.** Let an agent (or a script) send a prompt into another
   session's agent that is already running, through the `farhelm` CLI, and document it in the agent instructions. This is
   the CLI and agent part of "Inject commands into agents" (Maybe later), which also covers a UI button. The
