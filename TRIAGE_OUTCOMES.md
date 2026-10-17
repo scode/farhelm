@@ -15460,7 +15460,8 @@
   scale may be unlistable in the app, and supporting it is not a goal.
 - Completion criteria: the trash section of SPEC.md or SPEC_impl.md states that intended scale and that a host beyond it
   may be unlistable. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-spec-rules-oct16.md`.
+- Execution: change `kxsmypqulzmonvrousnkuxylykxtmywt`, bookmark `plan/triage-spec-rules-oct16/03-trash-scale`; draft PR
+  [#2196](https://github.com/scode/farhelm/pull/2196/changes).
 
 ## trash-body-lacks-keyboard-scroll-focus.md
 
