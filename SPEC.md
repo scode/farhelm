@@ -702,18 +702,23 @@ agent choice is independent of that destination:
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Cmd+P on macOS or Ctrl+Shift+P elsewhere
   starts it directly in the browser and desktop app, without showing the launcher on success. Applying it uses exactly
   New's defaults and ordinary launch path: the open session's host and directory, else this machine's home, with the
-  template overriding only its own fields. Success selects the created session. A held chord starts only once; the chord
-  never reaches the terminal and visible modals keep the keyboard. With no usable mark it opens Templates with an
-  explanation. An edited marked template that no longer supplies an agent or command opens New with it applied. A launch
-  refusal or YOLO question reveals New with the same draft, error or confirmation; nothing bypasses host admission, and
-  the shortcut never retries itself. The mark is a nullable template name on the helm's shared preferences, independent
-  of the template fields. Clicking another bolt moves it; clicking the lit bolt clears it. A template that chooses
-  neither an agent nor a nonblank command cannot be marked in the interface. Renaming repoints the mark before deleting
-  the old name; deleting that name clears its mark through the shared delete path, and Undo never restores the mark. The
-  editor says whether its saved template is marked. The shortcut reads the mark and templates fresh on each use, so
-  another window's change takes effect without reloading. Templates' hover and a separate quick-switcher row advertise
-  the chord and marked name. A browser that reserves the chord keeps its behavior; the quick-switcher row remains
-  available.
+  template overriding only its own fields. Success selects the created session. When New was never shown, the rename
+  dialog opens over it while its agent is already starting, unless Settings' on-by-default **name sessions on quick
+  launch** choice is off. This applies to the bolt shortcut, number shortcuts, composed sequences and the quick-switcher
+  row, even when a template supplied the name. The actual created name is focused and fully selected. Enter with the
+  name unchanged or Escape keeps it without sending a rename; a changed name uses ordinary rename. Closing returns to
+  the new terminal, which takes no input while the dialog is open. A launch that revealed New gets no naming dialog,
+  even if a later submission succeeds. A held chord starts only once; the chord never reaches the terminal and visible
+  modals keep the keyboard. With no usable mark it opens Templates with an explanation. An edited marked template that
+  no longer supplies an agent or command opens New with it applied. A launch refusal or YOLO question reveals New with
+  the same draft, error or confirmation; nothing bypasses host admission, and the shortcut never retries itself. The
+  mark is a nullable template name on the helm's shared preferences, independent of the template fields. Clicking
+  another bolt moves it; clicking the lit bolt clears it. A template that chooses neither an agent nor a nonblank
+  command cannot be marked in the interface. Renaming repoints the mark before deleting the old name; deleting that name
+  clears its mark through the shared delete path, and Undo never restores the mark. The editor says whether its saved
+  template is marked. The shortcut reads the mark and templates fresh on each use, so another window's change takes
+  effect without reloading. Templates' hover and a separate quick-switcher row advertise the chord and marked name. A
+  browser that reserves the chord keeps its behavior; the quick-switcher row remains available.
 - Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit in
   the Mac desktop app, or Ctrl+Shift+digit everywhere else (including a Mac browser), starts its template through the
   same direct launch path as quick launch. It reads bindings and templates fresh each time. Unbound keys open Templates
@@ -888,17 +893,19 @@ marking a template with ⚡ or giving it a number key is consent to its managed-
 combined in a quick-launch sequence, so it obtains the same exact preview and launches without showing the path first. A
 lost race still reveals New with the conflict and new preview rather than submitting again. Preview creates no directory
 and reserves nothing. An unnamed checkout uses the lowest available positive `repo-N` and that basename as its session
-title. An explicit title keeps its printable display spelling while the path uses `repo-` followed by its lowercase
-ASCII slug; runs outside letters and digits become hyphens. A title already starting with `repo-` does not repeat that
-prefix. An empty slug or a component over 200 bytes is refused, and so is a checkout path too long to archive later (the
-archive location adds up to 82 bytes to it, and the whole must stay within the system's path limit: 4096 bytes on Linux,
-1024 on macOS). Existing files, directories and symlinks all occupy a name. If another create wins the displayed path,
-Launch reports the conflict and obtains a new preview; it never submits automatically or silently chooses another
-directory. An explicit name remains a conflict rather than gaining a suffix. For Clone into the source's repository, an
-untouched nonempty copied title defaults to `<source title>-clone`, then the lowest free `<source title>-clone-N` for N
-≥ 2. The name field shows the effective name, and preview and launch use it alike. Changing hosts or repositories
-restarts the suffix search; editing the name makes it explicit and disables automatic suffixes. A lost-race launch
-re-previews and may advance the default name, but still needs another click on Launch for the newly shown path.
+title. Naming the session after quick launch changes only its title: the checkout keeps its original `repo-N` directory
+name. An explicit title at creation keeps its printable display spelling while the path uses `repo-` followed by its
+lowercase ASCII slug; runs outside letters and digits become hyphens. A title already starting with `repo-` does not
+repeat that prefix. An empty slug or a component over 200 bytes is refused, and so is a checkout path too long to
+archive later (the archive location adds up to 82 bytes to it, and the whole must stay within the system's path limit:
+4096 bytes on Linux, 1024 on macOS). Existing files, directories and symlinks all occupy a name. If another create wins
+the displayed path, Launch reports the conflict and obtains a new preview; it never submits automatically or silently
+chooses another directory. An explicit name remains a conflict rather than gaining a suffix. For Clone into the source's
+repository, an untouched nonempty copied title defaults to `<source title>-clone`, then the lowest free
+`<source title>-clone-N` for N ≥ 2. The name field shows the effective name, and preview and launch use it alike.
+Changing hosts or repositories restarts the suffix search; editing the name makes it explicit and disables automatic
+suffixes. A lost-race launch re-previews and may advance the default name, but still needs another click on Launch for
+the newly shown path.
 
 Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no repository ignore
 an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
@@ -1008,6 +1015,11 @@ reorder, filter, or temporarily fail without moving its textarea, so its draft, 
 session identity stay intact. A successful rename closes that editor; a refusal leaves its draft and error visible for
 correction. A complete, authoritative listing that no longer contains the source disables submission without discarding
 the draft, because a filtered, truncated, failed, or stale listing is not proof that the session disappeared.
+
+Quick launch uses the same editor in naming mode after creation, without holding up agent startup. Only that mode
+selects the whole initial name and treats an unchanged submission as keeping the default without a request. Saving,
+unchanged Enter, Escape and Cancel all return to the new session's terminal. Ordinary list rename keeps its existing
+submission and focus-return behavior.
 
 - **Stop** terminates the agent and its entire process tree — MCP servers, dev servers, and other descendants included.
   Terminal tabs keep running, and the session remains with its terminal still viewable.

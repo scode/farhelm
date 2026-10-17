@@ -1,9 +1,9 @@
-/** Quick launch must use New's ordinary authority without painting its fields
- * on success. Real input and API replies distinguish an invisible launch from
- * a shortcut that also types into the old terminal or quietly retries a refusal. */
+/** Quick launch uses New's authority without painting New on success, then
+ * offers naming while the agent starts. Real input and replies distinguish
+ * modal ownership from input leaked to an agent or a quietly retried refusal. */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
-import type { APIRequestContext, Page, Route } from "@playwright/test";
+import type { APIRequestContext, Locator, Page, Route } from "@playwright/test";
 import {
   cleanupSession,
   createSession,
@@ -19,6 +19,7 @@ import {
   stubFeed,
 } from "./helpers/fleet";
 import { attachSession, waitForTermText } from "./helpers/term";
+import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
 import { requireHelmBuild } from "./helpers/helm-build";
 
@@ -83,6 +84,44 @@ async function numberChord(page: Page, key = "1", repeat = false) {
     await page.keyboard.up("Shift");
     await page.keyboard.up("Control");
   }
+}
+
+/** A naming opening must own focus and select the whole actual session title.
+ * Returning the field without dismissing it keeps each test's close action
+ * explicit, including tests that intentionally close before replay finishes. */
+async function namingField(page: Page, title: string): Promise<Locator> {
+  const dialog = page.locator(".rename-dialog");
+  await expect(dialog).toHaveCount(1);
+  await expect(dialog).toBeVisible();
+  const field = dialog.locator(".rename-input");
+  await expect(field).toHaveValue(title);
+  await expect(field).toBeFocused();
+  await expect.poll(() => field.evaluate((node: HTMLTextAreaElement) => ({
+    start: node.selectionStart, end: node.selectionEnd, length: node.value.length,
+  })), { message: "naming selects the entire session title" }).toEqual({ start: 0, end: title.length, length: title.length });
+  return field;
+}
+
+/** Creation must start the requested agent without waiting for a name.
+ * This focus-neutral attachment boundary rejects bytes from the old source
+ * terminal while allowing the naming dialog to keep keyboard ownership. */
+async function agentStartedWhileNaming(page: Page, id: string, field: Locator) {
+  await waitForSessionRevealed(page, id);
+  await waitForTermText(page, "FAKE-AGENT READY");
+  await waitForTermText(page, "> ");
+  await expect(page.locator(".rename-dialog")).toBeVisible();
+  await expect(field).toBeFocused();
+}
+
+/** Observe the product's focus return, then prove this attachment accepts input.
+ * A real response distinguishes restored focus from an idle or dead terminal. */
+async function echoAfterNaming(page: Page, id: string, probe: string) {
+  await expect(page.locator(".rename-dialog")).toHaveCount(0);
+  await waitForSessionReady(page, id);
+  await waitForTermText(page, "> ");
+  await page.keyboard.type(probe);
+  await page.keyboard.press("Enter");
+  await waitForTermText(page, `echo:${probe}`);
 }
 
 test.beforeEach(async ({ request }) => {
@@ -150,12 +189,14 @@ test("launch sequence stacks a number template and bolt without showing New", as
     await chord(page);
     await expect(indicator).toContainText(partial);
     await expect(indicator).toContainText(runnable);
+    await expect(page.locator(".rename-dialog")).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("launch-sequence.png") });
     await page.keyboard.press("Enter");
     await expect.poll(() => bodies.length).toBe(1);
     const form = page.locator(".create-session-form");
     await expect(form).toHaveCount(1);
     await expect(form).toBeHidden();
+    await expect(page.locator(".rename-dialog")).toHaveCount(0);
     await expect(indicator).toHaveCount(0);
     expect(bodies[0]).toMatchObject({ title: `${runnable}-session`, command: { command: FAKE_AGENT, yolo: false } });
     expect(Buffer.concat(binary).toString(), "the sequence owns its complete input").toBe("");
@@ -163,6 +204,13 @@ test("launch sequence stacks a number template and bolt without showing New", as
     await expect.poll(() => created.length).toBe(1);
     await expect(page.locator(`[data-session-id="${created[0]}"]`)).toHaveAttribute("data-session-selected", "true");
     await expect(form).toHaveCount(0);
+    const field = await namingField(page, `${runnable}-session`);
+    await agentStartedWhileNaming(page, created[0], field);
+    expect(Buffer.concat(binary).toString(), "composing and naming send no terminal input").toBe("");
+    await page.keyboard.press("Enter");
+    const probe = `sequence-live-${Date.now()}`;
+    await echoAfterNaming(page, created[0], probe);
+    expect(Buffer.concat(binary).toString()).toBe(`${probe}\r`);
     expect(await page.evaluate(() => (window as unknown as { sequencePainted: boolean }).sequencePainted)).toBe(false);
     expect(bodies).toHaveLength(1);
   } catch (error) {
@@ -722,6 +770,11 @@ test("the quick switcher row launches through the fresh direct path", async ({ p
     await expect.poll(() => created.length).toBe(1);
     await expect(page.locator(`[data-session-id="${created[0]}"]`)).toHaveAttribute("data-session-selected", "true");
     await expect(page.locator(".create-session-form")).toHaveCount(0);
+    await namingField(page, `${name}-session`);
+    // A switcher opening and the following naming opening own different
+    // modals. Cancel must return directly to the newly selected terminal.
+    await page.locator(".rename-dialog .rename-cancel").click();
+    await echoAfterNaming(page, created[0], `switcher-named-${Date.now()}`);
   } catch (error) {
     bodyFailed = true;
     throw error;
@@ -743,8 +796,8 @@ test("the quick switcher row launches through the fresh direct path", async ({ p
 
 for (const [mac, numbered] of [[false, false], [true, false], [false, true], [true, true]]) {
   /** The held create reply establishes the hidden in-flight boundary. Actual
-   * binary input frames and a fresh echo prove both taking the chord away from
-   * the old agent and handing keyboard ownership to the newly selected one. */
+   * binary input frames prove that both the chord and naming stay away from
+   * the agents; output while naming and a later echo prove startup and handoff. */
   test(`${mac ? "Mac" : "non-Mac"} ${numbered ? "number shortcut" : "quick launch"} owns input and submits once without showing New`, async ({ page, request }) => {
     await platform(page, mac);
     const source = await createSession(request, { title: `quick-source-${Date.now()}` });
@@ -753,8 +806,15 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
     const binary: Buffer[] = [];
     const gate = routeGate();
     const bodies: any[] = [];
+    const renames: { path: string; body: unknown }[] = [];
     let bodyFailed = false;
     try {
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (request.method() === "POST" && path.endsWith("/rename")) {
+          renames.push({ path, body: request.postDataJSON() });
+        }
+      });
       page.on("websocket", (socket) => {
         if (new URL(socket.url()).pathname.endsWith("/term")) {
           socket.on("framesent", ({ payload }) => {
@@ -795,6 +855,7 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
       const form = page.locator(".create-session-form");
       await expect(form).toHaveCount(1);
       await expect(form).toBeHidden();
+      await expect(page.locator(".rename-dialog")).toHaveCount(0);
       expect(bodies).toHaveLength(1);
       expect(bodies[0]).toMatchObject({
         cwd: source.cwd,
@@ -811,12 +872,27 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
       const session = await accepted.json();
       await expect(form).toHaveCount(0);
       await expect(page.locator(`[data-session-id="${session.id}"]`)).toHaveAttribute("data-session-selected", "true");
-      await waitForTermText(page, "FAKE-AGENT READY");
-      await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+      const field = await namingField(page, `${name}-session`);
+      await agentStartedWhileNaming(page, session.id, field);
+      const changed = `${name}-renamed`;
+      // One changed Enter, one unchanged Enter, Escape and Cancel exercise
+      // the distinct exits without multiplying the platform/source matrix.
+      if (numbered || mac) {
+        await page.keyboard.type(changed);
+        await expect(field).toHaveValue(changed);
+      }
+      expect(Buffer.concat(binary).toString(), "typing a name reaches no terminal input frame").toBe("");
+      if (mac && numbered) await page.locator(".rename-dialog .rename-cancel").click();
+      else await page.keyboard.press(mac ? "Escape" : "Enter");
       const probe = `quick-live-${Date.now()}`;
-      await page.keyboard.type(probe);
-      await page.keyboard.press("Enter");
-      await waitForTermText(page, `echo:${probe}`);
+      await echoAfterNaming(page, session.id, probe);
+      const expectedTitle = numbered && !mac ? changed : `${name}-session`;
+      const stored = await request.get(`/api/sessions/${session.id}`);
+      expect(stored.ok(), await stored.text()).toBe(true);
+      expect((await stored.json()).title).toBe(expectedTitle);
+      expect(renames).toEqual(numbered && !mac
+        ? [{ path: `/api/sessions/${session.id}/rename`, body: { title: changed } }]
+        : []);
       expect(bodies).toHaveLength(1);
       expect(Buffer.concat(binary).toString()).toBe(`${probe}\r`);
       expect(await page.evaluate(() => (window as unknown as { quickLauncherPainted: boolean }).quickLauncherPainted))
@@ -844,15 +920,114 @@ for (const [mac, numbered] of [[false, false], [true, false], [false, true], [tr
   });
 }
 
-/** The host owns YOLO admission. Quick launch reveals the same draft and
- * question with Cancel focus, and cancelling it must never dispatch a retry. */
+/** Later naming openings must focus and select again in the same document.
+ * The first close uses no replay wait; this does not prove how far replay has
+ * progressed. The second Save covers submission after observed startup. */
+test("repeated naming selects the title and returns focus after immediate Enter and Save", async ({ page, request }) => {
+  const name = `quick-repeat-name-${Date.now()}`;
+  const created: string[] = [];
+  const renames: { path: string; body: unknown }[] = [];
+  let bodyFailed = false;
+  try {
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "POST" && path.endsWith("/rename")) renames.push({ path, body: request.postDataJSON() });
+    });
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch();
+      if (response.ok()) created.push((await response.json()).id);
+      await route.fulfill({ response });
+    });
+    await commandTemplate(request, name);
+    await patchPreferences(request, { quick_launch_template: name });
+    await page.goto("/");
+    await chord(page);
+    await expect.poll(() => created.length).toBe(1);
+    await namingField(page, `${name}-session`);
+    // Do not require terminal reveal before accepting the default. The
+    // following identity-aware wait still requires the actual focus handoff.
+    await page.keyboard.press("Enter");
+    await echoAfterNaming(page, created[0], `immediate-name-${Date.now()}`);
+    expect(renames).toEqual([]);
+    await chord(page);
+    await expect.poll(() => created.length).toBe(2);
+    const field = await namingField(page, `${name}-session`);
+    await agentStartedWhileNaming(page, created[1], field);
+    const title = `${name}-saved`;
+    await page.keyboard.type(title);
+    await expect(field).toHaveValue(title);
+    await page.locator(".rename-dialog .rename-submit").click();
+    await echoAfterNaming(page, created[1], `saved-name-${Date.now()}`);
+    expect(renames).toEqual([{ path: `/api/sessions/${created[1]}/rename`, body: { title } }]);
+    const stored = await request.get(`/api/sessions/${created[1]}`);
+    expect(stored.ok(), await stored.text()).toBe(true);
+    expect((await stored.json()).title).toBe(title);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["created sessions", () => cleanupOwnedSteps(false, created.map((id) => [id, () => cleanupSession(request, id)]))],
+      ["template", async () => {
+        expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
+      }],
+    ]);
+  }
+});
+
+/** Turning naming off preserves direct terminal ownership after a quick launch.
+ * A live echo pins the successful handoff, so absence of a dialog cannot pass
+ * merely because launch or selection failed. Other tests keep the default on. */
+test("the naming preference off launches directly into the terminal", async ({ page, request }) => {
+  const name = `quick-name-off-${Date.now()}`;
+  const created: string[] = [];
+  let bodyFailed = false;
+  try {
+    await commandTemplate(request, name);
+    await patchPreferences(request, { quick_launch_template: name, name_session_on_quick_launch: false });
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch();
+      if (response.ok()) created.push((await response.json()).id);
+      await route.fulfill({ response });
+    });
+    await page.goto("/");
+    await chord(page);
+    await expect.poll(() => created.length).toBe(1);
+    await echoAfterNaming(page, created[0], `naming-off-${Date.now()}`);
+    const stored = await request.get(`/api/sessions/${created[0]}`);
+    expect(stored.ok(), await stored.text()).toBe(true);
+    expect((await stored.json()).title).toBe(`${name}-session`);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["created sessions", () => cleanupOwnedSteps(false, created.map((id) => [id, () => cleanupSession(request, id)]))],
+      ["template", async () => {
+        expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
+      }],
+    ]);
+  }
+});
+
+/** The host owns YOLO admission. Cancel retains the draft without retrying;
+ * a later explicit answer may launch, but New has already supplied its name. */
 for (const numbered of [false, true]) {
 test(`${numbered ? "number shortcut" : "quick launch"} reveals the ordinary YOLO question and retains its draft`, async ({ page, request }) => {
   const name = `quick-yolo-${Date.now()}`;
   const posts: any[] = [];
+  const created: string[] = [];
+  let bodyFailed = false;
   await page.route("**/api/sessions", async (route) => {
-    if (route.request().method() === "POST") posts.push(route.request().postDataJSON());
-    await route.continue();
+    if (route.request().method() !== "POST") return route.continue();
+    posts.push(route.request().postDataJSON());
+    const response = await route.fetch();
+    if (response.ok()) created.push((await response.json()).id);
+    await route.fulfill({ response });
   });
   try {
     await setLocalYoloWithoutAsking(request, false);
@@ -870,24 +1045,47 @@ test(`${numbered ? "number shortcut" : "quick launch"} reveals the ordinary YOLO
     await expect(form.getByLabel("agent command", { exact: true })).toHaveValue(FAKE_AGENT);
     await expect(form.getByLabel("name (optional)")).toHaveValue(`${name}-session`);
     expect(posts).toHaveLength(1);
+    await form.locator(".create-session-submit").click();
+    await expect(form.locator(".yolo-confirmation")).toBeVisible();
+    expect(posts).toHaveLength(2);
+    await form.locator(".yolo-confirm").click();
+    await expect.poll(() => created.length).toBe(1);
+    await echoAfterNaming(page, created[0], `yolo-revealed-${Date.now()}`);
+    expect(posts).toHaveLength(3);
+    expect(posts[2].confirm_yolo).toBe(true);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await page.unroute("**/api/sessions");
-    expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["created sessions", () => cleanupOwnedSteps(false, created.map((id) => [id, () => cleanupSession(request, id)]))],
+      ["template", async () => {
+        expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
+      }],
+    ]);
   }
 });
 }
 
 /** A refusal spends the shortcut attempt, while a later deliberate Launch
- * reuses the mounted draft. Showing an error without that draft would lose the
- * setup; automatic retries would turn an ambiguous refusal into extra work. */
+ * reuses the mounted draft. Its eventual success must retain the ordinary
+ * New flow, including the name the user already had a chance to edit. */
 for (const numbered of [false, true]) {
 test(`${numbered ? "number shortcut" : "quick launch"} reveals a refusal without automatically retrying`, async ({ page, request }) => {
   const name = `quick-refused-${Date.now()}`;
   const bodies: any[] = [];
+  const created: string[] = [];
+  let bodyFailed = false;
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     bodies.push(route.request().postDataJSON());
-    await fulfillQuickFixture(route, request, 409, "quick fixture refusal");
+    if (bodies.length === 1) await fulfillQuickFixture(route, request, 409, "quick fixture refusal");
+    else {
+      const response = await route.fetch();
+      if (response.ok()) created.push((await response.json()).id);
+      await route.fulfill({ response });
+    }
   });
   try {
     await commandTemplate(request, name);
@@ -902,9 +1100,19 @@ test(`${numbered ? "number shortcut" : "quick launch"} reveals a refusal without
     await form.locator(".create-session-submit").click();
     await expect.poll(() => bodies.length).toBe(2);
     expect(bodies[1]).toEqual(bodies[0]);
+    await expect.poll(() => created.length).toBe(1);
+    await echoAfterNaming(page, created[0], `refused-revealed-${Date.now()}`);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await page.unroute("**/api/sessions");
-    expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["created sessions", () => cleanupOwnedSteps(false, created.map((id) => [id, () => cleanupSession(request, id)]))],
+      ["template", async () => {
+        expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
+      }],
+    ]);
   }
 });
 }
