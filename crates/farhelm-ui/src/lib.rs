@@ -173,6 +173,8 @@ mod sounds;
 mod ssh_help;
 mod status;
 mod tabs;
+#[cfg(native_desktop)]
+mod tunnels;
 mod welcome;
 mod window_chrome;
 /// The loud confirmation a YOLO launch asks for on a host that asks first.
@@ -1717,6 +1719,9 @@ fn AppBody() -> Element {
                 // card owned by the keyed view would vanish on a selection
                 // switch while the agent kept waiting (see `approvals`).
                 approvals::ApprovalCards {}
+                if cfg!(native_desktop) {
+                    NativeTunnelControls {}
+                }
                 // Beside the feed, and for the same reason: the coarse "now"
                 // every relative activity age is computed against belongs to
                 // the PAGE, not to whichever pane happens to print an age, and
@@ -1932,6 +1937,8 @@ fn PreferencesGate(children: Element) -> Element {
     let mut preferences =
         use_context_provider(|| list::SharedPreferences(Signal::new(api::Preferences::default())));
     use_context_provider(|| list::DeleteNotice(Signal::new(None)));
+    #[cfg(native_desktop)]
+    tunnels::use_controller();
     let mut loaded = use_signal(|| false);
     let mut welcome_on_load = use_context_provider(|| welcome::WelcomeOnLoad(Signal::new(false)));
     let mut welcome_decided = use_context::<welcome::WelcomeDecided>();
@@ -1989,6 +1996,19 @@ fn PreferencesGate(children: Element) -> Element {
         // Deliberately empty rather than a "loading" line: the wait is one
         // loopback round trip, and a message that flashes for that long
         // reads as a glitch rather than as information.
+        rsx! {}
+    }
+}
+
+/// Keep unsupported renderer builds free of native tunnel actions and requests.
+#[component]
+fn NativeTunnelControls() -> Element {
+    #[cfg(native_desktop)]
+    {
+        rsx! { tunnels::TunnelControls {} }
+    }
+    #[cfg(not(native_desktop))]
+    {
         rsx! {}
     }
 }

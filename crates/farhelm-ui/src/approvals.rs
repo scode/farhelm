@@ -57,6 +57,8 @@ use crate::reader::{SurfaceReader, Trigger, request_read};
 #[component]
 pub(crate) fn ApprovalCards() -> Element {
     let base = use_context::<ApiBase>().0;
+    #[cfg(native_desktop)]
+    let tunnel_controller = use_context::<crate::tunnels::TunnelController>();
     let mut approvals = use_signal(Vec::<PendingApproval>::new);
     // Answers in flight, so a double click cannot send two.
     let answering = use_signal(HashSet::<String>::new);
@@ -85,6 +87,8 @@ pub(crate) fn ApprovalCards() -> Element {
         async move {
             match crate::api::fetch_approvals(&base).await {
                 Ok(list) => {
+                    #[cfg(native_desktop)]
+                    tunnel_controller.observe_cards(&list);
                     let waiting: HashSet<String> =
                         list.iter().map(|card| card.id.clone()).collect();
                     errors.write().retain(|id, _| waiting.contains(id));
@@ -189,13 +193,15 @@ pub(crate) fn ApprovalCards() -> Element {
                         let request = request.clone();
                         let mut answering = answering;
                         let action = card.action.clone();
+                        #[cfg(native_desktop)]
+                        let tunnel_card = card.clone();
                         move |(id, answer): (String, ApprovalAnswer)| {
                             // DOM disabling follows rendering. Check the live pause and claim the
                             // answer before a queued click can open anything on the user's machine.
                             if !*armed.peek() || !answering.write().insert(id.clone()) {
                                 return;
                             }
-                            if answer != ApprovalAnswer::Deny
+                            if matches!(answer, ApprovalAnswer::Allow | ApprovalAnswer::AlwaysAllow)
                                 && let ApprovalAction::OpenUrl { url, .. } = &action
                                 && !open_approved_web_url(url)
                             {
@@ -205,8 +211,29 @@ pub(crate) fn ApprovalCards() -> Element {
                             }
                             let base = base.clone();
                             let request = request.clone();
+                            #[cfg(native_desktop)]
+                            let tunnel_card = tunnel_card.clone();
                             spawn(async move {
+                                #[cfg(native_desktop)]
+                                if answer == ApprovalAnswer::TunnelAndOpen {
+                                    match tunnel_controller.prepare_card(&base, tunnel_card).await {
+                                        Ok(true) => {}
+                                        Ok(false) => {
+                                            answering.write().remove(&id);
+                                            request(Trigger::Explicit);
+                                            return;
+                                        }
+                                        Err(error) => {
+                                            errors.write().insert(id.clone(), error);
+                                            answering.write().remove(&id);
+                                            request(Trigger::Explicit);
+                                            return;
+                                        }
+                                    }
+                                }
                                 let result = crate::api::answer_approval(&base, &id, answer).await;
+                                #[cfg(native_desktop)]
+                                if answer == ApprovalAnswer::TunnelAndOpen { tunnel_controller.complete(); }
                                 match result {
                                     Ok(outcome) => {
                                         errors.write().remove(&id);
@@ -330,6 +357,21 @@ fn ApprovalCard(
     error: Option<String>,
     on_answer: EventHandler<(String, ApprovalAnswer)>,
 ) -> Element {
+    let tunnel_available = cfg!(native_desktop)
+        && matches!(
+            &card.action,
+            ApprovalAction::OpenUrl {
+                tunnel_available: true,
+                ..
+            }
+        );
+    let tunnel_port = match &card.action {
+        ApprovalAction::OpenUrl { url, .. } => url::Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.port_or_known_default())
+            .unwrap_or_default(),
+        _ => 0,
+    };
     let preapproved = matches!(
         &card.action,
         ApprovalAction::OpenUrl {
@@ -379,7 +421,13 @@ fn ApprovalCard(
                     CardDetail { key: "{index}", row }
                 }
             }
-            if matches!(&card.action, ApprovalAction::OpenUrl { local_network: true, preapproved: false, .. }) {
+            if tunnel_available {
+                p { class: "approval-card-note",
+                    "This is port {tunnel_port} on "
+                    span { class: "peer-value", dir: "ltr", "{display_peer(&card.host_name)}" }
+                    ". Opening it directly would reach this Mac instead."
+                }
+            } else if matches!(&card.action, ApprovalAction::OpenUrl { local_network: true, preapproved: false, .. }) {
                 p { class: "approval-card-note",
                     "This link addresses your own machine or local network. It needs its own host permission, even when public links are allowed."
                 }
@@ -388,15 +436,19 @@ fn ApprovalCard(
                 p { class: "approval-card-error", role: "alert", "{display_peer(&error)}" }
             }
             div { class: "approval-card-actions",
+                if tunnel_available {
+                    button { r#type: "button", class: "btn btn-primary approval-tunnel", disabled: busy,
+                        onclick: answer(ApprovalAnswer::TunnelAndOpen), "Tunnel and open" }
+                }
                 button {
                     r#type: "button",
-                    class: "btn btn-primary approval-allow",
+                    class: if tunnel_available { "btn btn-neutral approval-allow" } else { "btn btn-primary approval-allow" },
                     "data-tooltip": "allow: let this one request go ahead",
                     disabled: busy,
                     onclick: answer(ApprovalAnswer::Allow),
-                    if preapproved { "open" } else { "allow" }
+                    if tunnel_available { "Open" } else if preapproved { "open" } else { "allow" }
                 }
-                if !preapproved {
+                if !preapproved && !tunnel_available {
                 button {
                     r#type: "button",
                     class: "btn btn-neutral approval-always-allow",
@@ -413,7 +465,7 @@ fn ApprovalCard(
                     "data-tooltip": "deny: refuse this request; the agent is told you declined",
                     disabled: busy,
                     onclick: answer(ApprovalAnswer::Deny),
-                    if preapproved { "dismiss" } else { "deny" }
+                    if tunnel_available { "Deny" } else if preapproved { "dismiss" } else { "deny" }
                 }
             }
         }
@@ -1182,6 +1234,7 @@ mod tests {
                 url: url.to_string(),
                 local_network: false,
                 preapproved: false,
+                tunnel_available: false,
             })
             .into_iter()
             .find_map(|row| match row {

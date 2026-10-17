@@ -81,6 +81,26 @@ an agent's path can name any file its account can read on that host.
 The terminal keeps at least the last 10,000 lines for scrolling back. How much of that history survives a restart is in
 [What survives what](/docs/how-it-works/what-survives-what/).
 
+### Open a remote localhost link
+
+In the Mac app, **Cmd-click** a localhost link in a remote session to open the service running on that host. Farhelm
+connects a port on your Mac to the service and opens it in your browser. The hover names the host and port; a plain click
+still opens the address on your Mac. Browser clients and sessions on your Mac have no tunnel action.
+
+The first time, Farhelm asks you to accept a security warning. A page opened this way runs as a local page in your
+browser: it can read cookies from other services on `127.0.0.1`, since ports do not separate cookies, and it bypasses
+your browser's private-network checks. Any program on your Mac can connect to the tunnel. Ordinary links from another
+`127.0.0.1` page into the browser helm are also refused; opening the helm from the address bar or a bookmark still works.
+You can turn tunnels off in settings, which closes the ones already open.
+
+Open tunnels appear below the session's title, with the port on your Mac, the host's port, and a close button. Opening
+another link to the same service reuses its tunnel. Deleting the session or quitting Farhelm closes it; stopping or
+restarting the agent leaves it open. A disconnected host makes new connections fail until it returns.
+
+This works for localhost names and loopback addresses, including a development server that listens only on IPv6. It
+does not forward browser-login callbacks automatically. When an agent asks to open a link, its
+[approval card](/docs/using/approve-agent-requests/#open-links-from-a-remote-session) offers the same tunnel action.
+
 ## When the connection drops
 
 If Farhelm loses its connection to the session, a card over the dimmed last screen explains what it is waiting for,

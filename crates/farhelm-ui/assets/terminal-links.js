@@ -18,8 +18,10 @@
 //
 // ## What this does NOT do
 //
-// No fetching, no confirmation dialog, no async lookup, no detection
-// service: opening stays inside the activation call stack. The `confirm()`
+// Ordinary opening does no fetching, confirmation or async lookup and stays
+// inside the activation stack. Native remote Meta-click instead hands an
+// explicit tunnel intent to Rust, which owns consent and the async request.
+// This asset never sends tunnel HTTP requests. The `confirm()`
 // xterm shows by default without a `linkHandler` is exactly what the tests
 // pin against (see e2e/tests/terminal-links.spec.ts). And this file never
 // DECIDES what text is a link — the WebLinks addon owns detection
@@ -97,6 +99,45 @@
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
     if (!parsed.host) return false;
     return true;
+  }
+
+  /** The tunnel's narrow loopback target, after the same URL normalization as Rust.
+   * No DNS lookup and no LAN/local-network guess: only localhost names, 127/8,
+   * ::1 and the two wildcard bind addresses qualify. Zero is not a service port.
+   * Ordinary terminal opening deliberately retains its existing broader URL rule.
+   */
+  function tunnelTarget(uri) {
+    if (typeof uri !== 'string' || !isPlainWebUrl(uri) || new TextEncoder().encode(uri).length > 4096) return null;
+    const parsed = new URL(uri);
+    const port = parsed.port === '' ? (parsed.protocol === 'https:' ? 443 : 80) : Number(parsed.port);
+    if (!port) return null;
+    const host = parsed.hostname.toLowerCase().replace(/\.+$/, '');
+    const loopback = host === 'localhost' || host.endsWith('.localhost') ||
+      /^127\.\d+\.\d+\.\d+$/.test(host) || host === '0.0.0.0' ||
+      host === '[::1]' || host === '[::]';
+    return loopback ? { port } : null;
+  }
+
+  /** Admit the one new gesture after the caller's actual click/selection guards.
+   * Extra modifiers retain their established selection/alternate-click meanings.
+   */
+  function shouldTunnel({ uri, native, remote, button, metaKey, ctrlKey, shiftKey, altKey, click, selection, mode }) {
+    return !!(native && remote && button === 0 && metaKey && !ctrlKey && !shiftKey && !altKey &&
+      click && !selection && mode !== 'program' && tunnelTarget(uri));
+  }
+
+  /** Both web-link providers route through this decision, so a tunnel can never
+   * fall through to raw opening. The injected bridge reports a missing native
+   * channel through the terminal's existing status surface. `validated` is
+   * reserved for OSC's caller-owned http(s) policy; prose always uses the
+   * stricter plain-text predicate. Tunneling never waives that strict rule.
+   */
+  function activateWebLink(options, open, tunnel) {
+    if (!options.click || options.selection || options.mode === 'program' ||
+      (!options.validated && !isPlainWebUrl(options.uri))) return 'ignored';
+    if (shouldTunnel(options)) { tunnel(options.uri); return 'tunnel'; }
+    open(options.uri);
+    return 'raw';
   }
 
   /** Admit only the release of a primary press on this terminal's screen.
@@ -519,7 +560,7 @@
    * @param {boolean} [fragment] an adjacent tagged row could not be joined;
    * URL-like pieces always warn, even if that piece alone equals the target.
    */
-  function showLinkTarget(event, uri, owner, text, fragment = false) {
+  function showLinkTarget(event, uri, owner, text, fragment = false, tunnel = null) {
     // Files share visual CSS only; their async evidence owns another element.
     let display = owner.querySelector(':scope > .terminal-link-target:not(.terminal-file-target)');
     if (!display) {
@@ -558,6 +599,11 @@
     targetLine.className = 'terminal-link-target-url';
     targetLine.textContent = shortenedTarget(displayedTarget(uri));
     lines.push(targetLine);
+    if (tunnel) {
+      const hint = document.createElement('div');
+      hint.textContent = `This is port ${tunnel.port} on ${visibleFormatCharacters(tunnel.host)}, not on this Mac. ⌘-click to open it through a tunnel. A plain click opens it on this Mac.`;
+      lines.push(hint);
+    }
     display.replaceChildren(...lines);
     // Place it below-right of the pointer, then pull it back inside the
     // viewport: a link on the last rows or near the right edge would
@@ -593,6 +639,9 @@
   const api = {
     openTerminalUrl,
     isPlainWebUrl,
+    tunnelTarget,
+    shouldTunnel,
+    activateWebLink,
     createLinkGesture,
     interceptLinkPress,
     suppressMouseReport,

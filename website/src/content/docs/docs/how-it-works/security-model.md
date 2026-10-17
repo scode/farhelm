@@ -27,4 +27,7 @@ Linux) also opens the saved copy in its default app, only for `.md` and `.txt` f
 only download; check the disclosed host and path first
 ([Work in a session](/docs/using/work-in-a-session/#copy-paste-and-links)). And opening links: with your approval, or a
 host's link permission, an agent on that host can make your browser open a web address, and the local-network permission
-lets it reach addresses on your own machine and network without asking.
+lets it reach addresses on your own machine and network without asking. The Mac app's optional localhost tunnels also
+let you open a remote development server as a local page, after accepting a separate warning about cookies,
+local-network access and other programs using the tunnel
+([Open a remote localhost link](/docs/using/work-in-a-session/#open-a-remote-localhost-link)).

@@ -15,6 +15,8 @@
 //! preferences: each explicitly saves validated text and shows its outcome.
 //! Ntfy alerts follow that explicit-save contract too, with a secret that is
 //! never part of the shared client snapshot or replayed preference writes.
+//! Native tunnel consent also requires an acknowledged save; its controller
+//! owns the shared warning and revokes listeners when the switch turns off.
 
 use dioxus::prelude::*;
 
@@ -58,6 +60,7 @@ fn restore_automatic_checkbox(in_force: bool) {
 /// Controls stay enabled, and closing the dialog must not cancel a queued write.
 /// The checkout and ntfy fields are exceptions: their explicit saves expose validation
 /// refusals rather than treating arbitrary text like a switch preference.
+/// Tunnel consent is another exception: it is never optimistic or silently retried.
 /// Only the grouped body scrolls; both dismissal paths stay outside it and
 /// share the caller's close callback and focus-return lifecycle.
 #[component]
@@ -250,6 +253,7 @@ pub(crate) fn SettingsDialog(
                             label: "pass the click on only",
                             help: "Let the program handle links. Farhelm does not open them; without mouse reporting, clicking a link does nothing.",
                         }
+                        NativeTunnelSettings {}
                     }
                     section {
                         class: "host-settings-section",
@@ -333,6 +337,19 @@ pub(crate) fn SettingsDialog(
                 }
             }
         }
+    }
+}
+
+/// The web renderer neither advertises tunnels nor contacts their native routes.
+#[component]
+fn NativeTunnelSettings() -> Element {
+    #[cfg(native_desktop)]
+    {
+        rsx! { crate::tunnels::TunnelSettings {} }
+    }
+    #[cfg(not(native_desktop))]
+    {
+        rsx! {}
     }
 }
 

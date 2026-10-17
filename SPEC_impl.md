@@ -1554,6 +1554,12 @@ response. The write and close tail run in an owned task so HTTP cancellation can
 A failed database write preserves both the previous consent and active resources. No tunnel URL or opener diagnostic is
 logged, and the listener has no authentication beyond its loopback bind.
 
+An agent's tunnel approval also carries its requesting host and connection into that publication path. The manager
+compares them to the exact owner/client snapshot used for the listener; a preceding approval lookup cannot authorize a
+different owner found after adoption or reconnect. The native terminal route is the user's direct selection and has no
+agent-origin restriction. The UI keeps an accepted warning's action claim until its consent save finishes, even if its
+source view retires; the existing source-generation check then suppresses opening from that retired gesture.
+
 ### What the helm believes from a supervisor
 
 The helm's trust in an attached supervisor is scoped by effect, not by connection. A supervisor is believed about things
@@ -4932,7 +4938,8 @@ whitespace, colon, percent, quotes, backslash and glob metacharacters, logging a
 path. Python's command-template controller and xdg-open wait for the child, whereas Rust webbrowser runs non-text
 browsers in the background (Codex's login server uses it). Inspection of Claude Code 2.1.296's Linux bundle found its
 native opener passes BROWSER as one executable to an argv-based child helper, not as a template; automatic forwarding
-does not work there. The explicit Farhelm verb remains usable. No localhost callback tunnel is supplied.
+does not work there. The explicit Farhelm verb remains usable. Login callbacks to a remote localhost server are not
+forwarded automatically by the explicit localhost-tunnel feature.
 
 Deleting a session refuses its waiting requests first and keeps refusing new ones until the delete finishes
 (`Approvals::deny_session`, held for the delete and for a replacement's teardown), so a card for a session that is going
