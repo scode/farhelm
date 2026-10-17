@@ -15396,7 +15396,8 @@
 - Completion criteria: the trust section's sentence says invalidation updates the hint band and Settings shows current
   values when opened; "One GUI at a time" gains the stale-open-view rule above, worded so a reviewer or triager can
   apply it without asking the maintainer. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-spec-rules-oct16.md`.
+- Execution: change `rvvxoonykyvylpnulwrzyykqtuxyysqr`, bookmark `plan/triage-spec-rules-oct16/02-stale-gui-views`;
+  draft PR [#2195](https://github.com/scode/farhelm/pull/2195/changes).
 
 ## replace-retries-replay-settled-create-failure.md
 

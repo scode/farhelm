@@ -835,7 +835,8 @@ has not been dismissed, an informational band appears above the terminal, below 
 than covering the question, is announced without taking focus, and explains that answering automatically would require
 editing Claude's own settings with caveats. Settings and caveats opens Settings at the switch; Don't show again stores a
 shared dismissal, reversible beside the switch. × hides only the current occurrence, until the question leaves the
-screen. Other clients observe saved changes through the normal invalidation feed.
+screen. The normal invalidation feed updates the hint band in other clients; Settings reads the current shared values
+when opened.
 
 When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
 explicit-save field, explaining that it sets the folder for every host and can be changed later in Settings. Refusal
@@ -2796,6 +2797,11 @@ race when the fix is easy and adds little complexity; do not add significant mac
 consistent. This does not withdraw the session view's multi-client rules (one attached client per session, takeover,
 displaced clients), which still hold whenever more than one client opens a session, and the desktop app remains the
 primary GUI (see Signing in again).
+
+With several GUIs open, a view already open in one GUI need not reflect a change saved from another until the view is
+reopened or the page reloads, unless this spec explicitly requires that view to update live. A finding solely about an
+already-open view showing older state after another GUI saves a change is covered by this rule, not a defect. Explicit
+live-update requirements, the session view's multi-client rules, and destructive prompts' preconditions still hold.
 
 The `farhelm` command line, and the agent skill through which agents act on the fleet, are a fully supported primary
 surface alongside the GUI, including while a GUI is open (acting from inside a session needs a window open to approve
