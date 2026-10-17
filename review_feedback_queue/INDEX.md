@@ -14,9 +14,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Repeated update or removal planning can leave adding, updating, and removing hosts stuck until the helm restarts, even
   after the pages close.
 
-- [`replace-retry-key-splits-across-controls.md`](replace-retry-key-splits-across-controls.md) — Retrying an unanswered
-  Replace through the other control can start another replacement agent.
-
 - [`replace-retries-replay-settled-create-failure.md`](replace-retries-replay-settled-create-failure.md) — Replace can
   replay a permanent creation refusal after its cause is repaired.
 

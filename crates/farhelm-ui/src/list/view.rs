@@ -222,6 +222,13 @@ pub(crate) struct SharedPreferences(pub(crate) Signal<Preferences>);
 #[derive(Clone, Copy)]
 pub(crate) struct DeleteNotice(pub(crate) Signal<Option<String>>);
 
+/// One unresolved plain Replace, shared by every control on this page.
+/// The source is reserved before key minting so a late reply from an older
+/// row cannot overwrite a newer intent. Selecting a session does not discard
+/// it; cancelling Replace, choosing Replace with, or replacing another source does.
+#[derive(Clone, Copy)]
+pub(crate) struct ReplaceIntent(pub(crate) Signal<Option<(String, Option<String>)>>);
+
 impl DeleteNotice {
     /// Show `notice` when there is one; `None` leaves any earlier notice.
     pub(crate) fn publish(mut self, notice: Option<String>) {
@@ -477,6 +484,9 @@ fn leave_phase(row_phases: &mut HashMap<String, RowPhase>, id: &str, phase: RowP
 /// could kill processes after a prompt that said none were running.
 #[derive(Clone, PartialEq)]
 struct PendingYoloReplace {
+    /// Source ids can recur after another row takes the shared intent slot.
+    /// Cancellation owns only the particular retry this question continued.
+    key: String,
     ask: crate::yolo_confirm::YoloAsk,
     source: Session,
     guard: crate::DeleteGuard,
@@ -2235,11 +2245,9 @@ pub(crate) fn ListView(
     // does not do for a client that already has a page open.
     let replace_base = base.clone();
     let replace_refresh = request_listing.clone();
-    // The shared row handler keeps one unresolved intent, bound to its source.
-    // Choosing another source abandons it; this is not a cross-row key registry.
-    // Reserve the source before awaiting a key: row tasks can overlap, so an
-    // older mint or reply must not overwrite or clear a newer source's intent.
-    let mut replace_key = use_signal(|| None::<(String, Option<String>)>);
+    // The header and interrupted card use this same page-owned intent. Keep
+    // the source reservation and key guards here: row tasks can overlap.
+    let mut replace_key = use_context::<ReplaceIntent>().0;
     // A replace the helm refused as a YOLO launch on a host that asks before YOLO launches
     // (`YoloReplaceQuestion`: the question, and the row snapshot and answer
     // it continues), shown as the loud confirmation above the list until the
@@ -2381,6 +2389,7 @@ pub(crate) fn ListView(
                             // "don't ask again" failure.
                             yolo_replace_error.set(None);
                             open_yolo_replace(PendingYoloReplace {
+                                key: key.clone(),
                                 ask,
                                 source: source.clone(),
                                 guard,
@@ -4042,8 +4051,8 @@ pub(crate) fn ListView(
                                     // an earlier question leaves a later one
                                     // (and its error) alone.
                                     if yolo_replace.take(&question).is_some() {
-                                        let owns_source = replace_key.peek().as_ref().is_some_and(|(source, _)| {
-                                            source == &question.pending.source.id
+                                        let owns_source = replace_key.peek().as_ref().is_some_and(|(source, key)| {
+                                            source == &question.pending.source.id && key.as_ref() == Some(&question.pending.key)
                                         });
                                         if owns_source {
                                             replace_key.set(None);
@@ -4825,6 +4834,7 @@ mod tests {
         let question = |opening: u64| YoloReplaceQuestion {
             opening,
             pending: PendingYoloReplace {
+                key: format!("key-{opening}"),
                 ask: crate::yolo_confirm::YoloAsk {
                     host: Some(7),
                     host_name: "build box".to_string(),

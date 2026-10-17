@@ -762,6 +762,12 @@ Creation guards against accidental double submission (a double-click, a retry af
 yields one session or a clear error, never two silently. Deliberately creating several sessions with identical
 parameters — same directory, same launch — is a sanctioned workflow, not a duplicate to be suppressed.
 
+Controls that perform exactly the same operation on the same target behave identically and share that operation's state,
+including an unresolved retry identity or a pending confirmation, differing only where the GUI strictly requires it.
+Plain Replace shares one unresolved identity across the sidebar, session header and interrupted-session card, including
+navigation away and back. An acknowledged result, cancelling Replace, choosing Replace with, or starting Replace on
+another source ends that identity; a partial success or unclear outcome retains it for retry.
+
 A YOLO launch on a host that asks before YOLO launches (see the host settings under Topology) needs an explicit
 confirmation. An agent launch counts as YOLO when its stored permission is custom or YOLO, including omitted permissions
 on Pi, OpenCode, OMP and Goose. A stored omission on Claude, Codex, Grok, Muse or Cursor is the agent's own setting, not
