@@ -52,6 +52,7 @@ import { fulfillAsHelm, helmBuild, installTerminalSuiteHooks, LIVE_BADGE, LIVE_S
 const UNACCEPTED = { "x-farhelm-create-outcome": "definitely-unaccepted" };
 import { routeGate } from "./helpers/route-gate";
 import { attachSession, waitForTermText } from "./helpers/term";
+import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 // Fabricated refusals need the live helm's stamp. The existing suite reset
 // captures it per engine and prevents unrelated build-skew recovery behavior.
@@ -147,6 +148,91 @@ async function confirmSidebarReplace(sourceRow: Locator) {
   await sourceRow.locator(".confirm-replace").click();
 }
 
+// The first request reaches the real create path, then a deliberately stricter
+// delete guard keeps its live source. Both controls must recover that exact
+// replacement, rather than merely reusing a key after an unaccepted request.
+for (const first of ["sidebar", "header"] as const) {
+  test(`plain Replace shares a committed retry across controls (${first} first)`, async ({ page, request }) => {
+    const title = `replace-shared-${first}-${Date.now()}`;
+    const source = await createSession(request, { title });
+    const endpoint = `**/api/sessions/${source.id}/replace`;
+    const keys: string[] = [];
+    let bodyFailed = false;
+    try {
+      await waitForListedState(request, source.id, "live");
+      expect(LIVE_STATES).toContain((await listSessions(request)).sessions.find((one) => one.id === source.id)?.status.state);
+      await page.route(endpoint, async (route) => {
+        const body = route.request().postDataJSON();
+        keys.push(body.intent_key);
+        if (keys.length === 1) {
+          const response = await route.fetch({ postData: JSON.stringify({ ...body, only_if_nothing_alive: true }) });
+          expect(response.status()).toBe(500);
+          expect(await response.text()).toContain("both sessions still exist");
+          await route.fulfill({ response });
+        } else await route.continue();
+      });
+      await page.goto("/");
+      await attachSession(page, source.id);
+      const sourceRow = row(page, source.id);
+      if (first === "sidebar") await confirmSidebarReplace(sourceRow);
+      else {
+        await page.locator(".header-replace").click();
+        await page.locator(".header-replace-confirm .btn-danger").click();
+      }
+      const error = first === "sidebar" ? sourceRow.locator(".action-error").first() : page.locator(".replace-error");
+      await expect(error).toContainText("both sessions still exist");
+      const afterFailure = (await listSessions(request)).sessions.filter((one) => one.title === title);
+      expect(afterFailure).toHaveLength(2);
+      const replacement = afterFailure.find((one) => one.id !== source.id)!;
+      expect(replacement).toBeTruthy();
+      expect(afterFailure.some((one) => one.id === source.id)).toBe(true);
+      expect(keys).toHaveLength(1);
+      expect(keys[0].length).toBeGreaterThan(0);
+
+      // Keyed session views remount on navigation. The retry is page state,
+      // so even leaving and returning must keep the committed create's key.
+      // Close the action panel explicitly: its outside-click dismissal can
+      // consume a click on another row. No terminal typing is needed here.
+      const menu = sourceRow.locator(".session-row-menu");
+      if (await menu.getAttribute("aria-expanded") === "true") await menu.click();
+      await expect(menu).toHaveAttribute("aria-expanded", "false");
+      const replacementRow = row(page, replacement.id);
+      await replacementRow.locator(".session-row-open").click();
+      await expect(replacementRow).toHaveAttribute("data-session-selected", "true");
+      await waitForSessionRevealed(page, replacement.id);
+      await sourceRow.locator(".session-row-open").click();
+      await expect(sourceRow).toHaveAttribute("data-session-selected", "true");
+      await waitForSessionRevealed(page, source.id);
+      const response = page.waitForResponse((reply) => reply.request().method() === "POST"
+        && reply.url().endsWith(`/api/sessions/${source.id}/replace`));
+      if (first === "header") await confirmSidebarReplace(sourceRow);
+      else {
+        await page.locator(".header-replace").click();
+        await page.locator(".header-replace-confirm .btn-danger").click();
+      }
+      const retried = await response;
+      expect(retried.ok(), await retried.text()).toBe(true);
+      expect((await retried.json()).id).toBe(replacement.id);
+      expect(keys).toEqual([keys[0], keys[0]]);
+      await expect(sourceRow).toHaveCount(0);
+      expect((await listSessions(request)).sessions.filter((one) => one.title === title).map((one) => one.id))
+        .toEqual([replacement.id]);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupReplaceFixtures(bodyFailed, [
+        () => page.unroute(endpoint),
+        async () => {
+          for (const one of (await listSessions(request)).sessions.filter((one) => one.title === title)) {
+            await cleanupSession(request, one.id);
+          }
+        },
+      ]);
+    }
+  });
+}
+
 /** Release every owned fixture, keeping the test's original failure primary.
  * Route release and session deletion are independent: a failed teardown step
  * must not strand a sibling in the shared stack or conceal the key assertion. */
@@ -158,6 +244,67 @@ async function cleanupReplaceFixtures(bodyFailed: boolean, steps: (() => Promise
     if (bodyFailed) console.error(error);
     else throw error;
   }
+}
+
+// Source identity alone is not ownership when the single page slot moves
+// A → B → A. The old YOLO question must not cancel A's newer retry key.
+for (const surface of ["sidebar", "header"] as const) {
+  test(`plain Replace keeps a newer same-source key after old ${surface} YOLO cancellation`, async ({ page, request }) => {
+    const source = await createSession(request, { title: `replace-return-${surface}-${Date.now()}` });
+    const other = await createSession(request, { title: `replace-between-${surface}-${Date.now()}` });
+    const sourceEndpoint = `**/api/sessions/${source.id}/replace`;
+    const otherEndpoint = `**/api/sessions/${other.id}/replace`;
+    const keys: string[] = [];
+    let bodyFailed = false;
+    try {
+      await page.setViewportSize({ width: 1280, height: 1100 });
+      await page.route(sourceEndpoint, async (route) => {
+        keys.push(route.request().postDataJSON().intent_key);
+        if (keys.length === 1) {
+          await fulfillAsHelm(route, {
+            status: 409,
+            body: "fixture asks for YOLO confirmation",
+            headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
+          });
+        } else if (keys.length === 2) await route.abort();
+        else await fulfillAsHelm(route, { status: 403, body: "new intent answered", headers: UNACCEPTED });
+      });
+      await page.route(otherEndpoint, (route) => route.abort());
+      await page.goto("/");
+      await attachSession(page, source.id);
+      const sourceRow = row(page, source.id);
+      if (surface === "sidebar") await confirmSidebarReplace(sourceRow);
+      else {
+        await page.locator(".header-replace").click();
+        await page.locator(".header-replace-confirm .btn-danger").click();
+      }
+      const question = page.locator(".yolo-confirmation");
+      await expect(question).toHaveCount(1);
+      await confirmSidebarReplace(row(page, other.id));
+      await expect(row(page, other.id).locator(".action-error").first()).toContainText("replace:");
+      await confirmSidebarReplace(sourceRow);
+      await expect(sourceRow.locator(".action-error").first()).toContainText("replace:");
+      expect(keys).toHaveLength(2);
+      expect(keys[1]).not.toBe(keys[0]);
+      await expect(question).toHaveCount(1);
+      await question.getByRole("button", { name: "cancel", exact: true }).click();
+      await expect(question).toHaveCount(0);
+      await confirmSidebarReplace(sourceRow);
+      await expect(sourceRow.locator(".action-error").first()).toContainText("new intent answered");
+      expect(keys).toHaveLength(3);
+      expect(keys[2]).toBe(keys[1]);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupReplaceFixtures(bodyFailed, [
+        () => page.unroute(sourceEndpoint),
+        () => page.unroute(otherEndpoint),
+        () => cleanupSession(request, source.id),
+        () => cleanupSession(request, other.id),
+      ]);
+    }
+  });
 }
 
 // Rows intentionally run concurrently. An older row's answered result or its
@@ -817,15 +964,18 @@ async function pressReplace(page: Page, form: Locator, sourceId: string) {
  * "live"): the server-side settling the drift tests need before the page is
  * told, or deliberately not told, about it. */
 async function waitForListedState(request: APIRequestContext, id: string, state: "exited" | "live") {
+  let lastState: string | undefined;
   await expect
     .poll(
       async () => {
-        const listed = (await listSessions(request)).sessions.find((one) => one.id === id)?.status?.state;
-        return state === "live" ? LIVE_STATES.includes(listed ?? "") : listed === state;
+        lastState = (await listSessions(request)).sessions.find((one) => one.id === id)?.status?.state;
+        return state === "live" ? LIVE_STATES.includes(lastState ?? "") : lastState === state;
       },
       { timeout: 20_000 },
     )
-    .toBe(true);
+    .toBe(true).catch((error) => {
+      throw new Error(`session ${id} did not become ${state}; last listed state: ${lastState ?? "absent"}`, { cause: error });
+    });
 }
 
 /**

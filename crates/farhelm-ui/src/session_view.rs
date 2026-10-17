@@ -472,6 +472,9 @@ fn followed_title(selected: Option<&Session>, shown: &Session) -> Option<String>
 /// never mentioned.
 #[derive(Clone, PartialEq)]
 struct PendingYoloReplace {
+    /// A later Replace on the same source can own a different page retry.
+    /// This question may cancel only the key it was originally raised for.
+    key: String,
     ask: crate::yolo_confirm::YoloAsk,
     source: Session,
     guard: crate::DeleteGuard,
@@ -654,9 +657,20 @@ pub(crate) fn SessionView(
     // before deleting this one; sharing restart state would lose the
     // endpoint's partial-failure wording or make the two operations race.
     let mut replacing = use_signal(|| false);
-    // This view is keyed by source id. An unanswered Replace keeps its key
-    // while the user retries here; cancellation or Replace with abandons it.
-    let mut replace_key = use_signal(|| None::<String>);
+    // Navigation remounts this view, but an unanswered Replace is still the
+    // same operation from the sidebar, header or interrupted card. Cancelling
+    // this source must leave a newer row's unresolved intent alone.
+    let mut replace_key = use_context::<crate::list::ReplaceIntent>().0;
+    let replace_source_id = use_signal(|| session.id.clone());
+    let mut cancel_replace_intent = move || {
+        if replace_key
+            .peek()
+            .as_ref()
+            .is_some_and(|(id, _)| id == &*replace_source_id.peek())
+        {
+            replace_key.set(None);
+        }
+    };
     // Each Replace prompt is a `ConfirmSlot` holding the lifecycle claim it
     // took when it opened: confirming moves that claim into the replace
     // task, cancelling drops it, and neither can touch a claim it does not
@@ -1517,6 +1531,12 @@ pub(crate) fn SessionView(
         let base = replace_base.clone();
         let id = replace_session_id.clone();
         let preferences = replace_preferences;
+        let retained = replace_key
+            .peek()
+            .as_ref()
+            .filter(|(source, _)| source == &id)
+            .and_then(|(_, key)| key.clone());
+        replace_key.set(Some((id.clone(), retained.clone())));
         spawn(async move {
             let _claim = claim;
             if let Some((host, name)) = stop_asking {
@@ -1527,12 +1547,17 @@ pub(crate) fn SessionView(
                 }
                 replace_yolo.set(None);
             }
-            let retained = replace_key.peek().clone();
             let key = match retained {
                 Some(key) => key,
                 None => match crate::api::mint_intent_key().await {
                     Ok(key) => {
-                        replace_key.set(Some(key.clone()));
+                        let owns_pending_key = replace_key
+                            .peek()
+                            .as_ref()
+                            .is_some_and(|(source, key)| source == &id && key.is_none());
+                        if owns_pending_key {
+                            replace_key.set(Some((id.clone(), Some(key.clone()))));
+                        }
                         key
                     }
                     Err(reason) => {
@@ -1542,9 +1567,22 @@ pub(crate) fn SessionView(
                     }
                 },
             };
+            // A concurrent sidebar operation can replace the page's single
+            // slot. Only the intent this task sent may be settled by its reply.
+            let mut end_intent = || {
+                if replace_key
+                    .peek()
+                    .as_ref()
+                    .is_some_and(|(source, retained)| {
+                        source == &id && retained.as_ref() == Some(&key)
+                    })
+                {
+                    replace_key.set(None);
+                }
+            };
             match replace_session(&base, &id, &key, guard, allow_yolo).await {
                 Ok((new_session, notice)) => {
-                    replace_key.set(None);
+                    end_intent();
                     header_refresh.set(true);
                     delete_notice.publish(notice);
                     let new_session = crate::list::with_source_host(new_session, &source);
@@ -1556,6 +1594,7 @@ pub(crate) fn SessionView(
                     // "don't ask again" failure.
                     replace_yolo_error.set(None);
                     replace_yolo.set(Some(PendingYoloReplace {
+                        key: key.clone(),
                         ask: crate::yolo_confirm::YoloAsk {
                             host: source.host,
                             host_name: source
@@ -1572,7 +1611,7 @@ pub(crate) fn SessionView(
                 }
                 Err(error) => {
                     if !error.retain_replace_key() {
-                        replace_key.set(None);
+                        end_intent();
                     }
                     replace_error.set(Some(error.text));
                 }
@@ -2409,7 +2448,7 @@ pub(crate) fn SessionView(
                                     "data-tooltip": "cancel: keep this session as it is",
                                     onclick: move |_| {
                                         if confirming_header_replace.take(&()).is_some() {
-                                            replace_key.set(None);
+                                            cancel_replace_intent();
                                         }
                                     },
                                     "cancel"
@@ -2431,7 +2470,7 @@ pub(crate) fn SessionView(
                         "data-tooltip": "replace with: edit the settings, then swap this session for a new one",
                         disabled: lifecycle.busy(),
                         onclick: move |_| {
-                            replace_key.set(None);
+                            cancel_replace_intent();
                             prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(header_replace_session.clone())));
                         },
                         "replace with"
@@ -2683,8 +2722,16 @@ pub(crate) fn SessionView(
                         }
                     },
                     on_cancel: move |_| {
+                        let pending = replace_yolo.peek().clone();
                         replace_yolo.set(None);
-                        replace_key.set(None);
+                        if let Some(pending) = pending {
+                            let owns_key = replace_key.peek().as_ref().is_some_and(|(source, key)| {
+                                source == &pending.source.id && key.as_ref() == Some(&pending.key)
+                            });
+                            if owns_key {
+                                replace_key.set(None);
+                            }
+                        }
                         replace_yolo_error.set(None);
                     },
                 }
@@ -2785,7 +2832,7 @@ pub(crate) fn SessionView(
                             "data-tooltip": "replace with: edit the settings, then swap this session for a new one",
                             disabled: lifecycle.busy(),
                             onclick: move |_| {
-                                replace_key.set(None);
+                                cancel_replace_intent();
                                 prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(card_replace_with_session.clone())));
                             },
                             "replace with"
@@ -2840,7 +2887,7 @@ pub(crate) fn SessionView(
                                 autofocus: replacing(),
                                 onclick: move |_| {
                                     if confirming_replace.take(&()).is_some() {
-                                        replace_key.set(None);
+                                        cancel_replace_intent();
                                     }
                                 },
                                 "cancel"

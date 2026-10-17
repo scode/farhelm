@@ -56,6 +56,6 @@ pub(crate) use create_form::submitted_field;
 pub(crate) use row::PeerTitle;
 pub(crate) use shared::{OpenDestination, with_source_host};
 pub(crate) use view::{
-    DeleteNotice, HeaderDeleteRequest, HeaderPrefillRequest, ListView, SharedPreferences,
-    remember_selection,
+    DeleteNotice, HeaderDeleteRequest, HeaderPrefillRequest, ListView, ReplaceIntent,
+    SharedPreferences, remember_selection,
 };

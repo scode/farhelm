@@ -15445,7 +15445,8 @@
 - Completion criteria: SPEC.md states the same-operation principle; a regression commits the first replacement, fails
   its deletion, retries through the other control and observes exactly one replacement, in both directions; run it
   through the recorder on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/replace-retry-identity.md`.
+- Execution: change `zqswvnzwyolkxutmskxpkukztownsplz`; bookmark `plan/replace-retry-identity/01-shared-identity`;
+  draft PR [#2205](https://github.com/scode/farhelm/pull/2205/changes).
 
 ## trash-listing-exceeds-control-frame.md
 
