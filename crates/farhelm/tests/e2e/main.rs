@@ -81,6 +81,8 @@ mod terminal_tabs;
 mod attachment_uploads;
 #[cfg(target_os = "linux")]
 mod file_downloads;
+#[cfg(target_os = "linux")]
+mod tcp_relays;
 
 #[cfg(target_os = "linux")]
 mod replay_marker;

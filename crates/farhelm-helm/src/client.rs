@@ -1,13 +1,14 @@
 //! The helm's client half of the supervisor protocol.
 //!
 //! One connection per supervisor, multiplexing concurrent requests
-//! (correlated by `req_id`) and any number of terminal attachments
+//! (correlated by `req_id`) and terminal, file and raw TCP streams
 //! (routed by data-channel id). The transport is opaque: a unix socket
 //! for the local host, an ssh exec channel for a remote one — handed in
 //! as a reader/writer pair so this code cannot tell the difference,
 //! which is the SPEC_impl.md transport-blindness made structural.
 
 mod downloads;
+mod tcp_relays;
 pub use downloads::DownloadGuard;
 
 use anyhow::bail;
@@ -86,9 +87,10 @@ const TERM_EVENT_QUEUE: usize = 256;
 /// here this counts MESSAGES, not bytes; a single paste chunk is up to
 /// `INPUT_CHUNK`, so the ceiling is 64 of those.
 ///
-/// Attachment uploads are the one BULK producer sharing this queue, and
-/// they are rationed rather than accommodated: [`UPLOAD_ENQUEUE_FRAMES`]
-/// caps how much of it upload data may occupy at once. That is what lets
+/// Attachment uploads and raw TCP relays are the BULK producers sharing
+/// this queue, and they are rationed rather than accommodated:
+/// [`UPLOAD_ENQUEUE_FRAMES`] caps how much of it their data may occupy at
+/// once. That is what lets
 /// this bound stay sized for the interactive traffic it exists to serve
 /// instead of growing to fit a megabyte-scale producer that would then
 /// sit in front of every keystroke.
@@ -127,8 +129,8 @@ const WRITER_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 /// declared stalled on the same generous timescale.
 const UPLOAD_ACK_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// How many upload data frames this connection may have sitting in the
-/// shared writer queue at once, across every concurrent upload.
+/// How many upload or raw TCP data frames this connection may have sitting
+/// in the shared writer queue at once, across every concurrent bulk producer.
 ///
 /// The credit window is not enough on its own, and `UPLOAD_CHUNK_BYTES`'s
 /// own docs say why: "the credit window bounds transit, the sender bounds
@@ -137,7 +139,7 @@ const UPLOAD_ACK_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 /// keystroke, resize and control reply enqueued after that would wait
 /// behind megabytes of attachment data on a queue that carries them all.
 ///
-/// The bound is global rather than per-upload so that concurrent uploads
+/// The bound is global rather than per-stream so that concurrent producers
 /// cannot multiply their way back to the same problem, and it is enforced
 /// with a semaphore whose permit rides the queued frame (see [`Outbound`]),
 /// so an allowance is returned only once the writer has actually WRITTEN
@@ -854,7 +856,10 @@ pub struct SupervisorClient {
     /// Receive-direction reads share the channel allocator, never terminal
     /// routing or upload lifecycle. The consumer guard owns retirement.
     downloads: Mutex<HashMap<u32, downloads::DownloadHandle>>,
-    /// The connection-wide ration of upload frames allowed to occupy the
+    /// Bidirectional raw TCP channels. Their futures own route retirement;
+    /// demux only appends bounded bytes or publishes credit/terminal state.
+    tcp_relays: Mutex<HashMap<u32, Arc<farhelm_proto::tcp_relay::TcpRelayState>>>,
+    /// The connection-wide ration of bulk frames allowed to occupy the
     /// shared writer queue at once — see [`UPLOAD_ENQUEUE_FRAMES`].
     upload_enqueue: Arc<Semaphore>,
     /// How long a credit wait may go without an advancing ack before the
@@ -1415,6 +1420,7 @@ impl SupervisorClient {
             terminals: Mutex::new(HashMap::new()),
             uploads: Mutex::new(HashMap::new()),
             downloads: Mutex::new(HashMap::new()),
+            tcp_relays: Mutex::new(HashMap::new()),
             upload_enqueue: Arc::new(Semaphore::new(UPLOAD_ENQUEUE_FRAMES)),
             upload_stall,
             next_req: AtomicU64::new(1),
@@ -1599,6 +1605,9 @@ impl SupervisorClient {
                 route.end.send_replace(Some(Err(reason.to_string())));
             }
         }
+        for state in self.tcp_relays.lock().await.values() {
+            state.finish(Err(reason.to_string()));
+        }
         // Flag and drain in one lock hold; see `Pending` for why.
         let mut pending = self.pending.lock().await;
         pending.closed = true;
@@ -1749,7 +1758,10 @@ impl SupervisorClient {
     async fn dispatch(self: &Arc<Self>, frame: Frame) -> anyhow::Result<()> {
         match frame.kind {
             FrameKind::Data => {
-                if self.downloads.lock().await.contains_key(&frame.channel) {
+                let relay = self.tcp_relays.lock().await.get(&frame.channel).cloned();
+                if let Some(state) = relay {
+                    state.push(&frame.body);
+                } else if self.downloads.lock().await.contains_key(&frame.channel) {
                     self.route_download_bytes(frame.channel, frame.body).await;
                 } else {
                     self.route_terminal_event(frame.channel, TermEvent::Data(frame.body))
@@ -1813,6 +1825,19 @@ impl SupervisorClient {
                     return Ok(());
                 }
                 match &msg {
+                    ControlMsg::TcpRelayAck { channel, received } => {
+                        if let Some(state) = self.tcp_relays.lock().await.get(channel) {
+                            state.ack(*received);
+                        }
+                    }
+                    ControlMsg::TcpRelayEnded { channel, reason } => {
+                        if let Some(state) = self.tcp_relays.lock().await.get(channel) {
+                            state.finish(match reason {
+                                Some(reason) => Err(reason.clone()),
+                                None => Ok(()),
+                            });
+                        }
+                    }
                     ControlMsg::DownloadEnded { channel, reason } => {
                         if let Some(route) = self.downloads.lock().await.get(channel) {
                             // A prior overflow must not become a later EOF success.

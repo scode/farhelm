@@ -98,6 +98,7 @@ mod report_files;
 mod report_watch;
 mod status;
 mod sweep;
+mod tcp_relays;
 mod teardown;
 mod terminals;
 mod ticker;
