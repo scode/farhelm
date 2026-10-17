@@ -38,6 +38,32 @@ pub(super) fn quick_launch_eligible(fields: &TemplateFields) -> bool {
             .is_some_and(|command| !command.trim().is_empty())
 }
 
+/// Estimate whether ordered template edits supply the active launch kind.
+/// This intentionally knows no catalog or hosts: the mounted New form still
+/// applies every template and owns all validation and refusal messages. Dormant
+/// agent and command choices survive tab switches, just as they do in New.
+pub(super) fn stacked_quick_launch_eligible(templates: &[LaunchTemplate]) -> bool {
+    let mut kind = LauncherKind::Agent;
+    let mut agent = None;
+    let mut command = None;
+    for template in templates {
+        let fields = &template.fields;
+        if let Some(next) = fields.kind {
+            kind = next;
+        }
+        if kind == LauncherKind::Agent && fields.agent.is_some() {
+            agent = fields.agent;
+        }
+        if let Some(next) = &fields.command {
+            command = Some(next);
+        }
+    }
+    match kind {
+        LauncherKind::Agent => agent.is_some(),
+        LauncherKind::Command => command.is_some_and(|command| !command.trim().is_empty()),
+    }
+}
+
 /// Advertise both platform chords without mistaking the browser for a Mac app.
 /// The capture listener chooses the actual chord using navigator.platform.
 pub(super) const QUICK_LAUNCH_CHORD: &str = "⌘P / Ctrl+Shift+P";
@@ -1879,6 +1905,72 @@ mod tests {
             command: Some("agent --flag".into()),
             ..Default::default()
         }));
+    }
+
+    /// Composition judges the final active tab, while preserving choices in
+    /// the other tab. A modifier alone must not launch an empty draft, and a
+    /// later blank command must not inherit an earlier runnable command.
+    #[test]
+    fn stacked_quick_launch_tracks_order_and_dormant_choices() {
+        let template = |fields| LaunchTemplate {
+            name: "setup".into(),
+            fields,
+        };
+        let agent = template(TemplateFields {
+            agent: Some(LaunchHarness::Codex),
+            ..Default::default()
+        });
+        let modifier = template(TemplateFields {
+            model: Some(Some("custom".into())),
+            ..Default::default()
+        });
+        let command_tab = template(TemplateFields {
+            kind: Some(LauncherKind::Command),
+            agent: Some(LaunchHarness::Claude),
+            ..Default::default()
+        });
+        let command = template(TemplateFields {
+            command: Some("run-task".into()),
+            ..Default::default()
+        });
+        let blank_command = template(TemplateFields {
+            command: Some(" \t".into()),
+            ..Default::default()
+        });
+        let agent_tab = template(TemplateFields {
+            kind: Some(LauncherKind::Agent),
+            ..Default::default()
+        });
+        assert!(!stacked_quick_launch_eligible(&[]));
+        assert!(!stacked_quick_launch_eligible(std::slice::from_ref(
+            &modifier
+        )));
+        assert!(stacked_quick_launch_eligible(&[agent.clone(), modifier]));
+        assert!(!stacked_quick_launch_eligible(std::slice::from_ref(
+            &command_tab
+        )));
+        assert!(!stacked_quick_launch_eligible(&[
+            agent.clone(),
+            command_tab.clone()
+        ]));
+        assert!(stacked_quick_launch_eligible(&[
+            command_tab.clone(),
+            command.clone()
+        ]));
+        assert!(!stacked_quick_launch_eligible(&[
+            command_tab.clone(),
+            command,
+            blank_command
+        ]));
+        assert!(!stacked_quick_launch_eligible(&[
+            command_tab.clone(),
+            agent_tab.clone()
+        ]));
+        assert!(stacked_quick_launch_eligible(&[
+            agent,
+            command_tab,
+            agent_tab
+        ]));
     }
 
     /// Explicit supported choices must remain saveable even when their mode

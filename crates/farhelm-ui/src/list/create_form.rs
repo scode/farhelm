@@ -2393,6 +2393,11 @@ pub(super) fn CreateSessionForm(
     /// through the same search-accept path as a keyboard or mouse choice. This is not a clone
     /// prefill: remembered permissions and New's destination still seed normally.
     initial_action: Option<crate::launch_composer::ComposerSearchResult>,
+    /// Quick-launch definitions captured together before this form mounted.
+    /// Replay one per effect pass so host and catalog reconciliation observes
+    /// each preceding edit before the next template is validated against it.
+    #[props(default)]
+    initial_templates: Vec<farhelm_proto::launcher::LaunchTemplate>,
     /// Quick launch submits this ordinary draft once, after its template and
     /// prerequisites settle. Failures reveal the same mounted form for retry.
     auto_launch: Signal<bool>,
@@ -2889,6 +2894,8 @@ pub(super) fn CreateSessionForm(
     // clone reconciliation cannot overwrite the action it applies.
     let mut mount_seeded = use_signal(|| false);
     let mut pending_initial_action = use_signal(move || initial_action);
+    let mut pending_initial_templates =
+        use_signal(move || std::collections::VecDeque::from(initial_templates));
     // Cloned rather than borrowed into the effect below: `hosts` is this
     // component's own prop (not a `Signal`, so it cannot be `Copy`-captured
     // the way the surrounding signals are), and the render body further
@@ -2902,6 +2909,7 @@ pub(super) fn CreateSessionForm(
             // revoke the child's mount-time copy.
             if prefill.is_some() {
                 pending_initial_action.set(None);
+                pending_initial_templates.write().clear();
                 auto_launch_pending.set(false);
                 quick_launch_hidden.set(false);
             }
@@ -4136,13 +4144,22 @@ pub(super) fn CreateSessionForm(
     let action_browse_base = browse_base.clone();
     let action_browse_hosts = browse_hosts.clone();
     let accept_search = use_callback(
-        move |result: crate::launch_composer::ComposerSearchResult| {
+        move |(result, captured): (
+            crate::launch_composer::ComposerSearchResult,
+            Option<farhelm_proto::launcher::LaunchTemplate>,
+        )| {
             if !draft_transition_allowed(ops) {
                 return false;
             }
             let switch_before = capture_permission_switch(undo_targets);
+            // Ordinary search follows its current list. Quick launch instead
+            // supplies the exact definition its fresh-read opening accepted.
+            let available_templates = captured
+                .as_ref()
+                .map(std::slice::from_ref)
+                .unwrap_or(&templates_now);
             let automatic_permission = match &result {
-                crate::launch_composer::ComposerSearchResult::Template(name) => templates_now
+                crate::launch_composer::ComposerSearchResult::Template(name) => available_templates
                     .iter()
                     .find(|template| &template.name == name)
                     .is_some_and(|template| template.fields.permissions.is_none()),
@@ -4160,7 +4177,7 @@ pub(super) fn CreateSessionForm(
             let mut browse_path = None;
             for edit in template_edits(
                 result,
-                &templates_now,
+                available_templates,
                 &action_hosts,
                 action_catalog.as_deref().unwrap_or_default(),
                 is_replace_with,
@@ -4259,7 +4276,13 @@ pub(super) fn CreateSessionForm(
     // While a template waits, the form presents a cancellable loading state
     // rather than accepting edits that the late application would overwrite.
     use_effect(use_reactive((&hosts_loaded,), move |(hosts_loaded,)| {
-        let action = pending_initial_action.peek().clone();
+        let captured = pending_initial_templates.read().front().cloned();
+        let action = captured
+            .as_ref()
+            .map(|template| {
+                crate::launch_composer::ComposerSearchResult::Template(template.name.clone())
+            })
+            .or_else(&*pending_initial_action);
         let Some(action) = action else {
             return;
         };
@@ -4270,7 +4293,7 @@ pub(super) fn CreateSessionForm(
             action,
             crate::launch_composer::ComposerSearchResult::Template(_)
         ) && (!hosts_loaded
-            || launch_templates.read().is_none()
+            || (captured.is_none() && launch_templates.read().is_none())
             || launch_catalog.read().is_none())
         {
             return;
@@ -4278,7 +4301,8 @@ pub(super) fn CreateSessionForm(
         if matches!(
             action,
             crate::launch_composer::ComposerSearchResult::Template(_)
-        ) && let Some(Err(message)) = launch_templates.read().as_ref()
+        ) && captured.is_none()
+            && let Some(Err(message)) = launch_templates.read().as_ref()
         {
             template_error.set(Some(format!(
                 "couldn't load templates: {message}; search tl: and retry"
@@ -4286,8 +4310,18 @@ pub(super) fn CreateSessionForm(
             pending_initial_action.set(None);
             return;
         }
-        if accept_search.call(action) {
-            pending_initial_action.set(None);
+        if accept_search.call((action, captured.clone())) {
+            if captured.is_some() {
+                if template_error.peek().is_some() {
+                    // A refused template owns the fallback. Later templates
+                    // must not clear its error or silently repair its fields.
+                    pending_initial_templates.write().clear();
+                } else {
+                    pending_initial_templates.write().pop_front();
+                }
+            } else {
+                pending_initial_action.set(None);
+            }
         }
     }));
     // Pointer and keyboard choices share their transition callbacks. Enter
@@ -4379,6 +4413,11 @@ pub(super) fn CreateSessionForm(
     // submitted, this flag is spent even after an ambiguous reply or path race.
     let quick_target_ready =
         target_matches_selection(selected, &hosts, create_target.read().as_ref());
+    // Replay effects and auto-submit can run in the same effect batch. The
+    // final replay must first earn a render with its resulting readiness and
+    // refusal, rather than consume those values from before the last edit.
+    let initial_setup_pending =
+        pending_initial_action().is_some() || !pending_initial_templates.read().is_empty();
     use_effect(use_reactive(
         (
             &hosts_loaded,
@@ -4387,8 +4426,17 @@ pub(super) fn CreateSessionForm(
             &busy,
             &selected_host_available,
             &host_read_error,
+            &initial_setup_pending,
         ),
-        move |(hosts_loaded, refusal, target_ready, busy, host_available, host_error)| {
+        move |(
+            hosts_loaded,
+            refusal,
+            target_ready,
+            busy,
+            host_available,
+            host_error,
+            setup_pending,
+        )| {
             if auto_launch_pending()
                 && !hosts_loaded
                 && let Some(message) = host_error
@@ -4402,7 +4450,9 @@ pub(super) fn CreateSessionForm(
             }
             if !auto_launch_pending()
                 || !mount_seeded()
+                || setup_pending
                 || pending_initial_action().is_some()
+                || !pending_initial_templates.read().is_empty()
                 || !hosts_loaded
             {
                 return;
@@ -5364,7 +5414,7 @@ pub(super) fn CreateSessionForm(
             if let Some(message) = preparation_error() {
                 p { class: "create-session-error", role: "alert", "{display_peer(&message)}" }
             }
-            if pending_initial_action().is_some() {
+            if pending_initial_action().is_some() || !pending_initial_templates.read().is_empty() {
                 p { role: "status", "loading session setup…" }
                 button {
                     r#type: "button", class: "btn btn-neutral launch-composer-loading-cancel",
@@ -5774,7 +5824,7 @@ pub(super) fn CreateSessionForm(
                                     if composer_search_open() && let Some(result) =
                                         search_results_for_keys.get(composer_active_index).cloned()
                                     {
-                                        accept_search.call(result);
+                                        accept_search.call((result, None));
                                     }
                                 }
                                 _ => {}
@@ -5832,7 +5882,7 @@ pub(super) fn CreateSessionForm(
                                                     onclick: {
                                                         let result = result.clone();
                                                         move |_| {
-                                                            accept_search.call(result.clone());
+                                                            accept_search.call((result.clone(), None));
                                                         }
                                                     },
                                                     match &result {
