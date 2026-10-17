@@ -7483,6 +7483,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   overflow: auto;
   padding: 0 18px 18px;
 }
+/* Match host plans: the enclosing frame must not clip the keyboard ring. */
+.checkout-trash-body:focus-visible { outline-offset: -2px; }
 
 .checkout-trash-header h2 {
   display: flex;
