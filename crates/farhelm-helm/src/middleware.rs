@@ -165,18 +165,33 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16, mode: crate::Se
     // attaching a session on load, merely rendering the page displaces
     // whichever client held that terminal. `Sec-Fetch-Site` is the
     // browser-set (unforgeable from content) fetch-metadata header that
-    // names the relationship: reject `cross-site` when no allowed Origin
-    // vouched for the request. Everything legitimate stays open — address
+    // names the relationship: reject `cross-site` and `same-site` when no
+    // allowed Origin vouched for the request. A page on another loopback
+    // port is same-site, including a remote page exposed by a desktop
+    // tunnel; it must not navigate into an authenticated helm either.
+    // Direct launches stay open — address
     // bar and bookmark launches say `none`, reloads and the app's own
     // requests say `same-origin`, non-browser clients send nothing, and
     // the desktop webview's fetches (cross-site by construction, custom
     // scheme → loopback) carry their custom-scheme Origin, which the arm
     // above admits only on the embedded helm, and are gated by that arm
     // instead of this one.
-    let fetch_site_ok = headers.get(axum::http::header::ORIGIN).is_some()
-        || headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) != Some("cross-site");
+    let fetch_site_ok = fetch_metadata_allows_navigation(headers);
 
     host_ok && origin_ok && fetch_site_ok
+}
+
+/// Refuse browser navigations from other sites or loopback ports when no
+/// Origin can vouch for them. Both admission and legacy-name redirects
+/// need this boundary: redirecting a rejected navigation would still send
+/// the browser toward the authenticated UI. A present Origin is validated
+/// separately by the admission guard; this predicate does not trust it.
+fn fetch_metadata_allows_navigation(headers: &axum::http::HeaderMap) -> bool {
+    headers.get(axum::http::header::ORIGIN).is_some()
+        || !matches!(
+            headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()),
+            Some("cross-site" | "same-site")
+        )
 }
 
 /// Where to send a plain page load that named this helm by a loopback name
@@ -191,12 +206,16 @@ fn origin_is_allowed(headers: &axum::http::HeaderMap, port: u16, mode: crate::Se
 /// from the request. The target is always `/` because the UI has no path
 /// routing. Only `GET` and `HEAD` without an `Upgrade` header qualify; API
 /// calls and WebSocket upgrades under those names stay refused, since no
-/// page this helm serves can make them.
+/// page this helm serves can make them. Origin-less navigations from
+/// another site or loopback port are refused rather than redirected.
 fn legacy_loopback_redirect(
     method: &axum::http::Method,
     headers: &axum::http::HeaderMap,
     port: u16,
 ) -> Option<axum::http::HeaderValue> {
+    if !fetch_metadata_allows_navigation(headers) {
+        return None;
+    }
     if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
         return None;
     }
@@ -508,6 +527,21 @@ mod tests {
         }
     }
 
+    /// The legacy spelling must not turn a refused foreign navigation
+    /// into a redirect to the authenticated UI. Direct bookmarks retain
+    /// the convenience redirect, but other sites and loopback ports do not.
+    #[farhelm_testtrace::test]
+    fn legacy_redirects_refuse_foreign_originless_navigations() {
+        for host in ["localhost:7433", "[::1]:7433"] {
+            for fetch_site in ["cross-site", "same-site"] {
+                let h = with_fetch_site(headers(Some(host), None), fetch_site);
+                for method in [axum::http::Method::GET, axum::http::Method::HEAD] {
+                    assert!(legacy_loopback_redirect(&method, &h, PORT).is_none());
+                }
+            }
+        }
+    }
+
     /// Custom-scheme origins are admitted only by the embedded helm. A
     /// standalone helm has no page that needs this cross-origin exemption,
     /// so accepting another framework app's scheme there would widen its
@@ -704,6 +738,39 @@ mod tests {
         ));
         assert!(!embedded_origin_is_allowed(
             &with_fetch_site(base(), "cross-site"),
+            PORT
+        ));
+    }
+
+    /// A page on another loopback port is same-site but has no authority
+    /// over this helm. This includes a remote page exposed through a
+    /// desktop tunnel. Neither helm mode may accept its Origin-less
+    /// navigation, which could otherwise attach the browser to a session.
+    /// Explicitly allowed origins still vouch for desktop and UI requests.
+    #[farhelm_testtrace::test]
+    fn same_site_navigations_require_an_allowed_origin_in_both_modes() {
+        for mode in [crate::ServingMode::Standalone, crate::ServingMode::Embedded] {
+            for origin in [None, Some("http://127.0.0.1:9999")] {
+                assert!(!origin_is_allowed(
+                    &with_fetch_site(headers(Some("127.0.0.1:7433"), origin), "same-site"),
+                    PORT,
+                    mode
+                ));
+            }
+            assert!(origin_is_allowed(
+                &with_fetch_site(
+                    headers(Some("127.0.0.1:7433"), Some("http://127.0.0.1:7433")),
+                    "same-site"
+                ),
+                PORT,
+                mode
+            ));
+        }
+        assert!(embedded_origin_is_allowed(
+            &with_fetch_site(
+                headers(Some("127.0.0.1:7433"), Some("dioxus://index.html")),
+                "same-site"
+            ),
             PORT
         ));
     }

@@ -2509,7 +2509,9 @@ redirects. Settings allow HTTP for a private server, which sends those values an
   the exemption because the window's page is `dioxus://index.html`, cross-origin to the helm. That check is not the
   desktop app's identity. Nothing that establishes the native app as a client may rely on `Origin`; that rests on the
   credential the native process obtains itself, and hardening that keeps other software from passing for the native app
-  goes through that credential.
+  goes through that credential. In both modes, a request without an Origin is refused when `Sec-Fetch-Site` says
+  `cross-site` or `same-site`: a page on another loopback port has no authority over this helm. This also prevents an
+  ordinary link from such a page from opening the standalone helm; address-bar launches and bookmarks still work.
 - **Helm to supervisor**: SSH, and only SSH, for every remote supervisor. Passwordless access from the helm's machine,
   as the user, is the requirement; authentication is the user's SSH keys, and supervisors listen on no network port of
   their own. Registering a host means giving the helm its SSH destination — there is no supervisor token to manage. The
