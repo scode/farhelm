@@ -1239,7 +1239,10 @@ like terminal text size: it is about the screen in front of the user, rather tha
 The main pane keeps its 320px floor; a narrower window scrolls horizontally.
 
 Every scrollable region in the GUI can be reached and scrolled with the keyboard alone in every engine Farhelm ships on,
-WebKit included. A region whose content holds nothing focusable gets its own tab stop with an accessible name.
+WebKit included. A region whose content holds nothing focusable gets its own tab stop with an accessible name. Pop-up
+suggestion lists and menus use their own arrow keys, the pointer-only file hover cannot be scrolled by anyone, and the
+terminal scrolls with Shift+PageUp/PageDown. On macOS, keyboard-only users reach buttons with Keyboard navigation or
+Option-Tab (the default Tab order includes only text fields and pop-ups), so button-only regions need no extra stop.
 
 Pinned sessions appear first in the sidebar, with each group preserving the chosen list order below. A pin is shared
 helm data, so every client agrees without a private rank; it works even when the session's host is unreachable. Host
