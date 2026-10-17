@@ -164,7 +164,8 @@ fn folder_tail_label(path: &str) -> String {
 }
 
 /// What a successful create hands to `on_created`: the session the helm
-/// returned, and the structured launch this form SUBMITTED, if any.
+/// returned, the structured launch this form SUBMITTED, if any, and whether
+/// New stayed hidden so the caller can offer naming after acceptance.
 ///
 /// Kept apart because they come from different parties. `session.launch` is
 /// the supervisor's reply, which a remote host writes; the form's own
@@ -175,6 +176,16 @@ fn folder_tail_label(path: &str) -> String {
 pub(crate) struct CreatedSession {
     pub(crate) session: Session,
     pub(crate) submitted_launch: Option<LaunchSelection>,
+    /// True only when this opening stayed hidden through successful creation.
+    /// A quick launch revealed for review has already offered its name field.
+    pub(crate) new_was_never_shown: bool,
+}
+
+/// Preserve the opening's actual visibility history at accepted-create time.
+/// A refusal, YOLO question or incomplete template reveals New permanently;
+/// the initial quick-launch intent alone cannot justify a second naming prompt.
+fn new_was_never_shown(quick_origin: bool, quick_launch_hidden: bool) -> bool {
+    quick_origin && quick_launch_hidden
 }
 
 /// What one create would actually LAUNCH.
@@ -5317,6 +5328,10 @@ pub(super) fn CreateSessionForm(
                                     created_host_identity,
                                 ),
                                 submitted_launch,
+                                new_was_never_shown: new_was_never_shown(
+                                    quick_origin,
+                                    *quick_launch_hidden.peek(),
+                                ),
                             });
                         }
                         Err(e) => {
@@ -7016,6 +7031,17 @@ pub(super) fn CreateSessionForm(
 
 #[cfg(test)]
 mod tests {
+    /// A quick origin is insufficient after New became visible. A successful
+    /// retry after refusal or consent has already offered the name field and
+    /// must not be followed by a second naming prompt.
+    #[test]
+    fn naming_fact_requires_a_quick_opening_that_never_revealed_new() {
+        assert!(super::new_was_never_shown(true, true));
+        assert!(!super::new_was_never_shown(true, false));
+        assert!(!super::new_was_never_shown(false, false));
+        assert!(!super::new_was_never_shown(false, true));
+    }
+
     /// A hidden prompt remains an agent-tab draft, never a command argument.
     /// Empty presence survives templates; unsupported agents omit it.
     #[test]
