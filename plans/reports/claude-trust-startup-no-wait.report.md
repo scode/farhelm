@@ -61,3 +61,49 @@ A fresh source reviewer requested as `gpt-6.1-sol` at high effort through `codex
 locking and ownership code, relevant specifications and the test-authoring checklist. It found no actionable issues and
 confirmed the complexity gate. That reviewer ran no tests; the executor ran and inspected the checks above. A fresh
 native `gpt-6.1-sol` medium cold reader checked the commit and PR wording. Implementation was not delegated.
+
+### Landing
+
+Landed on its own in round 78, as #2201, unchanged from what the report describes apart from one bookkeeping conflict
+resolved during the rebase (below).
+
+#### What landed since the PR was based, and whether it interacted
+
+Since the report's last rebase (onto the calm outage cards change, #2198), the only code change that reached main was
+the explicit bare-repository policy fix for checkouts (#2199). Both PRs edit the same supervisor file that prepares
+sessions, and both amend SPEC_impl.md, so the landing monitor read them against each other, and a fresh-context reviewer
+did the same independently. Neither found an interaction. #2199 changes only how the supervisor points Git at its
+repository cache when fetching, and adds a test for it. In that file, this PR changes only the function that removes a
+retired checkout's Claude trust entry, which now takes how long to wait for Claude's settings lock. Both callers in the
+merged code pass that wait: startup tries once without waiting, and the cleanup after Delete still waits up to twelve
+seconds. Marking a new checkout trusted at launch is unchanged and also still waits up to twelve seconds.
+
+The reviewer also checked this PR against the Claude settings lock limits that #2193 added to SPEC.md and SPEC_impl.md,
+which were already in its base. It keeps their stale-lock limit word for word, splits the retry wording by caller, and
+adds that a busy lock at startup is logged and leaves the record for a later start. Trying once cannot hold the lock any
+longer than before, and SPEC.md promises only a best-effort removal, so a trust entry left for a later start fits.
+
+#### Fixes made during the landing
+
+The review queue index conflicted: #2199 removed its own feedback entry next to the one this PR removes. The resolution
+keeps both removals, so the index again lists exactly the feedback files on disk. No source file changed.
+
+#### Checks
+
+Both PRs edit the same supervisor file, so the landing ran both plans' focused tests together on the merged code.
+
+- Run now, at the rebased tip: `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings`, both clean,
+  and a recorded supervisor run of this plan's Claude trust selection together with the checkout-preparation tests #2199
+  added or changed and the other real-Git checkout tests, through the test recorder with the pinned nextest and tmux,
+  four slots and no retries:
+  `cargo nextest run -p farhelm-supervisor --lib -E 'test(claude_trust) | test(startup_trust) | test(agent_kind::claude::trust::) | test(d1_fake_git_hook_agent_run_in_order_with_exact_argv) | test(d2_real_git)'`.
+  18 of 18 passed with no runtime skips, run `c954fdfc-6baf-46c2-a661-71482a5160b3`. It supersedes the executor's trust
+  run `77a31481-cba1-4269-be49-981f39b9c74f` (13 passed).
+- Run now: `dprint check` on the resolved review queue index and `python3 scripts/check-agents-md.py` on the merged
+  result, both clean.
+- Reused from the executor: its changelog-format and test-sleep checks, because the landing changed none of the files
+  they inspect.
+- Skipped: browser, desktop, website and unrelated Rust runs, for the reasons the report gives.
+
+Apart from the draft head it names, which the rebase replaced, nothing in the executor's report became untrue at
+landing.
