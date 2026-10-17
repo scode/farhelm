@@ -62,3 +62,53 @@ cleanup and the documentation-only complexity gate. The executor read the findin
 The reviewers ran no tests, and no runtime behavior was verified by these gates. Fresh gpt-6.1-sol medium cold readers
 checked commit and PR wording; the first message was rewritten after its initial read. No implementation work was
 delegated, and all three complexity gates were met without expanding scope.
+
+### Landing
+
+Landed in round 76, as #2193, #2195 and #2196, merged bottom-up after the round's other plan and unchanged from what the
+report describes. All three change only specification text and review bookkeeping.
+
+#### What landed since the stack was based, and whether it interacted
+
+Two code changes reached main between this stack's base and its landing. One is a fix for typing with an input method in
+WebKit-based browsers and the desktop app (#2194), which changes keyboard handling and adds its own SPEC_impl.md
+section. The other is the round's other plan, the cancelled-download fix (#2197), which changes the helm's download
+bookkeeping and its SPEC_impl.md paragraph. I read both against this stack, and a fresh-context reviewer did the same
+independently. Neither found an interaction: nothing in this stack says anything about keyboard handling or downloads,
+and neither change alters Claude settings edits, settings views or trash listing. #2197 also edited the triage ledger
+and the review queue index, which every PR here edits too, but in separate entries. The landing rebase merged them
+without conflict and left each PR's diff identical to what the executor delivered.
+
+The reviewer also checked the new specification text against the code:
+
+- The Claude settings statement (#2193) is accurate. Farhelm waits for Claude's settings lock but never takes over a
+  stale one. Just before its final rename it gives up if it has held the lock too long or the lock was replaced, but a
+  writer stalled after those checks and past Claude's stale-lock threshold can still overwrite a save made in that gap,
+  in either direction.
+- The stale-views rule (#2195) matches the code: the trust hint above the terminal re-reads on every update, while
+  Settings reads once when opened.
+- The trash scale statement (#2196) matches the 10,000-archive cleanup limit and the trash listing, which returns a
+  host's whole trash in one size-limited reply, so "may be unlistable" past that scale is right.
+
+#### Fixes made during the landing
+
+None.
+
+#### A wording note
+
+SPEC.md now says Farhelm follows Claude's settings lock "the way Claude's own writers do". That is slightly loose:
+Claude's own writers are understood to take over a stale lock (the report notes Claude's actual takeover behavior is
+unverified), and Farhelm never does. The phrase comes from the principle recorded with the maintainer's triage decision,
+so it was left as written. SPEC_impl.md's matching paragraph says Farhelm retries without ever taking over a lock, which
+pins the behavior down. If SPEC.md should be exact, a one-clause follow-up would say Farhelm waits on Claude's lock but
+never takes over a stale one.
+
+#### Checks
+
+- Run now, at the rebased tip: `dprint check` on SPEC.md, SPEC_impl.md, TRIAGE_OUTCOMES.md and the review queue index,
+  and `python3 scripts/check-agents-md.py`, both clean.
+- Reused: the executor's three source reviews, which still apply because the landing rebase left each PR's diff
+  unchanged.
+- Skipped: all runtime tests and builds, since the stack changes only specification text and bookkeeping.
+
+Nothing in the executor's report became untrue at landing.
