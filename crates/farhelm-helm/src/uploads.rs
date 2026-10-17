@@ -739,6 +739,7 @@ mod tests {
                 panic!("expected BeginUpload, got {request:?}");
             };
             peer.send(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: SENTINEL.to_string(),
                 kind: ErrorKind::NotFound,
@@ -1004,6 +1005,7 @@ mod tests {
                     panic!("expected CommitUpload, got {request:?}");
                 };
                 peer.send(&ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id,
                     message: sentinel.to_string(),
                     kind: ErrorKind::InvalidRequest,
@@ -1832,6 +1834,7 @@ mod tests {
                 panic!("expected BeginUpload, got {request:?}");
             };
             peer.send(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: SENTINEL.to_string(),
                 kind: ErrorKind::NotFound,
@@ -1890,6 +1893,7 @@ mod tests {
                 "an absent ?filename= must forward as the empty proposal, never a made-up name"
             );
             peer.send(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: "stop here; the filename assertion above is this test's point".to_string(),
                 kind: ErrorKind::Internal,

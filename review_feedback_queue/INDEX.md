@@ -14,9 +14,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Repeated update or removal planning can leave adding, updating, and removing hosts stuck until the helm restarts, even
   after the pages close.
 
-- [`replace-retries-replay-settled-create-failure.md`](replace-retries-replay-settled-create-failure.md) — Replace can
-  replay a permanent creation refusal after its cause is repaired.
-
 - [`uninstall-forgotten-success.md`](uninstall-forgotten-success.md) — A failed uninstall can be reported as successful
   after another client forgets the host.
 

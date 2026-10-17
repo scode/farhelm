@@ -208,6 +208,7 @@ where
                         "the session credential is invalid or its session no longer exists";
                     writer
                         .write_control(&ControlMsg::Error {
+                            create_unaccepted: false,
                             req_id: 0,
                             message: MESSAGE.to_string(),
                             kind: ErrorKind::Unauthorized,
@@ -218,6 +219,7 @@ where
                 Err(error) => {
                     writer
                         .write_control(&ControlMsg::Error {
+                            create_unaccepted: false,
                             req_id: 0,
                             message: "the supervisor could not validate the session credential"
                                 .to_string(),
@@ -602,7 +604,8 @@ where
                                 if channel == 0 || input_routes.contains_key(&channel)
                                     || upload_routes.get(&channel).is_some_and(UploadRoute::is_live)
                                     || download_channels.contains(&channel) {
-                                    send_reply(&tx, &ControlMsg::Error { req_id, kind: farhelm_proto::ErrorKind::InvalidRequest,
+                                    send_reply(&tx, &ControlMsg::Error {
+                                        create_unaccepted: false, req_id, kind: farhelm_proto::ErrorKind::InvalidRequest,
                                         message: "download channel is invalid or in use".into() }).await;
                                 } else {
                                     download_channels.insert(channel);
@@ -616,7 +619,8 @@ where
                             ControlMsg::AbortDownload { channel } => { downloads.remove(&channel); }
                             ControlMsg::Attach { req_id, channel, .. } | ControlMsg::BeginUpload { req_id, channel, .. }
                                 if download_channels.contains(&channel) => {
-                                send_reply(&tx, &ControlMsg::Error { req_id, kind: farhelm_proto::ErrorKind::InvalidRequest,
+                                send_reply(&tx, &ControlMsg::Error {
+                                    create_unaccepted: false, req_id, kind: farhelm_proto::ErrorKind::InvalidRequest,
                                     message: "channel was reserved for a download".into() }).await;
                             }
 
@@ -973,6 +977,7 @@ pub(crate) fn reply_frame(msg: &ControlMsg) -> Frame {
             "control reply exceeds max frame size; substituting an error reply"
         );
         Frame::control(&ControlMsg::Error {
+            create_unaccepted: false,
             req_id,
             message: format!(
                 "reply encodes to {} bytes, exceeding the {}-byte frame limit",
@@ -1088,6 +1093,7 @@ pub(crate) async fn admit_or_refuse(
             send_reply(
                 tx,
                 &ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id,
                     kind: ErrorKind::Unavailable,
                     message: farhelm_proto::HOST_BUSY_REFUSAL.to_string(),
@@ -2206,6 +2212,7 @@ mod tests {
             req_id: got_req_id,
             message,
             kind,
+            ..
         } = decoded
         else {
             panic!("expected ControlMsg::Error, got {decoded:?}");
@@ -2421,6 +2428,7 @@ mod tests {
             req_id,
             kind,
             message,
+            ..
         } = parse_control(&refusal).expect("decode refusal")
         else {
             panic!("an authenticated hello must receive an Error");
@@ -2941,6 +2949,7 @@ mod tests {
                 req_id: 3,
                 kind: ErrorKind::Unavailable,
                 message: farhelm_proto::HOST_BUSY_REFUSAL.to_string(),
+                create_unaccepted: false,
             }
         );
         assert_eq!(

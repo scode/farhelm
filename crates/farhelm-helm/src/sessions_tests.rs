@@ -3011,6 +3011,7 @@ async fn a_create_refusal_leaves_the_source_listed() {
         };
         writer
             .write_frame(&Frame::control(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: "working directory does not exist: /sess-1".into(),
                 kind: ErrorKind::InvalidRequest,
@@ -3115,6 +3116,7 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
         // unlike the happy-path tests, this peer must NOT remove it.
         writer
             .write_frame(&Frame::control(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: "supervisor lost the process table entry".into(),
                 kind: ErrorKind::Internal,
@@ -3336,6 +3338,8 @@ async fn replace_on_an_unreachable_host_is_refused_before_anything_is_created() 
 /// chains the retry off exactly that state, and the peer script plays the
 /// supervisor's own idempotent reply by hand (this helm keeps no local
 /// dedup of its own; the guarantee is entirely the supervisor's).
+/// A proof flag on Delete is deliberately ignored: that error comes after
+/// the successful create and must not authorize a second replacement.
 #[farhelm_testtrace::test]
 async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creates_only_once() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -3425,6 +3429,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
         // "sess-1" genuinely still exists on the far end too.
         writer
             .write_frame(&Frame::control(&ControlMsg::Error {
+                create_unaccepted: true,
                 req_id,
                 message: "transient failure".into(),
                 kind: ErrorKind::Internal,
@@ -3472,13 +3477,17 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
     });
 
     harness.await_refreshed(local).await;
-    let (status, _) = post_text(
+    let (status, headers, _) = post_text_headers(
         &harness,
         "/api/sessions/sess-1/replace",
         serde_json::json!({"intent_key": "replace-key"}),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        !headers.contains_key(farhelm_proto::http::CREATE_OUTCOME_HEADER),
+        "a failed delete cannot retire the successful create's key"
+    );
 
     let (status, body) = post_text(
         &harness,
@@ -3843,6 +3852,7 @@ async fn a_replace_with_override_whose_create_fails_leaves_the_source_untouched(
         assert_eq!(cwd, "/does-not-exist");
         writer
             .write_frame(&Frame::control(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: "working directory does not exist: /does-not-exist".into(),
                 kind: ErrorKind::InvalidRequest,
@@ -3957,6 +3967,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
         // "sess-1" genuinely still exists on the far end too.
         writer
             .write_frame(&Frame::control(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: "supervisor lost the process table entry".into(),
                 kind: ErrorKind::Internal,
@@ -4587,6 +4598,7 @@ async fn create_session_error_reply_maps_to_bad_request_status() {
         };
         writer
             .write_frame(&Frame::control(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: "working directory does not exist: /nope".into(),
                 kind: ErrorKind::InvalidRequest,
@@ -5011,6 +5023,7 @@ async fn restart_session_conflict_reaches_the_caller_as_409_with_its_message() {
         };
         writer
             .write_control(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: SENTINEL.to_string(),
                 kind: ErrorKind::Conflict,
@@ -5373,6 +5386,7 @@ async fn rename_session_invalid_title_returns_400_with_supervisor_message() {
         };
         writer
             .write_control(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: SENTINEL.to_string(),
                 kind: ErrorKind::InvalidRequest,
@@ -5551,6 +5565,7 @@ async fn open_tab_error_reply_maps_to_404_with_the_supervisors_message() {
         };
         writer
             .write_control(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: SENTINEL.to_string(),
                 kind: ErrorKind::NotFound,
@@ -5611,6 +5626,7 @@ async fn close_tab_error_reply_maps_to_404_with_the_supervisors_message() {
         };
         writer
             .write_control(&ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: SENTINEL.to_string(),
                 kind: ErrorKind::NotFound,
@@ -8919,6 +8935,7 @@ async fn fresh_rest_reconciliation_precedes_mutable_resolution_and_binds_install
                 assert_eq!(refused_identity, client_identity);
                 writer
                     .write_control(&ControlMsg::Error {
+                        create_unaccepted: false,
                         req_id,
                         kind: farhelm_proto::ErrorKind::CheckoutConflict,
                         message: "fixture durable refusal".into(),
@@ -9051,6 +9068,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                     );
                     let reply = match disposition {
                         "refused" => ControlMsg::Error {
+                            create_unaccepted: false,
                             req_id,
                             kind: ErrorKind::CheckoutConflict,
                             message: "stored durable refusal".into(),
@@ -9060,11 +9078,13 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                             session: None,
                         },
                         "unavailable" => ControlMsg::Error {
+                            create_unaccepted: false,
                             req_id,
                             kind: ErrorKind::Unavailable,
                             message: "refusal outcome unavailable".into(),
                         },
                         "stored-failure" => ControlMsg::Error {
+                            create_unaccepted: false,
                             req_id,
                             kind: ErrorKind::InvalidRequest,
                             message: "original stored failure".into(),
@@ -9283,6 +9303,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                         deletes += 1;
                         writer
                             .write_control(&ControlMsg::Error {
+                                create_unaccepted: false,
                                 req_id,
                                 kind: ErrorKind::Conflict,
                                 message: "retain source".into(),
@@ -9536,6 +9557,7 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
                 assert_eq!(refused_identity, client_identity);
                 writer
                     .write_control(&ControlMsg::Error {
+                        create_unaccepted: false,
                         req_id,
                         kind: ErrorKind::CheckoutConflict,
                         message: "fixture durable refusal".into(),
@@ -9583,6 +9605,7 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
                 assert_eq!(session_id, "sess-1");
                 writer
                     .write_control(&ControlMsg::Error {
+                        create_unaccepted: false,
                         req_id,
                         kind: ErrorKind::Conflict,
                         message: "fixture retains source".into(),
@@ -9748,6 +9771,7 @@ async fn github_repository_rest_routes_config_and_preserves_incomplete_status() 
                 }
             } else {
                 ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id,
                     kind: ErrorKind::Internal,
                     message: "Git failed inspecting https://user:secret@github.com/acme/bar".into(),

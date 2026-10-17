@@ -2556,11 +2556,26 @@ impl SupervisorClient {
         // a clone here for no reason (the reply is not used afterwards
         // either way).
         match reply {
-            ControlMsg::Error { message, kind, .. } => Err(anyhow::Error::new(SupervisorError {
-                origin: ErrorOrigin::SupervisorReply,
-                kind,
+            ControlMsg::Error {
                 message,
-            })),
+                kind,
+                create_unaccepted,
+                ..
+            } => {
+                let error = anyhow::Error::new(SupervisorError {
+                    origin: ErrorOrigin::SupervisorReply,
+                    kind,
+                    message,
+                });
+                // Only a create can use this proof. A peer cannot attach it
+                // to Delete's failure and make a successful replacement look
+                // unaccepted to the browser.
+                if create_unaccepted && matches!(msg, ControlMsg::CreateSession { .. }) {
+                    Err(error.context(crate::SettledCreateUnaccepted))
+                } else {
+                    Err(error)
+                }
+            }
             reply => Ok(reply),
         }
     }
@@ -4321,6 +4336,7 @@ mod tests {
             // one arrived — the order in which the bug does the most damage.
             writer
                 .write_control(&ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id: 0,
                     message: SENTINEL.to_string(),
                     kind: ErrorKind::Internal,
@@ -6860,6 +6876,7 @@ mod tests {
                         path: "/tmp/pub.png".to_string(),
                     },
                     Answer::Refused => ControlMsg::Error {
+                        create_unaccepted: false,
                         req_id,
                         message: SENTINEL.to_string(),
                         kind: ErrorKind::InvalidRequest,
@@ -6954,6 +6971,7 @@ mod tests {
             };
             writer
                 .write_control(&ControlMsg::Error {
+                    create_unaccepted: false,
                     req_id,
                     message: SENTINEL.to_string(),
                     kind: ErrorKind::NotFound,

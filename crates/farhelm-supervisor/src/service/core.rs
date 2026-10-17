@@ -7376,6 +7376,36 @@ impl Supervisor {
         self.launch_session(request, reserved, &guards).await
     }
 
+    /// Prove a settled ordinary create has no session left to recover.
+    /// A failed reservation alone is insufficient: retained failures keep a
+    /// session (and possibly a checkout) for the user to inspect. Match the
+    /// full request (or its stored tombstone digest) and lifetime, and exclude
+    /// managed/agent recovery encodings.
+    /// This is reply metadata only; the reservation still replays unchanged.
+    /// Ordinary rollback settles Failed only after confirming the terminal is
+    /// absent or stopped; ambiguous rollback keeps its row and Pending state.
+    pub(crate) async fn ordinary_create_was_refused(
+        &self,
+        claim: &IntentClaim,
+    ) -> anyhow::Result<bool> {
+        let fingerprint: serde_json::Value = serde_json::from_str(&claim.fingerprint)?;
+        if !matches!(
+            fingerprint.get(0).and_then(serde_json::Value::as_str),
+            Some("session_launch_v1" | "named_session_launch_v1" | "prompt_session_launch_v1")
+        ) {
+            return Ok(false);
+        }
+        let Some(reservation) = self.store.reservation(&claim.intent_key).await? else {
+            return Ok(false);
+        };
+        let same_request = reservation.fingerprint == claim.fingerprint
+            || reservation.fingerprint == crate::store::tombstone_fingerprint(&claim.fingerprint);
+        Ok(same_request
+            && reservation.dedup_scope == claim.dedup_scope
+            && matches!(reservation.outcome, ReservationOutcome::Failed { .. })
+            && self.store.session(&reservation.session_id).await?.is_none())
+    }
+
     /// [`Supervisor::create_session`] with no snapshot overrides — the
     /// shape every test predating PLAN_M3.md item 7 exercises.
     ///
@@ -26608,9 +26638,11 @@ exit 0
     /// spec_publish` uses), and permissions are RESTORED before the
     /// replays — so a replay that re-ran the create instead of reading the
     /// stored outcome would visibly succeed rather than quietly return the
-    /// same text, and this test would fail. The `kind` assertion is the
-    /// other half of "the same answer": a replay that decayed to
-    /// `Internal` would turn the first attempt's 400 into a 500.
+    /// same text, and this test would fail. The `kind` assertion pins the
+    /// other half of "the same answer", independently of that text.
+    /// Both initial and replayed failures carry the no-session proof, including
+    /// after reopening digests the spent key's fingerprint. A different request
+    /// must not borrow that proof from the spent key.
     #[farhelm_testtrace::test]
     async fn a_failed_create_replays_its_error_and_a_changed_override_conflicts() {
         let state = StateDir::new();
@@ -26668,6 +26700,7 @@ exit 0
         let ControlMsg::Error {
             message: first_message,
             kind: first_kind,
+            create_unaccepted: true,
             ..
         } = reply(&mut rx)
         else {
@@ -26678,6 +26711,25 @@ exit 0
             std::fs::set_permissions(&launch_dir, std::fs::Permissions::from_mode(0o700))
                 .expect("restoring launch/");
         }
+
+        let original = sup.store.reservation("one-intent").await.unwrap().unwrap();
+        assert!(!crate::store::is_tombstone_fingerprint(
+            &original.fingerprint
+        ));
+        drop(sup);
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        assert_eq!(
+            sup.store
+                .reservation("one-intent")
+                .await
+                .unwrap()
+                .unwrap()
+                .fingerprint,
+            crate::store::tombstone_fingerprint(&original.fingerprint),
+            "the replay must exercise the real writable-open digest boundary"
+        );
 
         // Same key, same request: the ORIGINAL error, verbatim.
         handle_control(
@@ -26692,7 +26744,13 @@ exit 0
             },
         )
         .await;
-        let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
+        let ControlMsg::Error {
+            message,
+            kind,
+            create_unaccepted: true,
+            ..
+        } = reply(&mut rx)
+        else {
             panic!("a replayed failure must still be an error");
         };
         assert_eq!(message, first_message, "the replay must be the same answer");
@@ -26717,7 +26775,13 @@ exit 0
             },
         )
         .await;
-        let ControlMsg::Error { message, kind, .. } = reply(&mut rx) else {
+        let ControlMsg::Error {
+            message,
+            kind,
+            create_unaccepted: false,
+            ..
+        } = reply(&mut rx)
+        else {
             panic!("a key reused for a different request must be refused");
         };
         assert_eq!(kind, ErrorKind::Conflict);
@@ -26730,6 +26794,110 @@ exit 0
             sup.sessions.lock().await.is_empty(),
             "none of the three attempts may have created a session"
         );
+    }
+
+    /// A missing row is proof only for the exact ordinary, terminally failed
+    /// request. Unknown keys, another request or lifetime, and managed/agent
+    /// recovery encodings must never authorize a new Replace identity.
+    #[farhelm_testtrace::test]
+    async fn ordinary_create_refusal_proof_requires_the_matching_failed_reservation() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let claim = IntentClaim {
+            intent_key: "proof".into(),
+            fingerprint: command_fingerprint("/", "agent", None),
+            dedup_scope: DedupScope::Permanent,
+        };
+        assert!(!sup.ordinary_create_was_refused(&claim).await.unwrap());
+        sup.store
+            .record_failed_intent(
+                claim.clone(),
+                "refused",
+                "fh-refused",
+                ErrorKind::InvalidRequest,
+                "missing folder",
+            )
+            .await
+            .unwrap();
+        assert!(sup.ordinary_create_was_refused(&claim).await.unwrap());
+        let before = sup.store.reservation("proof").await.unwrap().unwrap();
+        for other in [
+            IntentClaim {
+                fingerprint: command_fingerprint("/elsewhere", "agent", None),
+                ..claim.clone()
+            },
+            IntentClaim {
+                dedup_scope: DedupScope::SessionLifetime,
+                ..claim.clone()
+            },
+        ] {
+            assert!(!sup.ordinary_create_was_refused(&other).await.unwrap());
+        }
+        assert_eq!(
+            sup.store.reservation("proof").await.unwrap().unwrap(),
+            before
+        );
+
+        // Keep a durable row beside the same Failed reservation. Retained
+        // recovery state must prevent the no-session proof even after failure.
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: "refused".into(),
+                    parent: None,
+                    title: "retained".into(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: "/".into(),
+                    canonical_cwd: None,
+                    launch: SessionLaunch::plain_command("agent"),
+                    tmux_name: "fh-refused".into(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    launch_hooked: false,
+                    launch_boot_ended: false,
+                    captured_conversation: None,
+                    generation: 0,
+                    launch_scoped: false,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!sup.ordinary_create_was_refused(&claim).await.unwrap());
+
+        for (key, fingerprint) in [
+            (
+                "managed",
+                serde_json::json!({"kind": "github_checkout_v4"}).to_string(),
+            ),
+            ("agent", agent_request_fingerprint(&"a".repeat(64))),
+        ] {
+            let excluded = IntentClaim {
+                intent_key: key.into(),
+                fingerprint,
+                ..claim.clone()
+            };
+            sup.store
+                .record_failed_intent(
+                    excluded.clone(),
+                    key,
+                    "fh-excluded",
+                    ErrorKind::InvalidRequest,
+                    "refused",
+                )
+                .await
+                .unwrap();
+            assert!(!sup.ordinary_create_was_refused(&excluded).await.unwrap());
+        }
     }
 
     /// Why this matters: an agent's keyed create is retried after a lost
@@ -27349,6 +27517,16 @@ exit 0
             .await
             .expect("the session ran and finished");
 
+        let claim = IntentClaim {
+            intent_key: "key".into(),
+            fingerprint: fingerprint.clone(),
+            dedup_scope: DedupScope::Permanent,
+        };
+        assert!(
+            !sup.ordinary_create_was_refused(&claim).await.unwrap(),
+            "a pending create that ran is not a refusal"
+        );
+
         let replayed = sup
             .create_session_without_overrides(
                 "/",
@@ -27392,6 +27570,10 @@ exit 0
                 .outcome,
             ReservationOutcome::Created,
             "and the replay settles the intent it just reconciled"
+        );
+        assert!(
+            !sup.ordinary_create_was_refused(&claim).await.unwrap(),
+            "a created session remains accepted after it exits"
         );
     }
 
@@ -27830,6 +28012,20 @@ exit 0
                 .outcome,
             ReservationOutcome::Pending,
             "an ambiguous failure is exactly the reconcile-me state, not a recorded failure"
+        );
+        assert!(
+            !sup.ordinary_create_was_refused(&IntentClaim {
+                intent_key: "key".into(),
+                fingerprint: command_fingerprint(
+                    &work.path().to_string_lossy(),
+                    "sh -c 'sleep 300'",
+                    None
+                ),
+                dedup_scope: DedupScope::Permanent,
+            })
+            .await
+            .unwrap(),
+            "uncertain launch evidence must keep its retry identity"
         );
     }
 

@@ -593,6 +593,7 @@ fn supervisor_error_replies_exit_nonzero_with_empty_stdout() {
         let temp = farhelm_teststate::tempdir().unwrap();
         let socket = temp.path().join("supervisor.sock");
         let (done, server) = mock_supervisor(&socket, move |_| ControlMsg::Error {
+            create_unaccepted: false,
             req_id,
             kind,
             message: message.to_string(),
@@ -689,6 +690,7 @@ fn a_refusal_is_printed_escaped() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let (done, server) = mock_supervisor(&socket, |_| ControlMsg::Error {
+        create_unaccepted: false,
         req_id: 1,
         kind: farhelm_proto::ErrorKind::Conflict,
         message: "refused\u{1b}[2J\nforged line".to_string(),

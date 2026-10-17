@@ -125,6 +125,7 @@ async fn reply_error(
     send_reply(
         tx,
         &ControlMsg::Error {
+            create_unaccepted: false,
             req_id,
             kind,
             message: message.into(),
@@ -144,6 +145,7 @@ async fn reply_failure(tx: &mpsc::Sender<Frame>, req_id: u64, error: &anyhow::Er
 /// admission permit it reserved rather than awaiting `tx`.
 fn error_frame(req_id: u64, kind: ErrorKind, message: impl Into<String>) -> Frame {
     reply_frame(&ControlMsg::Error {
+        create_unaccepted: false,
         req_id,
         kind,
         message: message.into(),
@@ -462,6 +464,7 @@ async fn handle_create_session(
         },
         dedup_scope: admission.dedup_scope(),
     });
+    let refusal_claim = idempotency.clone();
     match sup
         .create_session_admitted(
             CreateInputs {
@@ -484,7 +487,25 @@ async fn handle_create_session(
             send_reply(tx, &ControlMsg::SessionCreated { req_id, session }).await;
         }
         Err(e) => {
-            reply_failure(tx, req_id, &e).await;
+            // Missing proof remains an ordinary error. A failed lookup must
+            // not turn an ambiguous create into permission to mint another key.
+            let create_unaccepted = match refusal_claim {
+                Some(claim) => sup
+                    .ordinary_create_was_refused(&claim)
+                    .await
+                    .unwrap_or(false),
+                None => false,
+            };
+            send_reply(
+                tx,
+                &ControlMsg::Error {
+                    req_id,
+                    kind: error_kind(&e),
+                    message: format!("{e:#}"),
+                    create_unaccepted,
+                },
+            )
+            .await;
         }
     }
 }
@@ -585,6 +606,7 @@ async fn handle_list_sessions(
             // docs for why each of them fails the whole request rather
             // than degrading one entry.
             Err(e) => ControlMsg::Error {
+                create_unaccepted: false,
                 req_id,
                 message: format!("{e:#}"),
                 kind: ErrorKind::Internal,
@@ -644,11 +666,13 @@ where
             truncated: list.truncated,
         },
         Ok(Err(error)) => ControlMsg::Error {
+            create_unaccepted: false,
             req_id,
             message: format!("{error:#}"),
             kind: ErrorKind::InvalidRequest,
         },
         Err(_) => ControlMsg::Error {
+            create_unaccepted: false,
             req_id,
             message: format!("directory browse did not finish within {timeout:?}"),
             kind: ErrorKind::Internal,
@@ -2646,6 +2670,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                         truncated: result.truncated,
                     },
                     Err(error) => ControlMsg::Error {
+                        create_unaccepted: false,
                         req_id,
                         kind: error_kind(&error),
                         message: format!("{error:#}"),
@@ -3644,6 +3669,7 @@ mod tests {
             req_id,
             message,
             kind,
+            ..
         } = reply
         else {
             panic!("a stalled directory browse must reply with ControlMsg::Error");
@@ -3699,6 +3725,7 @@ mod tests {
             req_id,
             kind,
             message,
+            ..
         } = parse_control(&frame).expect("decode Stop panic reply")
         else {
             panic!("a panicking Stop must reply with ControlMsg::Error");
@@ -3758,6 +3785,7 @@ mod tests {
             req_id,
             kind,
             message,
+            ..
         } = parse_control(&frame).expect("decode Restart panic reply")
         else {
             panic!("a panicking Restart must reply with ControlMsg::Error");
@@ -5196,6 +5224,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(1);
         let fence = sup.agent_request_locks.claim("asker").await;
         tx.send(reply_frame(&ControlMsg::Error {
+            create_unaccepted: false,
             req_id: 0,
             message: "occupy the only writer slot".to_string(),
             kind: ErrorKind::Internal,
@@ -5964,6 +5993,7 @@ mod tests {
             req_id,
             kind,
             message,
+            ..
         } = forged
         else {
             panic!("a session-authenticated create must be refused");
@@ -7568,6 +7598,7 @@ mod tests {
             req_id,
             kind,
             message,
+            ..
         } = decoded
         else {
             panic!("expected an Error reply, got {decoded:?}");
@@ -7793,6 +7824,7 @@ mod tests {
         let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
         assert!(matches!(reply, ControlMsg::Error {
             req_id: 98, kind: ErrorKind::InvalidRequest, message,
+            ..
         } if message.contains("request fingerprint and a managed checkout")));
         assert!(
             sup.store
@@ -7860,6 +7892,7 @@ mod tests {
         let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
         assert!(matches!(reply, ControlMsg::Error {
             req_id: 97, kind: ErrorKind::InvalidRequest, message,
+            ..
         } if message.contains("65536-byte limit")));
         assert!(
             sup.store
@@ -7928,6 +7961,7 @@ mod tests {
             req_id: got_req_id,
             message,
             kind,
+            ..
         } = decoded
         else {
             panic!("expected ControlMsg::Error, got {decoded:?}");
@@ -8295,6 +8329,7 @@ mod tests {
             req_id,
             message,
             kind,
+            ..
         } = decoded
         else {
             panic!("expected a refusal ControlMsg::Error, got {decoded:?}");
@@ -8992,6 +9027,7 @@ mod tests {
                 req_id,
                 kind: ErrorKind::Unavailable,
                 message: farhelm_proto::HOST_BUSY_REFUSAL.to_string(),
+                create_unaccepted: false,
             },
             "a management request on a saturated host must be refused as busy"
         );

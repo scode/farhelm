@@ -269,6 +269,7 @@ impl RawPeer {
                         req_id: reply,
                         kind: ErrorKind::InvalidRequest,
                         message,
+                        ..
                     } if reply == req_id
                         && message == format!("attachment channel {channel} is already in use") => {
                     }
@@ -473,6 +474,7 @@ async fn an_upload_shorter_than_it_declared_publishes_nothing() {
         req_id,
         message,
         kind,
+        ..
     } = outcome
     else {
         panic!("a short upload must be refused, got: {outcome:?}");
@@ -1166,6 +1168,7 @@ async fn begin_upload_refuses_a_bad_channel_and_an_over_full_connection() {
         req_id: 99,
         message,
         kind,
+        ..
     } = over_cap
     else {
         panic!("the ninth concurrent transfer must be refused, got: {over_cap:?}");
@@ -1259,6 +1262,7 @@ async fn a_finished_upload_channel_can_be_attached_as_a_terminal() {
                     req_id: 3,
                     kind: ErrorKind::InvalidRequest,
                     message,
+                    ..
                 } if message == "attachment channel 1 is already in use" => {}
                 other => panic!("terminal reuse after upload completion failed: {other:?}"),
             }
@@ -1905,6 +1909,7 @@ async fn a_publication_that_outlives_its_bound_frees_the_session() {
         req_id,
         kind,
         message,
+        ..
     } = outcome
     else {
         panic!("an unconfirmed publication must not acknowledge a path: {outcome:?}");
@@ -1961,6 +1966,7 @@ async fn a_cancelled_publication_can_leave_an_attachment_and_a_retry_copy() {
         req_id,
         kind,
         message,
+        ..
     } = outcome
     else {
         panic!("cancelled publication must not acknowledge a path: {outcome:?}");
@@ -2017,6 +2023,7 @@ async fn a_commit_time_filesystem_fault_is_a_correlated_error_with_no_debris() {
         req_id,
         message,
         kind,
+        ..
     } = outcome
     else {
         panic!("a failing publish must fail the commit, got: {outcome:?}");
@@ -2482,6 +2489,7 @@ async fn a_begin_that_cannot_stage_refuses_and_leaves_its_channel_usable() {
         req_id: 1,
         message,
         kind,
+        ..
     } = refused
     else {
         panic!("an unusable attachments directory must refuse the begin, got: {refused:?}");

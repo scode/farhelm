@@ -1066,6 +1066,7 @@ async fn restricted_raw_data_is_refused() {
             req_id: 1,
             kind: farhelm_proto::ErrorKind::Unauthorized,
             message,
+            ..
         } = raw_reply
         else {
             panic!("a restricted create must be refused: {raw_reply:?}");

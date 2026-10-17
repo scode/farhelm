@@ -2282,6 +2282,7 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
     let kind = error_kind(&e);
     let yolo_refused = find_cause::<yolo_guard::YoloNeedsConfirmation>(&e).is_some();
     let unaccepted = e.downcast_ref::<FreshCreateUnaccepted>().is_some()
+        || e.downcast_ref::<SettledCreateUnaccepted>().is_some()
         || kind == ErrorKind::CheckoutConflict
         || yolo_refused;
     let status = if error_kind_is_a_supervisor_reply(&e) {
@@ -2412,6 +2413,13 @@ fn supervisor_reply_status(kind: ErrorKind) -> axum::http::StatusCode {
 #[derive(Debug, thiserror::Error)]
 #[error("managed checkout was not accepted")]
 pub(crate) struct FreshCreateUnaccepted;
+
+/// The create's supervisor confirmed a durable refusal with no session left.
+/// Kept distinct from the helm's pre-dispatch proof: a transport error, a
+/// retained failed session, or a later failed Delete must never acquire it.
+#[derive(Debug, thiserror::Error)]
+#[error("the create was durably refused without retaining a session")]
+pub(crate) struct SettledCreateUnaccepted;
 
 #[cfg(test)]
 mod tests {
