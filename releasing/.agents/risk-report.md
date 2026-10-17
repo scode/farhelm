@@ -13,7 +13,7 @@ NOTE: The report is research done by reading diffs, not validation. It does not 
 does not gate an RC or dev tag: start it as soon as the base and version are settled, let it run alongside the bump and
 the pre-tag checks, and deliver it when it is ready. A stable release is different only in timing: have the report in
 front of the maintainer before pushing the tag (step 7 of `releasing/.agents/stable.md`, "Cutting a stable release"),
-since a stable tag reaches every ordinary install.
+since a stable tag reaches every ordinary install. Delivering it is enough: the tag does not wait for a reply.
 
 ## Which commits
 
