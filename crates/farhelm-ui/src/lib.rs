@@ -1524,10 +1524,27 @@ fn install_template_number_shortcuts() {
     ));
 }
 
+/// Normalize composition-ending keys before either renderer serializes them.
+///
+/// WebKit can send compositionend before its ending keydown, so that key would
+/// otherwise look ordinary to every Rust and JS guard. Inline eval preserves
+/// registration order with the capture listeners below; an asynchronously
+/// loaded script could install too late. The asset owns idempotence across
+/// authenticated-tree remounts and leaves terminal input to xterm.
+fn install_composition_guard() {
+    document::eval(&format!(
+        "{}\nwindow.installCompositionGuard();",
+        include_str!("../assets/composition-guard.js")
+    ));
+}
+
 /// The renderer-independent application mounted only after desktop IPC auth
 /// has completed. Browser builds mount it immediately.
 #[component]
 fn AppBody() -> Element {
+    // This must precede every page shortcut: capture listeners on the same
+    // window run in registration order, before Dioxus's root event listener.
+    use_hook(install_composition_guard);
     // Here rather than in `App`: the desktop branch of `App` requires the
     // embedded asset handler to be its first hook, and this is the one
     // component both builds mount, with every animation underneath it.
