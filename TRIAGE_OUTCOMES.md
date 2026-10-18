@@ -15606,7 +15606,9 @@
   differently. No code change.
 - Completion criteria: SPEC.md states that limit beside the file-link disclosure's escaping rules. Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: change `lytuzvwpulzxolxvokrvvoqznktpxntq`, bookmark `triage/fix-spec-highest-2026-10-17`, combined at the
+  user's request with the other two `fix spec` outcomes of this triage; draft PR
+  [#2250](https://github.com/scode/farhelm/pull/2250/changes).
 
 ## pending-menu-arrows-can-ignore-independent-focus.md
 
@@ -15634,7 +15636,9 @@
 - Completion criteria: SPEC.md (or SPEC_impl.md, wherever the GUI's general interaction rules live) states the
   principle, bound included, so the row menu's desktop residual is covered by it. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: change `lytuzvwpulzxolxvokrvvoqznktpxntq`, bookmark `triage/fix-spec-highest-2026-10-17`, combined at the
+  user's request with the other two `fix spec` outcomes of this triage; draft PR
+  [#2250](https://github.com/scode/farhelm/pull/2250/changes).
 
 ## settled-refusal-proof-can-follow-incomplete-cleanup.md
 
@@ -15666,4 +15670,6 @@
 - Completion criteria: SPEC.md's 2026-10-10 two-fault rule is widened as above; SPEC_impl.md's "only after confirming
   nothing is running" sentence and the `abandon_launching_record` docstring are corrected to match what rollback
   confirms, pointing at the deferred cleanup work. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: change `lytuzvwpulzxolxvokrvvoqznktpxntq`, bookmark `triage/fix-spec-highest-2026-10-17`, combined at the
+  user's request with the other two `fix spec` outcomes of this triage; draft PR
+  [#2250](https://github.com/scode/farhelm/pull/2250/changes).

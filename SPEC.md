@@ -1178,15 +1178,16 @@ operation fail.
 Confirmed 2026-10-10: these cleanup and resume rules cover single ordinary failures. They do not extend to a supervisor
 crash that lands at one exact moment of an operation, or to two independent rare faults coinciding (a crash and a failed
 systemd probe, a transient database read failure and a host that reports no identity, a lost report and a reused process
-number, and the like). Under those conditions it is accepted that a process on a remote host is left untracked, is later
-killed without the usual warning, or keeps running beside a relaunch; that a session's recorded conversation is wrong
-until the agent next reports one, so Restart may resume a different conversation of that agent; or that the helm
-reconnects a host to its previous destination until the next reload. These are exceptions to "never alongside them", to
-failing visibly when cleanup is unconfirmed, to Restart resuming the conversation the agent last reported, and to a
-corrected destination taking effect, for those conditions only. In the maintainer's words, they are accepted when they
-are of the "the process on the remote host got killed" kind. Conversation tracking also has the accepted limits under
-Durability and resume, which need no crash or coinciding faults. Corrupting the supervisor's or the helm's database,
-bricking an installation, or similar lasting damage is never accepted, however unlikely the trigger.
+number, and the like). Under those conditions it is accepted that a process on any host, the helm machine's own
+included, is left untracked, is later killed without the usual warning, or keeps running beside a relaunch or a new
+launch (Replace, New or Clone) in the same folder; that a session's recorded conversation is wrong until the agent next
+reports one, so Restart may resume a different conversation of that agent; or that the helm reconnects a host to its
+previous destination until the next reload. These are exceptions to "never alongside them", to failing visibly when
+cleanup is unconfirmed, to Restart resuming the conversation the agent last reported, and to a corrected destination
+taking effect, for those conditions only. In the maintainer's words, they are accepted when they are of the "the process
+on the remote host got killed" kind. Conversation tracking also has the accepted limits under Durability and resume,
+which need no crash or coinciding faults. Corrupting the supervisor's or the helm's database, bricking an installation,
+or similar lasting damage is never accepted, however unlikely the trigger.
 
 ### Session view
 
@@ -1274,6 +1275,13 @@ WebKit included. A region whose content holds nothing focusable gets its own tab
 suggestion lists and menus use their own arrow keys, the pointer-only file hover cannot be scrolled by anyone, and the
 terminal scrolls with Shift+PageUp/PageDown. On macOS, keyboard-only users reach buttons with Keyboard navigation or
 Option-Tab (the default Tab order includes only text fields and pop-ups), so button-only regions need no extra stop.
+
+Confirmed 2026-10-17: when the user moves between controls (menu items, buttons, switches) by different means within
+tens of milliseconds of each other, such as an arrow key and a pointer or screen reader at nearly the same instant, a
+race may leave focus or selection somewhere other than where they meant. That is accepted. Such a race is still worth
+fixing when the fix is reasonably simple, but it is not a defect to engineer around otherwise. The bound is firm: a race
+never runs a command, or applies a destructive action, that the user did not activate on a control that was visibly
+focused when they activated it.
 
 Pinned sessions appear first in the sidebar, with each group preserving the chosen list order below. A pin is shared
 helm data, so every client agrees without a private rank; it works even when the session's host is unreachable. Host
@@ -1730,19 +1738,22 @@ whatever the agent renders is what you see. There is no composer, no message abs
   retains its old target. A click cannot transfer or open a file while the full hover disclosure does not fit in the
   window; it is refused with an explanation to enlarge the window and hover again. File disclosures and transfer
   messages make presentation-unsafe characters visible, distinguish literal escape notation from escaped characters, and
-  preserve repeated spaces. Files must be readable regular files no larger than 100 MB, including while transferring;
-  directories are refused. A browser saves a complete file by basename. The desktop app saves into Downloads under a
-  unique name and shows where it went, with no partial file after failure or interruption. Status appears at the top of
-  that terminal: success fades after a few seconds, while a failure stays until the next click or download there. Plain
-  click only downloads. In the desktop app, Cmd-click on macOS (Ctrl-click elsewhere) also opens the completed save with
-  the default app, only when its final extension is .md or .txt, case-insensitively. Other types are saved without
-  opening; an opening failure leaves the save successful and says why it was not opened. A browser modifier-click only
-  downloads. The hover uses a file icon and bright name, the host and full directory on a second line, and decimal size
-  with the action hints on a third. A left stripe and size color show under 1 MB green, 1–10 MB blue stripe with neutral
-  size, and 10–100 MB amber; refusals are red and checking has a neutral stripe. Only an eligible desktop file has the
-  opening hint. Any file the session's account can read is in reach, within the existing shell authority; hover
-  discloses the agent-provided target before an explicit click. Only the helm can ask the supervisor for file reads. OSC
-  hyperlink schemes are explicitly limited to http, https and file; every other scheme is ignored.
+  preserve repeated spaces. They do not guarantee that names differing only by leading or trailing spaces, other Unicode
+  spaces, or lookalike letters render differently (confirmed 2026-10-17): a trailing space only makes a file less
+  openable, and in the usual case the program that could plant such a name can already write the file it imitates. Files
+  must be readable regular files no larger than 100 MB, including while transferring; directories are refused. A browser
+  saves a complete file by basename. The desktop app saves into Downloads under a unique name and shows where it went,
+  with no partial file after failure or interruption. Status appears at the top of that terminal: success fades after a
+  few seconds, while a failure stays until the next click or download there. Plain click only downloads. In the desktop
+  app, Cmd-click on macOS (Ctrl-click elsewhere) also opens the completed save with the default app, only when its final
+  extension is .md or .txt, case-insensitively. Other types are saved without opening; an opening failure leaves the
+  save successful and says why it was not opened. A browser modifier-click only downloads. The hover uses a file icon
+  and bright name, the host and full directory on a second line, and decimal size with the action hints on a third. A
+  left stripe and size color show under 1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals
+  are red and checking has a neutral stripe. Only an eligible desktop file has the opening hint. Any file the session's
+  account can read is in reach, within the existing shell authority; hover discloses the agent-provided target before an
+  explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to
+  http, https and file; every other scheme is ignored.
 
 ## Attachments
 
