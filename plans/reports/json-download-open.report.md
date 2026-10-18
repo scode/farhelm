@@ -69,3 +69,70 @@ round-trip test covers it. PR #2299's reviewer found that scanning only 32 raw t
 duplicates or empty tokens; the scan now reaches all tokens in a valid draft, and the targeted test covers HTML and
 another unfamiliar type. No review finding remains open. The second reviewer checked the HTML warning against the
 local-file evidence.
+
+### Landing
+
+Landed on its own in round 96, as #2296 and #2299, merged bottom-up, with several fixes made during the landing (below).
+
+#### What landed since the stack was based, and whether it interacted
+
+Since this stack's base, main gained the fix that closes the launcher's host list on an outside click (#2294) and the
+fix that fits a filled-in session launcher in a 900-pixel window (#2295), plus a TODO.md entry and plan bookkeeping. The
+landing rebase was clean. The landing monitor read the stack against them, and a fresh-context reviewer did the same
+independently. Neither found an interaction: this stack's only change to the launcher is a test value that names the new
+setting, and its new style rules apply to Settings alone. Opening a downloaded file still requires the file link's hover
+to be fully visible and uncovered, with the screen text unchanged since the hover, the helm applies the current list
+when the file is opened and requires the saved file to keep the hovered file's type, an empty list opens nothing, and a
+malformed or unreadable list opens nothing either. A program in a terminal cannot change the list, because changing it
+needs a signed-in device.
+
+#### Upgrade
+
+#2296 moves the helm database from schema 60 to 61; the protocol is unchanged. An older helm refuses the newer database.
+As the report says, trying a development build on the maintainer's Mac would migrate that helm's database.
+
+#### Fixes made during the landing
+
+Running the whole helm library and the UI style tests, rather than the executor's selections, found two problems in
+tests the executor did not run, and the cross-plan review found two stale texts; all were fixed before merging:
+
+- Two helm tests that rewind a database to an older schema failed because one of the rewinds did not remove the new
+  file-types column. The rewind now removes it, and the whole helm library passes. This is the same kind of break that
+  reached main twice before, with the tunnel and managed-agent trust settings, and was caught once more at landing.
+- The new warning beside a risky file type glowed with a smooth animation that never stops. The app's style tests refuse
+  that, because a smooth endless animation once held the Mac's window server at 40–50% CPU even with Farhelm's window
+  hidden. The glow now changes in steps, under three times a second. The warning and the file-types field also used
+  their own corner rounding instead of the app's standard sizes; they now use those.
+- The Settings footer in a browser said that file types use the save button, though only the desktop app shows that
+  field; the browser now leaves file types out of that sentence.
+- The Session list docs page still said file downloads are unchanged in the section that now leads to the file-types
+  choice; it now says the web-link choice does not change file downloads, as the app's own help text does.
+
+#### Possible follow-up
+
+A Cmd-click can open a file whose hover never offered to open it: the app sends the open request on any modifier-click
+and the helm checks the list at that moment, so if another signed-in device changes the list between the hover and the
+click, a type can open without its hover having shown the open hint, and, if the list was changed through the helm's API
+rather than a desktop app's Settings, without anyone having seen the warning for that type. Sending the open request
+only when the hover offered opening would close that.
+
+#### Checks
+
+- Run now, on the rebased stack with the landing fixes (the landed diffs are identical to it):
+  `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`,
+  `cargo check -p farhelm-desktop`, the isolated test-sleep check (304 delays, none without a reason); through the test
+  recorder with pinned nextest and tmux, four slots and no retries, the whole helm and UI libraries: 1730 passed, run
+  `d69ab2f2-b47c-443a-a0d7-8cea85eef1b3`, and the desktop UI targets: 689 passed, run
+  `41bc5719-b788-4829-9d24-3436ebcd23c8`; the UI JavaScript harness: 294 passed, run
+  `e39a7bcf-e73b-47f9-8a30-b4db41375609`; `bun run build` for the docs site (32 pages, internal links checked); then a
+  fresh web build and
+  `npx playwright test settings.spec.ts terminal-link-clicks.spec.ts terminal-links.spec.ts host-picker.spec.ts launcher-enter.spec.ts`
+  on both engines, one worker, no retries: 138 passed, run `341385a6-9324-4083-9403-bba4a584c78b`.
+- Retained earlier observations: the first whole-library run, which also covered the protocol library and the `farhelm`
+  binary (2077 passed, the two rewind tests failed), run `5fac4596-42df-4880-8d5f-f34d8dfc5f28` (the landing fixes touch
+  neither the protocol library nor the binary, so that run's passes for them still apply), and the JavaScript run with
+  the two style failures, run `370c7bb7-ddf6-40ed-b3e2-26b82438d6ca`.
+- Skipped: a running desktop window, as in the report; this machine's own Farhelm installation is off-limits.
+
+Nothing in the executor's report became untrue at landing, apart from the checks and fixes above.
