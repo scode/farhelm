@@ -18,3 +18,4 @@ playwright keyboard-scroll.spec.ts SSH help remains keyboard-scrollable with no 
 playwright keyboard-scroll.spec.ts long SSH commands wrap while Copy preserves their exact bytes  # long-ssh-command-help-click-timeout
 playwright modal-layout.spec.ts overflowing trash keeps vertical margins at width 1000  # trash-layout-listing-empty
 playwright terminal-tabs.spec.ts a tab opened and closed before any poll observes it does not come back  # tab-detail-missing-session
+playwright terminal.spec.ts stop and delete a session through the HTTP API  # stopped-session-reports-error
