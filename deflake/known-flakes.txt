@@ -16,4 +16,3 @@ playwright terminal-reconnect.spec.ts view-changes-do-not-postpone-a-recovery  #
 playwright terminal-reconnect.spec.ts a-rolled-back-helm-gets-no-automatic-attach  # rollback-browser-test-sees-skew-before-first-retry
 playwright terminal-reconnect.spec.ts client-helm-skew-prompts-reload  # client-helm-skew-reload-route-is-already-handled
 playwright replace.spec.ts plain Replace keeps a newer same-source key after old header YOLO cancellation  # same-source-replace-menu-after-yolo-cancellation
-playwright session-confirmations.spec.ts skip session confirmations walks row header interrupted card and tab actions  # skip-confirmations-session-actions-time-out

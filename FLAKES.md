@@ -2231,3 +2231,32 @@ in private temporary recorder directories named by the run IDs and may expire.
 Class: unknown
 
 Cause: unknown
+
+## 2026-10-17 — confirmation action-tour route drain (e2e/tests/session-confirmations.spec.ts)
+
+The timeout recorded earlier on 2026-10-17 reproduced on clean main `dd365da2a2db2defc834144f52e6ba48cccb2167`: Chromium
+run `ce5912db-9e4d-4fa4-be4d-d9ead3c28b10` failed two of three exact repetitions, with one worker and zero retries. Both
+failures exhausted the 120-second deadline after restart succeeded. The trace shows a status rewrite's `route.fulfill`
+failing with `Route is already handled!`, followed by a stalled `unrouteAll({ behavior: "wait" })`. Playwright 1.64.0
+leaves its internal handling promise unresolved after that channel error; catching the error lets the callback return
+but does not settle the promise its drain is already awaiting. The fix tracks callback work directly, stops admitting
+rewrites, drains that work, and removes the specific handler without Playwright's wait mode. Failed-body cleanup also
+stops every installed status rewrite before the shared teardown. The reason the browser-side request lost ownership is
+not established. Fixed-source run `f03f489d-e1ce-4e76-96ed-34daf140ab0c` passed ten Chromium repetitions; both callers
+are additionally checked on Chromium and WebKit. The exclusion and TODO entry are removed with this fix.
+
+```text
+Test timeout of 120000ms exceeded.
+route.fulfill: Route is already handled!
+```
+
+Linux x86_64, kernel 6.8.0-146-generic; tmux 3.7c executable SHA256
+`f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, locale `C.UTF-8`. Ambient `FARHELM_*` names were
+scrubbed; the generic recorder supplied `FARHELM_TEST_TRACE_DIR`. Browser build, compiler identity, concurrent load and
+memory pressure were not captured. Failed traces remain in the private recorder directory named above and may expire.
+The fixed run's dirty tree contained the new route helper and its action-tour integration; subsequent changes cover the
+Escape caller, failure cleanup and documentation, leaving the drain mechanism unchanged.
+
+Class: peer-lifecycle
+
+Cause: established
