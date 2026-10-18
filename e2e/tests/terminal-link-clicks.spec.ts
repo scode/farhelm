@@ -9,9 +9,9 @@ import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import type { Page } from "@playwright/test";
 import path from "node:path";
-import { createSession, cleanupSession, patchPreferences, readPreferences } from "./helpers/fleet";
+import { createSession, cleanupSession, patchPreferences, readPreferences, stubFeed } from "./helpers/fleet";
 import { attachSession, waitForTermText } from "./helpers/term";
-import { addTab, selectTerminal, islandText, waitForIslandText } from "./helpers/terminal-suite";
+import { addTab, selectTerminal, islandText, waitForIslandText, fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
 const invocation = `"${path.resolve(__dirname, "../../target/debug/farhelm-fixtures")}" fake-agent --script mouse-modes`;
 const labels = {
@@ -606,4 +606,297 @@ test("program-only link clicks do nothing without mouse reporting", async ({ pag
       ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
     ]);
   }
+});
+
+/** These tests keep the real terminal and approval renderer. Only the helm's
+ * approval listing and file replies are controlled; the hover is always the
+ * one created by the real link provider after pointer movement.
+ */
+test.describe("approval-covered terminal disclosures", () => {
+  // Scope the reset/build-stamp capture to these additions. The cleanup hook
+  // drains routed replies before Playwright disposes their page context.
+  installTerminalSuiteHooks();
+
+  /** One unrelated live approval makes the actual overlay region measurable.
+   * A URL request keeps this fixture compact without hiding an approval's
+   * rendering or layout behind a hand-made overlay.
+   */
+  async function stageCoveringApproval(page: Page) {
+    const feed = await stubFeed(page);
+    feed.notifyOnConnect(1);
+    await page.route(url => url.pathname === "/api/approvals", route => fulfillAsHelm(route, {
+      json: {
+        approvals: [{
+          id: "covering-link-disclosure",
+          host_id: 1,
+          host_name: "fixture",
+          session: { id: "7c1e9a52-4b0d-4f7e-9a3c-2d81f6b0e413", title: "requester", host_name: "fixture" },
+          expires_at_ms: Date.now() + 540_000,
+          action: { kind: "open_url", url: "https://example.test/approval", preapproved: false, local_network: false },
+        }],
+      },
+    }));
+  }
+
+  /** Observe synchronous browser opening without navigating away from the
+   * fixture. The refusal message supplies the negative assertion's boundary.
+   */
+  async function probeDisclosureOpens(page: Page) {
+    await page.addInitScript(() => {
+      (window as any).__disclosureOpens = [];
+      window.open = ((url: string) => {
+        (window as any).__disclosureOpens.push(String(url));
+        return null;
+      }) as typeof window.open;
+    });
+    return () => page.evaluate(() => (window as any).__disclosureOpens as string[]);
+  }
+
+  /** Add display bytes to the attached terminal while the real fake-agent
+   * keeps input ownership. Saving the cursor preserves its log area; this is
+   * the same display-only seam already used by this spec's OSC file case.
+   */
+  async function paintDisclosureLink(page: Page, label: string, target: string | null, row: number, col: number) {
+    await page.evaluate(({ label, target, row, col }) => new Promise<void>(resolve => {
+      const text = target ? `\x1b]8;;${target}\x07${label}\x1b]8;;\x07` : label;
+      (window as any).__farhelmTerm.write(`\x1b7\x1b[${row};${col}H\x1b[2K${text}\x1b8`, resolve);
+    }), { label, target, row, col });
+    return cell(page, label);
+  }
+
+  /** Put the pointer left of the card while its ordinary below-right hover
+   * reaches beneath it. The allowed location is below that same live card,
+   * so a positive click cannot pass merely because approvals disappeared.
+   */
+  async function besideApproval(page: Page, label: string, target: string | null, covered: boolean) {
+    await page.evaluate(() => document.fonts.ready);
+    const grid = await page.evaluate(({ label, covered }) => {
+      const term = (window as any).__farhelmTerm;
+      const screen = document.querySelector("#terminal .xterm-screen")!.getBoundingClientRect();
+      const region = document.querySelector(".approval-cards")!.getBoundingClientRect();
+      const width = screen.width / term.cols;
+      const height = screen.height / term.rows;
+      return {
+        row: Math.floor(((covered ? region.top + 12 : region.bottom + 28) - screen.top) / height) + 1,
+        col: Math.floor((region.left - 24 - screen.left) / width - label.length / 2) + 1,
+        rows: term.rows,
+        cols: term.cols,
+      };
+    }, { label, covered });
+    expect(grid.row, "the target row must be in this live terminal").toBeGreaterThan(0);
+    expect(grid.row).toBeLessThanOrEqual(grid.rows);
+    expect(grid.col, "the entire label must fit left of the card's center").toBeGreaterThan(0);
+    expect(grid.col + label.length).toBeLessThanOrEqual(grid.cols);
+    return paintDisclosureLink(page, label, target, grid.row, grid.col);
+  }
+
+  /** Establish both causes independently: the link receives real pointer
+   * input, and its otherwise fitting hover intersects the higher card region.
+   * Reading the rectangles also gives useful fixture state on failure.
+   */
+  async function assertDisclosureGeometry(page: Page, selector: string, point: { x: number; y: number }, covered: boolean) {
+    await expect(page.locator(selector)).toBeVisible();
+    await expect.poll(() => page.locator(selector).evaluate((hover, point) => {
+      const card = document.querySelector(".approval-cards")!;
+      const h = hover.getBoundingClientRect();
+      const c = card.getBoundingClientRect();
+      return {
+        fits: hover.clientWidth > 0 && hover.clientHeight > 0 && hover.scrollHeight <= hover.clientHeight &&
+          hover.scrollWidth <= hover.clientWidth && h.top >= 0 && h.left >= 0 && h.bottom <= innerHeight && h.right <= innerWidth,
+        overlaps: h.left < c.right && h.right > c.left && h.top < c.bottom && h.bottom > c.top,
+        pointerUncovered: !!document.elementFromPoint(point.x, point.y)?.closest("#terminal"),
+        cardAboveHover: Number(getComputedStyle(card).zIndex) > Number(getComputedStyle(hover).zIndex),
+      };
+    }, point), { message: "live pointer, fitting disclosure and approval-region intersection" }).toEqual({
+      fits: true, overlaps: covered, pointerUncovered: true, cardAboveHover: true,
+    });
+  }
+
+  /** Refusal must be a new, readable outcome above the surface that covered
+   * the destination, not an ordinary low-layer transfer failure.
+   */
+  async function assertCoveredRefusal(page: Page, operation: "download" | "open") {
+    const notice = page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]');
+    await expect(notice).toContainText(`cannot ${operation}:`);
+    await expect(notice).toContainText("covered by an approval request");
+    await expect(notice).toBeVisible();
+    await expect.poll(() => notice.evaluate(el => {
+      const card = document.querySelector(".approval-cards")!;
+      const box = el.getBoundingClientRect();
+      return Number(getComputedStyle(el).zIndex) > Number(getComputedStyle(card).zIndex) &&
+        box.top >= 0 && box.bottom <= innerHeight && el.scrollHeight <= el.clientHeight;
+    }), { message: "the full refusal is inside the window and above approval cards" }).toBe(true);
+  }
+
+  /** Both browser click forms must reach admission, refuse without a request,
+   * then permit a real Blob download once the same file's hover is uncovered.
+   * Browser modifiers exercise the shared gate; native opening is not covered.
+   */
+  test("a covered file hover refuses plain and modifier clicks before transfer", async ({ page, request }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const opens = await probeDisclosureOpens(page);
+    let sessionId: string | undefined;
+    let bodyFailed = false;
+    let transfers = 0;
+    try {
+      await patchPreferences(request, { terminal_link_click: null });
+      const session = await createSession(request, { title: `file-covered-${Date.now()}`, cwd: "/tmp", invocation });
+      sessionId = session.id;
+      await stageCoveringApproval(page);
+      page.on("request", request => {
+        if (new URL(request.url()).pathname === `/api/sessions/${session.id}/files/download`) transfers++;
+      });
+      await page.route(`**/api/sessions/${session.id}/files/stat`, route => fulfillAsHelm(route, {
+        json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
+      }));
+      await page.route(`**/api/sessions/${session.id}/files/download`, route => fulfillAsHelm(route, {
+        status: 200, contentType: "application/octet-stream", body: "fixture\n",
+      }));
+      await page.goto("/");
+      await attachSession(page, session.id);
+      await waitForTermText(page, "FAKE-AGENT READY");
+      await cue(page, "links");
+      await expect(page.locator(".approval-card .approval-allow")).toBeEnabled();
+      const modifier = await page.evaluate(() => navigator.platform.includes("Mac") ? "Meta" : "Control");
+      const disclosure = "#terminal .terminal-file-target";
+      for (const modified of [false, true]) {
+        const point = await besideApproval(page, "/output/report.txt", null, true);
+        await expect(page.locator(disclosure)).toContainText("8 B");
+        await expectLinkUnderPointer(page, point, "/output/report.txt");
+        await assertDisclosureGeometry(page, disclosure, point, true);
+        await expect(page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]')).toHaveCount(0);
+        if (modified) await page.keyboard.down(modifier);
+        await page.mouse.click(point.x, point.y);
+        if (modified) await page.keyboard.up(modifier);
+        await assertCoveredRefusal(page, "download");
+        expect(transfers, "refusal is the completed admission boundary").toBe(0);
+        expect(await opens()).toEqual([]);
+      }
+      const point = await besideApproval(page, "/output/report.txt", null, false);
+      await expect(page.locator(disclosure)).toContainText("8 B");
+      await assertDisclosureGeometry(page, disclosure, point, false);
+      const downloaded = page.waitForEvent("download");
+      await page.mouse.click(point.x, point.y);
+      expect((await downloaded).suggestedFilename()).toBe("report.txt");
+      expect(transfers).toBe(1);
+      await expect(page.locator("#terminal .terminal-file-message.showing")).toHaveText("downloaded report.txt");
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["Control key", () => page.keyboard.up("Control")],
+        ["Meta key", () => page.keyboard.up("Meta")],
+        ["session", () => sessionId && cleanupSession(request, sessionId)],
+        ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+      ]);
+    }
+  });
+
+  /** OSC output owes target disclosure even for an innocent-looking label.
+   * Plain URL text owes no hover: the adjacent real card must not disable it.
+   */
+  test("covered OSC web targets refuse while plain URLs and uncovered OSC targets open", async ({ page, request }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const opens = await probeDisclosureOpens(page);
+    let sessionId: string | undefined;
+    let bodyFailed = false;
+    try {
+      await patchPreferences(request, { terminal_link_click: null });
+      const session = await createSession(request, { title: `web-covered-${Date.now()}`, cwd: "/tmp", invocation });
+      sessionId = session.id;
+      await stageCoveringApproval(page);
+      await page.goto("/");
+      await attachSession(page, session.id);
+      await waitForTermText(page, "FAKE-AGENT READY");
+      await cue(page, "links");
+      await expect(page.locator(".approval-card .approval-allow")).toBeEnabled();
+      const target = "https://example.test/covered-osc";
+      const disclosure = "#terminal .terminal-link-target:not(.terminal-file-target)";
+      const point = await besideApproval(page, "COVERED-WEB", target, true);
+      await expect(page.locator(disclosure)).toContainText(target);
+      await expectLinkUnderPointer(page, point, "COVERED-WEB");
+      await assertDisclosureGeometry(page, disclosure, point, true);
+      await page.mouse.click(point.x, point.y);
+      await assertCoveredRefusal(page, "open");
+      expect(await opens()).toEqual([]);
+
+      const plain = "https://p.test";
+      const plainPoint = await besideApproval(page, plain, null, true);
+      await expect(page.locator(disclosure)).toBeHidden();
+      expect(await page.evaluate(point => !!document.elementFromPoint(point.x, point.y)?.closest("#terminal"), plainPoint)).toBe(true);
+      await expectLinkUnderPointer(page, plainPoint, plain);
+      await page.mouse.click(plainPoint.x, plainPoint.y);
+      expect(await opens()).toEqual([plain]);
+
+      const uncovered = await besideApproval(page, "UNCOVERED-WEB", target, false);
+      await expect(page.locator(disclosure)).toContainText(target);
+      await assertDisclosureGeometry(page, disclosure, uncovered, false);
+      await page.mouse.click(uncovered.x, uncovered.y);
+      expect(await opens()).toEqual([plain, target]);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["session", () => sessionId && cleanupSession(request, sessionId)],
+        ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+      ]);
+    }
+  });
+
+  /** The web hover renders its host without eliding it. A long real host in
+   * a short window exceeds the viewport without any fixture CSS or fake DOM;
+   * enlarging the window must restore opening of that exact target.
+   */
+  test("an OSC web hover clipped by the window refuses until it fits", async ({ page, request }) => {
+    await page.setViewportSize({ width: 900, height: 220 });
+    const opens = await probeDisclosureOpens(page);
+    let sessionId: string | undefined;
+    let bodyFailed = false;
+    try {
+      await patchPreferences(request, { terminal_link_click: null });
+      const session = await createSession(request, { title: `web-clipped-${Date.now()}`, cwd: "/tmp", invocation });
+      sessionId = session.id;
+      await page.goto("/");
+      await attachSession(page, session.id);
+      await waitForTermText(page, "FAKE-AGENT READY");
+      await cue(page, "links");
+      const target = `https://${"segment.".repeat(180)}example.test/path`;
+      const label = "https://claimed.test/safe";
+      const point = await paintDisclosureLink(page, label, target, 1, 1);
+      const disclosure = page.locator("#terminal .terminal-link-target:not(.terminal-file-target)");
+      await expect(disclosure).toContainText("link text does not match where it goes");
+      await expect.poll(() => disclosure.evaluate(el => el.getBoundingClientRect().bottom > innerHeight), {
+        message: "the real host disclosure must extend below the small window",
+      }).toBe(true);
+      await expectLinkUnderPointer(page, point, label);
+      await page.mouse.click(point.x, point.y);
+      const notice = page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]');
+      await expect(notice).toContainText("cannot open:");
+      await expect(notice).toContainText("not visible");
+      await expect(notice).toBeVisible();
+      expect(await opens()).toEqual([]);
+
+      const shortRows = await page.evaluate(() => (window as any).__farhelmTerm.rows);
+      await page.setViewportSize({ width: 1280, height: 1200 });
+      await expect.poll(() => page.evaluate(() => (window as any).__farhelmTerm.rows)).toBeGreaterThan(shortRows);
+      const fitting = await paintDisclosureLink(page, label, target, 1, 1);
+      await expect.poll(() => disclosure.evaluate(el => {
+        const rect = el.getBoundingClientRect();
+        return rect.top >= 0 && rect.left >= 0 && rect.bottom <= innerHeight && rect.right <= innerWidth &&
+          el.scrollHeight <= el.clientHeight && el.scrollWidth <= el.clientWidth;
+      })).toBe(true);
+      await page.mouse.click(fitting.x, fitting.y);
+      expect(await opens()).toEqual([target]);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["session", () => sessionId && cleanupSession(request, sessionId)],
+        ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+      ]);
+    }
+  });
 });

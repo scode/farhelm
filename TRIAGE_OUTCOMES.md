@@ -15586,7 +15586,8 @@
   visible still downloads. A web link whose hover overlaps an approval card or does not fit in the window is refused
   with a visible explanation and opens nothing, while one whose hover is fully visible still opens. Browser regressions
   cover these cases; run them through the recorder on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/covered-link-hover-refusal.md`.
+- Execution: change `krlyyrymtxlyvrwvrznvottsvmmzlvrr`, bookmark `plan/covered-link-hover-refusal/01-covered-hover`, PR
+  <https://github.com/scode/farhelm/pull/2254/changes>.
 
 ## file-disclosure-trailing-space-distinction-unverified.md
 

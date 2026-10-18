@@ -6,8 +6,8 @@ const vm = require('node:vm');
 const { linkRangeText } = require('../assets/terminal-links.js');
 const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, MAX_BYTES } = require('../assets/terminal-files.js');
 
-/** A noninteractive clipped disclosure is not inspectable. Both dimensions
- * and actual visibility matter, including a resize after the lookup finished.
+/** A noninteractive clipped or covered disclosure is not inspectable. Both
+ * dimensions and live cover rectangles matter, including changes after lookup.
  */
 test('only a visible fully fitting disclosure can authorize a transfer', () => {
   const rect = { top: 10, left: 10, bottom: 70, right: 210 };
@@ -24,6 +24,17 @@ test('only a visible fully fitting disclosure can authorize a transfer', () => {
   }
   assert.equal(disclosureFits(fits, { ...viewport, innerHeight: 69 }), false, 'a resize rechecks live viewport dimensions');
   assert.equal(disclosureFits(null, viewport), false);
+  for (const cover of [
+    { top: 20, bottom: 40, left: 200, right: 240 },
+    { top: 0, bottom: 100, left: 0, right: 300 },
+    { top: 69, bottom: 80, left: 20, right: 30 },
+  ]) assert.equal(disclosureFits(fits, viewport, [cover]), false, 'even a partial cover can hide the target');
+  for (const cover of [
+    { top: 70, bottom: 80, left: 20, right: 30 },
+    { top: 20, bottom: 40, left: 210, right: 240 },
+    { top: 20, bottom: 20, left: 20, right: 30 },
+    { top: 20, bottom: 40, left: 20, right: 20 },
+  ]) assert.equal(disclosureFits(fits, viewport, [cover]), true, 'touching edges or an empty region covers nothing');
 });
 
 /** Decimal display and exact byte thresholds must agree with the host cap;
@@ -511,6 +522,35 @@ test('clipping refuses transfer and shows failure after its own click', async ()
     pending.addon.dispose();
     assert.equal(pending.timers.size, 0, 'disposal cancels a pending explanation');
   }
+});
+
+/** An approval may arrive after lookup. Both activation paths consult its
+ * current region; a departed web hover also lowers a not-yet-shown refusal.
+ */
+test('live approval coverage refuses file transfers and shares web refusal lifetime', async () => {
+  const fixture = noticeFixture();
+  let cover = { top: 20, bottom: 40, left: 200, right: 240 };
+  fixture.addon.coveringRects = () => [cover];
+  let transfers = 0;
+  fixture.addon.request = async () => { transfers++; throw new Error('unexpected transfer'); };
+  await fixture.addon.download('report.pdf', { ctrlKey: true });
+  assert.equal(transfers, 0);
+  let [id, task] = [...fixture.timers][0];
+  fixture.timers.delete(id);
+  task.callback();
+  assert.match(fixture.notice().textContent, /cannot download:.*covered by an approval request/);
+  assert.equal(fixture.notice().dataset.outcome, 'disclosure-refusal');
+
+  assert.equal(fixture.addon.admitDisclosure(fixture.disclosure, true), false);
+  fixture.addon.lowerRefusal();
+  [id, task] = [...fixture.timers][0];
+  fixture.timers.delete(id);
+  task.callback();
+  assert.match(fixture.notice().textContent, /cannot open:.*covered by an approval request/);
+  assert.equal(fixture.notice().dataset.outcome, 'failure', 'departure before the task must not re-raise the notice');
+  cover = { top: 70, bottom: 80, left: 20, right: 30 };
+  assert.equal(fixture.addon.admitDisclosure(fixture.disclosure, true), true, 'moving the card away admits the same hover');
+  fixture.addon.dispose();
 });
 
 /** A cached link can survive repaint of only its continuation. The actual

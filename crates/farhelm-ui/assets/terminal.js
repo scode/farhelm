@@ -3581,12 +3581,19 @@
         // The addon owns file lookups/transfers for the retained terminal,
         // not for a particular WebSocket attachment or tab render.
         const linkGesture = window.farhelmTerminalLinks.createLinkGesture();
+        // Cards scroll inside one region. An offscreen card's own rectangle
+        // can extend beyond that viewport, so use only the visible region's
+        // live bounds, never individual card rectangles or cached positions.
+        const linkCoveringRects = () => Array.from(document.querySelectorAll('.approval-cards'))
+          .filter(region => region.getClientRects().length && getComputedStyle(region).visibility !== 'hidden')
+          .map(region => region.getBoundingClientRect());
         const fileLinks = new window.farhelmTerminalFiles.FileLinksAddon({
           endpoint: baseUrl + spec.path.split('/term')[0] + '/files',
           secret: deviceSecret,
           native: typeof window[WEBVIEW_DEVICE_SECRET] === 'string',
           isMac: IS_MAC,
           isClick: event => linkGesture.isClick(event),
+          coveringRects: linkCoveringRects,
         });
         // Both link providers identify the web target currently under the pointer.
         // A file hover never qualifies for withholding program input.
@@ -3600,6 +3607,15 @@
           return state?.available && target && linkClickMode() !== 'program'
             ? { port: target.port, host: state.host_name } : null;
         };
+        // OSC links always disclose their target; prose URLs do so only for a
+        // tunnel hint. Recheck the latter at activation, since availability may
+        // have changed since hover. Ignore rules still run before this gate.
+        const webDisclosureAdmits = (uri, osc) => !(osc || tunnelHint(uri)) ||
+          fileLinks.admitDisclosure(term.element.querySelector(':scope > .terminal-link-target:not(.terminal-file-target)'), true);
+        const hideWebLinkTarget = () => {
+          window.farhelmTerminalLinks.hideLinkTarget(term.element);
+          fileLinks.lowerRefusal();
+        };
         // OSC and prose links share all policy, including the exact release
         // token. Peer data crosses the Rust channel as values, never source.
         const activateWebLink = (event, uri, validated = false) => window.farhelmTerminalLinks.activateWebLink({
@@ -3608,7 +3624,10 @@
           button: event.button, metaKey: event.metaKey, ctrlKey: event.ctrlKey,
           shiftKey: event.shiftKey, altKey: event.altKey,
           click: linkGesture.isClick(event), selection: !!term.getSelection(), mode: linkClickMode(),
-        }, window.farhelmTerminalLinks.openTerminalUrl, target => {
+        }, target => {
+          if (webDisclosureAdmits(target, validated)) window.farhelmTerminalLinks.openTerminalUrl(target);
+        }, target => {
+          if (!webDisclosureAdmits(target, validated)) return;
           if (typeof window.farhelmTunnelOpen === 'function') {
             try {
               window.farhelmTunnelOpen({ session_id: spec.sessionId, url: target, generation: tunnelState().generation });
@@ -3701,9 +3720,15 @@
               }
             },
             leave() {
+              // An OSC file hover lowers its refusal through the addon's
+              // deferred leave, which a redraw's synchronous re-hover can
+              // reclaim. Lowering it here as well would let every repaint of
+              // the link drop the explanation beneath the hover and cards.
+              const web = hoveredWebLink;
               hoveredWebLink = false;
               fileLinks.leave();
-              window.farhelmTerminalLinks.hideLinkTarget(term.element);
+              if (web) hideWebLinkTarget();
+              else window.farhelmTerminalLinks.hideLinkTarget(term.element);
             },
           },
         });
@@ -3778,7 +3803,7 @@
               const hint = tunnelHint(uri);
               if (hint) window.farhelmTerminalLinks.showLinkTarget(event, uri, term.element, null, false, hint);
             },
-            leave() { hoveredWebLink = false; window.farhelmTerminalLinks.hideLinkTarget(term.element); },
+            leave() { hoveredWebLink = false; hideWebLinkTarget(); },
           }),
         );
         term.loadAddon(fileLinks);

@@ -4,18 +4,20 @@
 (function () {
   const MAX_BYTES = 100000000;
 
-  /** Transfer permission requires the entire live disclosure to fit. The
-   * noninteractive hover cannot be scrolled, so clipped details cannot count
+  /** Link admission requires the entire live disclosure to fit and be uncovered.
+   * The noninteractive hover cannot be scrolled, so clipped details cannot count
    * as evidence the user could inspect. Read dimensions at click time to
    * cover a window resize after lookup, and fail closed for a hidden hover.
    */
-  function disclosureFits(display, viewport) {
+  function disclosureFits(display, viewport, coveringRects = []) {
     if (!display || display.hidden || display.clientHeight <= 0 || display.clientWidth <= 0 ||
       display.scrollHeight > display.clientHeight || display.scrollWidth > display.clientWidth) return false;
     // A resize can move fixed-position details off-screen without changing
     // xterm's integer grid or overflowing the disclosure's own content box.
     const rect = display.getBoundingClientRect();
-    return rect.top >= 0 && rect.left >= 0 && rect.bottom <= viewport.innerHeight && rect.right <= viewport.innerWidth;
+    return rect.top >= 0 && rect.left >= 0 && rect.bottom <= viewport.innerHeight && rect.right <= viewport.innerWidth &&
+      !coveringRects.some(cover => cover.right > cover.left && cover.bottom > cover.top &&
+        rect.left < cover.right && rect.right > cover.left && rect.top < cover.bottom && rect.bottom > cover.top);
   }
 
   /** Decimal units agree with the transfer cap. Rounding never renders a
@@ -164,7 +166,7 @@
    * reopens the disclosed canonical path; that still is not a file snapshot.
    */
   class FileLinksAddon {
-    constructor({ endpoint, secret, native, isMac = false, isClick = () => false,
+    constructor({ endpoint, secret, native, isMac = false, isClick = () => false, coveringRects = () => [],
       // Browser timers require their global receiver. Wrappers keep the
       // defaults out of the addon's method-call context while allowing clocks.
       setTimeout: schedule = (callback, delay) => setTimeout(callback, delay),
@@ -176,6 +178,9 @@
       // The terminal owns primary-gesture admission across all link providers.
       // A standalone addon without that evidence cannot authorize a transfer.
       this.isClick = isClick;
+      // The shell supplies its visible approval region at activation time;
+      // this addon knows rectangles, not the shell's DOM or cached geometry.
+      this.coveringRects = coveringRects;
       this.hovered = null;
       this.transfers = new Set();
       this.schedule = schedule;
@@ -341,13 +346,43 @@
       this.hovered = null;
       const display = this.term?.element?.querySelector(':scope > .terminal-file-target');
       if (display) display.hidden = true;
-      // The clipped-hover refusal is raised above its own hover only while that
-      // hover can be showing. Once a new hover starts or the pointer leaves,
-      // drop it to the ordinary failure layer, text kept, so it can cover
-      // neither a new hover whose click is admitted nor the session header's
-      // confirmations below the terminal's top edge.
+      this.lowerRefusal();
+    }
+
+    /** A departed file or web hover must not leave its notice above later cards
+     * or disclosures. Keep the explanation, but restore ordinary failure stacking.
+     */
+    lowerRefusal() {
+      this.refusalRaised = false;
       const message = this.term?.element?.querySelector(':scope > .terminal-file-message');
       if (message?.dataset.outcome === 'disclosure-refusal') message.dataset.outcome = 'failure';
+    }
+
+    /** Share the click-time disclosure gate and explanation across file and web
+     * activation. Empty/hidden disclosures fail closed; only the shell decides
+     * which visible surfaces supply covering rectangles.
+     */
+    admitDisclosure(display, web = false) {
+      const fits = disclosureFits(display, window);
+      if (fits && disclosureFits(display, window, this.coveringRects())) return true;
+      const reason = fits ? 'are covered by an approval request; move the pointer' : 'are not visible; enlarge the window';
+      this.refuse(`cannot ${web ? 'open' : 'download'}: full ${web ? 'link' : 'file'} details ${reason} and hover again`);
+      return false;
+    }
+
+    /** Activation runs on mouseup, before the click that dismisses failures.
+     * Deferring both paths through the owned timer keeps a refusal from erasing
+     * itself; replacement or disposal cancels the pending explanation as usual.
+     */
+    refuse(text) {
+      this.hideMessage();
+      this.refusalRaised = true;
+      this.messageTimer = this.schedule(() => {
+        this.messageTimer = null;
+        // A departure can happen before this task runs. It withdraws the
+        // raised layer for the pending explanation as well as a shown one.
+        this.message(text, this.refusalRaised ? 'disclosure-refusal' : 'failure');
+      }, 0);
     }
 
     /** Paths travel as JSON data with the current device credential, never as
@@ -371,6 +406,7 @@
       if (this.messageTimer !== null) this.cancel(this.messageTimer);
       this.messageTimer = null;
       this.failureMessage = false;
+      this.refusalRaised = false;
       const message = this.term?.element?.querySelector(':scope > .terminal-file-message');
       if (message) {
         message.classList.remove('showing');
@@ -426,17 +462,7 @@
       if (state.link && !bufferLinks(this.term, state.range.start.y).some(current =>
         current.path === path && current.range.start.x === state.range.start.x && current.range.start.y === state.range.start.y &&
         current.range.end.x === state.range.end.x && current.range.end.y === state.range.end.y)) return;
-      if (!disclosureFits(this.term.element.querySelector(':scope > .terminal-file-target'), window)) {
-        // Activation is on mouseup. Showing failure in the next task lets the
-        // click that follows finish before it can dismiss its own explanation.
-        // Reuse the owned notice timer so replacement/disposal cancels it too.
-        this.hideMessage();
-        this.messageTimer = this.schedule(() => {
-          this.messageTimer = null;
-          this.message('cannot download: full file details are not visible; enlarge the window and hover again', 'disclosure-refusal');
-        }, 0);
-        return;
-      }
+      if (!this.admitDisclosure(this.term.element.querySelector(':scope > .terminal-file-target'))) return;
       const controller = new AbortController();
       this.transfers.add(controller);
       this.message('downloading…');

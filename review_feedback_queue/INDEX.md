@@ -8,9 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`approval-cards-can-obscure-file-disclosure.md`](approval-cards-can-obscure-file-disclosure.md) — A terminal file
-  link can remain clickable while an approval card hides its destination disclosure.
-
 ## High priority: material UX degradation
 
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
