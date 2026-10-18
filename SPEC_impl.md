@@ -5175,9 +5175,10 @@ field is a launcher-only button combobox with one listbox, active-descendant nav
 following the model picker's focus ownership. Arrow keys, Home and End browse without committing; Enter or Space commits
 an open option, Escape or blur discards browsing, and closed Enter retains `enter_choice` launch behavior. Typeahead
 uses a case-insensitive prefix, restarting after a one-second pause and cycling repeated letters. The menu closes during
-busy work and unmounts with its launcher; the committed id stays empty until hosts arrive. The parent retains the old
-native select's synchronous destination/history fence, browse invalidation, clone takeover and intent reset. Picking the
-already committed host does not reset the draft. Template editing retains its native host select.
+busy work and unmounts with its launcher; an outside pointer press blurs the button so even a click on unfocusable
+padding closes the menu without changing the committed host. The committed id stays empty until hosts arrive. The parent
+retains the old native select's synchronous destination/history fence, browse invalidation, clone takeover and intent
+reset. Picking the already committed host does not reset the draft. Template editing retains its native host select.
 
 `SessionView` reuses `AppBody`'s `Signal<HostsRead>` context that the sidebar refreshes from the hosts feed; its
 separate stale-only host read remains limited to outage details. The shared preferences signal controls whether a
