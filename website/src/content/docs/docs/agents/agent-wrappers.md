@@ -5,14 +5,21 @@ sidebar:
   order: 60
 ---
 
-Some environments do not start agents directly; they start a wrapper — `wrapper run <dir> <agent...>` — that `cd`s into
-the directory, does whatever bookkeeping it manages there, and runs the agent as a child while staying resident as its
-parent. Farhelm runs a wrapper like any other [custom command](/docs/agents/custom-commands/); there is no wrapper mode
-to turn on. Write `{cwd}` where the wrapper wants the directory and Farhelm substitutes the session's own directory at
-every launch and every restart, so one command (or one [launch template](/docs/using/launch-templates/)) serves every
-directory. Declare the agent the wrapper ends up running as the command's agent, and put `{farhelm_args}` where that
-agent's arguments go: without a declared agent, the session gets no agent-specific status, no conversation tracking, and
-no restart. On stop the wrapper is killed along with the agent; being the agent's parent exempts it from nothing.
+An agent can request a launch with `farhelm agent create --wrapper 'with-endpoint --profile work --'` or
+`farhelm spawn --wrapper 'with-endpoint --profile work --'`. Farhelm places the prefix before its composed agent command
+and retains the agent's status, conversation capture and resume behavior. The wrapper must run that agent and pass its
+arguments and environment through; Farhelm takes your word for that. The prefix is split into literal words using
+shell-style quotes and escapes, without shell expansion or placeholders. An agent-supplied prefix needs your approval on
+a host that asks before YOLO launches. Do not put secrets in a prefix: it appears in the launch command, and an agent on
+any host can read a saved template's prefix in the templates listing.
+
+For a wrapper that needs a directory argument or a different resume command, use a
+[custom command](/docs/agents/custom-commands/). Write `{cwd}` where the wrapper wants the directory and Farhelm
+substitutes the session's own directory at every launch and every restart, so one command (or one
+[launch template](/docs/using/launch-templates/)) serves every directory. Declare the agent the wrapper ends up running
+as the command's agent, and put `{farhelm_args}` where that agent's arguments go: without a declared agent, the session
+gets no agent-specific status, no conversation tracking, and no restart. On stop the wrapper is killed along with the
+agent; being the agent's parent exempts it from nothing.
 
 ## A wrapper command, field by field
 

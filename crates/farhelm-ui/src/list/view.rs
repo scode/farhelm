@@ -4371,6 +4371,15 @@ fn mirror_submitted_launch(
         .filter(|permission| Some(*permission) != launch.harness.omitted_permission())
         .filter(|permission| *permission != crate::LaunchPermission::Custom)
         .map(|permission| permission.wire_word().to_string());
+    if let Some(prefix) = &launch.wrapper_prefix {
+        preferences
+            .remembered_wrapper_prefixes
+            .insert(launch.harness, prefix.clone());
+    } else {
+        preferences
+            .remembered_wrapper_prefixes
+            .remove(&launch.harness);
+    }
 }
 
 /// The one open notification list (SPEC.md, Status), as `ListView` tracks it.
@@ -4613,6 +4622,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: Some(true),
         };
         mirror_submitted_launch(&mut preferences, Some(&submitted));
@@ -4632,6 +4642,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         mirror_submitted_launch(&mut preferences, Some(&omitted_yolo_default));

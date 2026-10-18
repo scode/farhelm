@@ -36,7 +36,7 @@ crate::enum_with_all! {
     /// the harness the user selected. In particular, Muse is a first-class launch
     /// choice even though it currently maps to the supervisor's generic runtime
     /// integration.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")]
     pub enum LaunchHarness {
         /// Cursor launches with the Generic runtime: no conversation tracking or Resume.
@@ -571,6 +571,12 @@ pub struct LaunchSelection {
     /// quoting style and shell expansion have no part in the persisted intent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_flags: Option<Vec<String>>,
+    /// Literal words prepended to the composed start and resume commands.
+    /// Absence preserves old launch fingerprints. A wrapper is the user's
+    /// assertion that the prefixed command still runs this agent; Farhelm
+    /// does not inspect or trust the wrapper's own behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrapper_prefix: Option<Vec<String>>,
     /// The launch's resolved trust for project-local settings and extensions.
     ///
     /// This is separate from tool approval and from Farhelm's hook-trust
@@ -582,6 +588,35 @@ pub struct LaunchSelection {
     /// JSON because that encoding also serves as a durable launch fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_trust: Option<bool>,
+}
+
+/// Parse a wrapper command line into literal argv words, with no shell run.
+/// Quotes and escapes select word boundaries; placeholders are reserved for
+/// Farhelm's later spawn pass and cannot come from this user-supplied prefix.
+pub fn split_wrapper_prefix(text: &str) -> Result<Vec<String>, String> {
+    let words =
+        shell_words::split(text).map_err(|error| format!("invalid wrapper prefix: {error}"))?;
+    check_wrapper_prefix(Some(&words))?;
+    Ok(words)
+}
+
+/// Check the persisted wrapper shape at every admission path, including API
+/// requests that did not pass through the editable command-line splitter.
+pub fn check_wrapper_prefix(words: Option<&[String]>) -> Result<(), String> {
+    let Some(words) = words else { return Ok(()) };
+    if words.first().is_none_or(String::is_empty) {
+        return Err("wrapper prefix needs a program".into());
+    }
+    if words.iter().any(|word| word.contains('\0')) {
+        return Err("wrapper prefix cannot contain NUL".into());
+    }
+    if words
+        .iter()
+        .any(|word| crate::session_launch::is_reserved_placeholder(word))
+    {
+        return Err("wrapper prefix cannot contain Farhelm placeholders".into());
+    }
+    Ok(())
 }
 
 /// Split editable permission text without evaluating expansions or commands.
@@ -893,6 +928,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
 
@@ -902,6 +938,7 @@ mod tests {
         assert!(json["effort"].is_null());
         assert!(json["permissions"].is_null());
         assert!(json.get("workspace_trust").is_none());
+        assert!(json.get("wrapper_prefix").is_none());
         assert_eq!(
             serde_json::from_value::<LaunchSelection>(json).expect("deserialize launch selection"),
             selection
@@ -920,6 +957,30 @@ mod tests {
         }))
         .expect("decode an older stored selection");
         assert_eq!(selection.workspace_trust, None);
+        assert_eq!(selection.wrapper_prefix, None);
+    }
+
+    /// Wrapper input is shell-like only for word boundaries. Persisted words
+    /// cannot ask the supervisor to substitute Farhelm's own placeholders,
+    /// including the Codex trust markers that are filled after checkout.
+    #[test]
+    fn wrapper_prefix_parses_literal_words_and_rejects_reserved_values() {
+        assert_eq!(
+            super::split_wrapper_prefix("with-endpoint --profile 'work space' --").unwrap(),
+            vec!["with-endpoint", "--profile", "work space", "--"]
+        );
+        for text in [
+            "",
+            "'unfinished",
+            "{cwd}",
+            "run {conversation}",
+            "run {farhelm_args}",
+            "run {codex:trusted-cwd}",
+            "run {codex:untrusted-cwd}",
+        ] {
+            assert!(super::split_wrapper_prefix(text).is_err(), "{text:?}");
+        }
+        assert!(super::check_wrapper_prefix(Some(&["run\0bad".into()])).is_err());
     }
 
     /// Explicit consent and refusal must remain distinct in saved intent and
@@ -932,6 +993,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         for choice in [true, false] {

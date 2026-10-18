@@ -719,6 +719,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let created = launch(&h, &fixture, selection.clone()).await;
@@ -743,6 +744,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             model: Some("composer-2.5".to_string()),
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         },
         LaunchSelection {
@@ -751,6 +753,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             model: None,
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         },
         LaunchSelection {
@@ -759,6 +762,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             model: Some("release/candidate'42;$literal".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         },
         LaunchSelection {
@@ -767,6 +771,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             model: Some("claude-fable-5".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         },
         LaunchSelection {
@@ -775,6 +780,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             model: Some("muse-spark-1.3-contributor".to_string()),
             effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         },
         LaunchSelection {
@@ -783,6 +789,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             model: Some("opencode/grok-4.6".to_string()),
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         },
     ];
@@ -921,6 +928,7 @@ async fn explicit_spawn_inheritance_relays_the_parents_stored_launch() {
         model: Some("gpt-6-astra".to_string()),
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
+        wrapper_prefix: None,
         workspace_trust: None,
     };
     let parent = launch(&h, &fixture, selection.clone()).await;
@@ -1026,6 +1034,7 @@ async fn restricted_raw_data_is_refused() {
         model: Some("gpt-6-astra".to_string()),
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
+        wrapper_prefix: None,
         workspace_trust: None,
     };
     let parent = launch(&h, &fixture, selection.clone()).await;
@@ -1323,6 +1332,7 @@ mod decoder_tests {
             model: Some("z-ai/glm-5.3".to_string()),
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
 
@@ -1335,6 +1345,7 @@ mod decoder_tests {
         // Approve: exactly the always-ask pair.
         let approve = LaunchSelection {
             permissions: Some(LaunchPermission::Approve),
+            wrapper_prefix: None,
             workspace_trust: None,
             ..base.clone()
         };
@@ -1346,6 +1357,7 @@ mod decoder_tests {
         // YOLO: exactly the yolo pair.
         let yolo = LaunchSelection {
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
             ..base.clone()
         };

@@ -710,6 +710,17 @@ const AGENT_PROFILES_REMOVED: &str = "farhelm agent profiles was removed with ag
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Choice<T>(Option<T>);
 
+/// Keep one shell-style command line as one clap value. A bare `Vec<String>`
+/// is a repeated flag to clap, even when its parser returns a word list.
+#[derive(Debug, Clone)]
+struct WrapperPrefix(Vec<String>);
+
+/// Parse the wrapper once at the CLI boundary so invalid quoting is a clap
+/// refusal, before any launch request can reach the helm.
+fn parse_wrapper_prefix(value: &str) -> Result<WrapperPrefix, String> {
+    farhelm_proto::split_wrapper_prefix(value).map(WrapperPrefix)
+}
+
 /// Parse a launch choice by its protocol spelling, or `default`, listing
 /// every spelling when the value names none.
 fn parse_choice<T: serde::de::DeserializeOwned + serde::Serialize>(
@@ -775,7 +786,7 @@ fn parse_permissions(value: &str) -> Result<Choice<farhelm_proto::LaunchPermissi
 
 /// The ids of every [`LaunchFlags`] argument, which `spawn --inherit-agent`
 /// conflicts with: a spawn either reuses its own launch or describes one.
-const LAUNCH_FLAG_IDS: [&str; 12] = [
+const LAUNCH_FLAG_IDS: [&str; 13] = [
     "prompt",
     "prompt_file",
     "templates",
@@ -783,6 +794,7 @@ const LAUNCH_FLAG_IDS: [&str; 12] = [
     "model",
     "effort",
     "permissions",
+    "wrapper",
     "command",
     "yolo",
     "no_yolo",
@@ -832,6 +844,10 @@ struct LaunchFlags {
     /// and OpenCode default to YOLO.
     #[arg(long, value_name = "MODE", value_parser = parse_permissions)]
     permissions: Option<Choice<farhelm_proto::LaunchPermission>>,
+    /// Command words placed before Farhelm's composed agent command.
+    /// Quoting groups words; no shell evaluates the prefix.
+    #[arg(long, value_name = "COMMAND", allow_hyphen_values = true, value_parser = parse_wrapper_prefix)]
+    wrapper: Option<WrapperPrefix>,
     /// Make this a command launch running this command line, as written.
     /// Needs --yolo or --no-yolo.
     #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
@@ -863,6 +879,7 @@ impl LaunchFlags {
             || self.model.is_some()
             || self.effort.is_some()
             || self.permissions.is_some()
+            || self.wrapper.is_some()
             || self.command.is_some()
             || self.yolo
             || self.no_yolo
@@ -892,6 +909,7 @@ impl LaunchFlags {
                 .map(|model| (model != "default").then(|| model.clone())),
             effort: self.effort.map(|choice| choice.0),
             permissions: self.permissions.map(|choice| choice.0),
+            wrapper_prefix: self.wrapper.as_ref().map(|prefix| Some(prefix.0.clone())),
             // The helm derives trust from Settings and the resolved destination.
             // Keep the wire field absent so CLI launches cannot request it.
             workspace_trust: None,
@@ -2049,6 +2067,92 @@ mod tests {
         );
         assert!(super::parse_permissions("guarded").is_ok());
         assert!(super::parse_permissions("yolo").is_ok());
+    }
+
+    /// The same parsed words must reach create, spawn and template writes.
+    /// Inheritance remains exclusive because it copies the source launch.
+    #[test]
+    fn wrapper_flag_is_a_shared_launch_edit() {
+        let words = vec![
+            "with-endpoint".to_string(),
+            "--profile".into(),
+            "work space".into(),
+            "--".into(),
+        ];
+        let command = "with-endpoint --profile 'work space' --";
+        let Cmd::Agent { command: create } = Cli::try_parse_from([
+            "farhelm",
+            "agent",
+            "create",
+            "--cwd",
+            "/work",
+            "--agent",
+            "codex",
+            "--wrapper",
+            command,
+        ])
+        .unwrap()
+        .command
+        else {
+            panic!("agent create")
+        };
+        let Some(farhelm_proto::AgentVerb::Create { edits, .. }) = create.verb() else {
+            panic!("create intent")
+        };
+        assert_eq!(edits.wrapper_prefix, Some(Some(words.clone())));
+
+        let Cmd::Spawn { launch, .. } = Cli::try_parse_from([
+            "farhelm",
+            "spawn",
+            "--cwd",
+            "/work",
+            "--agent",
+            "codex",
+            "--wrapper",
+            command,
+        ])
+        .unwrap()
+        .command
+        else {
+            panic!("spawn")
+        };
+        assert!(launch.any());
+        assert_eq!(
+            launch.edits(None, None).wrapper_prefix,
+            Some(Some(words.clone()))
+        );
+        assert!(
+            Cli::try_parse_from([
+                "farhelm",
+                "spawn",
+                "--cwd",
+                "/work",
+                "--inherit-agent",
+                "--wrapper",
+                command,
+            ])
+            .is_err()
+        );
+
+        let Cmd::Agent {
+            command: AgentCmd::Template(TemplateCmd::Create { fields, .. }),
+        } = Cli::try_parse_from([
+            "farhelm",
+            "agent",
+            "template",
+            "create",
+            "wrapped",
+            "--agent",
+            "codex",
+            "--wrapper",
+            command,
+        ])
+        .unwrap()
+        .command
+        else {
+            panic!("template create")
+        };
+        assert_eq!(fields.fields().unwrap().wrapper_prefix, Some(Some(words)));
     }
     use super::*;
 

@@ -201,6 +201,12 @@ pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> Str
             reset(permissions, |permission| permission.wire_word().to_string())
         ));
     }
+    if let Some(wrapper) = &fields.wrapper_prefix {
+        parts.push(format!(
+            "wrapper {}",
+            reset(wrapper, |words| quoted(&shell_words::join(words)))
+        ));
+    }
     if template.sets_command {
         parts.push("command (set)".to_string());
     }

@@ -298,6 +298,9 @@ fn gui_connected(state: &AppState) -> bool {
 ///
 /// The caller must still recheck that `origin` is live after an `Ok`, before
 /// acting: the connection can go between the answer and the action.
+/// Wrapper-bearing agent launches and template writes always wait for one
+/// visible answer; the host's ordinary command shortcut cannot vouch for a
+/// wrapper the agent chose.
 pub(crate) async fn ask(
     state: &AppState,
     origin: AgentOrigin,
@@ -329,6 +332,7 @@ pub(crate) async fn ask_with_answer(
     let Some(row) = hosts.iter().find(|row| row.id == origin.host) else {
         return Err(crate::sessions::no_such_host(origin.host));
     };
+    let direct_allow = action.requires_direct_allow();
     match &mut action {
         ApprovalAction::OpenUrl {
             url,
@@ -351,7 +355,9 @@ pub(crate) async fn ask_with_answer(
             // reduced card waives the trust question, never the gesture needed to open.
             *preapproved = allowed;
         }
-        _ if row.commands_without_asking => return Ok(Allowed::Raw),
+        _ if row.commands_without_asking && !direct_allow => {
+            return Ok(Allowed::Raw);
+        }
         _ => {}
     }
     if !gui_connected(state) {
@@ -632,6 +638,13 @@ pub(crate) async fn answer_approval(
                 let Some((origin, identity, action, _)) = state.approvals.origin_of(&id) else {
                     return gone(&id);
                 };
+                if action.requires_direct_allow() {
+                    return http_error(refusal(
+                        ErrorKind::Conflict,
+                        "this wrapper needs an Allow answer for this request; Always allow cannot approve it"
+                            .into(),
+                    ));
+                }
                 if !crate::agent_requests::origin_is_live(&state, origin) {
                     return http_error(refusal(
                         ErrorKind::Conflict,
@@ -1494,6 +1507,54 @@ mod tests {
             .unwrap();
         let refused = refusal_of(ask(&harness.state, origin, "asker", stop_action()).await);
         assert_eq!(refused.message, NO_GUI_REFUSAL, "asks again once it is off");
+    }
+
+    /// An agent-written wrapper cannot become a trusted template through the
+    /// requesting host's command shortcut. The card needs a one-time Allow,
+    /// and Always allow must leave both it and the host setting unchanged.
+    #[farhelm_testtrace::test]
+    async fn wrapper_template_write_requires_a_direct_allow() {
+        let harness = rest_harness::idle_helm().await;
+        let origin = local_origin(&harness).await;
+        harness
+            .store
+            .set_commands_without_asking(origin.host, true)
+            .await
+            .unwrap();
+        let action = || ApprovalAction::TemplateWrite {
+            name: "wrapped".into(),
+            replaces_existing: false,
+            fields: farhelm_proto::launcher::TemplateFields {
+                wrapper_prefix: Some(Some(vec!["with-endpoint".into(), "--".into()])),
+                ..Default::default()
+            },
+            host_name: None,
+        };
+        let refused = refusal_of(ask(&harness.state, origin, "asker", action()).await);
+        assert_eq!(
+            refused.message, NO_GUI_REFUSAL,
+            "the shortcut did not approve it"
+        );
+
+        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let (task, id) = waiting_for_action(&harness, origin, "asker", action()).await;
+        assert!(
+            harness.state.approvals.list()[0]
+                .action
+                .requires_direct_allow()
+        );
+        let (status, _) = answer(&harness, &id, "always_allow").await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(
+            harness.state.approvals.list().len(),
+            1,
+            "the card remains answerable"
+        );
+        let (status, _) = answer(&harness, &id, "allow").await;
+        assert_eq!(status, axum::http::StatusCode::NO_CONTENT);
+        ended(task)
+            .await
+            .expect("direct Allow approved the request");
     }
 
     /// Spec: with a GUI connected, a request waits as a card listed by

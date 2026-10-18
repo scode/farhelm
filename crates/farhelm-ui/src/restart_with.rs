@@ -268,6 +268,7 @@ pub(crate) fn RestartWithDialog(
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         },
     };

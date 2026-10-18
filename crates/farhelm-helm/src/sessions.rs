@@ -1215,6 +1215,8 @@ fn github_checkout_resolution(
     }
     Some(Ok(Some(farhelm_proto::ResolvedGithubCheckout {
         client_identity,
+        agent_wrapper_supplied: false,
+        wrapper_approved: false,
         repo,
         root,
         post_clone: config.post_clone.clone(),
@@ -1397,7 +1399,7 @@ fn create_target(
 /// create fails with the returned error rather than hand the caller an id
 /// whose operations would land on another machine. Replies to operations
 /// on an existing session ignore it: their id was already routed.
-async fn record_session(
+pub(crate) async fn record_session(
     state: &AppState,
     claim: &manager::SessionClaim,
     session: &farhelm_proto::SessionInfo,
@@ -1684,7 +1686,7 @@ pub(crate) async fn do_create_session(
         intent_key,
         origin,
         accept_result,
-        github_checkout,
+        mut github_checkout,
         settings_from_source,
         parent,
         spawned,
@@ -1698,11 +1700,37 @@ pub(crate) async fn do_create_session(
     // the last step before dispatch as well as before its approval card, so a setting
     // that changed in between is judged as it stands now.
     match origin {
-        CreateOrigin::Agent => crate::yolo_guard::check_agent(state, claim.host, &mode).await?,
+        CreateOrigin::Agent {
+            agent_wrapper_supplied,
+            wrapper_approved,
+        } => {
+            crate::yolo_guard::check_agent_approved(
+                state,
+                claim.host,
+                &mode,
+                agent_wrapper_supplied,
+                wrapper_approved,
+            )
+            .await?;
+        }
         CreateOrigin::User => {
             let is_yolo = crate::yolo_guard::create_is_yolo(&mode);
             crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
         }
+    }
+    if let (
+        Some(checkout),
+        CreateOrigin::Agent {
+            agent_wrapper_supplied,
+            wrapper_approved,
+        },
+    ) = (&mut github_checkout, origin)
+    {
+        // Recovery reads these admission facts from the durable checkout
+        // snapshot. Today's template and host policy cannot prove whether
+        // the original wrapper was agent-supplied or received an Allow.
+        checkout.agent_wrapper_supplied = agent_wrapper_supplied;
+        checkout.wrapper_approved = wrapper_approved;
     }
     // REST carries the displayed preview cwd as part of the retained client
     // request identity. The supervisor's fresh-create destination instead
@@ -1946,7 +1974,12 @@ pub(crate) struct CreateSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CreateOrigin {
     User,
-    Agent,
+    /// The direct wrapper answer is bound to this resolved agent request,
+    /// never stored with the reusable launch or treated as host permission.
+    Agent {
+        agent_wrapper_supplied: bool,
+        wrapper_approved: bool,
+    },
 }
 
 /// [`CreateSpec::accept_result`]'s hook: judge the session a create came
@@ -2075,7 +2108,13 @@ async fn create_fresh_session_resolved(
             None
         },
     };
-    if let Some(key) = &intent_key
+    // Agent checkout requests inspect the retained attempt and gate its
+    // original launch before reaching this pipeline. A second reconciliation
+    // here could race with another accepted request and launch a different
+    // snapshot after the card. The keyed create below compares the complete
+    // fingerprint under supervisor admission instead.
+    if origin == CreateOrigin::User
+        && let Some(key) = &intent_key
         && let Some(session) = client
             .reconcile_github_checkout(key.clone(), client_identity.clone(), req.cols, req.rows)
             .await?
@@ -2121,6 +2160,15 @@ async fn create_fresh_session_resolved(
             let Some(key) = intent_key else {
                 return Err(local_error.context(crate::FreshCreateUnaccepted));
             };
+            if matches!(origin, CreateOrigin::Agent { .. }) {
+                // The agent's earlier read-only inspection cannot prove
+                // durable non-acceptance after a concurrent writer wins. A
+                // refusal lookup is launch-capable for that winner, so leave
+                // the key available for an exact guarded retry instead.
+                return Err(local_error.context(
+                    "checkout acceptance is unknown; retain this request and key for retry",
+                ));
+            }
             return match client.reconcile_github_checkout_with_refusal(
                 key, client_identity, req.cols, req.rows, true,
             ).await {
@@ -2161,23 +2209,27 @@ async fn create_fresh_session_resolved(
     .await
 }
 
-/// Reconcile an approved agent checkout before preview or another approval.
-/// Unknown means no approved dispatch was recorded, and must still pass the
-/// ordinary approval path. The digest is the frozen agent request identity,
-/// not a new identity built from today's template or preview.
+/// Recover the inspected agent checkout only under its retained fingerprint.
+/// The original request identity proves which agent request owns the key;
+/// the fingerprint proves this is the launch and destination inspected before
+/// a possible wrapper card. Neither is rebuilt from today's template.
 pub(crate) async fn reconcile_agent_checkout(
     state: &AppState,
     claim: &manager::SessionClaim,
     client: &SupervisorClient,
     key: &str,
     identity: &str,
+    expected_fingerprint: String,
+    approve_wrapper_recovery: bool,
 ) -> anyhow::Result<Option<farhelm_proto::SessionInfo>> {
     let Some(session) = client
-        .reconcile_github_checkout(
+        .reconcile_github_checkout_exact(
             key.to_string(),
             identity.to_string(),
             default_cols(),
             default_rows(),
+            expected_fingerprint,
+            approve_wrapper_recovery,
         )
         .await?
     else {
@@ -2199,7 +2251,7 @@ async fn accept_fresh_reconciled(
     acceptance: CreateAcceptance,
     origin: CreateOrigin,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
-    if origin == CreateOrigin::Agent {
+    if matches!(origin, CreateOrigin::Agent { .. }) {
         record_session(state, claim, &session).await?;
         Ok(session)
     } else {
@@ -2209,13 +2261,20 @@ async fn accept_fresh_reconciled(
 
 /// Dispatch an agent's approved preview through fresh admission with agent
 /// authority. Configuration and incarnation are rechecked after the card;
-/// keyed local refusals use the same durable settlement as browser creates.
+/// a keyed local failure leaves acceptance unknown until an exact guarded retry.
+/// The caller keeps the card verdict and the request's retry identity beside
+/// the resolved launch so this boundary cannot silently infer either one.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "admission inputs stay explicit at dispatch"
+)]
 pub(crate) async fn create_agent_checkout(
     state: &AppState,
     claim: &manager::SessionClaim,
     client: &SupervisorClient,
     checkout: farhelm_proto::GithubCheckoutRequest,
     resolution: crate::agent_launch::Resolution,
+    wrapper_approved: bool,
     intent_key: Option<String>,
     client_identity: String,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
@@ -2244,7 +2303,10 @@ pub(crate) async fn create_agent_checkout(
             intent_key,
             client_identity,
             accept_result: None,
-            origin: CreateOrigin::Agent,
+            origin: CreateOrigin::Agent {
+                agent_wrapper_supplied: resolution.agent_wrapper_supplied,
+                wrapper_approved,
+            },
             resolved_mode: Some(resolution.launch),
         },
     )
@@ -2368,6 +2430,7 @@ mod workspace_trust_tests {
                     effort: None,
                     permissions: None,
                     permission_flags: None,
+                    wrapper_prefix: None,
                     workspace_trust: trust,
                 };
                 let resolved = resolve_launch_request(LaunchRequest::Agent { selection }).unwrap();
@@ -2403,6 +2466,7 @@ mod workspace_trust_tests {
                         effort: None,
                         permissions: None,
                         permission_flags: None,
+                        wrapper_prefix: None,
                         workspace_trust: harness.offers_workspace_trust().then_some(true),
                     };
                     let launch = launches::compile(selection).unwrap();

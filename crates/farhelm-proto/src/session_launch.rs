@@ -38,6 +38,28 @@ pub const CONVERSATION_PLACEHOLDER: &str = "{conversation}";
 /// takes no such arguments, so the rule never depends on which type it is.
 pub const FARHELM_ARGS_PLACEHOLDER: &str = "{farhelm_args}";
 
+/// The supervisor fills these whole-argument Codex project-trust markers only
+/// after the destination directory is known. Editors must refuse them in a
+/// wrapper prefix for the same reason they refuse the general launch markers.
+pub const CODEX_TRUSTED_CWD_PLACEHOLDER: &str = "{codex:trusted-cwd}";
+pub const CODEX_UNTRUSTED_CWD_PLACEHOLDER: &str = "{codex:untrusted-cwd}";
+
+/// Every whole-argument marker that a later launch pass may substitute.
+/// Keep validation and substitution tied to one list: a user-supplied word
+/// equal to a marker must never acquire Farhelm-owned meaning at spawn.
+pub const RESERVED_PLACEHOLDERS: &[&str] = &[
+    CWD_PLACEHOLDER,
+    CONVERSATION_PLACEHOLDER,
+    FARHELM_ARGS_PLACEHOLDER,
+    CODEX_TRUSTED_CWD_PLACEHOLDER,
+    CODEX_UNTRUSTED_CWD_PLACEHOLDER,
+];
+
+/// Match reserved markers as whole argv words; embedded text stays literal.
+pub fn is_reserved_placeholder(value: &str) -> bool {
+    RESERVED_PLACEHOLDERS.contains(&value)
+}
+
 /// One session's launch, resolved: what it runs and how it resumes.
 ///
 /// Serialized with an internal `kind` tag because the value is stored in the
@@ -604,6 +626,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let agent = |start: &[&str], resume: Option<&[&str]>| SessionLaunch::Agent {
@@ -655,6 +678,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: Some(LaunchPermission::Yolo),
+                wrapper_prefix: None,
                 workspace_trust: None,
             },
             start: vec!["claude".into(), "{farhelm_args}".into()],
@@ -692,6 +716,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let template = vec![
@@ -789,6 +814,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         }
     }

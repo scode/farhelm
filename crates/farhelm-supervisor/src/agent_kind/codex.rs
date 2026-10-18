@@ -380,6 +380,7 @@ mod tests {
         resume.extend(["resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
         IntegrationSnapshot {
             kind: farhelm_proto::AgentKind::Codex,
+            wrapper_prefix_words: 0,
             resume_template: Some(resume),
         }
     }

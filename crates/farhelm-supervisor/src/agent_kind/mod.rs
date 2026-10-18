@@ -260,40 +260,9 @@ pub(crate) use records::{
 /// `{cwd}` and `{farhelm_args}` at spawn in `Supervisor::spawn_agent`, the
 /// only place the launch's working directory is known on every path.
 pub use farhelm_proto::session_launch::{
-    CONVERSATION_PLACEHOLDER, CWD_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER,
+    CODEX_TRUSTED_CWD_PLACEHOLDER, CODEX_UNTRUSTED_CWD_PLACEHOLDER, CONVERSATION_PLACEHOLDER,
+    CWD_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER, RESERVED_PLACEHOLDERS, is_reserved_placeholder,
 };
-
-/// Structured Codex launches defer their project-trust override until the
-/// target supervisor knows the final working directory. Each marker is one
-/// entire argv element after `-c`; raw paths cannot be embedded in the
-/// helm's earlier invocation because a fresh checkout has no path yet.
-pub const CODEX_TRUSTED_CWD_PLACEHOLDER: &str = "{codex:trusted-cwd}";
-pub const CODEX_UNTRUSTED_CWD_PLACEHOLDER: &str = "{codex:untrusted-cwd}";
-
-/// Every whole-element marker a later launch pass substitutes, as the set a
-/// VALIDATOR refuses. (Substitution itself matches its own subsets:
-/// [`fill_cwd`] only the three directory markers.)
-///
-/// The helm's model-id check asks [`is_reserved_placeholder`] instead of
-/// keeping its own list: a model id that happens to equal a marker would be
-/// silently rewritten at spawn, and a hand-copied list is what let that check
-/// miss the two Codex markers when they were added. The conversation-id shape
-/// check (`is_plausible_conversation_id`) asks it too, for the same reason.
-pub const RESERVED_PLACEHOLDERS: &[&str] = &[
-    CWD_PLACEHOLDER,
-    CONVERSATION_PLACEHOLDER,
-    FARHELM_ARGS_PLACEHOLDER,
-    CODEX_TRUSTED_CWD_PLACEHOLDER,
-    CODEX_UNTRUSTED_CWD_PLACEHOLDER,
-];
-
-/// Whether `value` is exactly one of [`RESERVED_PLACEHOLDERS`].
-///
-/// Exact equality only, matching how substitution matches: a marker embedded
-/// in longer text (`--dir={cwd}`) is literal and is not reserved.
-pub fn is_reserved_placeholder(value: &str) -> bool {
-    RESERVED_PLACEHOLDERS.contains(&value)
-}
 
 /// The short model-visible pointer delivered through every supported vendor's
 /// additive instruction channel.
@@ -1800,6 +1769,10 @@ pub(crate) fn is_plausible_conversation_id(id: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntegrationSnapshot {
     pub kind: AgentKind,
+    /// Stored selection words before the composed program. OMP's launch
+    /// provenance must classify the agent command behind this prefix, while
+    /// its runtime process corridor remains as strict as before.
+    pub wrapper_prefix_words: usize,
     /// The resume argv, so a path with spaces survives without quoting.
     /// `None` means the launch has no resume command at all: an agent type
     /// without conversation reporting, a command launch that did not opt
@@ -1815,6 +1788,12 @@ impl IntegrationSnapshot {
     pub fn of(launch: &SessionLaunch) -> IntegrationSnapshot {
         IntegrationSnapshot {
             kind: launch.agent_kind(),
+            wrapper_prefix_words: match launch {
+                SessionLaunch::Agent { selection, .. } => {
+                    selection.wrapper_prefix.as_ref().map_or(0, Vec::len)
+                }
+                SessionLaunch::Command(_) | SessionLaunch::Legacy { .. } => 0,
+            },
             resume_template: launch.resume_argv().ok().flatten(),
         }
     }
@@ -2652,6 +2631,7 @@ mod tests {
     fn test_snapshot(kind: AgentKind, resume_template: Option<Vec<String>>) -> IntegrationSnapshot {
         IntegrationSnapshot {
             kind,
+            wrapper_prefix_words: 0,
             resume_template,
         }
     }
@@ -3766,6 +3746,7 @@ mod tests {
         // to avoid advertising a restart command that cannot be run.
         let unfillable = IntegrationSnapshot {
             kind: AgentKind::Generic,
+            wrapper_prefix_words: 0,
             resume_template: Some(vec![
                 "bash".to_string(),
                 CONVERSATION_PLACEHOLDER.to_string(),

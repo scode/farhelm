@@ -249,6 +249,14 @@ pub struct TemplateFields {
     /// independently of it. Later permission edits clear the older words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_flags: Option<Vec<String>>,
+    /// Absent leaves the current agent's prefix alone; null explicitly runs
+    /// the composed agent command without one.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub wrapper_prefix: Option<Option<Vec<String>>>,
     /// Retained to decode stored templates and older clients. This field
     /// neither applies a choice nor implies an agent launch; new saves drop it.
     #[serde(
@@ -297,6 +305,7 @@ impl TemplateFields {
             || self.effort.is_some()
             || self.permissions.is_some()
             || self.permission_flags.is_some()
+            || self.wrapper_prefix.is_some()
             || self.prompt.is_some()
     }
 
@@ -370,6 +379,9 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
         template.fields.permissions.flatten(),
         template.fields.permission_flags.as_deref(),
     )?;
+    if let Some(Some(prefix)) = &template.fields.wrapper_prefix {
+        crate::check_wrapper_prefix(Some(prefix))?;
+    }
     let name = &template.name;
     if name.is_empty() {
         return Err("a template needs a name".to_string());
@@ -440,6 +452,9 @@ pub struct LauncherState {
     /// Words stay paired with Custom through template application. Replacing
     /// the permission or changing agents must clear this source-agent intent.
     pub permission_flags: Option<Vec<String>>,
+    /// The current agent launch's optional command prefix. Templates edit
+    /// this value without changing the command launch's separate draft.
+    pub wrapper_prefix: Option<Vec<String>>,
     /// Compatibility state for callers carrying old stored selections. New
     /// GUI/CLI drafts leave this unset, and templates cannot modify it.
     pub workspace_trust: Option<bool>,
@@ -524,6 +539,10 @@ pub fn apply_template(
         fields.permission_flags.as_deref(),
     )
     .map_err(|reason| refuse("permission flags", reason))?;
+    if let Some(Some(prefix)) = &fields.wrapper_prefix {
+        crate::check_wrapper_prefix(Some(prefix))
+            .map_err(|reason| refuse("wrapper prefix", reason))?;
+    }
 
     // 1. The launch kind.
     if let Some(kind) = fields.kind {
@@ -537,6 +556,7 @@ pub fn apply_template(
             LauncherKind::Agent => {
                 let selection = LaunchSelection {
                     permission_flags: next.permission_flags.clone(),
+                    wrapper_prefix: next.wrapper_prefix.clone(),
                     harness: next.harness.unwrap_or(agent),
                     model: next.model.clone(),
                     effort: next.effort,
@@ -555,6 +575,7 @@ pub fn apply_template(
                 next.effort = selection.effort;
                 next.permissions = selection.permissions;
                 next.permission_flags = selection.permission_flags;
+                next.wrapper_prefix = selection.wrapper_prefix;
                 next.workspace_trust = selection.workspace_trust;
                 if !agent.supports_initial_prompt(false) {
                     next.prompt = None;
@@ -587,11 +608,12 @@ pub fn apply_template(
     }
 
     // 3. The agent launch's choices.
-    let agent_fields: [(&'static str, bool); 4] = [
+    let agent_fields: [(&'static str, bool); 5] = [
         ("model", fields.model.is_some()),
         ("effort", fields.effort.is_some()),
         ("permissions", fields.permissions.is_some()),
         ("permission flags", fields.permission_flags.is_some()),
+        ("wrapper prefix", fields.wrapper_prefix.is_some()),
     ];
     if let Some((field, _)) = agent_fields.iter().find(|(_, set)| *set) {
         if kind == LauncherKind::Command {
@@ -653,6 +675,7 @@ pub fn apply_template(
                     let (selection, owner) = reconcile_harness_selection(
                         LaunchSelection {
                             permission_flags: next.permission_flags.clone(),
+                            wrapper_prefix: next.wrapper_prefix.clone(),
                             harness,
                             model: Some(model.clone()),
                             effort: next.effort,
@@ -703,6 +726,9 @@ pub fn apply_template(
             }
             next.permissions = permissions;
             next.permission_flags = fields.permission_flags.clone();
+        }
+        if let Some(prefix) = &fields.wrapper_prefix {
+            next.wrapper_prefix = prefix.clone();
         }
     }
 
@@ -860,6 +886,7 @@ mod tests {
             effort: None,
             permissions: Some(crate::LaunchPermission::Custom),
             permission_flags: Some(words),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         for destination in [
@@ -896,6 +923,7 @@ mod tests {
                 effort: None,
                 permissions: Some(crate::LaunchPermission::Guarded),
                 permission_flags: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             };
             let (after, _) =
@@ -1007,6 +1035,47 @@ mod tests {
             catalog,
             known_hosts: hosts,
             host_fixed,
+        }
+    }
+
+    /// A missing wrapper edit must preserve New's remembered prefix, while a
+    /// present null must remove it. Quick launch and agent template writes use
+    /// this same application rule, so all three wire states matter.
+    #[test]
+    fn wrapper_template_distinguishes_unset_prefix_and_explicit_none() {
+        let seed = LauncherState {
+            kind: Some(LauncherKind::Agent),
+            harness: Some(LaunchHarness::Codex),
+            wrapper_prefix: Some(vec!["old-wrapper".into(), "--".into()]),
+            ..Default::default()
+        };
+        let context = context(&[], &[], false);
+        for (edit, expected) in [
+            (None, Some(vec!["old-wrapper".into(), "--".into()])),
+            (Some(None), None),
+            (
+                Some(Some(vec!["new-wrapper".into(), "--".into()])),
+                Some(vec!["new-wrapper".into(), "--".into()]),
+            ),
+        ] {
+            let fields = TemplateFields {
+                wrapper_prefix: edit.clone(),
+                ..Default::default()
+            };
+            let encoded = serde_json::to_value(&fields).unwrap();
+            assert_eq!(
+                encoded.get("wrapper_prefix"),
+                edit.as_ref()
+                    .map(|value| match value {
+                        Some(words) => serde_json::json!(words),
+                        None => serde_json::Value::Null,
+                    })
+                    .as_ref()
+            );
+            let decoded: TemplateFields = serde_json::from_value(encoded).unwrap();
+            assert_eq!(decoded.wrapper_prefix, edit);
+            let applied = apply_template(&seed, &template("wrapper", decoded), &context).unwrap();
+            assert_eq!(applied.wrapper_prefix, expected);
         }
     }
 

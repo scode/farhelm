@@ -26,6 +26,7 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
             model: Some("gpt-6-astra".to_string()),
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         }),
         ..rest_harness::session("composer-history", 100)
@@ -517,6 +518,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                                 model: Some("gpt-6-astra".into()),
                                 effort: Some(farhelm_proto::LaunchEffort::High),
                                 permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                                wrapper_prefix: None,
                                 workspace_trust: None,
                             },
                         ),
@@ -628,6 +630,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     model: None,
                     effort: None,
                     permissions: Some(LaunchPermission::Yolo),
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 }),
             ),
@@ -640,6 +643,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     model: None,
                     effort: None,
                     permissions: None,
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 }),
             ),
@@ -651,6 +655,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     model: None,
                     effort: None,
                     permissions: Some(LaunchPermission::Yolo),
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 }),
             ),
@@ -818,6 +823,7 @@ async fn remembered_defaults_follow_the_submitted_launch_not_the_reply() {
                 model: None,
                 effort: None,
                 permissions: Some(LaunchPermission::Yolo),
+                wrapper_prefix: None,
                 workspace_trust: Some(true),
             });
             writer
@@ -2276,6 +2282,7 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
         model: None,
         effort: None,
         permissions: Some(LaunchPermission::Yolo),
+        wrapper_prefix: None,
         workspace_trust: Some(true),
     };
     let mut source = rest_harness::session("yolo-src", 1_700_000_000);
@@ -2892,6 +2899,7 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
         model: Some("claude-opus-4-6".to_string()),
         effort: Some(LaunchEffort::High),
         permissions: None,
+        wrapper_prefix: None,
         workspace_trust: None,
     };
     // A launch an older catalog composed: the start command carries a flag
@@ -4844,6 +4852,7 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
             effort: None,
             permissions: Some(LaunchPermission::Guarded),
             permission_flags: None,
+            wrapper_prefix: None,
             workspace_trust: incoming_trust,
         };
         let mut final_selection = selection.clone();
@@ -9198,7 +9207,11 @@ async fn fresh_rest_reconciliation_precedes_mutable_resolution_and_binds_install
                 None
             };
             writer
-                .write_control(&ControlMsg::GithubCheckoutReconciled { req_id, session })
+                .write_control(&ControlMsg::GithubCheckoutReconciled {
+                    req_id,
+                    session,
+                    snapshot: None,
+                })
                 .await
                 .unwrap();
             if expected_key != "recorded-key" {
@@ -9332,6 +9345,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                         .write_control(&ControlMsg::GithubCheckoutReconciled {
                             req_id,
                             session: None,
+                            snapshot: None,
                         })
                         .await
                         .unwrap();
@@ -9362,6 +9376,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                         "unknown" => ControlMsg::GithubCheckoutReconciled {
                             req_id,
                             session: None,
+                            snapshot: None,
                         },
                         "unavailable" => ControlMsg::Error {
                             create_unaccepted: false,
@@ -9378,6 +9393,7 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
                         "source-veto" => ControlMsg::GithubCheckoutReconciled {
                             req_id,
                             session: Some(rest_harness::session("sess-1", 12)),
+                            snapshot: None,
                         },
                         _ => unreachable!(),
                     };
@@ -9516,6 +9532,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                 .write_control(&ControlMsg::GithubCheckoutReconciled {
                     req_id,
                     session: None,
+                    snapshot: None,
                 })
                 .await
                 .unwrap();
@@ -9539,6 +9556,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                 effort: None,
                 permissions: Some(farhelm_proto::LaunchPermission::Guarded),
                 permission_flags: None,
+                wrapper_prefix: None,
                 workspace_trust: Some(true),
             })
             .unwrap();
@@ -9567,6 +9585,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                 .write_control(&ControlMsg::GithubCheckoutReconciled {
                     req_id,
                     session: None,
+                    snapshot: None,
                 })
                 .await
                 .unwrap();
@@ -9596,6 +9615,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                             .write_control(&ControlMsg::GithubCheckoutReconciled {
                                 req_id,
                                 session: Some(winner.clone()),
+                                snapshot: None,
                             })
                             .await
                             .unwrap();
@@ -9871,7 +9891,11 @@ async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
                 _ => None,
             };
             writer
-                .write_control(&ControlMsg::GithubCheckoutReconciled { req_id, session })
+                .write_control(&ControlMsg::GithubCheckoutReconciled {
+                    req_id,
+                    session,
+                    snapshot: None,
+                })
                 .await
                 .unwrap();
             if attempt == 3 {

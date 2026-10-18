@@ -33,16 +33,16 @@ combination of: durable remote execution, real-terminal fidelity, VCS neutrality
   re-registration; terminal contents live only as long as the host-side terminal does (see Terminal experience).
 - **Launch**: what a session runs, as the user chose it in the launcher. Every launch has one of two launch kinds. An
   **agent launch** names an agent type Farhelm knows (Claude Code, Codex, and the other harnesses under Topology) plus
-  that agent type's own choices, such as model and permissions. The one custom-argument choice is permission flags: the
-  user's own words replace Farhelm's permission flags and always count as YOLO. Farhelm composes the command, and the
-  command it uses to resume a conversation, from those choices when the session is created (and again on Restart with),
-  and stores them; Replace and agent clone copy the stored commands rather than composing them anew, while Clone and
-  Replace with compose from the choices. A **command launch** is a command line the user writes, with the user's own
-  assertion of whether it bypasses safety checks (YOLO). A command launch may also declare that it runs a given agent
-  type, which buys that agent type's status reading and conversation reporting, and, with a resume command the user
-  writes, Resume (see Creation and Durability). The agent type is the field the two kinds share: required for an agent
-  launch, optional for a command launch. This spec also calls an agent type a harness, after the vendor program behind
-  it.
+  that agent type's own choices, such as model and permissions. Custom permission flags replace Farhelm's permission
+  flags and always count as YOLO. An optional wrapper prefix places literal words before the agent command Farhelm
+  composes, without changing its agent type or other choices. Farhelm composes the command, and the command it uses to
+  resume a conversation, from those choices when the session is created (and again on Restart with), and stores them;
+  Replace and agent clone copy the stored commands rather than composing them anew, while Clone and Replace with compose
+  from the choices. A **command launch** is a command line the user writes, with the user's own assertion of whether it
+  bypasses safety checks (YOLO). A command launch may also declare that it runs a given agent type, which buys that
+  agent type's status reading and conversation reporting, and, with a resume command the user writes, Resume (see
+  Creation and Durability). The agent type is the field the two kinds share: required for an agent launch, optional for
+  a command launch. This spec also calls an agent type a harness, after the vendor program behind it.
 - **Launch template**: a named, partial set of launcher edits. Applying a template is exactly the same as making its
   edits by hand in the launcher, and nothing more: a template sets only the fields it contains, the result can be edited
   further before launching, and several templates can be applied one after another. A session records the launch that
@@ -2366,11 +2366,25 @@ the source's supervisor reports it, which the helm does not trust, and a session
 been composed differently, so such a launch is refused like a command launch. There is no override an agent can pass:
 the command line has no `--confirm-yolo`, and the helm ignores one in any request from a session.
 
+A wrapper prefix from a named template is part of the composed agent command. A prefix an agent supplies in its own
+flags, or inherits through clone or `--inherit-agent`, is the agent's own choice: on a host that asks before YOLO
+launches, it needs an Allow or Deny card even when ordinary agent commands from that host run without asking. The card
+shows the complete command and labels the prefix as the agent's; Always allow is not offered. Approval satisfies the
+prefix check on later guard checks, while YOLO agent launches and command launches remain refused on that host. A host
+allowed to start YOLO sessions without asking has no prefix approval gate.
+
+For a keyed managed-checkout retry, an interrupted attempt may still start its original command. Farhelm checks that
+retained command and checkout before recovery. If the host now asks before YOLO launches and the agent's prefix has not
+received an Allow, the card shows those original details and asks before starting it. A prior Allow for that attempt
+remains valid across another interrupted retry; a launch first accepted while the host allowed YOLO without asking has
+no such Allow to reuse. A completed attempt returns its recorded result without another card.
+
 `farhelm agent create` and `farhelm spawn` take the launcher's fields as flags. `--template <name>` applies a template
 by its exact name, and may be repeated to apply several in order. `--agent <type>` sets the agent type; `--model`,
-`--effort` and `--permissions` set an agent launch's choices; `--command` makes it a command launch, which needs
-`--yolo` or `--no-yolo` as its assertion and may add `--agent <type>` as its declared agent type and `--resume-command`
-to opt into Resume. Templates are applied first, in order, and the other flags then act as further edits, so
+`--effort`, `--permissions` and `--wrapper` set an agent launch's choices; `--wrapper` is one shell-style command line
+split into prefix words with no placeholders. `--command` makes it a command launch, which needs `--yolo` or `--no-yolo`
+as its assertion and may add `--agent <type>` as its declared agent type and `--resume-command` to opt into Resume.
+Templates are applied first, in order, and the other flags then act as further edits, so
 `--template my-codex --model gpt-6-luna` is `my-codex` with a different model. The result is validated exactly like a
 GUI launch, with the same refusals naming the field, and the remembered GUI defaults never fill a gap, so the same
 templates can launch differently from the CLI than from a GUI that preselected a remembered permission. A flag required

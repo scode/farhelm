@@ -2735,15 +2735,31 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             cols,
             rows,
             refuse_unknown,
+            inspect_only,
+            expected_fingerprint,
+            approve_wrapper_recovery,
         } => {
             match sup
-                .reconcile_github_checkout(intent_key, &client_identity, cols, rows, refuse_unknown)
+                .reconcile_github_checkout_checked(
+                    intent_key,
+                    &client_identity,
+                    cols,
+                    rows,
+                    refuse_unknown,
+                    inspect_only,
+                    expected_fingerprint.as_deref(),
+                    approve_wrapper_recovery,
+                )
                 .await
             {
-                Ok(session) => {
+                Ok((session, snapshot)) => {
                     send_reply(
                         ctx.tx,
-                        &ControlMsg::GithubCheckoutReconciled { req_id, session },
+                        &ControlMsg::GithubCheckoutReconciled {
+                            req_id,
+                            session,
+                            snapshot: snapshot.map(Box::new),
+                        },
                     )
                     .await
                 }
@@ -4003,6 +4019,7 @@ mod tests {
                 model: Some("gpt-6-astra".to_string()),
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                wrapper_prefix: None,
                 workspace_trust: None,
             }),
         )
@@ -6369,6 +6386,9 @@ mod tests {
                     cols: 80,
                     rows: 24,
                     refuse_unknown,
+                    inspect_only: false,
+                    expected_fingerprint: None,
+                    approve_wrapper_recovery: false,
                 },
                 &tx,
                 &auth,
@@ -6461,6 +6481,8 @@ mod tests {
                 confirm_yolo: false,
                 github_checkout: Some(ResolvedGithubCheckout {
                     client_identity: "fixture-request".into(),
+                    agent_wrapper_supplied: false,
+                    wrapper_approved: false,
                     repo: repo.clone(),
                     root: "/tmp/checkouts".to_string(),
                     post_clone: None,
@@ -6584,6 +6606,8 @@ mod tests {
                 confirm_yolo: false,
                 github_checkout: Some(ResolvedGithubCheckout {
                     client_identity: "fixture-request".into(),
+                    agent_wrapper_supplied: false,
+                    wrapper_approved: false,
                     repo: repo.clone(),
                     root: missing_root.to_string_lossy().into_owned(),
                     post_clone: None,
@@ -6738,6 +6762,7 @@ mod tests {
         entry.info.id = id.to_string();
         entry.snapshot = IntegrationSnapshot {
             kind,
+            wrapper_prefix_words: 0,
             resume_template: None,
         };
         sup.sessions
@@ -8033,6 +8058,8 @@ mod tests {
     fn checkout_size_fixture() -> ResolvedGithubCheckout {
         ResolvedGithubCheckout {
             client_identity: "original-request".into(),
+            agent_wrapper_supplied: false,
+            wrapper_approved: false,
             repo: farhelm_proto::parse_github_repo("acme/bar").unwrap(),
             root: "/checkouts".into(),
             post_clone: None,
@@ -8613,6 +8640,7 @@ mod tests {
                 },
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,
+                    wrapper_prefix_words: 0,
                     resume_template: None,
                 },
                 canonical_cwd: None,
@@ -8805,6 +8833,7 @@ mod tests {
             },
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Generic,
+                wrapper_prefix_words: 0,
                 resume_template: None,
             },
             canonical_cwd: None,
@@ -9012,6 +9041,7 @@ mod tests {
                 },
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,
+                    wrapper_prefix_words: 0,
                     resume_template: None,
                 },
                 canonical_cwd: None,

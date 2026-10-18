@@ -84,7 +84,7 @@
 //! that the request's connection is still the one serving its host, so an
 //! approval cannot carry over to whatever replaced it during the wait. New
 //! sessions also pass the agent YOLO rule ([`approve_launch`],
-//! `yolo_guard::check_agent`) before the card and again after it. A
+//! `yolo_guard::check_agent_wrapper`) before the card and again after it. A
 //! lifecycle verb routes its target before asking, so a session no host
 //! knows is refused without a card. Listings never ask.
 //!
@@ -508,7 +508,7 @@ impl AgentRequestHandler for HelmAgentRequests {
             }
             // `confirm_yolo` is ignored on both creating verbs: an agent has
             // no YOLO override (SPEC.md, Agent-spawned sessions), whatever a
-            // modified CLI sends; `yolo_guard::check_agent` decides instead.
+            // modified CLI sends; `yolo_guard::check_agent_wrapper` decides instead.
             AgentVerb::Create {
                 host,
                 templates,
@@ -1404,7 +1404,8 @@ async fn create_for_agent(
         Some(_) => LaunchVerb::Spawn,
         None => LaunchVerb::Create,
     };
-    approve_launch(
+    let agent_wrapper_supplied = resolved.resolution.agent_wrapper_supplied;
+    let wrapper_approved = approve_launch(
         state,
         origin,
         asking_session,
@@ -1417,6 +1418,7 @@ async fn create_for_agent(
             repo: None,
             title: resolved.resolution.title.clone(),
             launch: resolved.resolution.launch.clone(),
+            agent_wrapper_supplied,
             source: None,
         },
     )
@@ -1432,6 +1434,8 @@ async fn create_for_agent(
             spawned,
             request_fingerprint,
             composition_incarnation,
+            agent_wrapper_supplied,
+            wrapper_approved,
         },
     )
     .await
@@ -1469,23 +1473,102 @@ async fn create_checkout_for_agent(
         true,
     )
     .await?;
-    crate::yolo_guard::check_agent(state, claim.host, &resolution.launch).await?;
+    // A keyed retry still checks today's resolved request, as it does for
+    // other agent creates. Recovery below also checks the retained launch
+    // before it can run; neither check stands in for the other.
+    crate::yolo_guard::check_agent_wrapper(
+        state,
+        claim.host,
+        &resolution.launch,
+        resolution.agent_wrapper_supplied,
+    )
+    .await?;
     // Unkeyed requests never reconcile; their identity still has to satisfy
     // the supervisor's nonempty checkout identity contract.
     let identity = request_identity.unwrap_or_else(|| "unkeyed_agent_create_v1".to_string());
-    if let Some(key) = &intent_key
-        && let Some(session) = on_host(
-            crate::sessions::reconcile_agent_checkout(state, &claim, &client, key, &identity).await,
+    if let Some(key) = &intent_key {
+        let (settled, recovery) = on_host(
+            client
+                .inspect_github_checkout(key.clone(), identity.clone())
+                .await,
             &resolved.host_name,
-        )?
-    {
-        return Ok(agent_created_reply(
-            state,
-            &claim,
-            session,
-            origin.host,
-            asking_session,
-        ));
+        )?;
+        if let Some(session) = settled {
+            crate::sessions::record_session(state, &claim, &session).await?;
+            return Ok(agent_created_reply(
+                state,
+                &claim,
+                session,
+                origin.host,
+                asking_session,
+            ));
+        }
+        if let Some(recovery) = recovery {
+            let mut wrapper_approved = recovery.wrapper_approved;
+            // A retained attempt runs the original launch, even when a
+            // named template now resolves to different words or path.
+            // The original card must therefore carry the frozen facts.
+            let verdict = crate::yolo_guard::check_agent_wrapper(
+                state,
+                claim.host,
+                &recovery.launch,
+                recovery.agent_wrapper_supplied,
+            )
+            .await?;
+            if !wrapper_approved
+                && matches!(verdict, crate::yolo_guard::AgentVerdict::ApprovalRequired)
+            {
+                wrapper_approved = approve_launch(
+                    state,
+                    origin,
+                    asking_session,
+                    LaunchApproval {
+                        verb: LaunchVerb::Create,
+                        prompt: recovery.prompt.clone(),
+                        host: claim.host,
+                        host_name: resolved.host_name.clone(),
+                        cwd: recovery.cwd.clone(),
+                        repo: Some(format!("{}/{}", recovery.repo.owner, recovery.repo.name)),
+                        title: recovery.title.clone(),
+                        launch: recovery.launch.clone(),
+                        agent_wrapper_supplied: recovery.agent_wrapper_supplied,
+                        source: None,
+                    },
+                )
+                .await?;
+            }
+            crate::yolo_guard::check_agent_approved(
+                state,
+                claim.host,
+                &recovery.launch,
+                recovery.agent_wrapper_supplied,
+                wrapper_approved,
+            )
+            .await?;
+            let session = on_host(
+                crate::sessions::reconcile_agent_checkout(
+                    state,
+                    &claim,
+                    &client,
+                    key,
+                    &identity,
+                    recovery.fingerprint,
+                    !recovery.wrapper_approved && wrapper_approved,
+                )
+                .await,
+                &resolved.host_name,
+            )?
+            .ok_or_else(|| {
+                anyhow::anyhow!("the inspected checkout intent disappeared before recovery; retry")
+            })?;
+            return Ok(agent_created_reply(
+                state,
+                &claim,
+                session,
+                origin.host,
+                asking_session,
+            ));
+        }
     }
     let preview = on_host(
         crate::sessions::preview_github_checkout(
@@ -1498,7 +1581,7 @@ async fn create_checkout_for_agent(
         .await,
         &resolved.host_name,
     )?;
-    approve_launch(
+    let wrapper_approved = approve_launch(
         state,
         origin,
         asking_session,
@@ -1511,6 +1594,7 @@ async fn create_checkout_for_agent(
             repo: Some(repo.clone()),
             title: resolution.title.clone(),
             launch: resolution.launch.clone(),
+            agent_wrapper_supplied: resolution.agent_wrapper_supplied,
             source: None,
         },
     )
@@ -1535,6 +1619,7 @@ async fn create_checkout_for_agent(
                 preview: Some(preview),
             },
             resolution,
+            wrapper_approved,
             intent_key,
             identity,
         )
@@ -1663,6 +1748,11 @@ fn inherited_spawn_resolution(
             cwd,
             github_repo: None,
             launch,
+            agent_wrapper_supplied: placement
+                .inherited_launch
+                .as_deref()
+                .and_then(|launch| launch.agent_selection())
+                .is_some_and(|selection| selection.wrapper_prefix.is_some()),
             title: name.clone(),
             template_host: None,
         },
@@ -1683,6 +1773,7 @@ struct LaunchApproval {
     repo: Option<String>,
     title: Option<String>,
     launch: farhelm_proto::SessionLaunch,
+    agent_wrapper_supplied: bool,
     source: Option<farhelm_proto::approvals::ApprovalSession>,
 }
 
@@ -1693,19 +1784,31 @@ struct LaunchApproval {
 /// (`sessions::do_create_session`).
 ///
 /// The YOLO rule comes first so the user is never asked to approve something
-/// the target host's own setting rules out (`yolo_guard::check_agent`), and
+/// the target host's own setting rules out (`yolo_guard::check_agent_wrapper`), and
 /// again after the approval, because the setting can change during the wait
 /// (SPEC.md: the rule is applied again when the user approves). The origin
-/// recheck is [`approved`]'s.
+/// recheck is [`approved`]'s. The returned bit is true only after the special
+/// wrapper card's Allow; the final dispatch needs it because a host's command
+/// shortcut can approve an ordinary card without ever showing one.
 async fn approve_launch(
     state: &AppState,
     origin: AgentOrigin,
     asking_session: &str,
     approval: LaunchApproval,
-) -> anyhow::Result<()> {
-    crate::yolo_guard::check_agent(state, approval.host, &approval.launch).await?;
+) -> anyhow::Result<bool> {
+    let wrapper_card = matches!(
+        crate::yolo_guard::check_agent_wrapper(
+            state,
+            approval.host,
+            &approval.launch,
+            approval.agent_wrapper_supplied,
+        )
+        .await?,
+        crate::yolo_guard::AgentVerdict::ApprovalRequired
+    );
     let host = approval.host;
     let launch = approval.launch.clone();
+    let agent_wrapper_supplied = approval.agent_wrapper_supplied;
     // The target as the card names it: the connection serving its registry
     // row now. A row can be retargeted or adopt a new install while the user
     // takes their time, and the approval was for the machine on the card.
@@ -1721,8 +1824,8 @@ async fn approve_launch(
         source,
         ..
     } = approval;
-    let action = match prompt {
-        Some(prompt) => ApprovalAction::LaunchWithPrompt {
+    let action = if wrapper_card {
+        ApprovalAction::LaunchWithAgentWrapper {
             prompt,
             verb,
             host_name,
@@ -1731,16 +1834,29 @@ async fn approve_launch(
             title,
             launch: approved_launch,
             source,
-        },
-        None => ApprovalAction::Launch {
-            verb,
-            host_name,
-            cwd,
-            repo,
-            title,
-            launch: approved_launch,
-            source,
-        },
+        }
+    } else {
+        match prompt {
+            Some(prompt) => ApprovalAction::LaunchWithPrompt {
+                prompt,
+                verb,
+                host_name,
+                cwd,
+                repo,
+                title,
+                launch: approved_launch,
+                source,
+            },
+            None => ApprovalAction::Launch {
+                verb,
+                host_name,
+                cwd,
+                repo,
+                title,
+                launch: approved_launch,
+                source,
+            },
+        }
     };
     approved(state, origin, asking_session, action).await?;
     if state.manager.status(host).map(|status| status.incarnation) != target_before {
@@ -1752,7 +1868,15 @@ async fn approve_launch(
                 .to_string(),
         }));
     }
-    crate::yolo_guard::check_agent(state, host, &launch).await
+    crate::yolo_guard::check_agent_approved(
+        state,
+        host,
+        &launch,
+        agent_wrapper_supplied,
+        wrapper_card,
+    )
+    .await?;
+    Ok(wrapper_card)
 }
 
 /// Approve a message using the target's current display facts and pinned owner.
@@ -1921,6 +2045,8 @@ struct AgentCreateDispatch {
     /// Destination ownership was read on this connection before approval.
     /// A replacement connection cannot inherit its trust decision.
     composition_incarnation: Option<u64>,
+    agent_wrapper_supplied: bool,
+    wrapper_approved: bool,
 }
 
 /// The refusal for a create whose host came from a template, when the
@@ -1999,7 +2125,10 @@ async fn dispatch_agent_create(
                 // Managed destinations take the claim-bound fresh pipeline
                 // before this ordinary folder/spawn dispatch.
                 github_checkout: None,
-                origin: crate::sessions::CreateOrigin::Agent,
+                origin: crate::sessions::CreateOrigin::Agent {
+                    agent_wrapper_supplied: dispatch.agent_wrapper_supplied,
+                    wrapper_approved: dispatch.wrapper_approved,
+                },
                 // `create` names a directory and a launch rather than a
                 // session, so no answer of the target's is forbidden — a
                 // keyed replay is the caller's own earlier create coming
@@ -2255,6 +2384,7 @@ fn merge_template_fields(
         effort,
         permissions,
         permission_flags,
+        wrapper_prefix,
         workspace_trust: _,
         command,
         yolo,
@@ -2277,6 +2407,7 @@ fn merge_template_fields(
         } else {
             permission_flags.or(existing.permission_flags)
         },
+        wrapper_prefix: wrapper_prefix.or(existing.wrapper_prefix),
         workspace_trust: None,
         command: command.or(existing.command),
         yolo: yolo.or(existing.yolo),
@@ -2447,7 +2578,10 @@ async fn clone_for_agent(
     // The source's words must be vouched for before changing any of them.
     // Otherwise normalization could erase the mismatch a forged source
     // relies on to smuggle a different command under safe-looking choices.
-    crate::yolo_guard::check_agent(state, host, &mode).await?;
+    let agent_wrapper_supplied = mode
+        .agent_selection()
+        .is_some_and(|selection| selection.wrapper_prefix.is_some());
+    crate::yolo_guard::check_agent_wrapper(state, host, &mode, agent_wrapper_supplied).await?;
     let mode =
         crate::sessions::normalize_launch_workspace_trust(state, &client, mode, &mut cwd, false)
             .await?;
@@ -2456,7 +2590,7 @@ async fn clone_for_agent(
     // rename the copy, which is the one thing a user reading two rows side by
     // side would notice first.
     let title = request.title.unwrap_or(source.title);
-    approve_launch(
+    let wrapper_approved = approve_launch(
         state,
         origin,
         asking_session,
@@ -2469,6 +2603,7 @@ async fn clone_for_agent(
             repo: None,
             title: Some(title.clone()),
             launch: mode.clone(),
+            agent_wrapper_supplied,
             source: Some(
                 crate::approvals::describe_session(state, &request.source_session_id).await,
             ),
@@ -2522,7 +2657,10 @@ async fn clone_for_agent(
                 rows: crate::sessions::default_rows(),
                 intent_key,
                 github_checkout: None,
-                origin: crate::sessions::CreateOrigin::Agent,
+                origin: crate::sessions::CreateOrigin::Agent {
+                    agent_wrapper_supplied,
+                    wrapper_approved,
+                },
                 // A clone that comes back as the SOURCE or ASKING session is
                 // refused rather than reported. Either is reachable through
                 // an idempotency-key replay, and this helm would otherwise
@@ -6387,6 +6525,8 @@ mod tests {
             spawned: false,
             request_fingerprint: None,
             composition_incarnation: None,
+            agent_wrapper_supplied: false,
+            wrapper_approved: false,
         };
         let before = resolve().await;
         let held = resolve().await;
@@ -6714,6 +6854,25 @@ mod tests {
         }
     }
 
+    /// A guarded agent launch whose stored prefix came from the source session.
+    /// Clone and inheritance cannot tell who chose that prefix originally,
+    /// so both must take the agent-supplied approval path even though the
+    /// compiled launch itself is safe from the ordinary YOLO refusal.
+    fn copied_wrapped_claude_launch() -> farhelm_proto::SessionLaunch {
+        let launch = crate::launches::compile(farhelm_proto::LaunchSelection {
+            permission_flags: None,
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: Some(farhelm_proto::LaunchPermission::Guarded),
+            wrapper_prefix: Some(vec!["with-endpoint".to_string(), "--".to_string()]),
+            workspace_trust: None,
+        })
+        .expect("compose a guarded wrapped Claude launch");
+        assert_eq!(launch.yolo(), Some(false), "premise: this is not YOLO");
+        launch
+    }
+
     /// Spec: `farhelm agent clone` sends the source's stored launch to the
     /// target verbatim, for a command launch and for an agent launch alike.
     ///
@@ -6741,6 +6900,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             },
             start: ["claude", "--from-an-older-catalog", "{farhelm_args}"]
@@ -6847,6 +7007,92 @@ mod tests {
         }
     }
 
+    /// A cloned wrapper is untrusted even when its source is a structured
+    /// agent launch and the requesting host may run ordinary commands without
+    /// asking. The source may have obtained that prefix from an agent, so the
+    /// copy needs a direct Allow on the exact launch shown to the user.
+    #[farhelm_testtrace::test]
+    async fn a_cloned_wrapper_forces_a_card_before_dispatch() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let launch = copied_wrapped_claude_launch();
+        let source = SessionInfo {
+            cwd: "/srv/project".to_string(),
+            canonical_cwd: None,
+            invocation: launch.display_command(),
+            launch: launch.clone(),
+            ..session("source", 1)
+        };
+        let (h, local, remote) =
+            creating_fleet(client_side, vec![source, session("asker", 1)]).await;
+        h.store
+            .set_yolo_without_asking(remote, false)
+            .await
+            .unwrap();
+        let asking_host = h
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == local)
+            .expect("the requesting host exists");
+        assert!(
+            asking_host.commands_without_asking,
+            "premise: an ordinary card would be skipped"
+        );
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Clone {
+                        source_session_id: Some("source".to_string()),
+                        host: Some("user@builder".to_string()),
+                        cwd: None,
+                        title: None,
+                        intent_key: None,
+                        confirm_yolo: false,
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        match card.action {
+            ApprovalAction::LaunchWithAgentWrapper {
+                verb,
+                launch: card_launch,
+                source,
+                ..
+            } => {
+                assert_eq!(verb, LaunchVerb::Clone);
+                assert_eq!(card_launch, launch);
+                assert_eq!(source.expect("the clone names its source").id, "source");
+            }
+            other => panic!("a forced cloned-wrapper card, got {other:?}"),
+        }
+        assert!(seen.lock().unwrap().is_empty(), "no create before Allow");
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert!(
+            matches!(
+                task.await.unwrap(),
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "the direct Allow must release the clone"
+        );
+        let created = seen.lock().unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].launch.as_ref(), Some(&launch));
+    }
+
     /// A copied managed source cannot authorize trust at another destination.
     /// The real clone path must preserve the remaining launch words, query
     /// only the selected target when needed, and ignore the source trust bit.
@@ -6865,6 +7111,7 @@ mod tests {
                 effort: None,
                 permissions: Some(LaunchPermission::Guarded),
                 permission_flags: None,
+                wrapper_prefix: None,
                 workspace_trust: source_trust,
             };
             let source_launch = crate::launches::compile(selection.clone()).unwrap();
@@ -6953,6 +7200,7 @@ mod tests {
             effort: None,
             permissions: Some(LaunchPermission::Guarded),
             permission_flags: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let source_launch = crate::launches::compile(selection.clone()).unwrap();
@@ -7062,6 +7310,7 @@ mod tests {
             effort: None,
             permissions: Some(LaunchPermission::Guarded),
             permission_flags: None,
+            wrapper_prefix: None,
             workspace_trust: Some(true),
         })
         .unwrap();
@@ -7941,6 +8190,7 @@ mod tests {
                     effort: None,
                     permissions: Some(LaunchPermission::Guarded),
                     permission_flags: None,
+                    wrapper_prefix: None,
                     workspace_trust: (enabled && managed).then_some(true),
                 })
                 .unwrap();
@@ -8130,6 +8380,8 @@ mod tests {
                 spawned: false,
                 request_fingerprint: None,
                 composition_incarnation: Some(claim.incarnation),
+                agent_wrapper_supplied: false,
+                wrapper_approved: false,
             },
         )
         .await
@@ -8174,6 +8426,7 @@ mod tests {
                 effort: None,
                 permissions: Some(LaunchPermission::Guarded),
                 permission_flags: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             };
             let source_launch = crate::launches::compile(selection.clone()).unwrap();
@@ -8503,6 +8756,174 @@ mod tests {
         );
     }
 
+    /// A pending checkout accepted while the host was permissive has no
+    /// wrapper Allow to reuse. If that host now asks before YOLO, the retry
+    /// must show the original stored command and directory before recovery
+    /// can start it, even when normal command cards are skipped.
+    #[farhelm_testtrace::test]
+    async fn guarded_wrapper_checkout_retry_cards_the_retained_launch() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let original = copied_wrapped_claude_launch();
+        let repo = farhelm_proto::parse_github_repo("owner/project").unwrap();
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let messages = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = Arc::clone(&messages);
+        let original_for_peer = original.clone();
+        let repo_for_peer = repo.clone();
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            loop {
+                let Some(frame) = reader.read_frame().await.unwrap() else {
+                    break;
+                };
+                let reply = match parse_control(&frame).unwrap() {
+                    ControlMsg::ReconcileGithubCheckout {
+                        req_id,
+                        inspect_only,
+                        expected_fingerprint,
+                        approve_wrapper_recovery,
+                        ..
+                    } => {
+                        observed.lock().unwrap().push((
+                            inspect_only,
+                            expected_fingerprint.clone(),
+                            approve_wrapper_recovery,
+                        ));
+                        if inspect_only {
+                            ControlMsg::GithubCheckoutReconciled {
+                                req_id,
+                                session: None,
+                                snapshot: Some(Box::new(farhelm_proto::GithubCheckoutRecovery {
+                                    launch: original_for_peer.clone(),
+                                    prompt: None,
+                                    title: Some("project".into()),
+                                    repo: repo_for_peer.clone(),
+                                    cwd: "/checkouts/project".into(),
+                                    fingerprint: "original snapshot".into(),
+                                    agent_wrapper_supplied: true,
+                                    wrapper_approved: false,
+                                })),
+                            }
+                        } else {
+                            assert_eq!(expected_fingerprint.as_deref(), Some("original snapshot"));
+                            assert!(approve_wrapper_recovery, "Allow must be retained");
+                            ControlMsg::GithubCheckoutReconciled {
+                                req_id,
+                                session: Some(session("recovered-child", 100)),
+                                snapshot: None,
+                            }
+                        }
+                    }
+                    other => panic!("recovery must not preview or create: {other:?}"),
+                };
+                writer.write_control(&reply).await.unwrap();
+            }
+        });
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store.set_checkout_root(None, "/checkouts").await.unwrap();
+        h.store.set_yolo_without_asking(remote, true).await.unwrap();
+        assert!(
+            h.store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == remote && row.yolo_without_asking),
+            "premise: the retained attempt was accepted without a wrapper card"
+        );
+        h.store
+            .set_yolo_without_asking(remote, false)
+            .await
+            .unwrap();
+        assert!(
+            h.store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == remote && !row.yolo_without_asking),
+            "premise: recovery now needs the wrapper guard"
+        );
+        let asking_host = h
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == local)
+            .unwrap();
+        assert!(
+            asking_host.commands_without_asking,
+            "premise: normal cards are skipped"
+        );
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let request = AgentVerb::Create {
+            host: Some("user@builder".into()),
+            templates: vec![],
+            edits: farhelm_proto::launcher::TemplateFields {
+                agent: Some(farhelm_proto::LaunchHarness::Claude),
+                permissions: Some(Some(farhelm_proto::LaunchPermission::Guarded)),
+                wrapper_prefix: Some(Some(vec!["with-endpoint".into(), "--".into()])),
+                destination: Some(farhelm_proto::launcher::TemplateDestination::Github(
+                    "owner/project".into(),
+                )),
+                name: Some("project".into()),
+                ..Default::default()
+            },
+            intent_key: Some("retry-key".into()),
+            confirm_yolo: false,
+            spawn: None,
+        };
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move { handler.handle(origin, "asker", request).await });
+        let card = await_card(&h, &task).await;
+        let ApprovalAction::LaunchWithAgentWrapper {
+            launch, cwd, repo, ..
+        } = card.action
+        else {
+            panic!("a pending unapproved wrapper needs its own card");
+        };
+        assert_eq!(launch, original, "the card must show the retained command");
+        assert_eq!(cwd, "/checkouts/project");
+        assert_eq!(repo.as_deref(), Some("owner/project"));
+        assert_eq!(
+            messages.lock().unwrap().len(),
+            1,
+            "only inspection preceded Allow"
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcome = task.await.unwrap();
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            messages.lock().unwrap().as_slice(),
+            &[
+                (true, None, false),
+                (false, Some("original snapshot".into()), true),
+            ]
+        );
+        drop(h);
+        responder.await.unwrap();
+    }
+
     /// Only the originating host can recover its approved managed create.
     /// A second live host repeats the exact session ID, key and request: it
     /// must get its own approval card, not the first host's recorded child.
@@ -8544,6 +8965,7 @@ mod tests {
                         ControlMsg::GithubCheckoutReconciled {
                             req_id,
                             session: matched.then(|| session("approved-child", 100)),
+                            snapshot: None,
                         }
                     }
                     ControlMsg::GithubCheckoutPreview { req_id, request } => {
@@ -8698,13 +9120,12 @@ mod tests {
         );
         assert_eq!(
             lookups.len(),
-            4,
-            "initial lookup, post-approval lookup, recovery, other-host lookup"
+            3,
+            "initial inspection, same-host recovery, other-host inspection"
         );
         assert_eq!(lookups[0], lookups[1]);
-        assert_eq!(lookups[0], lookups[2]);
         assert_ne!(
-            lookups[0], lookups[3],
+            lookups[0], lookups[2],
             "a second host cannot name the first reservation"
         );
     }
@@ -8871,6 +9292,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             },
             start: vec!["claude".into(), "{farhelm_args}".into()],
@@ -8953,6 +9375,95 @@ mod tests {
             other => panic!("refused, got {other:?}"),
         }
         assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    /// An inheriting spawn copies an opaque stored prefix, so a guarded
+    /// launch still needs a direct Allow despite the asking host's command
+    /// shortcut. The card must show the exact inherited launch before the
+    /// supervisor receives a create, and approval must preserve those words.
+    #[farhelm_testtrace::test]
+    async fn an_inherited_wrapper_forces_a_card_before_dispatch() {
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let seen = spawn_create_responder(peer, None);
+        let (h, _local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .set_yolo_without_asking(remote, false)
+            .await
+            .unwrap();
+        let asking_host = h
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == remote)
+            .expect("the requesting host exists");
+        assert!(
+            asking_host.commands_without_asking,
+            "premise: an ordinary card would be skipped"
+        );
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let launch = copied_wrapped_claude_launch();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, remote);
+        let inherited = launch.clone();
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Create {
+                        host: None,
+                        templates: Vec::new(),
+                        edits: farhelm_proto::launcher::TemplateFields {
+                            destination: Some(
+                                farhelm_proto::launcher::TemplateDestination::Folder(
+                                    "/srv/child".to_string(),
+                                ),
+                            ),
+                            ..Default::default()
+                        },
+                        intent_key: None,
+                        confirm_yolo: false,
+                        spawn: Some(farhelm_proto::SpawnPlacement {
+                            parent: Some("asker".to_string()),
+                            inherit_agent: true,
+                            inherited_launch: Some(Box::new(inherited)),
+                        }),
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        match card.action {
+            ApprovalAction::LaunchWithAgentWrapper {
+                verb,
+                launch: card_launch,
+                ..
+            } => {
+                assert_eq!(verb, LaunchVerb::SpawnInherited);
+                assert_eq!(card_launch, launch);
+            }
+            other => panic!("a forced inherited-wrapper card, got {other:?}"),
+        }
+        assert!(seen.lock().unwrap().is_empty(), "no create before Allow");
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert!(
+            matches!(
+                task.await.unwrap(),
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "the direct Allow must release the inherited spawn"
+        );
+        let created = seen.lock().unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].launch.as_ref(), Some(&launch));
+        assert_eq!(created[0].parent.as_deref(), Some("asker"));
     }
 
     /// Spec: the agent YOLO rule is applied again when the user approves: a

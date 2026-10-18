@@ -4721,13 +4721,16 @@ Restart with, clone and replace, inheritance, the YOLO guard and mark, and the i
 The helm composes an agent launch's start command with `{farhelm_args}` last, and for an agent type with conversation
 reporting a resume command that adds the type's resume selector after the start command's choices and then
 `{farhelm_args}`; Muse, Cursor and OpenCode get none. `{farhelm_args}` sits where the previous release appended
-Farhelm's arguments, so an upgraded session and a new one spawn alike. At spawn the supervisor fills `{cwd}` (and the
-compiler's Codex trust markers `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, which predate launch kinds and are
-filled in any launch that contains one, a command launch included, so a command copied from a composed Codex launch
-keeps working; SPEC.md states this as the one exception to a command launch running as written), then replaces
-`{farhelm_args}` with the declared kind's own arguments (`AgentIntegration::farhelm_args`, asked for a start or a resume
-and never shown the command) and puts that kind's reporter settings in `LaunchSpec.env`, which the shim sets on the
-agent process alone, after scrubbing inherited reporter variables. Goose is the one kind whose integration the
+Farhelm's arguments, so an upgraded session and a new one spawn alike. `LaunchSelection.wrapper_prefix` stores optional
+literal words before both composed commands, including Goose's leading `env` words. The field is omitted when absent;
+the protocol bump refuses older peers rather than translating the new launch shape. OMP attribution skips exactly that
+many words before classifying the agent program, without relaxing its process proof. At spawn the supervisor fills
+`{cwd}` (and the compiler's Codex trust markers `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, which predate launch
+kinds and are filled in any launch that contains one, a command launch included, so a command copied from a composed
+Codex launch keeps working; SPEC.md states this as the one exception to a command launch running as written), then
+replaces `{farhelm_args}` with the declared kind's own arguments (`AgentIntegration::farhelm_args`, asked for a start or
+a resume and never shown the command) and puts that kind's reporter settings in `LaunchSpec.env`, which the shim sets on
+the agent process alone, after scrubbing inherited reporter variables. Goose is the one kind whose integration the
 environment still switches: its reporter is persisted in the resumed session, so a resume carries no argument and only
 `FARHELM_GOOSE_REPORTER_ENABLED` turns it on or off. A legacy session goes through the previous release's injection
 (`AgentIntegration::inject_hooks`, with its shape checks and `env` prefix). Its only other reader of a command line is
@@ -4905,13 +4908,19 @@ child from the templates as they are now, because the spawn's session-lifetime r
 
 Managed-checkout agent creates use that same frozen `agent_create_v1` digest as the checkout's `client_identity`,
 without a `request_fingerprint`. The helm resolves the request and host, checks the agent YOLO rule, and performs
-lookup-only reconciliation before preview or approval. Only unknown keys proceed to the shared claim-bound preview, card
-and fresh-create pipeline; known accepted attempts finish or return their recorded session without another card. Fresh
-dispatch repeats lookup to settle concurrent approvals, revalidates configuration and the accepted installation, and
-uses `CreateOrigin::Agent`, including the dispatch-time YOLO guard and no remembered GUI selection. Local failures after
-approval use the browser's durable refusal settlement. A template that flips between a folder and checkout encounters an
+lookup-only reconciliation before preview or approval. An unknown key proceeds to the shared claim-bound preview, card
+and fresh-create pipeline. A known key exposes its original launch and checkout for the wrapper guard; a pending
+agent-supplied prefix without a retained Allow gets a card for those original facts if the host now asks before YOLO.
+The exact inspected fingerprint is required by the later launch-capable reconciliation, so another accepted snapshot
+cannot replace the one the card showed. An Allow is recorded with that reservation under the same admission lock before
+recovery, and its approval bit does not change the identity of the original create. A completed attempt returns its
+recorded result without a card. Agent fresh dispatch does not perform another launch-capable lookup after approval;
+supervisor create admission compares the complete checkout fingerprint when concurrent requests reach it. It revalidates
+configuration and the accepted installation, and uses `CreateOrigin::Agent`, including the dispatch-time YOLO guard and
+no remembered GUI selection. A local failure leaves an agent's key for an exact guarded retry instead of using the
+browser's launch-capable durable refusal settlement. A template that flips between a folder and checkout encounters an
 incompatible reservation and is refused as key reuse. Agent template writes store managed destinations through the same
-editor path as folder destinations. No supervisor protocol or frozen digest encoding changes.
+editor path as folder destinations.
 
 ### Permission prompts for agent actions
 
@@ -5090,6 +5099,13 @@ GUI's own writes still carry no precondition. The helm also refuses, before any 
 which `launcher::apply_template` could never apply. A create stores the launch kind its choices imply: agent for
 agent-launch choices or an agent type alone, command for any command field. The template therefore means what the flags
 meant.
+
+An agent-supplied wrapper is marked when its own flags set the prefix, or when clone or inheritance takes a prefix from
+a source session. The resolved launch still undergoes exact recomposition, but that comparison cannot establish who
+chose the prefix. On a host that asks before YOLO, the guard therefore returns an approval-dependent verdict; the direct
+Allow card satisfies it at the later checks. A template prefix counts as user-approved only after its write card was
+shown, including on a host that normally skips command cards. The ordinary host command shortcut cannot waive either
+card.
 
 The prompts are a check on agents that act through the `farhelm` CLI, not a sandbox. Any process running as the
 session's user, an agent included, can open the supervisor's socket with full authority and act on that host without

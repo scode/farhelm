@@ -59,7 +59,10 @@
 //! [`a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_restart`].
 
 use crate::harness::*;
-use crate::hook_identity::{attach_ready, hook_harness, hook_log, report as report_conversation};
+use crate::hook_identity::{
+    ServeTask, attach_ready, hook_harness, hook_log, report as report_conversation,
+};
+use crate::structured_launches::{fake_harness_with_script, observed_argv};
 
 // ---------------------------------------------------------------------
 // Wrapper fixtures (farhelm-wrappers-plan.md §4.2)
@@ -83,6 +86,10 @@ use crate::hook_identity::{attach_ready, hook_harness, hook_log, report as repor
 /// A directory spliced into the script would be re-parsed by the shell,
 /// and this feature's whole rule is that it never is.
 const WRAPPER_SCRIPT: &str = r#"cd "$1" && shift && "$@"; exit $?"#;
+
+/// Structured prefixes cannot supply Farhelm placeholders. This wrapper
+/// stays resident while forwarding the compiler's agent argv unchanged.
+const STRUCTURED_WRAPPER_SCRIPT: &str = r#""$@"; exit $?"#;
 
 /// The argv slot `{cwd}` occupies in every wrapper vector this file
 /// builds: `sh`, `-c`, the script, `$0`, then `$1`.
@@ -273,6 +280,36 @@ fn wrapper_slot_argv(session_id: &str) -> Vec<String> {
         "expected exactly one live wrapper process for session {session_id}, found {found:?}"
     );
     found.pop().expect("just asserted there is one")
+}
+
+/// Observe both processes in a structured wrapper launch through their
+/// inherited session marker. The wrapper must remain resident, while the
+/// fake agent must receive the same marker after the wrapper starts it.
+fn assert_structured_wrapper_and_agent(session_id: &str) {
+    let marked = marked_pids(session_id);
+    let wrappers: Vec<Vec<String>> = marked
+        .iter()
+        .map(|pid| cmdline_of(*pid))
+        .filter(|argv| argv.iter().any(|word| word == STRUCTURED_WRAPPER_SCRIPT))
+        .collect();
+    assert_eq!(
+        wrappers.len(),
+        1,
+        "one resident structured wrapper must carry the session environment: {wrappers:?}"
+    );
+    let wrapper = &wrappers[0];
+    assert_eq!(
+        wrapper.get(4).map(String::as_str),
+        Some("claude"),
+        "the compiled agent command must follow the wrapper's positional slot: {wrapper:?}"
+    );
+    assert!(
+        marked
+            .iter()
+            .map(|pid| cmdline_of(*pid))
+            .any(|argv| argv.iter().any(|word| word == "fake-agent")),
+        "the wrapper's agent child must inherit FARHELM_SESSION_ID={session_id}"
+    );
 }
 
 /// Assert the wrapper for `session_id` was handed `cwd` in its `{cwd}`
@@ -517,6 +554,121 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
         settings > resume,
         "the injected hook flags must land after the agent's own argv, not inside it: {argv}"
     );
+}
+
+/// A structured wrapper surrounds the compiler's start and resume argv.
+///
+/// This covers the boundary the command-launch tests above cannot reach:
+/// the wrapper prefix is a stored agent choice, while the agent command and
+/// Farhelm's own hook arguments are compiled later. Both generations must
+/// reach the fake Claude with its model choice and injected hook arguments;
+/// the resident shell and its agent child must retain the session marker.
+#[farhelm_testtrace::test]
+async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
+    let fixture = fake_harness_with_script("hook-report");
+    let shell = fixture.bash_shell().to_string_lossy().into_owned();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_env: vec![
+                (
+                    "HOME".to_string(),
+                    fixture
+                        .login_home_with_fake_path()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                ("SHELL".to_string(), shell.clone()),
+            ],
+            launch_shell: Some(shell),
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let _accepting = ServeTask::spawn(&h.sup, h.state.path()).await;
+    let selection = farhelm_proto::LaunchSelection {
+        permission_flags: None,
+        harness: farhelm_proto::LaunchHarness::Claude,
+        model: Some("claude-fable-5".to_string()),
+        effort: None,
+        // The compiler records Claude's effective default in the stored
+        // selection; make the fixture's expected selection equally explicit.
+        permissions: Some(farhelm_proto::LaunchPermission::Guarded),
+        wrapper_prefix: Some(vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            STRUCTURED_WRAPPER_SCRIPT.to_string(),
+            "wrapper".to_string(),
+        ]),
+        workspace_trust: None,
+    };
+    let launch = farhelm_helm::compile_agent_launch(selection.clone())
+        .expect("compile the wrapper around a Claude launch");
+    let session = h
+        .client
+        .create_session_with_extras(
+            &fixture.work().to_string_lossy(),
+            launch,
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .expect("create a structured wrapper session");
+    assert_eq!(session.launch.agent_selection(), Some(&selection));
+
+    let first = shell_words::split(&observed_argv(&h, &session.id, 1).await)
+        .expect("decode the first agent argv");
+    assert!(
+        first
+            .windows(2)
+            .any(|words| words == ["--model", "claude-fable-5"]),
+        "the agent must receive the compiled model choice: {first:?}"
+    );
+    assert!(
+        first.iter().any(|word| word == "--settings"),
+        "Farhelm's hook arguments must pass through the wrapper: {first:?}"
+    );
+    assert_structured_wrapper_and_agent(&session.id);
+
+    let (channel, mut stream, mut seen) = attach_ready(&h, &session).await;
+    let conversation = "structured-wrapper-report";
+    report_conversation(&h, channel, &mut stream, &mut seen, conversation).await;
+    assert_eq!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .as_deref(),
+        Some(conversation),
+        "the fake agent must report through the wrapper; {}",
+        hook_log(&h, &session.id)
+    );
+
+    h.client
+        .restart_session(&session.id, true)
+        .await
+        .expect("resume the structured wrapper session");
+    let resumed = shell_words::split(&observed_argv(&h, &session.id, 2).await)
+        .expect("decode the resumed agent argv");
+    assert!(
+        resumed
+            .windows(2)
+            .any(|words| words == ["--resume", conversation]),
+        "the wrapper must forward the captured conversation on resume: {resumed:?}"
+    );
+    assert!(
+        resumed
+            .windows(2)
+            .any(|words| words == ["--model", "claude-fable-5"]),
+        "the resumed agent must keep its compiled model choice: {resumed:?}"
+    );
+    assert!(
+        resumed.iter().any(|word| word == "--settings"),
+        "Farhelm's hook arguments must follow the agent on resume: {resumed:?}"
+    );
+    assert_structured_wrapper_and_agent(&session.id);
 }
 
 /// A wrapper is handed the user's own spelling of the directory at create

@@ -117,6 +117,19 @@ pub enum ApprovalAction {
         source: Option<ApprovalSession>,
         prompt: String,
     },
+    /// An agent-supplied wrapper needs this particular user's answer on a
+    /// host that asks before YOLO. Its separate tag makes older clients fail
+    /// closed instead of showing an ordinary launch card with Always allow.
+    LaunchWithAgentWrapper {
+        verb: LaunchVerb,
+        host_name: String,
+        cwd: String,
+        repo: Option<String>,
+        title: Option<String>,
+        launch: SessionLaunch,
+        source: Option<ApprovalSession>,
+        prompt: Option<String>,
+    },
     /// `farhelm agent rename`.
     Rename {
         target: ApprovalSession,
@@ -171,6 +184,21 @@ pub enum ApprovalAction {
     },
 }
 
+impl ApprovalAction {
+    /// These requests need one visible Allow, even when the requesting host
+    /// normally runs Farhelm commands without asking. A wrapper-bearing
+    /// template becomes trusted by later launches only after this card.
+    pub fn requires_direct_allow(&self) -> bool {
+        match self {
+            Self::LaunchWithAgentWrapper { .. } => true,
+            Self::TemplateWrite { fields, .. } => {
+                matches!(&fields.wrapper_prefix, Some(Some(_)))
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Which command a [`ApprovalAction::Launch`] came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -206,6 +234,54 @@ pub enum ApprovalAnswer {
 
 #[cfg(test)]
 mod tests {
+    /// A direct wrapper answer must survive as a distinct card kind. Older
+    /// clients cannot render its trust warning, so they must fail decoding.
+    #[test]
+    fn agent_wrapper_cards_fail_an_older_decoder_and_force_allow() {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum OlderAction {
+            Launch {},
+        }
+        let card = super::ApprovalAction::LaunchWithAgentWrapper {
+            verb: super::LaunchVerb::Create,
+            host_name: "host".into(),
+            cwd: "/work".into(),
+            repo: None,
+            title: None,
+            source: None,
+            prompt: Some("go".into()),
+            launch: crate::SessionLaunch::Command(crate::CommandLaunch {
+                command: "with-endpoint codex".into(),
+                agent: Some(crate::LaunchHarness::Codex),
+                yolo: false,
+                resume: None,
+            }),
+        };
+        let value = serde_json::to_value(&card).unwrap();
+        assert_eq!(value["kind"], "launch_with_agent_wrapper");
+        assert_eq!(
+            serde_json::from_value::<super::ApprovalAction>(value.clone()).unwrap(),
+            card
+        );
+        assert!(serde_json::from_value::<OlderAction>(value).is_err());
+        assert!(card.requires_direct_allow());
+
+        let fields = crate::launcher::TemplateFields {
+            wrapper_prefix: Some(Some(vec!["with-endpoint".into()])),
+            ..Default::default()
+        };
+        assert!(
+            super::ApprovalAction::TemplateWrite {
+                name: "wrapped".into(),
+                replaces_existing: false,
+                fields,
+                host_name: None,
+            }
+            .requires_direct_allow()
+        );
+    }
+
     /// Existing-agent messages need a distinct card tag: an older UI must
     /// fail closed instead of offering approval while omitting the message.
     #[test]
@@ -283,6 +359,7 @@ mod tests {
                     effort: None,
                     permissions: None,
                     permission_flags: None,
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 },
                 start: vec![

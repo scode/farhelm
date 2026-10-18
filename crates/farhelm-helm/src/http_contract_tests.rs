@@ -47,6 +47,7 @@ fn session_list_body() -> SessionListBody {
         model: Some("gpt-5".to_string()),
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
+        wrapper_prefix: None,
         workspace_trust: Some(true),
     })
     .expect("a valid Codex selection compiles");
