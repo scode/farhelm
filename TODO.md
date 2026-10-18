@@ -44,6 +44,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Open JSON downloads with Cmd-click.** Add `.json` to the desktop app's allowed extensions for opening a completed
+  file download with Cmd-click (Ctrl-click on non-macOS desktop builds). Keep the final-extension check
+  case-insensitive. Update SPEC.md and SPEC_impl.md, which currently limit opening to `.md` and `.txt`.
+
 - **Apply template hotkeys in the launcher.** While New, Clone, or Replace with is open, pressing a bound template
   hotkey should apply that template to the current launcher draft, exactly as accepting `tl:name` in the launcher's
   search does, instead of starting a session. This should work for the quick-launch bolt and number shortcuts, so
