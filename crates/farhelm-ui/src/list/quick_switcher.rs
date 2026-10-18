@@ -29,6 +29,15 @@ pub(super) enum SwitcherPick {
     New(ComposerSearchResult),
     /// Close this modal, then use the chord's fresh quick-launch path.
     QuickLaunch,
+    /// Resolve a template name again after this snapshot's dialog closes.
+    TemplateLaunch(String),
+}
+
+/// One dialog shares focus, filtering and close behavior across two entry keys.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SwitcherMode {
+    Sessions,
+    Templates,
 }
 
 /// Wait for the closing render before navigation lets a terminal take focus.
@@ -157,6 +166,24 @@ fn agent_label(session: &Session) -> &'static str {
     }
 }
 
+/// Describe the bindings visible beside a launchable template row.
+///
+/// Preferences give the current assignments, while the one shortcut
+/// definition supplies the same labels used by the capture listener.
+fn template_shortcut_badges(name: &str, preferences: &crate::api::Preferences) -> Vec<String> {
+    let keys = crate::launch_sequence::TEMPLATE_SHORTCUTS;
+    let mut badges = Vec::new();
+    if preferences.quick_launch_template.as_deref() == Some(name) {
+        badges.push(keys.bolt.label(keys.mac_desktop));
+    }
+    for (number, bound_name) in &preferences.template_shortcuts {
+        if bound_name == name {
+            badges.push(keys.number_chord(number));
+        }
+    }
+    badges
+}
+
 /// Coalesce highlight runs so a long legal title does not create one DOM
 /// node per character. Positions are sorted original-character indices.
 fn highlight_runs(text: &str, positions: &[usize]) -> Vec<(bool, String)> {
@@ -190,17 +217,16 @@ fn MatchedText(text: String, positions: Vec<usize>) -> Element {
     }
 }
 
-/// Keep one fleet snapshot and one template snapshot for this open dialog.
+/// Share one dialog's keyboard and focus contract across session and template lists.
 ///
-/// Plain typing searches sessions and offers a pinned New action. Only `tl:`
-/// searches templates, through the launcher's own parser and matcher. The
-/// empty query appends direct quick launch after recent sessions without
-/// changing their initial selection. Unlike a template pick, that action can
-/// submit New after the parent removes this modal and reads the mark fresh.
-/// The input retains focus while arrows change its active row; the parent closes
-/// and removes the modal before navigating or opening the launcher.
+/// The sessions mode keeps its activity snapshot, pinned New action and `tl:`
+/// search. Templates-only mode skips the session read and passes plain text
+/// through the same template matcher. It returns a name, not a captured
+/// template: the parent closes this modal before fresh launch dispatch.
+/// The input retains focus while arrows change its active row.
 #[component]
 pub(super) fn QuickSwitcher(
+    mode: SwitcherMode,
     hosts: Signal<HostsRead>,
     on_close: EventHandler<()>,
     on_pick: EventHandler<SwitcherPick>,
@@ -210,7 +236,13 @@ pub(super) fn QuickSwitcher(
     let sessions_base = base.clone();
     let listing = use_resource(move || {
         let base = sessions_base.clone();
-        async move { fetch_sessions(&base, &SessionFilter::default(), ListSort::Activity).await }
+        async move {
+            if mode == SwitcherMode::Templates {
+                None
+            } else {
+                Some(fetch_sessions(&base, &SessionFilter::default(), ListSort::Activity).await)
+            }
+        }
     });
     let templates = use_resource(move || {
         let base = base.clone();
@@ -221,9 +253,11 @@ pub(super) fn QuickSwitcher(
     let hosts_read = hosts.read();
     let host_rows = hosts_read.hosts().unwrap_or_default();
     let text = query();
-    let template_mode = scoped_query(&text).0 == SearchScope::Template;
+    let template_only = mode == SwitcherMode::Templates;
+    let template_mode = template_only || scoped_query(&text).0 == SearchScope::Template;
     let read = listing.read();
-    let sessions = read.as_ref().and_then(|result| result.as_ref().ok());
+    let session_read = read.as_ref().and_then(|result| result.as_ref());
+    let sessions = session_read.and_then(|result| result.as_ref().ok());
     let matches = sessions
         .map(|listing| session_matches(&listing.sessions, &text))
         .unwrap_or_default();
@@ -234,7 +268,15 @@ pub(super) fn QuickSwitcher(
     let template_names = templates_now
         .map(|templates| templates.iter().map(|t| t.name.clone()).collect::<Vec<_>>())
         .unwrap_or_default();
-    let template_rows = template_search_results(&text, &template_names);
+    let template_rows = template_search_results(
+        &if template_only {
+            format!("tl:{text}")
+        } else {
+            text.clone()
+        },
+        &template_names,
+    );
+    let mut arrowed = use_signal(|| false);
     let show_new = !template_mode && !text.trim().is_empty();
     let show_quick = !template_mode && text.trim().is_empty();
     // Loading has no active action, including New, so Enter cannot mistake
@@ -242,19 +284,37 @@ pub(super) fn QuickSwitcher(
     // remains usable; template mode has its own independent readiness.
     let count = if template_mode {
         template_rows.len()
-    } else if read.is_none() {
+    } else if session_read.is_none() {
         0
     } else {
         matches.len() + usize::from(show_new) + usize::from(show_quick)
     };
-    let selected_index = selected().min(count.saturating_sub(1));
+    // A name that exactly equals the query wins over an earlier substring
+    // match until the user deliberately arrows to another row. This also
+    // handles a template snapshot that arrives after the user has typed.
+    let exact = template_only
+        .then(|| {
+            template_rows.iter().position(
+                |row| matches!(row, ComposerSearchResult::Template(name) if name == text.trim()),
+            )
+        })
+        .flatten();
+    let selected_index = if !arrowed() {
+        exact.unwrap_or(selected())
+    } else {
+        selected()
+    }
+    .min(count.saturating_sub(1));
     let picked = if count == 0 {
         None
     } else if template_mode {
-        template_rows
-            .get(selected_index)
-            .cloned()
-            .map(SwitcherPick::New)
+        template_rows.get(selected_index).cloned().map(|action| {
+            if let (true, ComposerSearchResult::Template(name)) = (template_only, &action) {
+                SwitcherPick::TemplateLaunch(name.clone())
+            } else {
+                SwitcherPick::New(action)
+            }
+        })
     } else if selected_index == matches.len() && show_quick {
         Some(SwitcherPick::QuickLaunch)
     } else if selected_index == matches.len() && show_new {
@@ -276,7 +336,7 @@ pub(super) fn QuickSwitcher(
     rsx! {
         div { class: "quick-switcher-backdrop", role: "presentation", onclick: move |_| on_close.call(()),
             div {
-                class: "quick-switcher-dialog", role: "dialog", aria_modal: "true", aria_label: "quick switcher", tabindex: "-1",
+                class: "quick-switcher-dialog", role: "dialog", aria_modal: "true", aria_label: if template_only { "template launcher" } else { "quick switcher" }, tabindex: "-1",
                 onclick: move |event| event.stop_propagation(),
                 onmounted: move |_| install_dialog_with_selector(DIALOG_SELECTOR, ".quick-switcher-search", Some(".quick-switcher-close"), None),
                 onkeydown: move |event: KeyboardEvent| {
@@ -290,21 +350,21 @@ pub(super) fn QuickSwitcher(
                         if event.is_composing() { return; }
                         match event.key() {
                             Key::ArrowDown if count > 0 => {
-                                event.prevent_default(); selected.set((selected_index + 1).min(count - 1)); scroll_selection();
+                                event.prevent_default(); selected.set((selected_index + 1).min(count - 1)); arrowed.set(true); scroll_selection();
                             }
                             Key::ArrowUp if count > 0 => {
-                                event.prevent_default(); selected.set(selected_index.saturating_sub(1)); scroll_selection();
+                                event.prevent_default(); selected.set(selected_index.saturating_sub(1)); arrowed.set(true); scroll_selection();
                             }
                             Key::Enter => { event.prevent_default(); if let Some(pick) = picked.clone() { on_pick.call(pick); } }
                             _ => {}
                         }
                     },
-                    class: "quick-switcher-search", aria_label: "search sessions or templates",
-                    "data-tooltip": "search sessions across every host; tl: searches templates",
+                    class: "quick-switcher-search", aria_label: if template_only { "search templates" } else { "search sessions or templates" },
+                    "data-tooltip": if template_only { "search templates by name; Enter starts the highlighted one" } else { "search sessions across every host; tl: searches templates" },
                     role: "combobox", aria_autocomplete: "list", aria_expanded: "true", aria_controls: "quick-switcher-results",
                     aria_activedescendant: (count > 0).then(|| format!("quick-switcher-result-{selected_index}")),
-                    placeholder: "jump to a session · tl: for templates", value: text.clone(),
-                    oninput: move |event| { query.set(event.value()); selected.set(0); },
+                    placeholder: if template_only { "start a template" } else { "jump to a session · tl: for templates" }, value: text.clone(),
+                    oninput: move |event| { query.set(event.value()); selected.set(0); arrowed.set(false); },
                 }
                 div { class: "quick-switcher-heading",
                     if template_mode { "templates" } else if text.trim().is_empty() { "recent sessions" } else { "sessions" }
@@ -317,7 +377,7 @@ pub(super) fn QuickSwitcher(
                         _ => rsx! {},
                     }
                 } else {
-                    match read.as_ref() {
+                    match session_read {
                         None => rsx! { p { role: "status", "loading sessions…" } },
                         Some(Err(reason)) => rsx! { p { role: "alert", "Couldn't load sessions: " bdi { "{display_peer(reason)}" } } },
                         Some(Ok(_)) if matches.is_empty() => rsx! { p { role: "status", "no sessions match" } },
@@ -331,16 +391,26 @@ pub(super) fn QuickSwitcher(
                             for (position, action) in template_rows.iter().enumerate() {
                                 { if let ComposerSearchResult::Template(name) = action {
                                   let template = templates_now.and_then(|templates| templates.iter().find(|t| &t.name == name));
-                                  let pick = action.clone();
+                                  let pick = if template_only {
+                                      SwitcherPick::TemplateLaunch(name.clone())
+                                  } else {
+                                      SwitcherPick::New(action.clone())
+                                  };
+                                  let badges = if template_only { template_shortcut_badges(name, &preferences.0.read()) } else { Vec::new() };
                                   rsx! {
                                     button {
                                         key: "{name}", class: "quick-switcher-row quick-switcher-template", r#type: "button", role: "option", tabindex: "-1",
                                         id: "quick-switcher-result-{position}", aria_selected: position == selected_index,
-                                        "data-tooltip": "open New with this template applied; nothing launches yet",
-                                        onclick: move |_| on_pick.call(SwitcherPick::New(pick.clone())),
+                                        "data-tooltip": if template_only { "start a session from this template" } else { "open New with this template applied; nothing launches yet" },
+                                        onclick: move |_| on_pick.call(pick.clone()),
                                         span { class: "quick-switcher-template-name", bdi { "{display_peer(name)}" } }
                                         if let Some(template) = template {
                                             span { class: "quick-switcher-template-summary", bdi { "{super::templates::template_summary(&template.fields)}" } }
+                                        }
+                                        if !badges.is_empty() {
+                                            span { class: "quick-switcher-template-keys",
+                                                for badge in badges { kbd { "{badge}" } }
+                                            }
                                         }
                                     }
                                   }
@@ -404,7 +474,8 @@ pub(super) fn QuickSwitcher(
                     p { class: "quick-switcher-cap", "Only the most recently active sessions were searched; the helm's listing limit was reached." }
                 }
                 div { class: "quick-switcher-templates-hint",
-                    if template_mode { "Picking a template opens New with it applied; nothing launches yet." }
+                    if template_only { "Enter starts the highlighted template. A partial template opens New to complete it." }
+                    else if template_mode { "Picking a template opens New with it applied; nothing launches yet." }
                     else { span { "templates" } p { "Type tl: to search templates. Picking one opens New with it applied." } }
                 }
                 footer { class: "quick-switcher-footer", span { "↑↓ choose · Enter pick · Escape close" }

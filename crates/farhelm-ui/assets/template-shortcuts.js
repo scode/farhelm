@@ -40,8 +40,8 @@
    * only while armed; keypad keys are never accepted. `none` consumes a held
    * recognized key without admitting it twice. When idle, `source` retains
    * the relay identity so a missing trigger cannot claim a repeated chord.
-   * Cmd-J remains inert until its list is installed, but its identity still
-   * comes from the definition.
+   * Cmd-J's key identity and modifier rule come from the same definition as
+   * the template chords, even though it opens a list instead of a launch.
    */
   function classifyTemplateShortcutKey(event, armed, definition, ordinaryTextEditor) {
     const pass = { action: "pass", consume: false };
@@ -54,6 +54,10 @@
     const bolt = event.code === definition.bolt.code && chord(event, definition.bolt.modifiers, definition);
     const list = event.code === definition.template_list.code &&
       chord(event, definition.template_list.modifiers, definition);
+
+    // Opening the template list supersedes an unfinished sequence. Recognize
+    // it before the armed branch so its chord never falls through to xterm.
+    if (list) return { action: "template-list", consume: true };
 
     if (!armed) {
       if (prefix && !ordinaryTextEditor) {
@@ -68,7 +72,6 @@
         return event.repeat ? { action: "none", consume: true, source: "quick-digit", digit: number.value } :
           { action: "quick-digit", consume: true, digit: number.value };
       }
-      if (list) return { action: "template-list", consume: false };
       return pass;
     }
 
@@ -106,10 +109,7 @@
     return form ? "preparing" : "page";
   }
 
-  /** Admit template actions in the page, hidden preparation and open launcher.
-   * The list chord remains inert in this installer; when installed, it may
-   * open only from the page context.
-   */
+  /** Admit template actions in the page, hidden preparation and open launcher. */
   function templateShortcutAdmitted(context) {
     return context === "page" || context === "preparing" || context === "launcher";
   }
@@ -181,7 +181,19 @@
       const result = classifyTemplateShortcutKey(
         event, armed, keys, prefixReservedForTextEditing(event.target, context, document),
       );
-      if (result.action === "pass" || result.action === "template-list") return;
+      if (result.action === "pass") return;
+      if (result.action === "template-list") {
+        cancel();
+        // Cmd-J has the same modal boundary as Cmd-K. A live relay is the
+        // sign that authentication and preference loading have completed.
+        if (context !== "page") return;
+        const trigger = document.querySelector(".quick-switcher-template-trigger");
+        if (!trigger) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!event.repeat && !trigger.disabled) root.farhelmOpenQuickSwitcher?.(trigger);
+        return;
+      }
       if (result.action === "cancel" && !result.consume) {
         cancel();
         return;

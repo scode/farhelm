@@ -71,9 +71,17 @@ The quick switcher's **Quick launch** row does the same thing. In Firefox, Ctrl+
 use that row there. While the session launcher is open, the shortcut applies the marked template to the draft and leaves
 **Launch** to you. Other dialogs keep their keyboard shortcuts.
 
+To start any template by name, press Cmd+J on a Mac or Ctrl+Shift+J elsewhere. This opens a template-only list: type part
+of a name, use ↑ and ↓ to choose, then press Enter. If you type the exact name, that template is highlighted. Each row
+shows its saved choices and any **⚡** or number shortcut. A template that needs more choices opens the session launcher
+for you to finish. Escape closes the list and returns focus to where you were. Cmd+J does nothing while another dialog
+is open, including the session launcher.
+
+The desktop app accepts this shortcut. In a browser, the browser may keep it: [Chrome](https://support.google.com/chrome/answer/157179?hl=en_1), [Edge](https://learn.microsoft.com/en-us/microsoft-edge/devtools/shortcuts/), and [Firefox](https://support.mozilla.org/en-US/kb/keyboard-shortcuts-perform-firefox-tasks-quickly) list Ctrl+Shift+J for a console on Windows and Linux; Firefox lists Cmd+J for Downloads on a Mac. The browser's shortcut lists do not establish whether Farhelm receives the key.
+
 After a quick launch, Rename opens with the session's name selected while the agent is already starting. Enter keeps
 the name; typing replaces it, and Enter saves it. Escape or **cancel** keeps the name too. Closing Rename takes you to
-the new terminal. This also happens for number shortcuts and combined launch sequences, even when a template supplied
+the new terminal. This also happens for number shortcuts, combined launch sequences and the Cmd+J list, even when a template supplied
 the name. If the session launcher opened first, it already offered the name field and Rename does not open again.
 
 In Settings, beside **skip session confirmations**, **name sessions on quick launch** turns this off. It is on by

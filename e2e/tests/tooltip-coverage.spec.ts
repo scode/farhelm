@@ -29,7 +29,8 @@
  * sidebar with the shared session in both row densities, the session's own
  * view with an extra terminal tab, the row and host menus, the rename and
  * delete confirmations, the help menu, settings, feedback, templates, the
- * host settings and add-host dialogs, and both tabs of the new-session form.
+ * host settings and add-host dialogs, the template-only list, and both tabs
+ * of the new-session form.
  * States it cannot reach (a host mid-update, an interrupted session, a
  * provisioning plan) are covered by review of the inventory instead.
  * The same dialog walk checks text attributes separately. It verifies the
@@ -187,6 +188,32 @@ async function expectTextFieldsCovered(page: Page, state: string, root: string, 
 
 test.afterEach(async ({ request }) => {
   await resetPreferences(request);
+});
+
+/** Template rows in the Cmd-J list have their own hover contract. Visiting
+ * a saved row keeps this sweep from passing on the search field alone.
+ */
+test("template launcher rows and search carry hover help", async ({ page, request }) => {
+  const name = `tooltip-cmdj-${Date.now()}`;
+  try {
+    const saved = await request.put(`/api/templates/${encodeURIComponent(name)}`, {
+      data: { kind: "command", command: "printf ready" },
+    });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await page.goto("/");
+    await expect(page.locator(".quick-switcher-template-trigger")).toHaveCount(1);
+    const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+    await page.keyboard.press(mac ? "Meta+j" : "Control+Shift+j");
+    const dialog = page.getByRole("dialog", { name: "template launcher", exact: true });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("combobox").fill(name);
+    await expect(dialog.locator(".quick-switcher-template")).toHaveCount(1);
+    await expectCovered(page, "template launcher row", ".quick-switcher-dialog", 1);
+    await expectTextFieldsCovered(page, "template launcher search", ".quick-switcher-dialog", 1);
+  } finally {
+    const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+    expect(removed.ok() || removed.status() === 404).toBe(true);
+  }
 });
 
 /**

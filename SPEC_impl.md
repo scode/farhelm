@@ -970,16 +970,17 @@ rather than earn a native state file.
 
 The quick switcher installs an idempotent capture-phase window keydown listener through inline `document::eval` in both
 renderers. It matches `KeyK` with Meta alone on macOS or Ctrl+Shift elsewhere, using terminal.js's platform test;
-composition and repeat do not open it. An existing modal or an absent list-owned trigger yields the chord without
-preventing its default. Otherwise it prevents default and propagation before xterm handles input, records the active
-element and clicks that hidden trigger. Each mounted dialog fetches one unfiltered activity-ordered session snapshot and
-partitions it into title and metadata-only subsequence matches, retaining helm order inside each tier. It never adds a
-result cap or subscribes to listing updates. Peer text is escaped and isolated before highlighting. Closing releases
-modal isolation and waits for actual DOM removal before letting ListView's ordinary navigation callback open a session.
-Cancellation, a refused pick and picking the current session restore previous focus; an accepted different session
-leaves focus free for its terminal. The trigger stays mounted but disabled through that handoff, swallowing repeat
-chords without replacing the saved opener; terminal.js's modal focus veto must no longer see the switcher when the new
-selection arrives.
+composition and repeat do not open it. Cmd+J is matched by the shared template-shortcut listener from the Rust
+definition, and uses the same focus-capturing opener with a templates-only relay. An existing modal or an absent
+list-owned trigger yields the chord without preventing its default. Otherwise it prevents default and propagation before
+xterm handles input, records the active element and clicks the appropriate hidden trigger. In sessions mode, each
+mounted dialog fetches one unfiltered activity-ordered session snapshot and partitions it into title and metadata-only
+subsequence matches, retaining helm order inside each tier. It never adds a result cap or subscribes to listing updates.
+Peer text is escaped and isolated before highlighting. Closing releases modal isolation and waits for actual DOM removal
+before letting ListView's ordinary navigation callback open a session. Cancellation, a refused pick and picking the
+current session restore previous focus; an accepted different session leaves focus free for its terminal. The trigger
+stays mounted but disabled through that handoff, swallowing repeat chords without replacing the saved opener;
+terminal.js's modal focus veto must no longer see the switcher when the new selection arrives.
 
 The switcher also reads one template snapshot per open and delegates `tl:` parsing and matching to the launcher's own
 search helpers. It reuses the Templates panel's summary formatter. New/name and template choices close through the same
@@ -990,6 +991,12 @@ read to succeed. While waiting, the launcher shows a cancellable loading state s
 edits. Clone/Replace revokes any pending choice, and closing clears the parent opening intent. Both kinds use the same
 search-accept callback as Enter and a clicked search result. Completed read failures follow that callback's ordinary
 refusal behavior; resource refreshes do not reapply the initial choice. Name and template picks do not submit the form.
+The templates-only mode passes its plain query through that same template matcher and shows the current shortcut labels
+beside bound rows. An exact case-sensitive name is selected over other substring matches unless the user arrows away;
+the same rule applies if the template snapshot arrives after typing. A row pick carries only its name across the modal
+removal handoff. The shared shortcut worker reads preferences and templates afresh and resolves that name before using
+the existing quick-launch admission, fallback and naming behavior. A name missing from the fresh catalog opens New with
+a preparation error rather than launching a stale captured definition.
 
 Session-action shortcuts use an idempotent capture listener and a pure key matcher from `session-action-shortcuts.js`.
 The build's Mac-desktop condition selects Cmd+W for Delete; browsers use Ctrl+Shift+Backspace. A visible modal yields,
@@ -1015,16 +1022,17 @@ alone for number keys and the sequence prefix; every other build selects Ctrl+Sh
 distinguishes the page, a hidden launcher preparing quick launch, the visible launcher and unrelated visible modals; the
 launcher alone accepts template actions while unrelated visible modals yield. Ten hidden `.template-number-trigger`
 buttons hand the digit to the same list callback that handles quick launch; the existing `.quick-launch-trigger` remains
-unique. Both callbacks read fresh shortcut preferences and template definitions, resolve a name and use the same
-New-open, template application and submission path. The row's key popup uses `menu_panel` keyboard/focus/placement
-helpers inside modal isolation; Escape closes it without closing Templates. The open toggle owns pointerdown until
-click. Dialog scroll/resize, backdrop resize and the app's layout epoch dismiss the popup when its fixed coordinates
-become stale; the popup's own scrolling does not dismiss it. Focus returns only while still owned by a closing menu,
-with `preventScroll`, so a delayed dismissal cannot steal another popup's focus or undo the dialog's scroll. Re-delivery
-to an already closed popup does nothing. The two shortcut preference fields share acknowledgment, deletion retirement
-and fresh-read overlay helpers. A rename repoints both before deleting the old name, and removes a stale new-name key
-when retaining the old name's key would otherwise violate one-key-per-template. Failed repoints keep both names and
-dirty intent for recovery.
+unique. Cmd+J uses the definition's platform chord in this listener and admits only the page context; a hidden
+template-switcher relay shares Cmd-K's opener and close handoff. Both direct-launch relays read fresh shortcut
+preferences and template definitions, resolve a name and use the same New-open, template application and submission
+path. The row's key popup uses `menu_panel` keyboard/focus/placement helpers inside modal isolation; Escape closes it
+without closing Templates. The open toggle owns pointerdown until click. Dialog scroll/resize, backdrop resize and the
+app's layout epoch dismiss the popup when its fixed coordinates become stale; the popup's own scrolling does not dismiss
+it. Focus returns only while still owned by a closing menu, with `preventScroll`, so a delayed dismissal cannot steal
+another popup's focus or undo the dialog's scroll. Re-delivery to an already closed popup does nothing. The two shortcut
+preference fields share acknowledgment, deletion retirement and fresh-read overlay helpers. A rename repoints both
+before deleting the old name, and removes a stale new-name key when retaining the old name's key would otherwise violate
+one-key-per-template. Failed repoints keep both names and dirty intent for recovery.
 
 Quick launch uses that shared capture listener and the same list-owned New-open callback, followed by the ordinary
 template search action and form requestSubmit. The mark is one nullable shared preference rather than template data, so

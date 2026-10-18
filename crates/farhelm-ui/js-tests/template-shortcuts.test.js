@@ -62,7 +62,7 @@ for (const client of clients) {
     assert.deepEqual(classify(client, { code: "Digit3", ...client.number }, false),
       { action: "quick-digit", consume: true, digit: "3" });
     assert.deepEqual(classify(client, { code: "KeyJ", ...client.bolt }, false),
-      { action: "template-list", consume: false }, "Cmd-J is defined but not installed in PR1");
+      { action: "template-list", consume: true }, "the template list follows the shared key definition");
     assert.deepEqual(classify(client, { code: "KeyY", key: "x", ...client.number }, false),
       { action: "pass", consume: false }, "prefix identity is physical, not the printed character");
     assert.deepEqual(classify(client, { code: "KeyP", key: "p" }), { action: "cancel", consume: false });
@@ -189,6 +189,9 @@ function page(client = clients[2], definition = defaultDefinition) {
   const clicks = [];
   const relays = new Map();
   const direct = new Map();
+  const templateList = new Element();
+  templateList.click = () => clicks.push("template-list");
+  window.farhelmOpenQuickSwitcher = trigger => trigger.click();
   const modals = [];
   document.form = null;
   document.hidden = false;
@@ -201,6 +204,7 @@ function page(client = clients[2], definition = defaultDefinition) {
   document.querySelector = selector => {
     if (selector === ".create-session-form") return document.form;
     if (selector === ".quick-launch-trigger") return direct.get("bolt") || null;
+    if (selector === ".quick-switcher-template-trigger") return document.templateList || null;
     if (selector.startsWith(".template-number-trigger")) {
       const digit = selector.match(/data-number-key="(\d)"/)?.[1];
       return direct.get(`digit${digit}`) || null;
@@ -210,6 +214,7 @@ function page(client = clients[2], definition = defaultDefinition) {
     assert.ok(action, `relay selector expected: ${selector}`);
     return relays.get(action === "digit" ? `digit${digit}` : action) || null;
   };
+  document.templateList = templateList;
   for (const action of ["begin", "bolt", "launch", "cancel", ...Array.from("1234567890", d => `digit${d}`)]) {
     const relay = new Element({ action: action.startsWith("digit") ? "digit" : action,
       digit: action.startsWith("digit") ? action.slice(-1) : undefined });
@@ -233,7 +238,7 @@ function page(client = clients[2], definition = defaultDefinition) {
   window.installTemplateShortcuts({ ...definition, mac_desktop: client.mac_desktop });
   const press = event => window.dispatch("keydown", key(event));
   const prefix = overrides => press({ ...client.number, ...overrides });
-  return { window, document, clicks, relays, direct, modals, press, prefix };
+  return { window, document, clicks, relays, direct, templateList, modals, press, prefix };
 }
 
 for (const client of clients) {
@@ -470,8 +475,8 @@ for (const client of clients) {
         .defaultPrevented, true);
     }
     assert.deepEqual(p.clicks, ["quick-bolt", ...Array.from("1234567890", d => `quick-digit${d}`)]);
-    assert.equal(p.press({ code: "KeyJ", ...client.bolt }).defaultPrevented, false,
-      "the template list chord stays inactive until Cmd-J is implemented");
+    assert.equal(p.press({ code: "KeyJ", ...client.bolt }).defaultPrevented, true);
+    assert.equal(p.clicks.at(-1), "template-list");
   });
 }
 
@@ -495,6 +500,51 @@ test("direct shortcuts reserve disabled and repeated chords, but not missing rel
     assert.equal(p.press(event).defaultPrevented, false);
     assert.equal(p.press({ ...event, repeat: true }).defaultPrevented, false);
   }
+});
+
+/** The template list is available only after its authenticated relay mounts.
+ * A disabled relay still reserves the chord during close, while a modal or
+ * hidden launcher leaves the browser's normal shortcut ownership intact.
+ */
+test("Cmd-J opens the template switcher only from the page", () => {
+  const p = page();
+  const chord = { code: "KeyJ", ctrlKey: true, shiftKey: true };
+  assert.equal(p.press(chord).defaultPrevented, true);
+  assert.deepEqual(p.clicks, ["template-list"]);
+  assert.equal(p.press({ ...chord, repeat: true }).defaultPrevented, true);
+  assert.deepEqual(p.clicks, ["template-list"]);
+  p.templateList.disabled = true;
+  assert.equal(p.press(chord).defaultPrevented, true);
+  assert.deepEqual(p.clicks, ["template-list"]);
+  p.document.templateList = null;
+  assert.equal(p.press(chord).defaultPrevented, false);
+  p.document.templateList = p.templateList;
+  p.templateList.disabled = false;
+  const form = new Element({ modal: true, visible: false });
+  p.document.form = form;
+  p.modals.push(form);
+  assert.equal(p.press(chord).defaultPrevented, false);
+  form.visible = true;
+  assert.equal(p.press(chord).defaultPrevented, false);
+  p.document.form = null;
+  p.modals.length = 0;
+  p.modals.push(new Element({ modal: true }));
+  assert.equal(p.press(chord).defaultPrevented, false);
+  assert.deepEqual(p.clicks, ["template-list"]);
+});
+
+/** An incomplete sequence must not hand Cmd-J to the terminal. Opening the
+ * list retires its queued references before the list takes keyboard focus.
+ */
+test("Cmd-J cancels an armed sequence and opens the template list", () => {
+  const p = page();
+  p.prefix();
+  p.press({ code: "Digit2" });
+  const chord = { code: "KeyJ", ctrlKey: true, shiftKey: true };
+  assert.equal(p.press(chord).defaultPrevented, true);
+  assert.deepEqual(p.clicks, ["begin", "digit2", "cancel", "template-list"]);
+  assert.equal(p.press({ code: "Enter", key: "Enter" }).defaultPrevented, false,
+    "the old sequence must not launch after the list closes");
 });
 
 /** The Rust dispatch will ask this same rule again after its fresh read.
@@ -609,7 +659,7 @@ test("a non-default definition moves all shortcuts in page and launcher contexts
     assert.deepEqual(classify(client, { code: "Escape", key: "Escape" }, true, false, changed),
       { action: "cancel", consume: true });
     assert.deepEqual(classify(client, list, false, false, changed),
-      { action: "template-list", consume: false });
+      { action: "template-list", consume: true });
     for (const old of [{ code: "KeyP", ...client.bolt },
       { code: "Digit1", ...client.number }, { code: "KeyX", ...client.number },
       { code: "KeyJ", ...client.bolt }]) {
@@ -618,10 +668,11 @@ test("a non-default definition moves all shortcuts in page and launcher contexts
     }
     assert.equal(p.press({ code: "KeyC", ...client.number }).defaultPrevented, false,
       "the installer must also reject the old Ctrl+Shift mask on the moved number key");
+    assert.equal(p.press(list).defaultPrevented, context === "page");
     for (const event of [bolt, ...numbers, prefix]) {
       assert.equal(p.press(event).defaultPrevented, true);
     }
-    assert.equal(p.press(list).defaultPrevented, false);
+    assert.equal(p.press(list).defaultPrevented, context === "page");
     p.press({ code: "KeyZ" });
     p.press(prefix);
     assert.deepEqual(classify(client, { code: "KeyC" }, true, false, changed),
@@ -630,8 +681,8 @@ test("a non-default definition moves all shortcuts in page and launcher contexts
     assert.equal(p.press(bolt).defaultPrevented, true);
     assert.equal(p.press({ code: "Enter", key: "Enter" }).defaultPrevented, true);
     assert.deepEqual(p.clicks,
-      ["quick-bolt", ...changed.number.keys.map(key => `quick-digit${key.value}`),
-        "begin", "cancel", "begin", "digit1", "bolt", "launch"]);
+      [...(context === "page" ? ["template-list"] : []), "quick-bolt", ...changed.number.keys.map(key => `quick-digit${key.value}`),
+        "begin", "cancel", ...(context === "page" ? ["template-list"] : []), "begin", "digit1", "bolt", "launch"]);
   }
 });
 

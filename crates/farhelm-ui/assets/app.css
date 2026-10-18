@@ -7643,6 +7643,15 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .quick-switcher-template-name { font-weight: 600; }
 .quick-switcher-template-summary,
 .quick-switcher-templates-hint { color: var(--fg-1); font-size: 12px; }
+.quick-switcher-template-keys { display: flex; flex-wrap: wrap; gap: 5px; }
+.quick-switcher-template-keys kbd {
+  padding: 2px 5px;
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-sm);
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 11px;
+}
 .quick-switcher-templates-hint { border-top: 1px solid var(--border-dialog); padding-top: 10px; }
 .quick-switcher-templates-hint p { margin: 4px 0 0; }
 
