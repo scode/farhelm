@@ -23,6 +23,7 @@ appear only when a host needs attention, such as setting Farhelm up on a host th
 row has no **uninstall** or **remove**. In the Farhelm app installed on your Mac, its **update** checks for a new
 release of Farhelm and installs it, as [Update or uninstall Farhelm](/docs/using/update-and-uninstall/) describes. In a
 browser, or in a copy of Farhelm that is not installed in `~/Applications`, it is greyed out instead.
+If **retry** or **adopt** fails, a dialog shows why.
 
 ## Host settings
 
@@ -60,6 +61,7 @@ Clicking it updates the host straight away, without asking, and shows the progre
 top of the host list updates every remote host at once.
 
 Updating a host does not interrupt its sessions: they keep running through the update.
+If Farhelm cannot plan an update, a dialog shows the reason before anything changes.
 
 ## Uninstall Farhelm from a remote host
 
@@ -75,8 +77,8 @@ its status is not known yet), or still has a terminal tab open, it says which on
 and close their terminal tabs first, as in [Stop, restart, and resume](/docs/using/stop-restart-resume/). Do not start a
 session on the host while the uninstall runs: one started then can end along with Farhelm. Uninstall also needs Farhelm
 to be connected to the host so it can check, so fix a host that shows as unreachable first. A few less common setups are
-refused too, each with the reason: a host where Farhelm was set up by running `farhelm helm setup` on the host itself
-(its own `farhelm uninstall` removes it), one whose Farhelm runs from somewhere unexpected, and one whose
+refused too, with the reason shown in a dialog: a host where Farhelm was set up by running `farhelm helm setup` on the
+host itself (its own `farhelm uninstall` removes it), one whose Farhelm runs from somewhere unexpected, and one whose
 `~/.local/lib/farhelm` directory is a symbolic link. **remove** still works for all of them.
 
 If something goes wrong partway, the host stays in the list and its details show which steps finished. Choose
@@ -94,6 +96,8 @@ To remove Farhelm from your Mac, see [Uninstall Farhelm](/docs/get-started/unins
 
 As the dialog says, removing a host only makes Farhelm forget it. Nothing is stopped or uninstalled on the host, and
 adding the same destination again brings back its sessions. **cancel** or Escape leaves the host where it was.
+The dialog stays open until Farhelm answers; if removal is refused, it shows why. If you chose to skip the confirmation,
+a refusal opens a short dialog instead.
 
 ## Turn the questions back on
 

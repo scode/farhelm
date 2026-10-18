@@ -614,10 +614,14 @@ outcomes, and setup confirmation live in a modal dialog; a permanent setup answe
 and lets later setup-needed adds submit after probing. The dialog never holds the user behind a pending request: its
 cancel and Escape stay live while discovery or another operation's request is out, and confirming setup closes it at
 once. The submission then continues from the hosts panel, which keeps the page token until the helm answers; the new row
-tracks the run, and a refusal or transport failure is reported on the panel, since the dialog is gone. Remove opens the
-modal `HostRemoveDialog`; the modal is isolated from the page, starts focus on Remove when enabled (Cancel otherwise),
-and returns focus to the row toggle when cancelled. The dialog's permanent answer writes the shared helm preference
-best-effort before removing the registry row.
+tracks an accepted run. A definite refusal reopens the add dialog with its destination and reason but without the
+consumed plan; a lost reply stays on the panel because the run may have started. Remote setup rerun, update and
+uninstall planning failures, and definite confirmed setup rerun or uninstall refusals, use one host-keyed refusal
+dialog. Retry and adopt refusals use that dialog too. Remove opens the modal `HostRemoveDialog`; the modal is isolated
+from the page, starts focus on Remove when enabled (Cancel otherwise), and returns focus to the row toggle when
+cancelled. It stays open through its request and shows a refusal there; when the remembered preference skips
+confirmation, a refused Remove opens the short refusal dialog instead. The dialog's permanent answer writes the shared
+helm preference best-effort before removing the registry row.
 
 Host Settings waits while any host prepares or holds an ADD/Uninstall confirmation, so independent modal isolation
 cannot lock both dialogs. Another host's one-click Update or accepted run does not block it; the host's own planning or

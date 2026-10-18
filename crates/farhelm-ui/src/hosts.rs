@@ -119,6 +119,9 @@ pub(crate) enum HostRefusalAction {
     Setup,
     Update,
     Uninstall,
+    Retry,
+    Adopt,
+    Remove,
 }
 
 /// Present a definite host-action refusal in the same framed modal as its
@@ -136,6 +139,9 @@ fn HostRefusalDialog(
         HostRefusalAction::Setup => "set up host",
         HostRefusalAction::Update => "update host",
         HostRefusalAction::Uninstall => "uninstall Farhelm",
+        HostRefusalAction::Retry => "retry host",
+        HostRefusalAction::Adopt => "adopt host",
+        HostRefusalAction::Remove => "remove host",
     };
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
@@ -174,6 +180,7 @@ fn HostRefusalDialog(
                         button {
                             r#type: "button",
                             class: "btn btn-neutral host-refusal-close",
+                            "data-tooltip": "close this refusal",
                             autofocus: true,
                             onclick: move |_| on_close.call(()),
                             "close"
@@ -182,6 +189,7 @@ fn HostRefusalDialog(
                             button {
                                 r#type: "button",
                                 class: "btn btn-danger host-refusal-remove",
+                                "data-tooltip": "remove this host from Farhelm's list; its supervisor and sessions keep running",
                                 onclick: move |_| on_remove.call(()),
                                 "remove"
                             }
@@ -1081,6 +1089,20 @@ pub(crate) fn stale_session_notice(
 /// need every signal it touches passed in by hand.
 type HostRequest = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Commit, String>>>>;
 
+/// Route a host write's outcome to the surface that owns its action.
+/// Settings writes retain their field attribution; menu refusals have no
+/// field and use the host dialog, while a visible Remove confirmation owns
+/// its answer until the helm responds.
+#[derive(Clone)]
+enum HostRequestDisplay {
+    Row,
+    Refusal {
+        host: Box<Host>,
+        action: HostRefusalAction,
+    },
+    RemoveDialog,
+}
+
 /// The permanent host list: every registered host, its state, and the
 /// management verbs SPEC.md's host management consists of.
 ///
@@ -1184,12 +1206,11 @@ pub(crate) fn HostsPanel(
     // The parent owns one compact update status per row and passes it to both
     // the renderer and the provisioning child that publishes it.
     let row_update_progress = use_signal(HashMap::<HostId, HostUpdateProgress>::new);
-    // Per-host rather than one shared slot, the discipline `ListView` keeps
-    // for its session errors and for the same reason: a retry failing on one
-    // host must not blank out an adopt refusal on another that the user has
-    // not read yet.
+    // Settings write refusals remain per host so a write to one host cannot
+    // replace another host's field outcome when its settings dialog reopens.
+    // Menu-action refusals have their own host-keyed modal map below.
     let mut errors = use_signal(HashMap::<HostId, String>::new);
-    // Planning and confirmed-action refusals remain visible independently of
+    // Host-action refusals remain visible independently of
     // the global row disclosure. The host-list order chooses the one modal
     // shown when several Updates fail together; each entry also keeps its
     // host snapshot if a later list read no longer has that row.
@@ -1197,9 +1218,14 @@ pub(crate) fn HostsPanel(
     // Committed-but-unvalidated replies, kept apart from `errors` because
     // they mean the opposite thing — see this component's docs.
     let mut warnings = use_signal(HashMap::<HostId, String>::new);
-    // Which host's removal dialog is open. The modal is panel-owned so a
-    // refresh cannot tear down its focus or explanation mid-question.
-    let mut remove_open = use_signal(|| None::<HostId>);
+    // The host whose removal dialog is open. Keep its identity snapshot so
+    // a concurrent list refresh cannot tear down the question before the
+    // pending Remove request answers.
+    let mut remove_open = use_signal(|| None::<Host>);
+    // A visible Remove confirmation remains mounted through the request and
+    // owns its refusal. Skip-confirmation has no such surface and instead
+    // sends a refusal through the panel's host-keyed modal map.
+    let mut remove_error = use_signal(|| None::<String>);
     // Which field of which host the settings dialog is editing, if any. One
     // at a time, and only inside the open dialog.
     let mut editing = use_signal(|| None::<(HostId, EditField)>);
@@ -1209,7 +1235,7 @@ pub(crate) fn HostsPanel(
     // Per host, which setting the dialog last wrote, so that write's outcome
     // renders under that setting instead of on the row. `errors` and
     // `warnings` are per host, not per field, and one of them can be left
-    // over from a retry or an adopt; this is what tells the dialog whether a
+    // over from another kind of write; this tells the dialog whether a
     // host's current line belongs to one of its own settings, and which.
     // `run` drops a host's entry at the start of every write to that host and
     // the dialog's writes put it back once theirs has started, so an entry
@@ -1235,11 +1261,10 @@ pub(crate) fn HostsPanel(
     // An add that committed with an unreadable reply, which has no row to
     // sit on — see the form's `on_added`.
     let mut add_warning = use_signal(|| None::<String>);
-    // A setup submission the helm refused or that failed in transport. The
-    // add dialog has already closed by then (see `on_add_submit`), so the
-    // panel is the only place left to say so; opening the dialog again
-    // clears it, the same way a fresh attempt clears an in-dialog error.
+    // A lost setup submission reply can still mean a run started, so it
+    // remains on the panel. A definite refusal reopens the add dialog below.
     let mut add_error = use_signal(|| None::<String>);
+    let mut add_reopen = use_signal(|| None::<AddReopen>);
     // Uninstalls this window confirmed, each with the notice owed once its
     // host leaves the list. The row's provisioning panel adds the entry as it
     // submits and drops it on a refusal or a failed run; the panel cannot
@@ -1310,7 +1335,7 @@ pub(crate) fn HostsPanel(
     // dialog's writes act on: only a write that started gets its outcome
     // attributed to a setting (`dialog_write`). A refused start leaves the
     // host's existing line, if any, belonging to whatever produced it.
-    let mut run = move |host: HostId, request: HostRequest| -> bool {
+    let mut run = move |host: HostId, request: HostRequest, display: HostRequestDisplay| -> bool {
         if provisioning_busy_hosts.peek().contains(&host) {
             return false;
         }
@@ -1329,22 +1354,52 @@ pub(crate) fn HostsPanel(
         warnings.write().remove(&host);
         // Every write starts unattributed; the settings dialog's own writes
         // claim their outcome right after this returns (see `dialog_write`),
-        // so a retry, adopt, or remove never has its refusal shown under a
+        // so a menu action never has its outcome shown under a
         // setting the user did not touch.
         dialog_write.write().remove(&host);
         spawn(async move {
             match request.await {
-                Ok(Commit::Confirmed) => on_changed.call(()),
+                Ok(Commit::Confirmed) => {
+                    if matches!(display, HostRequestDisplay::RemoveDialog) {
+                        remove_open.set(None);
+                    }
+                    on_changed.call(());
+                }
                 // Committed, unreadable. The refresh still fires — it is the
                 // authoritative answer to what happened — and the decode
                 // problem is reported as its own thing.
                 Ok(Commit::Unvalidated(warning)) => {
+                    if matches!(display, HostRequestDisplay::RemoveDialog) {
+                        remove_open.set(None);
+                    }
                     warnings.write().insert(host, warning);
                     on_changed.call(());
                 }
-                Err(error) => {
-                    errors.write().insert(host, error);
-                }
+                Err(error) => match display {
+                    HostRequestDisplay::Row => {
+                        errors.write().insert(host, error);
+                    }
+                    HostRequestDisplay::Refusal {
+                        host: snapshot,
+                        action,
+                    } => {
+                        refusals.write().insert(
+                            host,
+                            HostRefusalEntry::new(
+                                &snapshot,
+                                HostRefusal {
+                                    action,
+                                    reason: error,
+                                    remove_instead: false,
+                                },
+                            ),
+                        );
+                    }
+                    HostRequestDisplay::RemoveDialog => {
+                        remove_error.set(Some(error));
+                        settings_dialog::focus_remove_refusal();
+                    }
+                },
             }
             mutation_busy_hosts.write().remove(&host);
             // Naming the guard here is what moves it into this task, so the
@@ -1369,7 +1424,13 @@ pub(crate) fn HostsPanel(
         // — would hide it behind the very panel that triggered it. See
         // `on_adopt` just below for the identical reasoning.
         host_menu_open.set(None);
-        details_open.set(true);
+        let Some(snapshot) = hosts
+            .peek()
+            .hosts()
+            .and_then(|list| list.iter().find(|row| row.id == host).cloned())
+        else {
+            return;
+        };
         let base = retry_base.clone();
         // The started/refused answer is ignored here and in the two verbs
         // below: their controls simply stay as they are, so a click that
@@ -1380,6 +1441,10 @@ pub(crate) fn HostsPanel(
         run(
             host,
             Box::pin(async move { retry_host(&base, host).await.map(|()| Commit::Confirmed) }),
+            HostRequestDisplay::Refusal {
+                host: Box::new(snapshot),
+                action: HostRefusalAction::Retry,
+            },
         );
     };
 
@@ -1394,7 +1459,13 @@ pub(crate) fn HostsPanel(
         // the identity changed again renders its refusal where the user can
         // actually see it.
         host_menu_open.set(None);
-        details_open.set(true);
+        let Some(snapshot) = hosts
+            .peek()
+            .hosts()
+            .and_then(|list| list.iter().find(|row| row.id == host).cloned())
+        else {
+            return;
+        };
         let base = adopt_base.clone();
         run(
             host,
@@ -1403,31 +1474,53 @@ pub(crate) fn HostsPanel(
                     .await
                     .map(|()| Commit::Confirmed)
             }),
+            HostRequestDisplay::Refusal {
+                host: Box::new(snapshot),
+                action: HostRefusalAction::Adopt,
+            },
         );
     };
 
     let remove_base = base.clone();
-    let on_remove_confirm = use_callback(move |(host, skip_future): (HostId, bool)| {
-        if *remove_open.peek() != Some(host) {
-            return;
-        }
-        remove_open.set(None);
-        // A host the user removes by hand did not leave the list through an
-        // uninstall, so a notice still owed for it (an uninstall whose reply
-        // was lost, say) must not appear as if one had succeeded.
-        if uninstall_notices.peek().contains_key(&host) {
-            uninstall_notices.write().remove(&host);
-        }
-        if skip_future {
-            preferences.0.write().skip_host_remove_confirmation = Some(true);
-            store_preference(&remove_base, PreferenceValue::HostRemoveConfirmation(true));
-        }
-        let base = remove_base.clone();
-        run(
-            host,
-            Box::pin(async move { remove_host(&base, host).await.map(|()| Commit::Confirmed) }),
-        );
-    });
+    let on_remove_confirm = use_callback(
+        move |(host, skip_future, show_dialog): (HostId, bool, bool)| {
+            let Some(snapshot) = remove_open
+                .peek()
+                .as_ref()
+                .filter(|open| open.id == host)
+                .cloned()
+            else {
+                return;
+            };
+            remove_error.set(None);
+            if !show_dialog {
+                remove_open.set(None);
+            }
+            // A host the user removes by hand did not leave the list through an
+            // uninstall, so a notice still owed for it (an uninstall whose reply
+            // was lost, say) must not appear as if one had succeeded.
+            if uninstall_notices.peek().contains_key(&host) {
+                uninstall_notices.write().remove(&host);
+            }
+            if skip_future {
+                preferences.0.write().skip_host_remove_confirmation = Some(true);
+                store_preference(&remove_base, PreferenceValue::HostRemoveConfirmation(true));
+            }
+            let base = remove_base.clone();
+            run(
+                host,
+                Box::pin(async move { remove_host(&base, host).await.map(|()| Commit::Confirmed) }),
+                if show_dialog {
+                    HostRequestDisplay::RemoveDialog
+                } else {
+                    HostRequestDisplay::Refusal {
+                        host: Box::new(snapshot),
+                        action: HostRefusalAction::Remove,
+                    }
+                },
+            );
+        },
+    );
 
     // Menu Remove and a typed uninstall remedy enter the same confirmation
     // path, including the remembered skip-confirmation preference.
@@ -1438,9 +1531,17 @@ pub(crate) fn HostsPanel(
         editing.set(None);
         settings_open.set(None);
         host_menu_open.set(None);
-        remove_open.set(Some(id));
+        let Some(snapshot) = hosts
+            .peek()
+            .hosts()
+            .and_then(|list| list.iter().find(|row| row.id == id).cloned())
+        else {
+            return;
+        };
+        remove_error.set(None);
+        remove_open.set(Some(snapshot));
         if preferences.0.peek().skip_host_remove_confirmation == Some(true) {
-            on_remove_confirm.call((id, false));
+            on_remove_confirm.call((id, false, false));
         }
     });
 
@@ -1479,6 +1580,7 @@ pub(crate) fn HostsPanel(
                 }
                 outcome
             }),
+            HostRequestDisplay::Row,
         );
         if started {
             dialog_write
@@ -1506,6 +1608,7 @@ pub(crate) fn HostsPanel(
                 }
                 outcome
             }),
+            HostRequestDisplay::Row,
         );
         if started {
             dialog_write
@@ -1531,6 +1634,7 @@ pub(crate) fn HostsPanel(
                 }
                 outcome
             }),
+            HostRequestDisplay::Row,
         );
         if started {
             dialog_write
@@ -1556,6 +1660,7 @@ pub(crate) fn HostsPanel(
                 }
                 outcome
             }),
+            HostRequestDisplay::Row,
         );
         if started {
             dialog_write.write().insert(
@@ -1598,6 +1703,7 @@ pub(crate) fn HostsPanel(
                 on_appearance_committed.call((host, icon, color));
                 Ok(commit)
             }),
+            HostRequestDisplay::Row,
         ) {
             dialog_write.write().insert(host, SettingsField::Appearance);
         }
@@ -1712,9 +1818,14 @@ pub(crate) fn HostsPanel(
     // and every other page mutation.
     let add_submit_base = base.clone();
     let on_add_submit = move |submission: AddSubmission| {
-        let AddSubmission { probe_id, claim } = submission;
+        let AddSubmission {
+            probe_id,
+            destination,
+            claim,
+        } = submission;
         settings_dialog::return_focus_to_add_button();
         adding.set(false);
+        add_reopen.set(None);
         add_error.set(None);
         add_warning.set(None);
         let base = add_submit_base.clone();
@@ -1724,6 +1835,15 @@ pub(crate) fn HostsPanel(
             match result {
                 Ok(ProvisioningSubmission::Accepted(_)) => {}
                 Ok(ProvisioningSubmission::Unvalidated(warning)) => add_warning.set(Some(warning)),
+                Err(crate::api::SubmissionError::Refused(reason)) => {
+                    // A definite answer can return to the form with the
+                    // destination intact; the one-use plan itself is gone.
+                    add_reopen.set(Some(AddReopen {
+                        destination,
+                        reason,
+                    }));
+                    adding.set(true);
+                }
                 Err(problem) => add_error.set(Some(problem.into_text())),
             }
             // Every outcome refreshes: an accepted add registered a row whose
@@ -1731,6 +1851,14 @@ pub(crate) fn HostsPanel(
             // still have committed (the probe id is one-use either way).
             on_changed.call(());
         });
+    };
+    // A fast definite reply can reopen the form before the closing render
+    // unmounts it. The key makes the reopened draft and refusal its own form
+    // instance even when those two state writes share one render batch.
+    let add_dialog_key = if add_reopen().is_some() {
+        "refused"
+    } else {
+        "fresh"
     };
     rsx! {
         section { class: "hosts-panel",
@@ -1827,6 +1955,7 @@ pub(crate) fn HostsPanel(
                         let open = adding();
                         if !open {
                             add_error.set(None);
+                            add_reopen.set(None);
                         }
                         adding.set(!open);
                     },
@@ -1835,16 +1964,20 @@ pub(crate) fn HostsPanel(
             }
             if adding() {
                 AddHostForm {
+                    key: "{add_dialog_key}",
+                    reopen: add_reopen(),
                     ops,
                     on_refresh: on_changed,
                     on_submit: on_add_submit,
                     on_cancel: move |_| {
                         settings_dialog::return_focus_to_add_button();
                         adding.set(false);
+                        add_reopen.set(None);
                     },
                     on_added: move |unvalidated: Option<String>| {
                         settings_dialog::return_focus_to_add_button();
                         adding.set(false);
+                        add_reopen.set(None);
                         // A committed-but-unreadable add has no row id to
                         // hang a warning on — the reply that would have
                         // named it is the thing that failed to decode — so
@@ -2095,15 +2228,13 @@ pub(crate) fn HostsPanel(
                     host,
                 }
             }
-            if let Some(host) = remove_open
-                .read()
-                .and_then(|id| read.hosts()?.iter().find(|host| host.id == id).cloned())
-            {
+            if let Some(host) = remove_open() {
                 settings_dialog::HostRemoveDialog {
                     busy: mutation_busy_hosts.read().contains(&host.id)
                         || provisioning_busy_hosts.read().contains(&host.id)
                         || busy,
                     host: host.clone(),
+                    error: remove_error(),
                     on_remove: {
                         let handler = on_remove_confirm;
                         move |skip_future| {
@@ -2113,13 +2244,22 @@ pub(crate) fn HostsPanel(
                             // `remove_open.set(None)` then panics on the
                             // still-borrowed signal, which a release wasm
                             // build reports only as `unreachable`.
-                            let open = *remove_open.peek();
+                            let open = remove_open.peek().as_ref().map(|host| host.id);
                             if let Some(id) = open {
-                                handler.call((id, skip_future));
+                                handler.call((id, skip_future, true));
                             }
                         }
                     },
-                    on_cancel: move |_| remove_open.set(None),
+                    on_cancel: move |_| {
+                        if !mutation_busy_hosts.peek().contains(&host.id) {
+                            // A dismissal can arrive before busy props render.
+                            // Keep isolation until the live request guard permits
+                            // the entire close, including its focus handoff.
+                            settings_dialog::return_focus_to_row(host.id);
+                            remove_error.set(None);
+                            remove_open.set(None);
+                        }
+                    },
                 }
             }
             if let Some(entry) = visible_refusal {
@@ -4033,7 +4173,17 @@ struct AddOffer {
 /// offer was already spent).
 struct AddSubmission {
     probe_id: String,
+    destination: String,
     claim: OpGuard,
+}
+
+/// Preserve the destination after a definite setup submission refusal so
+/// the add dialog can reopen at its discovery question. The consumed plan
+/// is deliberately omitted: another attempt needs a new probe.
+#[derive(Clone, PartialEq)]
+struct AddReopen {
+    destination: String,
+    reason: String,
 }
 
 /// Keep probe and manual diagnostics inside the peer-text boundary.
@@ -4086,6 +4236,9 @@ fn destination_detail_parts(destination: &str) -> Vec<DetailPart> {
 /// The dialog never holds the user behind a pending request. Confirming
 /// setup hands the claimed token and the one-use probe id to `on_submit` and
 /// the dialog closes; the panel runs the POST and the new row tracks the run.
+/// A definite refusal remounts the form with its destination and the helm's
+/// reason, but without the consumed plan. A lost reply stays on the panel:
+/// the run may have started even though its answer never arrived.
 /// Cancel and Escape stay live throughout, including while discovery is out
 /// or another page operation holds the token: closing mid-discovery drops
 /// the probe's reply, as closing the inline form did before this was a
@@ -4093,6 +4246,7 @@ fn destination_detail_parts(destination: &str) -> Vec<DetailPart> {
 /// the fleet feed if the probe registered a host.
 #[component]
 fn AddHostForm(
+    reopen: Option<AddReopen>,
     mut ops: OpLock,
     on_added: EventHandler<Option<String>>,
     on_refresh: EventHandler<()>,
@@ -4101,11 +4255,16 @@ fn AddHostForm(
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<crate::list::SharedPreferences>();
-    let mut ssh = use_signal(String::new);
+    let initial_destination = reopen
+        .as_ref()
+        .map(|value| value.destination.clone())
+        .unwrap_or_default();
+    let initial_error = reopen.map(|value| value.reason);
+    let mut ssh = use_signal(|| initial_destination);
     // Keep the add component and its draft mounted while connection help owns
     // the modal. Its extra destination is sampled when that child opens.
     let mut ssh_help_open = use_signal(|| false);
-    let mut error = use_signal(|| None::<String>);
+    let mut error = use_signal(|| initial_error);
     let mut probing = use_signal(|| false);
     // The setup question for the plan discovery returned: a `ConfirmSlot`
     // keyed by the offer itself, so a confirmation acts only by taking the
@@ -4160,6 +4319,7 @@ fn AddHostForm(
         error.set(None);
         on_submit.call(AddSubmission {
             probe_id: planned.probe_id,
+            destination: planned.binding.destination,
             claim,
         });
     });
