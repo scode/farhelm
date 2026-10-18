@@ -381,3 +381,26 @@ each PR passed its review gate, and the last code PR removes the TODO.md entry. 
 section exists, its latest entry must also be satisfied. Then close the plan per `plans/.agents/executing.md` (Executing
 one plan, steps 11 and 12): deliver its report through the queue script, write a closing entry in its log, and stop the
 watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-10-18 (claim d768b2).
+
+### Checkout filters prevent a transparent cached clone
+
+Managed checkouts currently clone from GitHub while borrowing objects from the host's repository cache, then make an
+independent copy. You wanted the faster path to clone directly from that cache and become the default, but only if the
+result behaves like a plain GitHub clone. The global switch would restore today's clone when off.
+
+The proposed faster path clones without checking out files, changes the remote back to GitHub, then checks out. Review
+found a difference that the first equivalence test missed: Git's ordinary clone sends the branch name and commit to a
+long-running `filter.<name>.process` filter. The proposed checkout sends neither. Such a filter may produce different
+files or refuse the checkout. Git's ordinary `checkout -f` command does not preserve the same filter, hook, and reflog
+behavior as a clone either. No optimized clone has been enabled or published; the existing behavior remains in place.
+
+Should we abandon this default-on optimization for now and keep today's clone? I recommend that choice. It closes this
+plan without shipping a speedup, and a future plan can revisit it if an equivalent Git checkout mechanism is
+demonstrated. The alternative is to revise the transparency requirement and allow the faster path to produce different
+results for repositories using process filters, relying on the global switch for affected installations. That could
+silently change checked out files, so I do not recommend enabling it by default. A filter-specific fallback would also
+require a reliable way to detect every affected checkout; that has not been demonstrated.
