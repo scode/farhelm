@@ -1628,20 +1628,19 @@ test("create API reports a precondition failure containing the supervisor's own 
   expect(await resp.text()).toContain("working directory does not exist");
 });
 
-// Request-level coverage for the stop/delete HTTP surface (PLAN_M2.md step
-// 6): the full UI flows (stop/delete buttons, delete's confirmation
-// dialog) are PLAN_M2.md step 8's PR, so this exercises the API
-// directly against the real stack, following the request-fixture style of
-// the create-API test above rather than driving a page. It creates its
-// own session (a long-running `sleep`, distinct from the shared
-// "e2e-session" every terminal test above depends on) so it can freely
-// stop and delete it without perturbing the rest of the suite.
-test("stop and delete a session through the HTTP API", async ({ request }) => {
+/**
+ * Stop and delete an owned session through the HTTP API once its command has
+ * started. The create reply alone does not establish that readiness, so the
+ * page observes a terminal marker before the request-level stop assertions.
+ * Owning a separate long-running session keeps this test clear of the shared
+ * session used by the surrounding terminal tests (PLAN_M2.md step 6).
+ */
+test("stop and delete a session through the HTTP API", async ({ page, request }) => {
   const totalBefore = (await (await request.get("/api/sessions")).json())
     .total;
 
   const created = await request.post("/api/sessions", {
-    data: { cwd: "/tmp", command: { command: "sleep 300", yolo: false }},
+    data: { cwd: "/tmp", command: { command: "printf FH_STOP_READY; sleep 300", yolo: false }},
   });
   expect(created.status()).toBe(200);
   const { id } = await created.json();
@@ -1658,6 +1657,12 @@ test("stop and delete a session through the HTTP API", async ({ request }) => {
   try {
     const afterCreate = await (await request.get("/api/sessions")).json();
     expect(afterCreate.total).toBe(totalBefore + 1);
+
+    // A create reply precedes the exec shim. Stopping before the command
+    // writes this marker can correctly report that it never started.
+    await page.goto("/");
+    await attachSession(page, id);
+    await waitForTermText(page, "FH_STOP_READY");
 
     const stopped = await request.post(`/api/sessions/${id}/stop`);
     expect(stopped.status()).toBe(200);
