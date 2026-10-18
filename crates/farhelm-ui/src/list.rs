@@ -3,9 +3,8 @@
 //! (one row, including the inline lifecycle confirmations), and
 //! `CreateSessionForm` (the "new session" inline form). All three are
 //! `ListView`'s own concern — none of them is meaningful mounted outside
-//! it — so only `ListView` itself is `pub(crate)`; `SessionRow` and
-//! `CreateSessionForm` stay private to this module. The rename editor is
-//! the one visibility exception: `rename::RenameDialog` is the list-owned
+//! it — so `SessionRow` and `CreateSessionForm` stay private to this module.
+//! `rename::RenameDialog` is the list-owned
 //! modal the sidebar's rename contract lives in (the edit survives the
 //! menu, the row, and listing churn, which the popup's geometry could
 //! never guarantee), and the list view submodule is what mounts it.
@@ -20,9 +19,11 @@
 //! in the message, which is a far more useful answer than a disabled button
 //! that explains nothing.
 //!
-//! This view also owns the hosts READ (`hosts::HostsPanel` renders it),
-//! because two consumers need one read: the panel, and the create dialog's
-//! host selector.
+//! This view owns refreshing the hosts READ (`hosts::HostsPanel` renders it).
+//! `AppBody` provides that snapshot through context so the panel, create
+//! dialog and open session use the same registry facts without extra requests.
+//! The shared session-host icon and name components also serve the open
+//! session, keeping its host presentation consistent with the sidebar.
 //!
 //! ## The list is the WHOLE list
 //!
@@ -53,8 +54,10 @@ mod trash;
 mod view;
 
 pub(crate) use create_form::submitted_field;
-pub(crate) use row::PeerTitle;
-pub(crate) use shared::{OpenDestination, with_source_host};
+pub(crate) use row::{PeerTitle, abbreviate_home};
+pub(crate) use shared::{
+    OpenDestination, SessionHostIcon, SessionHostName, session_locality, with_source_host,
+};
 pub(crate) use view::{
     DeleteNotice, HeaderDeleteRequest, HeaderPrefillRequest, ListView, ReplaceIntent,
     SharedPreferences, remember_selection,

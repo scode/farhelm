@@ -94,7 +94,7 @@ function handshake(feed: FeedStub, revision: number) {
  * appears once the view has a session to describe. */
 async function openSession(page: Page, id: string, title: string) {
   await row(page, id).locator(".session-row-open").click();
-  await expect(page.locator(".titlebar .title")).toHaveText(title, { timeout: 20_000 });
+  await expect(page.locator(".session-details .title")).toHaveText(title, { timeout: 20_000 });
 }
 
 /**
@@ -997,7 +997,7 @@ test.describe("the invalidation feed", () => {
     // ATTENDED — permitted under skew exactly like the list's own — so it
     // must finish landing before the counted quiet window opens (on a
     // slow engine it otherwise trails into it and reads as unattended).
-    await expect(page.locator(".titlebar .title")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".session-details .title")).toBeVisible({ timeout: 20_000 });
     await expect
       .poll(() => reads.count("detail"), { timeout: 20_000 })
       .toBeGreaterThanOrEqual(1);

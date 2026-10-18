@@ -1203,7 +1203,7 @@ test("rename-refused-pasted-newline: a multi-line title reaches the supervisor i
       page.locator(`[data-session-id="${id}"] .action-error`),
     ).toContainText("control characters", { timeout: 15_000 });
     // The header still shows the real title while the refusal stands.
-    await expect(page.locator(".titlebar .title")).toHaveText(title);
+    await expect(page.locator(".session-details .title")).toHaveText(title);
     await expect(field).toHaveValue(pasted);
     const fetched = await (await request.get(`/api/sessions/${id}`)).json();
     expect(fetched.title).toBe(title);
@@ -1562,7 +1562,7 @@ test("replay-stale-mount: a torn-down island's deferred ending cannot touch its 
     await expect(sharedRow).toHaveAttribute("data-session-id", /.+/, { timeout: 20_000 });
     const sharedId = (await sharedRow.getAttribute("data-session-id"))!;
     await sharedRow.click();
-    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
     await waitForSessionMounted(page, sharedId);
     await row.click();
     await waitForSessionMounted(page, id);

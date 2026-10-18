@@ -337,7 +337,7 @@ test("the row kebab is hidden at rest and revealed by hover, focus, selection, o
     await page.goto("/");
     const target = row(page, older.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator(".titlebar .title")).toContainText("kebab-newer-", {
+    await expect(page.locator(".session-details .title")).toContainText("kebab-newer-", {
       timeout: 20_000,
     });
 
@@ -395,7 +395,7 @@ test("the row kebab is hidden at rest and revealed by hover, focus, selection, o
     // SELECTED: the row becomes the open session, and stays revealed for
     // as long as it holds that selection.
     await target.locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toContainText("kebab-older-", {
+    await expect(page.locator(".session-details .title")).toContainText("kebab-older-", {
       timeout: 20_000,
     });
     await expect(kebab, "the current selection keeps its kebab reachable").toHaveCSS(

@@ -1083,7 +1083,7 @@ test("leaving-a-session-cancels-a-pending-reconnect", async ({ page, request }) 
     const sharedId = await shared.getAttribute("data-session-id");
     expect(sharedId, "the replacement row must identify its session").toBeTruthy();
     await shared.click();
-    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
     await waitForSessionMounted(page, sharedId!);
     // sleep-ok: sample for a stale retry after the replacement attachment owns the slot.
     await page.waitForTimeout(2_500);
@@ -1832,7 +1832,7 @@ try {
   // stack a dead terminal under the live one, and leak an xterm
   // instance per detach.
   await sharedSessionRow(page).click();
-  await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+  await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
   await page.locator(`[data-session-id="${id}"]`).click();
   await waitForSessionRevealed(page, id);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);

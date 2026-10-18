@@ -85,7 +85,7 @@ async function stageApprovals(page: Page, initial: Approval[]) {
 
 let session: SessionRow | undefined;
 
-// The real selected view supplies the header and tabs whose bounds matter.
+// The real selected view supplies the top row and terminal whose bounds matter.
 // Cleanup includes partially completed setup; no shared fixture is renamed.
 test.beforeEach(async ({ page, request }) => {
   session = undefined;
@@ -100,7 +100,7 @@ test.afterEach(async ({ request }) => {
 async function openSelected(page: Page) {
   await page.goto("/");
   await attachSession(page, session!.id);
-  await expect(page.locator(".app-main .tab-strip")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".app-main .terminal-panes")).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(".approval-card .approval-allow")).toBeEnabled();
 }
 
@@ -113,7 +113,7 @@ async function placement(page: Page) {
     };
     return {
       main: rect(".app-main"),
-      tabs: rect(".app-main .tab-strip"),
+      terminal: rect(".app-main .terminal-panes"),
       card: rect(".approval-card"),
       region: rect(".approval-cards"),
       actions: rect(".approval-card-actions"),
@@ -127,10 +127,10 @@ test("a compact card follows the main pane and keeps the answer buttons visible"
   const staged = await stageApprovals(page, [launchRequest("layout")]);
   await openSelected(page);
   await expect.poll(async () => {
-    const { main, card, tabs } = await placement(page);
+    const { main, card, terminal } = await placement(page);
     return Math.abs(card.x + card.width / 2 - main.x - main.width / 2) < 1
-      && card.y >= tabs.bottom + 11 && card.x >= main.x + 11;
-  }, { message: "card centered below the tab strip and clear of the sidebar" }).toBe(true);
+      && card.y >= terminal.y + 11 && card.x >= main.x + 11;
+  }, { message: "card centered inside the terminal area and clear of the sidebar" }).toBe(true);
   const wide = await placement(page);
   expect(wide.card.width).toBeCloseTo(660, 0);
   // The bound grew from 380 when guarded launches began naming the agent's
@@ -142,6 +142,26 @@ test("a compact card follows the main pane and keeps the answer buttons visible"
   expect(wide.actions.bottom, "answers visible without scrolling").toBeLessThanOrEqual(wide.region.bottom);
   expect(wide.region.bottom, "the terminal's bottom remains clear").toBeLessThan(wide.main.bottom - 100);
   await page.screenshot({ path: info.outputPath("approval-common.png") });
+
+  // A band between chrome and terminal distinguishes the terminal anchor
+  // from the now-higher tab strip. Only its height is synthetic: the
+  // anchor and approval region remain the application's production nodes.
+  await page.locator(".terminal-panes").evaluate((terminal) => {
+    const band = document.createElement("div");
+    band.dataset.approvalBandFixture = "true";
+    band.style.cssText = "height: 64px; flex-shrink: 0";
+    band.textContent = "conditional notice geometry fixture";
+    terminal.before(band);
+  });
+  await expect.poll(async () => {
+    const { card, terminal } = await placement(page);
+    return Math.abs(card.y - terminal.y - 12);
+  }, { message: "a conditional band moves the approval below itself with the terminal" }).toBeLessThan(1);
+  await page.locator("[data-approval-band-fixture]").evaluate((band) => band.remove());
+  await expect.poll(async () => {
+    const { card, terminal } = await placement(page);
+    return Math.abs(card.y - terminal.y - 12);
+  }, { message: "removing a band restores the terminal anchor" }).toBeLessThan(1);
 
   // Change actual pane geometry, without depending on the separate sidebar
   // resizing feature. A hardcoded sidebar offset fails this observation.
@@ -257,8 +277,8 @@ test("placement follows the empty pane, session mount, and approval remount", as
   await attachSession(page, session!.id);
   await expect(page.locator(".app-main .tab-strip")).toBeVisible();
   await expect.poll(async () => {
-    const { card, tabs } = await placement(page);
-    return Math.abs(card.y - tabs.bottom - 12);
+    const { card, terminal } = await placement(page);
+    return Math.abs(card.y - terminal.y - 12);
   }, { message: "new session chrome replaces the no-session anchor" }).toBeLessThan(1);
 
   await staged.replace([]);
@@ -266,9 +286,41 @@ test("placement follows the empty pane, session mount, and approval remount", as
   await staged.replace([launchRequest("remounted")]);
   await expect(page.locator(".approval-card")).toHaveAttribute("data-approval-id", "remounted");
   await expect.poll(async () => {
-    const { card, tabs } = await placement(page);
-    return Math.abs(card.y - tabs.bottom - 12);
+    const { card, terminal } = await placement(page);
+    return Math.abs(card.y - terminal.y - 12);
   }, { message: "remounted region owns a fresh measured anchor" }).toBeLessThan(1);
+});
+
+/**
+ * A rebooted session has chrome and a restart explanation but no terminal
+ * surface. Approval placement must use the top row's bottom in that state,
+ * rather than the bottom details bar or the empty pane's top.
+ */
+test("a session without a terminal anchors approval below its top row", async ({ page }) => {
+  const interrupted = { ...session!, status: { state: "interrupted" }, stale: false };
+  await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
+    json: { sessions: [interrupted], total: 1, matching: 1, truncated: false },
+  }));
+  await page.route(`**/api/sessions/${session!.id}`, (route) => fulfillAsHelm(route, { json: interrupted }));
+  await stageApprovals(page, [launchRequest("no-terminal")]);
+  await page.goto("/");
+  const target = page.locator(`[data-session-id="${session!.id}"] .session-row-open`);
+  await expect(target).toBeVisible();
+  await target.click();
+  await expect(page.locator(".session-details .status-badge")).toHaveText("interrupted");
+  await expect(page.locator(".terminal-panes")).toHaveCount(0);
+  // The recovery card replaces the flexible terminal area. A full-pane
+  // minimum height would leave the session identity below the window edge.
+  const details = (await page.locator(".session-details").boundingBox())!;
+  const recovery = (await page.locator(".interrupted-card").boundingBox())!;
+  expect(details.y).toBeGreaterThanOrEqual(recovery.y + recovery.height - 1);
+  expect(details.y + details.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+  await expect(page.locator(".approval-card .approval-allow")).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => {
+    const top = document.querySelector(".session-topbar")!.getBoundingClientRect();
+    const card = document.querySelector(".approval-card")!.getBoundingClientRect();
+    return Math.abs(card.top - top.bottom - 12);
+  }), { message: "no-terminal approval uses the top row fallback" }).toBeLessThan(1);
 });
 
 /** A stale delay must not arm a different request after rapid switches across hosts. */

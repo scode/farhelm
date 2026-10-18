@@ -254,7 +254,7 @@ test.describe("the M6.5 test debts", () => {
       timeout: 20_000,
     });
     await row(page, session.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toHaveText(original, { timeout: 20_000 });
+    await expect(page.locator(".session-details .title")).toHaveText(original, { timeout: 20_000 });
     // Premise: Restart is available (the session reported its
     // conversation), or the click below would silently do nothing.
     await expect(page.locator(".restart-primary")).not.toHaveAttribute("aria-disabled", "true");
@@ -300,7 +300,7 @@ test.describe("the M6.5 test debts", () => {
     // through the same door every other read uses.
     finishRestart();
     reads.releaseAll();
-    await expect(page.locator(".titlebar .title")).toHaveText(renamed, { timeout: 30_000 });
+    await expect(page.locator(".session-details .title")).toHaveText(renamed, { timeout: 30_000 });
     await expect(page.locator(".refresh-stale")).toHaveCount(0);
   });
 
@@ -363,7 +363,7 @@ test.describe("the M6.5 test debts", () => {
     feed.notify(1);
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     await row(page, session.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toHaveText(original, { timeout: 20_000 });
+    await expect(page.locator(".session-details .title")).toHaveText(original, { timeout: 20_000 });
     // Premise: Restart is available (the session reported its
     // conversation), or the click below would silently do nothing.
     await expect(page.locator(".restart-primary")).not.toHaveAttribute("aria-disabled", "true");
@@ -440,7 +440,7 @@ test.describe("the M6.5 test debts", () => {
     // nothing has repaired the screen since.
     await reads.waitForCaptures(held + 1);
     await expect(
-      page.locator(".titlebar .title"),
+      page.locator(".session-details .title"),
       "a read launched during a restart describes the run that ended, and the second bump is " +
         "the only thing between it and the header while the refresh is held",
     ).toHaveText(original);
@@ -449,12 +449,12 @@ test.describe("the M6.5 test debts", () => {
     // is needed to distinguish it from the untouched header.
     // sleep-ok: finite stale-title observation after reply consumption, while the replacement detail response remains held.
     await page.waitForTimeout(1_000);
-    await expect(page.locator(".titlebar .title")).toHaveText(original);
+    await expect(page.locator(".session-details .title")).toHaveText(original);
 
     // And the refresh, once allowed to run, agrees with the server.
     reads.releaseAll();
     await waitForRestart(request, original);
-    await expect(page.locator(".titlebar .title")).toHaveText(original);
+    await expect(page.locator(".session-details .title")).toHaveText(original);
   });
 
   /**

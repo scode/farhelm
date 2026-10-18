@@ -2560,7 +2560,7 @@ test.describe("multi-host", () => {
 
       // A successful create navigates into the new session, exactly as a
       // local one does; back out to see how the list describes it.
-      await expect(page.locator(".titlebar .title")).toHaveText(title, {
+      await expect(page.locator(".session-details .title")).toHaveText(title, {
         timeout: 30_000,
       });
       const row = rowByTitle(page, title);
@@ -2634,7 +2634,7 @@ test.describe("multi-host", () => {
       const anchorRow = rowByTitle(page, anchorTitle);
       await expect(anchorRow).toBeVisible({ timeout: 20_000 });
       await anchorRow.locator(".session-row-open").click();
-      await expect(page.locator(".titlebar .title")).toHaveText(anchorTitle, {
+      await expect(page.locator(".session-details .title")).toHaveText(anchorTitle, {
         timeout: 20_000,
       });
 
@@ -2729,7 +2729,7 @@ test.describe("multi-host", () => {
       const anchorRow = rowByTitle(page, anchorTitle);
       await expect(anchorRow).toBeVisible({ timeout: 20_000 });
       await anchorRow.locator(".session-row-open").click();
-      await expect(page.locator(".titlebar .title")).toHaveText(anchorTitle, {
+      await expect(page.locator(".session-details .title")).toHaveText(anchorTitle, {
         timeout: 20_000,
       });
 
@@ -3081,12 +3081,19 @@ test.describe("multi-host", () => {
 
       // SPEC.md's metadata triple, all three of it: title, directory, and
       // the LAST-KNOWN status. The status is the one an earlier shape of
-      // this view dropped — the titlebar carries the first two, and the
-      // restart offer beside them describes what a relaunch WOULD do rather
+      // this view dropped — the details bar carries the first two, and the
+      // restart offer above them describes what a relaunch WOULD do rather
       // than what the session last was.
-      await expect(page.locator(".titlebar .title")).toHaveText(staleTitle);
-      await expect(page.locator(".titlebar .header-copy").nth(0)).toContainText("/tmp");
-      await expect(page.locator(".titlebar .header-copy").nth(1)).toContainText("sleep 600");
+      await expect(page.locator(".session-details .title")).toHaveText(staleTitle);
+      await expect(page.locator(".session-details .header-copy").nth(0)).toContainText("/tmp");
+      await expect(page.locator(".session-details .header-copy").nth(1)).toContainText("sleep 600");
+      // A stale session still carries its host identity. Both surfaces use
+      // the same icon choice even though no terminal can attach here.
+      const detailsHost = page.locator(".session-details-host");
+      await expect(detailsHost.locator(".session-host")).toHaveText(info.remote_ssh);
+      const rowIcon = rowByTitle(page, staleTitle).locator(".session-locality-slot .host-kind-icon");
+      await expect(rowIcon).toHaveCount(1);
+      await expect(detailsHost.locator(".host-kind-icon")).toHaveAttribute("data-glyph", (await rowIcon.getAttribute("data-glyph"))!);
       const badge = page.locator(".stale-metadata .status-badge");
       await expect(badge).toBeVisible();
       // `sleep 600` was running, and the group's setup waited for the helm
@@ -3097,8 +3104,8 @@ test.describe("multi-host", () => {
       // The one-badge rule's other half, asserted on the real browser
       // rather than only in `status_badge_destination`'s unit test: a
       // stale session's status appears in EXACTLY the stale band and
-      // NOWHERE in the header, never both.
-      await expect(page.locator(".titlebar .status-badge")).toHaveCount(0);
+      // NOWHERE in the details bar, never both.
+      await expect(page.locator(".session-details .status-badge")).toHaveCount(0);
       await expect(page.locator(".stale-metadata .status-badge")).toHaveCount(1);
 
       const notice = page.locator(".host-stale-notice");
@@ -3312,7 +3319,7 @@ test.describe("multi-host", () => {
       const notice = page.locator(".interrupted-card");
       await expect(notice).toBeVisible({ timeout: 60_000 });
       await expect(notice).toContainText("host restart paused this session");
-      await expect(page.locator(".titlebar .status-badge")).toHaveText("interrupted");
+      await expect(page.locator(".session-details .status-badge")).toHaveText("interrupted");
       await expect(page.locator("#terminal")).toHaveCount(0);
       await expect(page.locator("#term-connecting")).toHaveCount(0);
       await expect(page.locator(".host-stale-notice")).toHaveCount(0);
@@ -3323,7 +3330,7 @@ test.describe("multi-host", () => {
       await page.waitForTimeout(5_000);
       await expect(page.locator("#terminal")).toHaveCount(0);
       await expect(page.locator("#term-connecting")).toHaveCount(0);
-      await expect(page.locator(".titlebar .status-badge")).toHaveText("interrupted");
+      await expect(page.locator(".session-details .status-badge")).toHaveText("interrupted");
     });
 
     // Opening a session that was ALREADY interrupted when the view loads,
@@ -3344,7 +3351,7 @@ test.describe("multi-host", () => {
       // Declining is leaving. Nothing was sent, so the supervisor still
       // classifies the session as interrupted and the row still says so.
       await sharedSessionRow(page).click();
-      await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+      await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
       await expect(rowByTitle(page, closedTitle).locator(".status-badge")).toHaveText("interrupted");
       const listing = await (await request.get("/api/sessions")).json();
       const still = listing.sessions.find((s: any) => s.title === closedTitle);
@@ -3370,7 +3377,7 @@ test.describe("multi-host", () => {
         timeout: 60_000,
       });
       await waitForTermText(page, "FAKE-AGENT READY");
-      await expect(page.locator(".titlebar .status-badge")).toHaveText(LIVE_BADGE, {
+      await expect(page.locator(".session-details .status-badge")).toHaveText(LIVE_BADGE, {
         timeout: 60_000,
       });
     });

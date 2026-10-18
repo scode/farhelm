@@ -8,7 +8,7 @@
 //! module's own docs for why the split is drawn there. The restart affordance's own pure wording
 //! helpers (`restart_offer_text`, `restart_button_label`) stay local, since
 //! nothing outside this component calls them, and so does
-//! `status_badge_destination` — the consolidated header's rule for where a
+//! `status_badge_destination` — the details bar's rule for where a
 //! status badge renders, which is a fact about THIS layout rather than
 //! about what a status means.
 
@@ -54,7 +54,7 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// is mounted at a time.
 const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 const RESTART_WITH_DESCRIPTION_ID: &str = "restart-with-description";
-/// The DOM ids of the header copy buttons' accessible descriptions.
+/// The DOM ids of the bottom bar's copy-button accessible descriptions.
 ///
 /// Each copy button's hover tooltip names its full value and the copy action,
 /// but the tooltip is a visual aid outside the accessibility tree. The
@@ -195,24 +195,27 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
     skip_confirmations && restart_needs_confirmation(status)
 }
 
-/// One session: a single header row (status, identity, age, copyable fields,
-/// and actions) over
-/// a tab strip over one terminal per open terminal — the sidebar beside this
+/// One session: tabs and actions above the terminal, identity and host below.
+/// The sidebar beside this
 /// view owns navigation and rename. Each terminal div is handed to the JS island
 /// on mount; Dioxus never touches its children again — that boundary is
 /// the whole design.
 ///
-/// ## The consolidated header (the 2026-08 UI refresh)
+/// ## Session chrome
 ///
-/// Everything that identifies the session lives in ONE ~40px row: the status
-/// badge, session title, last-activity age, copyable directory and command
-/// line, and six always-visible lifecycle actions — Restart, Restart with,
-/// Replace, Clone, Replace with, and Delete. Rename stays in the sidebar, which owns navigation, and
-/// tabs stay in the strip below. This replaced a stack of four bands that
-/// cost ~170px of chrome before the terminal started, on a surface whose
-/// whole point is the terminal.
+/// Tabs and six lifecycle actions share the top row; status, session name,
+/// host, age, directory and command line share a slim bottom bar. Moving
+/// identity below the terminal makes the active session and host easier to
+/// see and leaves more width for paths without moving actions away from tabs.
+/// The sidebar's hosts snapshot supplies appearance and locality without
+/// adding a refresh path to this view. Its separate stale-only read remains
+/// responsible for explaining unavailable sessions.
 ///
-/// Four rules keep it at one row, and each of them is a decision rather than
+/// The 2026-08 refresh consolidated four bands costing ~170px into one
+/// header. This split keeps its compact controls and conditional notices;
+/// moving the tabs into the action row pays for the new bottom bar.
+///
+/// These rules keep the chrome compact, and each is a decision rather than
 /// an implementation detail:
 ///
 /// - **The confirmations are POPOVERS, anchored to the button that opened
@@ -241,7 +244,7 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
 ///   is what let the old retry overlay advertise the wrong action there.
 ///   Conditional, like the stale band, so the steady state
 ///   still pays nothing.
-/// - **A classified status renders in at most one place.** The header
+/// - **A classified status renders in at most one place.** The bottom bar
 ///   normally, the stale band for a stale session (whose notice already
 ///   carries SPEC.md's "last-known status"), nowhere for `Unknown`
 ///   (`status_badge_destination`). The last-activity age follows it to
@@ -254,8 +257,8 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
 ///   Restart, Restart with, Replace, Clone, Replace with, and Delete in that
 ///   order, so pointer, keyboard, and assistive-technology users encounter
 ///   the same controls. There is deliberately no overflow `⋯` menu: all six
-///   actions remain visible in the row, even when the identity fields have
-///   to ellipsize.
+///   actions remain visible in the row; the tabs scroll within the remaining
+///   width. Identity fields below do not compete with those controls.
 /// - **Directory and command line are copy buttons, not passive metadata.**
 ///   Their full values remain in the tooltip while the fields shrink before
 ///   the title. A hover or keyboard focus reveals the clipboard affordance;
@@ -321,7 +324,7 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
 ///
 /// ## Rename (PLAN_M5.md item 6)
 ///
-/// The header carries NO rename surface, by decision (BUGS_BURNDOWN.md
+/// The details bar carries NO rename surface, by decision (BUGS_BURNDOWN.md
 /// issue 5's consolidation): the sidebar row's actions menu is the one
 /// place a session is renamed, which retires the old problem of two
 /// optimistic title overlays disagreeing. This view's title follows a
@@ -600,6 +603,9 @@ pub(crate) fn SessionView(
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let preferences = use_context::<crate::list::SharedPreferences>();
+    // The sidebar owns refreshes. This shared snapshot is presentation data,
+    // separate from the stale-only host read that explains an outage below.
+    let sidebar_hosts = use_context::<Signal<HostsRead>>();
     // The session as this view currently understands it. Seeded from the
     // prop and then owned here, because a restart changes it: the reply
     // carries the session's recomputed status and offer, and a REFUSED
@@ -2059,16 +2065,16 @@ pub(crate) fn SessionView(
     });
     // SPEC.md's metadata triple for a stale session is "title, directory,
     // last-known status", and this band is where the third one lands: the
-    // header above carries the title and the directory, and it deliberately
+    // bottom bar carries the title and the directory, and it deliberately
     // drops its own badge while stale so the status is not stated twice.
     // Rendered through the list's own badge so the two surfaces cannot
     // describe one session differently. `status_badge` is called exactly
     // once, inside `status_badge_destination`, so the stale/non-stale split
     // below and `status_badge`'s own `Unknown`-suppresses-everything rule
     // are the only two places a badge can ever go missing.
-    let (stale_badge, header_badge) = status_badge_destination(&shown);
+    let (stale_badge, details_badge) = status_badge_destination(&shown);
     // How long ago the session was last active, routed to the SAME surface
-    // the badge went to — the header for a reachable session, the stale band
+    // the badge went to — the bottom bar for a reachable session, the stale band
     // for one whose host is gone — but decided independently of whether
     // there IS a badge. The two are separate facts about a session, not one:
     // an `Unknown` status is deliberately badgeless, and a session nothing
@@ -2079,7 +2085,7 @@ pub(crate) fn SessionView(
     // Reading the clock here subscribes this view to its tick (see
     // `activity`), which is what advances the number while a terminal sits
     // open and idle.
-    let (stale_activity, header_activity) = activity_destination(
+    let (stale_activity, details_activity) = activity_destination(
         shown.stale,
         ActivityStamp::new(*ACTIVITY_NOW.read(), shown.effective_activity()),
     );
@@ -2088,10 +2094,6 @@ pub(crate) fn SessionView(
     // `Unknown` session on a dead host still has an age worth printing under
     // the notice.
     let stale_metadata = stale_badge.is_some() || stale_activity.is_some();
-    // One string, built once, for both the visible metadata and its own
-    // tooltip: the line is truncated with an ellipsis at whatever width the
-    // header has left, and the tooltip is the only way back to the full cwd
-    // and invocation. Two copies of the format would let the two drift.
     // The restart offer's explanation, now the restart button's tooltip and
     // accessible description rather than a permanent band (see this
     // component's header docs).
@@ -2158,6 +2160,16 @@ pub(crate) fn SessionView(
             }
         });
     };
+    let hosts_snapshot = sidebar_hosts.read();
+    let registry = hosts_snapshot.hosts().unwrap_or_default();
+    let local_host = registry
+        .iter()
+        .find(|host| host.kind == crate::HostKind::Local)
+        .map(|host| host.id);
+    let locality = crate::list::session_locality(shown.host, local_host);
+    let host_appearance = registry.iter().find(|host| Some(host.id) == shown.host);
+    let host_icon = host_appearance.map(|host| host.icon).unwrap_or_default();
+    let host_color = host_appearance.map(|host| host.color).unwrap_or_default();
     let header_session = shown.clone();
     let header_replace_session = shown.clone();
     // A legacy session's launch cannot be copied as it is, so plain Replace
@@ -2171,10 +2183,9 @@ pub(crate) fn SessionView(
     let card_replace_with_session = shown.clone();
     rsx! {
         div { class: "layout", "data-claude-trust-prompt": "{shown.claude_trust_prompt}",
-            // The one header row. Identity on the left, status in the
-            // middle, actions pinned right — see this component's docs for
-            // why everything that used to be its own band lives here.
-            header { class: "titlebar",
+            // Tabs share the top row with actions; identity stays below the
+            // terminal so a wider path never competes with a lifecycle control.
+            header { class: "session-topbar",
                 // Header questions share Escape cancellation, including their
                 // lifecycle admission. Once an answer has taken a claim, a
                 // queued Escape must leave the running operation alone.
@@ -2202,89 +2213,49 @@ pub(crate) fn SessionView(
                         document::eval("requestAnimationFrame(() => window.farhelmTerm?.focusSelected());");
                     }
                 },
-                // Both of these carry their own text as a tooltip because both
-                // ellipsize: a title and a cwd share `CreateSession`'s 64 KiB
-                // field budget, so the hover tooltip is the only route back
-                // to a value the row cannot fit.
-                if let Some(badge) = header_badge {
-                    // No toggle here: this is chrome for the OPEN session's
-                    // own header, and only a row's own dot is a control
-                    // (`StatusBadgeView`'s own doc).
-                    StatusBadgeView { badge, dot_onclick: |_| {}, dot_title: None }
-                }
-                // Peer text: the title, directory and command come from the
-                // session's host and from agents, so each is escaped and
-                // direction-isolated like every other peer value (see
-                // `peer.rs`), tooltips included. A tooltip is one attribute
-                // string and cannot be isolated, so escaping is what keeps it
-                // honest there.
-                span { class: "title", "data-tooltip": "{display_peer(&shown_title)}",
-                    span { class: "peer-value", dir: "ltr", "{display_peer(&shown_title)}" }
-                }
-                // Its own `if`, not nested under the badge's: see
-                // `activity_destination` for why an absent badge must not
-                // take the age with it.
-                if let Some(activity) = &header_activity {
-                    span {
-                        class: "status-time",
-                        "data-tooltip": "{activity.absolute}",
-                        "{activity.age}"
+                if keep_terminal_surface(&shown, relaunched(), had_terminal()) {
+                // The tab strip: the agent terminal first and unclosable
+                // (SPEC.md gives a session one agent terminal, and closing it
+                // is not one of the operations that exist), then every open
+                // tab in the server's creation order, then the add control.
+                div { class: "tab-strip", inert: shown.stale.then_some(""),
+                    button {
+                        r#type: "button",
+                        class: if active_tab.is_none() { "btn tab tab-agent selected" } else { "btn tab tab-agent" },
+                        "data-tooltip": "agent: show the session's agent terminal",
+                        "data-terminal": "agent",
+                        onclick: move |_| selected.set(None),
+                        "agent"
                     }
-                }
-                if let Some(checkout) = &shown.working_copy {
-                    crate::icons::ManagedCheckoutMark { checkout: checkout.clone(), cwd: shown.cwd.clone() }
-                }
-                button {
-                    r#type: "button",
-                    class: if copied_directory().is_some() { "header-copy copied" } else { "header-copy" },
-                    "data-tooltip": "{display_peer(&shown.cwd)} — click to copy",
-                    "aria-describedby": COPY_DIRECTORY_DESCRIPTION_ID,
-                    // The clipboard gets the raw bytes (a copy that differed
-                    // from the value would be useless); the feedback says
-                    // when those bytes hold characters the display escaped.
-                    onclick: { let cwd = shown.cwd.clone(); move |_| copy_value(cwd.clone(), copied_directory) },
-                    // The short feedback replaces the value while it shows;
-                    // a hidden-characters warning does NOT live in here,
-                    // because this button shrinks and clips in a crowded
-                    // header. See `.copy-warning` below.
-                    if copied_directory().is_some() {
-                        span { class: "copy-feedback", "✓ copied" }
-                    } else {
-                        span { class: "copy-glyph", "📋" }
-                        span { class: "peer-value", dir: "ltr", "{display_peer(&shown.cwd)}" }
+                    // `key` is the tab id, not the loop index, and that is
+                    // load-bearing rather than a lint: closing a tab shifts
+                    // every later sibling's position, and an index key would
+                    // make Dioxus reuse each item's DOM for a DIFFERENT tab —
+                    // carrying the wrong id into the close handler of a
+                    // still-open prompt. The id keys the PANES below for the
+                    // same reason, with more at stake: reused pane DOM would
+                    // hand one tab's mounted island to another's element.
+                    for (index , tab_id) in tabs.iter().enumerate() {
+                        TabStripItem {
+                            key: "{tab_id}",
+                            tab_id: tab_id.clone(),
+                            label: tab_label(index),
+                            selected: active_tab.as_deref() == Some(tab_id.as_str()),
+                            busy: closing_tabs.read().contains(tab_id),
+                            on_select: move |id| selected.set(Some(id)),
+                            on_close: on_close_tab.clone(),
+                        }
                     }
-                }
-                button {
-                    r#type: "button",
-                    class: if copied_command().is_some() { "header-copy copied" } else { "header-copy" },
-                    "data-tooltip": "{display_peer(&shown.invocation)} — click to copy",
-                    "aria-describedby": COPY_COMMAND_DESCRIPTION_ID,
-                    onclick: { let invocation = shown.invocation.clone(); move |_| copy_value(invocation.clone(), copied_command) },
-                    if copied_command().is_some() {
-                        span { class: "copy-feedback", "✓ copied" }
-                    } else {
-                        span { class: "copy-glyph", "📋" }
-                        span { class: "peer-value", dir: "ltr", "{display_peer(&shown.invocation)}" }
+                    button {
+                        r#type: "button",
+                        class: "btn btn-neutral tab-add",
+                        "data-tooltip": "+ terminal: open a shell tab in the session's folder",
+                        disabled: opening_tab() || lifecycle.busy(),
+                        onclick: on_add_tab,
+                        "+ terminal"
                     }
+                    TerminalTextSize {}
                 }
-                // The two copy buttons' accessible descriptions (see the
-                // id constants for why they exist beside the tooltips).
-                span { id: COPY_DIRECTORY_DESCRIPTION_ID, class: "visually-hidden",
-                    "{display_peer(&shown.cwd)} — click to copy"
-                }
-                span { id: COPY_COMMAND_DESCRIPTION_ID, class: "visually-hidden",
-                    "{display_peer(&shown.invocation)} — click to copy"
-                }
-                // The warning floats below the header, anchored to the
-                // titlebar rather than inside the copy button, so no amount
-                // of crowding can clip it: the clipboard now holds bytes the
-                // label did not show, and that is the one thing this copy
-                // must not leave unsaid.
-                if let Some(warning) = copied_directory()
-                    .and(copy_warning("folder", &shown.cwd))
-                    .or(copied_command().and(copy_warning("command", &shown.invocation)))
-                {
-                    div { class: "copy-warning", role: "status", "{warning}" }
                 }
                 // While a delete of this session is in flight the actions give
                 // way to its progress, the same label the sidebar row shows.
@@ -2963,52 +2934,9 @@ pub(crate) fn SessionView(
                     }
                 }
             }
-            NativeTunnelStrip { session: shown.clone() }
             // Retain the whole surface through outages, but never invent a
             // screen for a fresh stale view or attach a rebooted terminal.
             if keep_terminal_surface(&shown, relaunched(), had_terminal()) {
-                // The tab strip: the agent terminal first and unclosable
-                // (SPEC.md gives a session one agent terminal, and closing it
-                // is not one of the operations that exist), then every open
-                // tab in the server's creation order, then the add control.
-                div { class: "tab-strip", inert: shown.stale.then_some(""),
-                    button {
-                        r#type: "button",
-                        class: if active_tab.is_none() { "btn tab tab-agent selected" } else { "btn tab tab-agent" },
-                        "data-tooltip": "agent: show the session's agent terminal",
-                        "data-terminal": "agent",
-                        onclick: move |_| selected.set(None),
-                        "agent"
-                    }
-                    // `key` is the tab id, not the loop index, and that is
-                    // load-bearing rather than a lint: closing a tab shifts
-                    // every later sibling's position, and an index key would
-                    // make Dioxus reuse each item's DOM for a DIFFERENT tab —
-                    // carrying the wrong id into the close handler of a
-                    // still-open prompt. The id keys the PANES below for the
-                    // same reason, with more at stake: reused pane DOM would
-                    // hand one tab's mounted island to another's element.
-                    for (index , tab_id) in tabs.iter().enumerate() {
-                        TabStripItem {
-                            key: "{tab_id}",
-                            tab_id: tab_id.clone(),
-                            label: tab_label(index),
-                            selected: active_tab.as_deref() == Some(tab_id.as_str()),
-                            busy: closing_tabs.read().contains(tab_id),
-                            on_select: move |id| selected.set(Some(id)),
-                            on_close: on_close_tab.clone(),
-                        }
-                    }
-                    button {
-                        r#type: "button",
-                        class: "btn btn-neutral tab-add",
-                        "data-tooltip": "+ terminal: open a shell tab in the session's folder",
-                        disabled: opening_tab() || lifecycle.busy(),
-                        onclick: on_add_tab,
-                        "+ terminal"
-                    }
-                    TerminalTextSize {}
-                }
                 // The close confirmation, on its own row under the strip
                 // rather than in place of the tab's own controls: the strip is
                 // a single-line flex row that a prompt would push tabs out of,
@@ -3083,6 +3011,11 @@ pub(crate) fn SessionView(
                 if let Some(err) = lease_error.read().clone() {
                     div { class: "lease-error", "{err}" }
                 }
+            }
+            // Conditional notices precede tunnels; approvals follow the terminal
+            // area rather than assuming the tabs are still its immediate sibling.
+            NativeTunnelStrip { session: shown.clone() }
+            if keep_terminal_surface(&shown, relaunched(), had_terminal()) {
                 // Every terminal is mounted at once and stacked; only the
                 // selected one is visible. The agent's pane is a fixed node
                 // rather than part of the loop below so that Dioxus never
@@ -3248,6 +3181,100 @@ pub(crate) fn SessionView(
                     SessionUnavailableCard { notice: notice.clone() }
                 }
             }
+            // Last in DOM order: keyboard traversal reaches copy controls after
+            // the top controls and terminal, matching their visual positions.
+            div { class: "session-details",
+                if let Some(badge) = details_badge {
+                    // No toggle here: this is chrome for the OPEN session's
+                    // own details bar, and only a row's own dot is a control
+                    // (`StatusBadgeView`'s own doc).
+                    StatusBadgeView { badge, dot_onclick: |_| {}, dot_title: None }
+                }
+                // Peer text: the title, directory and command come from the
+                // session's host and from agents, so each is escaped and
+                // direction-isolated like every other peer value (see
+                // `peer.rs`), tooltips included. A tooltip is one attribute
+                // string and cannot be isolated, so escaping is what keeps it
+                // honest there.
+                span { class: "title", "data-tooltip": "{display_peer(&shown_title)}",
+                    span { class: "peer-value", dir: "ltr", "{display_peer(&shown_title)}" }
+                }
+                if let Some(name) = &shown.host_name {
+                    span { class: "session-details-host",
+                        crate::list::SessionHostIcon { locality, icon: host_icon, color: host_color }
+                        crate::list::SessionHostName { name: name.clone(), locality }
+                    }
+                }
+                // Its own `if`, not nested under the badge's: see
+                // `activity_destination` for why an absent badge must not
+                // take the age with it.
+                if let Some(activity) = &details_activity {
+                    span {
+                        class: "status-time",
+                        "data-tooltip": "{activity.absolute}",
+                        "{activity.age}"
+                    }
+                }
+                if let Some(checkout) = &shown.working_copy {
+                    crate::icons::ManagedCheckoutMark { checkout: checkout.clone(), cwd: shown.cwd.clone() }
+                }
+                button {
+                    r#type: "button",
+                    class: if copied_directory().is_some() { "header-copy copied" } else { "header-copy" },
+                    "data-tooltip": "{display_peer(&shown.cwd)} — click to copy",
+                    "aria-describedby": COPY_DIRECTORY_DESCRIPTION_ID,
+                    // The clipboard gets the raw bytes (a copy that differed
+                    // from the value would be useless); the feedback says
+                    // when those bytes hold characters the display escaped.
+                    onclick: { let cwd = shown.cwd.clone(); move |_| copy_value(cwd.clone(), copied_directory) },
+                    // The short feedback replaces the value while it shows;
+                    // a hidden-characters warning does NOT live in here,
+                    // because this button shrinks and clips in a crowded
+                    // details bar. See `.copy-warning` below.
+                    if copied_directory().is_some() {
+                        span { class: "copy-feedback", "✓ copied" }
+                    } else {
+                        span { class: "copy-glyph", "📋" }
+                        // Visible text folds the home directory like the
+                        // sidebar does (see `directory_label`); the tooltip,
+                        // accessible description and copied bytes keep the
+                        // recorded path.
+                        span { class: "peer-value", dir: "ltr", "{directory_label(&shown.cwd)}" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: if copied_command().is_some() { "header-copy copied" } else { "header-copy" },
+                    "data-tooltip": "{display_peer(&shown.invocation)} — click to copy",
+                    "aria-describedby": COPY_COMMAND_DESCRIPTION_ID,
+                    onclick: { let invocation = shown.invocation.clone(); move |_| copy_value(invocation.clone(), copied_command) },
+                    if copied_command().is_some() {
+                        span { class: "copy-feedback", "✓ copied" }
+                    } else {
+                        span { class: "copy-glyph", "📋" }
+                        span { class: "peer-value", dir: "ltr", "{display_peer(&shown.invocation)}" }
+                    }
+                }
+                // The two copy buttons' accessible descriptions (see the
+                // id constants for why they exist beside the tooltips).
+                span { id: COPY_DIRECTORY_DESCRIPTION_ID, class: "visually-hidden",
+                    "{display_peer(&shown.cwd)} — click to copy"
+                }
+                span { id: COPY_COMMAND_DESCRIPTION_ID, class: "visually-hidden",
+                    "{display_peer(&shown.invocation)} — click to copy"
+                }
+                // The warning floats upward from the details bar rather than
+                // inside the copy button, so no amount
+                // of crowding can clip it: the clipboard now holds bytes the
+                // label did not show, and that is the one thing this copy
+                // must not leave unsaid.
+                if let Some(warning) = copied_directory()
+                    .and(copy_warning("folder", &shown.cwd))
+                    .or(copied_command().and(copy_warning("command", &shown.invocation)))
+                {
+                    div { class: "copy-warning", role: "status", "{warning}" }
+                }
+            }
         }
     }
 }
@@ -3301,11 +3328,11 @@ fn seen_effect_eligible(session: &Session) -> bool {
     !session.stale && !session.status.has_ended() && session.seen_activity_at.is_some()
 }
 
-/// Where this session's status badge belongs on the consolidated header
+/// Where this session's status badge belongs on the session chrome
 /// surface, computed from exactly ONE call to `status_badge` and split into
-/// the two destinations a caller can render: `(stale band, header)`.
+/// the two destinations a caller can render: `(stale band, bottom bar)`.
 ///
-/// A classified status renders in at most one place: the header normally,
+/// A classified status renders in at most one place: the bottom bar normally,
 /// the `.stale-metadata` band under the host-unreachable notice for a stale
 /// session (where SPEC.md's metadata triple — "title, directory,
 /// last-known status" — is assembled as one statement), and nowhere at all
@@ -3336,11 +3363,11 @@ fn status_badge_destination(session: &Session) -> (Option<StatusBadge>, Option<S
 }
 
 /// Where this session's last-activity age belongs, split the same two ways
-/// [`status_badge_destination`] splits the badge: `(stale band, header)`.
+/// [`status_badge_destination`] splits the badge: `(stale band, bottom bar)`.
 ///
 /// The SURFACE choice is shared with the badge — a stale session's status
 /// statement is assembled under its host-unreachable notice, and printing
-/// half of it up in the header would scatter one statement across two
+/// half of it in the bottom bar would scatter one statement across two
 /// places. What is NOT shared is the presence choice, and that is the whole
 /// reason this is its own function rather than another field of the badge
 /// pair: `status_badge` suppresses `Unknown` entirely, while an unclassified
@@ -3671,6 +3698,27 @@ fn restart_button_label(offer: RestartOffer) -> &'static str {
     }
 }
 
+/// The details bar's visible directory: the sidebar's `~` fold, then escaping.
+///
+/// SPEC.md has the bar abbreviate the home directory the way the session list
+/// does. The fold is skipped when the account segment it would remove holds a
+/// presentation-unsafe character: the copy warning says hidden characters are
+/// "shown above", so the label must still show every one the copied path has.
+fn directory_label(cwd: &str) -> String {
+    let unsafe_count = |text: &str| {
+        text.chars()
+            .filter(|c| farhelm_proto::text::is_presentation_unsafe(*c))
+            .count()
+    };
+    let folded = crate::list::abbreviate_home(cwd);
+    let shown = if unsafe_count(&folded) == unsafe_count(cwd) {
+        folded
+    } else {
+        cwd.to_string()
+    };
+    display_peer(&shown)
+}
+
 /// The warning a header copy shows after copying `value`, when there is one.
 ///
 /// The copy is always the raw value, so when it contains characters the
@@ -3769,6 +3817,25 @@ mod tests {
             Some("⚠ the copied command contains hidden characters, shown above as <U+…>")
         );
         assert_eq!(copy_warning("command", "claude --resume"), None);
+    }
+
+    /// Why this matters: the details bar is where the open session's folder
+    /// is read, and SPEC.md promises the same `~` the session list shows; a
+    /// fold must never hide a character the copy warning claims is shown.
+    /// Spec: a path under a home folds to `~`, other paths are unchanged, and
+    /// a hidden character in the folded-away account keeps the full path.
+    #[farhelm_testtrace::test]
+    fn the_details_bar_folds_home_without_hiding_escaped_characters() {
+        assert_eq!(directory_label("/home/alice/src/api"), "~/src/api");
+        assert_eq!(directory_label("/Users/alice/src/api"), "~/src/api");
+        assert_eq!(directory_label("/tmp/work"), "/tmp/work");
+        assert_eq!(directory_label("/home/alice/a\u{202E}b"), "~/a<U+202E>b");
+        let hidden_account = "/home/a\u{202E}b/src";
+        assert_eq!(
+            directory_label(hidden_account),
+            display_peer(hidden_account)
+        );
+        assert!(directory_label(hidden_account).contains("<U+202E>"));
     }
 
     /// This dialog changes an agent or command launch with a captured

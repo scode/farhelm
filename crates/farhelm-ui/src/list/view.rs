@@ -808,10 +808,9 @@ pub(crate) fn ListView(
     // has already landed — and committing it would put the deleted row
     // back until the next one.
     let mut listing_reads = use_signal(ReadGate::default);
-    // The host registry as this client currently knows it — four states, not
-    // three, so a failed read cannot blank the panel (see `hosts::HostsRead`).
-    // Shared by the hosts panel and the create dialog's selector.
-    let mut hosts = use_signal(HostsRead::default);
+    // AppBody keeps the snapshot above both panes. This view still owns every
+    // refresh, so showing host identity in the session adds no request path.
+    let mut hosts = use_context::<Signal<HostsRead>>();
     // Per-REQUEST, not per-caller: the mount read, the feed's re-read, the
     // fallback poll and every mutation-triggered refetch draw from the same
     // gate, so an older completion cannot resurrect what a newer one removed

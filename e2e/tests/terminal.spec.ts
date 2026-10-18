@@ -89,7 +89,7 @@ installTerminalSuiteHooks();
 // behavior under test.
 test("renders the session and the agent's TUI output", async ({ page }) => {
   await openTerminal(page);
-  await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+  await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
   await waitForTermText(page, "fake-agent starting");
   // The visible viewport is real DOM text too — the DOM renderer is what
   // makes these tests semantic rather than pixel-diffing.
@@ -274,7 +274,7 @@ test("keyboard activation opens the session, matching a real click", async ({
   try {
     await pinAutoSelect(page, bounce.id);
     await page.goto("/");
-    await expect(page.locator(".titlebar .title")).toContainText("kbd-bounce-");
+    await expect(page.locator(".session-details .title")).toContainText("kbd-bounce-");
     // The bounce session's terminal takes focus for itself when its mount
     // lands, which can be AFTER the title already reads "kbd-bounce-".
     // Focusing the open button before that mount means the steal moves
@@ -315,7 +315,7 @@ test("keyboard activation opens the session, matching a real click", async ({
       await openButton.focus();
       await expect(openButton).toBeFocused();
       await page.keyboard.press("Enter");
-      await expect(page.locator(".titlebar .title")).toHaveText("e2e-session", {
+      await expect(page.locator(".session-details .title")).toHaveText("e2e-session", {
         timeout: 5_000,
       });
     }).toPass({ timeout: 30_000 });
@@ -372,7 +372,7 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
   // globals) plus the stashed socket's closure below, rather than
   // through a gone-entirely window that no longer exists.
   await page.locator(`[data-session-id="${bounce.id}"]`).click();
-  await expect(page.locator(".titlebar .title")).toContainText("bounce-");
+  await expect(page.locator(".session-details .title")).toContainText("bounce-");
   await expect
     .poll(() =>
       page.evaluate(
@@ -481,7 +481,7 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
 // set by the real mount, silently no-op the real one instead).
 //
 // An earlier version of this test only clicked through the navigation
-// quickly and asserted the Dioxus-rendered `.titlebar .title` afterward
+// quickly and asserted the Dioxus-rendered `.session-details .title` afterward
 // — which passes even if session A's socket is the one that actually
 // mounted, since the titlebar text comes from the `session` PROP
 // SessionView was given, entirely independent of what terminal.js did.
@@ -610,7 +610,7 @@ test("switching sessions before the first terminal is ready mounts the second se
     await waitForIslandMounted(page, "terminal");
     const wsUrl = await page.evaluate(() => (window as any).__farhelmWs.url);
     expect(wsUrl).toContain(idB);
-    await expect(page.locator(".titlebar .title")).toHaveText(
+    await expect(page.locator(".session-details .title")).toHaveText(
       "regression-session-b",
     );
   } finally {
@@ -1489,9 +1489,9 @@ test("opening a stale session shows metadata and calm terminal recovery", async 
   // invocation render from the row's own fields, independent
   // of whether a terminal ever comes up behind them. Text assertions retry
   // on their own; the copy controls also contain a clipboard glyph.
-  await expect(page.locator(".titlebar .title")).toHaveText(title);
-  await expect(page.locator(".titlebar .header-copy").nth(0)).toContainText(cwd);
-  await expect(page.locator(".titlebar .header-copy").nth(1)).toContainText(invocation);
+  await expect(page.locator(".session-details .title")).toHaveText(title);
+  await expect(page.locator(".session-details .header-copy").nth(0)).toContainText(cwd);
+  await expect(page.locator(".session-details .header-copy").nth(1)).toContainText(invocation);
 
   // A connected socket alone cannot prove that the server refused this
   // attach: wait for the real refusal before inspecting the recovery UI.
@@ -1651,7 +1651,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     const idA = await sessionIdFor(rowByTitle(page, titleA));
     await waitForSessionRevealed(page, idA);
     await waitForTermText(page, "FAKE-AGENT READY");
-    await expect(page.locator(".titlebar .title")).toHaveText(titleA);
+    await expect(page.locator(".session-details .title")).toHaveText(titleA);
 
     // Type into session A while it is open, per the flow's "open one,
     // type" step, then use the permanent sidebar to create session B.
@@ -1669,7 +1669,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     const idB = await sessionIdFor(rowByTitle(page, titleB));
     await waitForSessionRevealed(page, idB);
     await waitForTermText(page, "FAKE-AGENT READY");
-    await expect(page.locator(".titlebar .title")).toHaveText(titleB);
+    await expect(page.locator(".session-details .title")).toHaveText(titleB);
 
     // Both rows are visible in the permanent sidebar, alive. `LIVE_BADGE`
     // rather than the literal "running": session A's last output was its
@@ -1827,7 +1827,7 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
     await form.getByLabel("folder", { exact: true }).fill("/tmp");
     await form.locator('button[type="submit"]').click();
     await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
-    await expect(page.locator(".titlebar .title")).toHaveText(title);
+    await expect(page.locator(".session-details .title")).toHaveText(title);
   } finally {
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
     if (id) {
@@ -1906,7 +1906,7 @@ test("create dialog disables the submit control while a create is in flight", as
     // session's terminal, same as the multi-session flow above.
     release(true);
     await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
-    await expect(page.locator(".titlebar .title")).toHaveText(title);
+    await expect(page.locator(".session-details .title")).toHaveText(title);
   } finally {
     release(false);
     const id = await findSessionIdByTitle(request, title).catch(() => undefined);
@@ -2802,14 +2802,54 @@ test("stale-session-view-with-no-status-renders-metadata-and-no-badge", async ({
   await page.goto("/");
   await page.locator(`[data-session-id="${sessionId}"] .session-row-open`).click();
 
-  await expect(page.locator(".titlebar .title")).toHaveText(sessionId);
-  await expect(page.locator(".titlebar .header-copy").nth(0)).toContainText("/tmp");
-  await expect(page.locator(".titlebar .header-copy").nth(1)).toContainText("sleep 600");
+  await expect(page.locator(".session-details .title")).toHaveText(sessionId);
+  await expect(page.locator(".session-details .header-copy").nth(0)).toContainText("/tmp");
+  await expect(page.locator(".session-details .header-copy").nth(1)).toContainText("sleep 600");
   await expect(page.locator(".stale-metadata .status-badge")).toHaveCount(0);
   // The notice itself still renders: the point is a MISSING badge inside a
   // present stale surface, not a stale surface that failed to appear.
   await expect(page.locator(".host-stale-notice")).toBeVisible();
 });
+
+/**
+ * An unavailable hosts snapshot cannot erase a session's recorded host.
+ * Legacy sessions without a name remain nameless, while names supplied by
+ * peers stay escaped and direction-isolated even without a locality icon.
+ */
+for (const hostName of ["unlisted-remote", "remote-\u202Ename\nnext", undefined]) {
+  test(`details preserve ${hostName === undefined ? "a missing legacy host" : "an unknown host " + JSON.stringify(hostName)}`, async ({ page }) => {
+    const sessionId = "unknown-locality-details";
+    const session = {
+      id: sessionId,
+      title: "unknown locality details",
+      cwd: "/tmp",
+      invocation: "sleep 600",
+      stale: true,
+      ...(hostName === undefined ? {} : { host_name: hostName }),
+    };
+    await page.route("**/api/hosts", (route) => fulfillAsHelm(route, { json: { hosts: [] } }));
+    await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
+      json: { sessions: [session], total: 1, matching: 1, truncated: false },
+    }));
+    await page.route(`**/api/sessions/${sessionId}`, (route) => fulfillAsHelm(route, { json: session }));
+    await page.goto("/");
+    const target = page.locator(`[data-session-id="${sessionId}"]`);
+    await expect(target.locator(".session-title")).toHaveText(session.title);
+    await target.locator(".session-row-open").click();
+    await expect(page.locator(".session-details .title")).toHaveText(session.title);
+    await expect(page.locator(".host-stale-notice")).toBeVisible();
+    const host = page.locator(".session-details-host");
+    if (hostName === undefined) {
+      await expect(host).toHaveCount(0);
+    } else {
+      const expected = hostName.replaceAll("\u202E", "<U+202E>").replaceAll("\n", "<U+000A>");
+      await expect(host.locator(".session-host")).toHaveText(expected);
+      await expect(host.locator(".session-host")).toHaveAttribute("dir", "ltr");
+      await expect(host.locator(".host-kind-icon")).toHaveCount(0);
+      await expect(target.locator(".session-host")).toHaveText(expected);
+    }
+  });
+}
 
 // at all (see that derive's own docs) — i.e. an old PEER, not a restart of
 // this same build's own supervisor — which is not something this suite's
@@ -2934,7 +2974,7 @@ test("submitting the create form twice while one create is in flight produces ex
     // attached a session at load), so it cannot gate on the create any
     // more; the created session's own title taking the pane is what
     // proves the POST completed and creation selected it.
-    await expect(page.locator(".titlebar .title")).toHaveText(title, { timeout: 15_000 });
+    await expect(page.locator(".session-details .title")).toHaveText(title, { timeout: 15_000 });
     expect(postCount).toBe(1);
 
     const listing = await (await request.get("/api/sessions")).json();
@@ -3484,7 +3524,7 @@ test("a blank title creates a session titled after the working directory's basen
     await form.locator('button[type="submit"]').click();
     // The created session's derived title taking the pane is the create's
     // completion signal (termReady is already true under auto-select).
-    await expect(page.locator(".titlebar .title")).toHaveText("tmp", { timeout: 15_000 });
+    await expect(page.locator(".session-details .title")).toHaveText("tmp", { timeout: 15_000 });
 
     // `== null` deliberately covers BOTH an omitted key (`undefined`
     // after JSON parsing) and an explicit `null` value — `create_session`
@@ -3494,7 +3534,7 @@ test("a blank title creates a session titled after the working directory's basen
     // is NOT the empty string.
     expect(capturedBody.title == null).toBe(true);
 
-    const titleText = await page.locator(".titlebar .title").textContent();
+    const titleText = await page.locator(".session-details .title").textContent();
     expect(titleText).toBe("tmp");
     expect(titleText).not.toBe("");
 

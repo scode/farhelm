@@ -381,7 +381,7 @@ async function headerReplaceKeepsAnswer(page: Page, request: APIRequestContext, 
     await stopSession(request, sourceId);
     await page.goto("/");
     await page.locator(`.session-row[data-session-id="${sourceId}"]`).click();
-    const exitedBadge = page.locator(".titlebar .status-badge.exited");
+    const exitedBadge = page.locator(".session-details .status-badge.exited");
     await expect(exitedBadge).toBeVisible({ timeout: 20_000 });
     const header = page.locator(".header-replace-anchor");
     await header.locator(".header-replace").click();
@@ -592,7 +592,7 @@ test("a skipped header replace still asks the YOLO question", async ({ page, req
     });
     await page.goto("/");
     await page.locator(`.session-row[data-session-id="${sourceId}"]`).click();
-    await expect(page.locator(".titlebar .status-badge.exited")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".session-details .status-badge.exited")).toBeVisible({ timeout: 20_000 });
 
     const [refused] = await Promise.all([
       page.waitForResponse(

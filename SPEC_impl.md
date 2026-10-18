@@ -446,27 +446,37 @@ app.css makes them inherit `font-family`, and a control added later cannot fall 
 most of the launch composer's buttons once did. The rule leaves font size alone, and it excludes xterm.js's own helper
 textarea, which belongs to the vendored widget.
 
-The open session's chrome is ONE header row ordered status, title, age, copyable `{cwd}`, copyable invocation, then
-Restart, Restart with, Replace, Clone, and Replace with — sized at about 40px, with the tab strip beneath it and nothing
-else in the steady state. It used to be four stacked bands costing roughly 170px before the terminal started, on a
-surface whose entire point is the terminal. Two of those bands had to go somewhere rather than merely shrink. The
-restart offer's explanation became the restart button's tooltip and its `aria-describedby` target: SPEC.md's rule that
-Restart always resumes and, when it cannot, is greyed out with the specific reason is carried by the button's accessible
-name (`aria-label` and, alongside the further elaboration, its tooltip) — naming the offer (`resume conversation` or
-`restart unavailable`) rather than the action. An unavailable Restart, like an unavailable Restart with, is
-`aria-disabled` rather than natively disabled, so its tooltip stays hoverable in webviews and its click handler is what
-refuses. The directory and invocation buttons carry their full values in their tooltips, shrink before the session
-title, and reveal a clipboard affordance on hover or keyboard focus. The six action buttons remain fully visible and in
-DOM order from a 650px main pane. The app's 320px main-pane floor is unchanged; between those widths the row may clip
-its trailing actions rather than wrapping or hiding them. The restart confirmation became a popover anchored under the
-button that opened it, still confirm-in-place with focus on the enabled confirming answer (Cancel while disabled); the
-consequence sentence they lead with is the one line standing between a click and a killed process tree, and a header
+The open session's chrome has one top row with terminal tabs on the left and Restart, Restart with, Replace, Clone,
+Replace with, and Delete on the right, and a slim details bar below the terminal. The bottom bar is ordered status,
+title, host, age, managed-checkout branch mark when present, copyable `{cwd}`, and copyable invocation. The host uses
+the same label component as the session list, reading the shared `Signal<HostsRead>` context rather than starting
+another host request; its name remains visible when locality is unknown, and only a missing name omits it. Identity
+moved below the terminal to make the active session and host easier to see while keeping the bottom bar small and
+leaving room for the tabs and actions together at the top. The terminal keeps at least its previous steady-state height.
+Earlier, four stacked bands cost roughly 170px before the terminal started, on a surface whose entire point is the
+terminal; they were consolidated into one roughly 40px header above the tabs before this split. Two of those bands had
+to go somewhere rather than merely shrink. The restart offer's explanation became the restart button's tooltip and its
+`aria-describedby` target: SPEC.md's rule that Restart always resumes and, when it cannot, is greyed out with the
+specific reason is carried by the button's accessible name (`aria-label` and, alongside the further elaboration, its
+tooltip) — naming the offer (`resume conversation` or `restart unavailable`) rather than the action. An unavailable
+Restart, like an unavailable Restart with, is `aria-disabled` rather than natively disabled, so its tooltip stays
+hoverable in webviews and its click handler is what refuses. The directory and invocation buttons carry their full
+values in their tooltips, shrink before the session title and host, and reveal a clipboard affordance on hover or
+keyboard focus. Their hidden-characters copy warning opens upward from the bottom bar so the window edge cannot clip it.
+The six action buttons remain fully visible and in DOM order from a 650px main pane; the tab strip shrinks into the
+remaining width and scrolls horizontally. The app's 320px main-pane floor is unchanged; between those widths the row may
+clip its trailing actions rather than wrapping or hiding them. The restart confirmation became a popover anchored under
+the button that opened it, still confirm-in-place with focus on the enabled confirming answer (Cancel while disabled);
+the consequence sentence they lead with is the one line standing between a click and a killed process tree, and a header
 that kept it in flow would have to either wrap or truncate it. Header Replace has a separate anchored confirmation state
-so it cannot accidentally open the interrupted card's confirmation. Everything conditional — a refused restart's prose,
-the last-known-status band and the "helm stopped listing this session" line — is still a full-width band, because a band
-that only appears when it has something to say costs the steady state nothing. A classified status renders in at most
-one place: the header normally, the stale notice's own metadata band for a stale session (where SPEC.md's
-title/directory/last-known-status triple is assembled), and nowhere at all for a session nothing has classified yet.
+so it cannot accidentally open the interrupted card's confirmation. The top row owns their Escape handler alongside the
+action buttons; keyboard order is top row, terminal, then bottom bar. Everything conditional — a refused restart's
+prose, the last-known-status band and the "helm stopped listing this session" line — is still a full-width band, because
+a band that only appears when it has something to say costs the steady state nothing. These notices, the interrupted
+card, trust hint and tab errors remain between the top row and terminal, followed by the desktop tunnel strip. A
+classified status renders in at most one place: the bottom bar normally, the stale notice's own metadata band for a
+stale session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for a session
+nothing has classified yet.
 
 An unavailable session uses one accent card over the terminal scrim, sharing Delete's card geometry and spinner.
 `hosts::session_unavailable_cause` maps the existing host read to a stable phrase for both row densities and the card;
@@ -731,7 +741,7 @@ not displayed (SPEC.md, Managed checkouts). The composer applies that rule where
 (`create_form::submitted_title`) instead of clearing the field when a repository is picked, because the checkout
 preview's title must equal the create's, and choosing an existing folder again must bring the copied title back.
 
-The session list and open-session header mark current `working_copy` membership with the shared inline branch SVG,
+The session list and open-session details bar mark current `working_copy` membership with the shared inline branch SVG,
 including sessions sharing another session's checkout whose launch has no repository provenance. Full rows display
 `working_copy.repo` after a spaced dot separating it from the host; compact rows retain only the mark beside the title.
 The escaped tooltip exposes the recorded canonical path, the session directory when its spelling differs from the root,
@@ -741,34 +751,35 @@ Ordinary directories keep their existing clipping and display.
 The macOS desktop WindowBuilder retains native decorations while making the titlebar transparent, hiding its visible
 title text, and extending the webview into the full content area. Tao positions the native traffic lights in logical
 coordinates, and the root-mounted Wry webview retains the same inset because its content view replaces Tao's. The
-desktop macOS shell class reserves matching space in the sticky sidebar app bar and aligns the session header's height.
-In narrow windows, a fixed app row sits above both scrolling panes; the current sidebar width, main-pane floor, and
-horizontal scrolling remain intact without moving controls under the native buttons. The native window still has a title
-for system menus. A dedicated empty Dioxus element owns native window actions for primary-button presses; the press
-handler is not attached to a parent containing controls or text. Double-click zoom/restore is decided on the press's own
-mousedown, before any dragging for that press begins: a page script (`assets/click-detail.js`) reads the mousedown's DOM
-`detail` — which WebKit sets from the incoming native click count (`NSEvent.clickCount`, copied statelessly through
-`WebEventFactory::createWebMouseEvent`, `WebEventConversion`, and `EventHandler::handleMousePressEvent`'s per-press
-assignment) — and synchronously POSTs it, with an eligibility bit saying whether the preceding primary press landed on
-the same connected spacer, to a Rust asset-handler route ahead of the interpreter's own event send for the same press.
-That chain proves propagation of an incoming native count, not AppKit's classification itself: that the press after a
-drag-consumed release carries count 2 is an assumption, unobserved here, and native zoom/restore awaits the manual Mac
-checklist. A document-level capture listener runs strictly before the interpreter's delegated bubble listener, and both
-sends are synchronous XHRs on the page's one JS thread, so each POST is answered before its press's event send starts
-and the Rust side pairs the two by order. The spacer's handler then zooms exactly once for an eligible repeat press and
-never drags it, drags an ordinary press as before, or does nothing at all for a cross-target repeat (no zoom AND no
-drag); there is no `dblclick` handler. The first press's mouse-up may never reach the view once native dragging starts,
-and that is harmless here: the count is assigned fresh from each press's own platform event rather than accumulated
-across the release, and the release-dependent click/dblclick synthesis is on a path this design never uses. Fullscreen
-suppresses the toggle explicitly (`toggle_maximized`, unlike `drag`, has no fullscreen check of its own, and Tao defers
-a fullscreen maximize change until exit). The route is registered from the window root, which never unmounts, and the
-page listener survives component remounts; a missing report against an empty slot, or a count stuck at 1, degrades to
-ordinary dragging. That fail-safe does not cover complementary loss in both directions at once — report A arrives, event
-A never consumes it, report B fails to replace it, event B consumes A — which borrows the wrong press's report and stays
-a documented residual. Other builds keep that spacer hidden and inert, and receive no macOS shell class. Browser tests
-can apply the class to production markup to verify geometry, without enabling native actions. Fullscreen, resizing, and
-button behavior remain AppKit-owned; actual native appearance and interactions require the manual Mac checklist. The
-window root installs native layout before authentication completes. Bootstrap and error pages reserve a top band without
+desktop macOS shell class reserves matching space in the sticky sidebar app bar and aligns the session top row's height
+with it at 48px. In narrow windows, a fixed app row sits above both scrolling panes; the current sidebar width,
+main-pane floor, and horizontal scrolling remain intact without moving controls under the native buttons. The native
+window still has a title for system menus. A dedicated empty Dioxus element owns native window actions for
+primary-button presses; the press handler is not attached to a parent containing controls or text. Double-click
+zoom/restore is decided on the press's own mousedown, before any dragging for that press begins: a page script
+(`assets/click-detail.js`) reads the mousedown's DOM `detail` — which WebKit sets from the incoming native click count
+(`NSEvent.clickCount`, copied statelessly through `WebEventFactory::createWebMouseEvent`, `WebEventConversion`, and
+`EventHandler::handleMousePressEvent`'s per-press assignment) — and synchronously POSTs it, with an eligibility bit
+saying whether the preceding primary press landed on the same connected spacer, to a Rust asset-handler route ahead of
+the interpreter's own event send for the same press. That chain proves propagation of an incoming native count, not
+AppKit's classification itself: that the press after a drag-consumed release carries count 2 is an assumption,
+unobserved here, and native zoom/restore awaits the manual Mac checklist. A document-level capture listener runs
+strictly before the interpreter's delegated bubble listener, and both sends are synchronous XHRs on the page's one JS
+thread, so each POST is answered before its press's event send starts and the Rust side pairs the two by order. The
+spacer's handler then zooms exactly once for an eligible repeat press and never drags it, drags an ordinary press as
+before, or does nothing at all for a cross-target repeat (no zoom AND no drag); there is no `dblclick` handler. The
+first press's mouse-up may never reach the view once native dragging starts, and that is harmless here: the count is
+assigned fresh from each press's own platform event rather than accumulated across the release, and the
+release-dependent click/dblclick synthesis is on a path this design never uses. Fullscreen suppresses the toggle
+explicitly (`toggle_maximized`, unlike `drag`, has no fullscreen check of its own, and Tao defers a fullscreen maximize
+change until exit). The route is registered from the window root, which never unmounts, and the page listener survives
+component remounts; a missing report against an empty slot, or a count stuck at 1, degrades to ordinary dragging. That
+fail-safe does not cover complementary loss in both directions at once — report A arrives, event A never consumes it,
+report B fails to replace it, event B consumes A — which borrows the wrong press's report and stays a documented
+residual. Other builds keep that spacer hidden and inert, and receive no macOS shell class. Browser tests can apply the
+class to production markup to verify geometry, without enabling native actions. Fullscreen, resizing, and button
+behavior remain AppKit-owned; actual native appearance and interactions require the manual Mac checklist. The window
+root installs native layout before authentication completes. Bootstrap and error pages reserve a top band without
 requiring the sidebar to mount. A build-mismatch notice stays below that band and above the scrolling shell, with the
 app bar pinned above it so the warning remains readable.
 
@@ -4883,12 +4894,13 @@ delay from arming buttons after a more recent switch. Existing decision rows are
 and full-width text, preserving the peer-text distinction and showing real commands in full.
 
 The approval region stays beside the shell so modal isolation leaves it live. While mounted, its small geometry observer
-follows the actual main-pane rectangle and the current tab strip's bottom (the titlebar or pane top when there are no
-tabs). This accounts for sidebar width, narrow-window shell scrolling, native top chrome, and conditional header notices
-without fixed offsets. Width is capped at 660px with 12px margins; the whole region's height is capped at 55% of the
-pane and at the space remaining below its top. Pane, sidebar and chrome sizes and direct chrome structure are observed,
-not terminal output mutations; listeners and observers are released when the region leaves the DOM. Sidebar size is an
-input even at the pane's minimum width, where a resize moves the pane without changing its size.
+follows the actual main-pane rectangle and the terminal area's top, falling back to the top row's bottom when no
+terminal surface is shown. Anchoring below the conditional bands and tunnel strip keeps approval cards from covering
+notices or tunnel chips. This accounts for sidebar width, narrow-window shell scrolling, native top chrome, and
+conditional notices without fixed offsets. Width is capped at 660px with 12px margins; the whole region's height is
+capped at 55% of the pane and at the space remaining below its top. Pane, sidebar and chrome sizes and direct chrome
+structure are observed, not terminal output mutations; listeners and observers are released when the region leaves the
+DOM. Sidebar size is an input even at the pane's minimum width, where a resize moves the pane without changing its size.
 
 "A GUI is connected" means at least one subscriber to the fleet invalidation feed, which every GUI holds open for its
 whole life and which the cards rely on to appear without a reload. The desktop app's process ends when its window closes

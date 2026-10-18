@@ -20,6 +20,43 @@
  * docs/manual-mac-checklist.md's Integrated window header section.
  */
 import { expect, test } from "./helpers/evidence";
+import { cleanupSession, createSession } from "./helpers/fleet";
+import { waitForSessionRevealed } from "./helpers/terminal-readiness";
+
+/**
+ * macOS aligns the merged top row with the native app bar, while the
+ * identity bar keeps its compact height below the terminal. A copied old
+ * titlebar rule would leave the new row short or inset the wrong surface.
+ */
+test("the macOS inset belongs to the merged top row and leaves details compact", async ({ page, request }) => {
+  const session = await createSession(request, { title: `window-chrome-${Date.now()}` });
+  try {
+    await page.setViewportSize({ width: 1100, height: 700 });
+    await page.goto("/");
+    const target = page.locator(`[data-session-id="${session.id}"] .session-row-open`);
+    await expect(target).toBeVisible();
+    await target.click();
+    await waitForSessionRevealed(page, session.id);
+    const top = page.locator(".session-topbar");
+    const details = page.locator(".session-details");
+    await expect(details).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const browserTop = (await top.boundingBox())!;
+    const browserDetails = (await details.boundingBox())!;
+    expect(browserTop.height).toBeLessThanOrEqual(32);
+    await page.locator(".app-shell").evaluate((node) => node.classList.add("macos-window"));
+    const macTop = (await top.boundingBox())!;
+    const appBar = (await page.locator(".app-bar").boundingBox())!;
+    expect(macTop.height).toBe(48);
+    expect(macTop.y).toBeCloseTo(appBar.y, 0);
+    expect(macTop.height).toBeCloseTo(appBar.height, 0);
+    expect(await details.boundingBox()).toEqual(browserDetails);
+    await expect(top.locator(".tab-strip")).toBeVisible();
+    await expect(top.locator(".titlebar-actions")).toBeVisible();
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
 
 test("the web shell hides the spacer and loads no bridge script", async ({ page }) => {
   const pageErrors: Error[] = [];

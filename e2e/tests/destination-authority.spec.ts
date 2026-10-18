@@ -69,7 +69,7 @@ for (const replace of [false, true]) {
       expect(terminal).toBeTruthy();
       await page.locator(".filter-host").selectOption(String(fixture.local));
       await expect(row, "the server-backed filter must actually remove the selected row").toHaveCount(0);
-      await expect(page.locator(".titlebar .title")).toHaveText(active.title);
+      await expect(page.locator(".session-details .title")).toHaveText(active.title);
       expect(await terminal!.evaluate((node) => node === document.querySelector("#terminal")), "filtering must preserve the same terminal element").toBe(true);
       if (replace) {
         replacement = true;

@@ -8,10 +8,9 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-use crate::hosts::gui_host_name;
 use crate::icons::{
-    EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, HostMark, LocalHostIcon,
-    ManagedCheckoutMark, PermissionGlyph, PermissionIcon, QualifierGlyph, QualifierIcon,
+    EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, ManagedCheckoutMark, PermissionGlyph,
+    PermissionIcon, QualifierGlyph, QualifierIcon,
 };
 use crate::launch_composer::selection_explicit_before_permissions;
 use crate::peer::{DetailPart, PeerLine, display_peer};
@@ -19,7 +18,7 @@ use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, s
 use crate::{LaunchHarness, Session, SessionStatus};
 
 use super::bell::{BellSlot, NotificationBell};
-use super::shared::{DeleteTarget, HostLocality, RowState};
+use super::shared::{DeleteTarget, HostLocality, RowState, SessionHostIcon, SessionHostName};
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
     closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
@@ -332,7 +331,8 @@ fn MenuActionIcon(action: MenuAction) -> Element {
 /// followed by at least one more segment, become `~` plus that remainder.
 /// `/home/alice/src/api` reads `~/src/api`; `/home/`, `/home//x`, and
 /// `/homework/x` are left alone because none of them names an account, and
-/// three further shapes are excluded below.
+/// three further shapes are excluded below. The open session's details bar
+/// uses the same rule, so a directory reads the same in both places.
 ///
 /// ## What this does NOT do, and why
 ///
@@ -369,7 +369,7 @@ fn MenuActionIcon(action: MenuAction) -> Element {
 ///   trailing slash) has nothing for `~` to stand in for — folding it would
 ///   erase the one thing the path says rather than shorten it, so it stays
 ///   absolute.
-fn abbreviate_home(cwd: &str) -> String {
+pub(crate) fn abbreviate_home(cwd: &str) -> String {
     for prefix in ["/home/", "/Users/"] {
         let Some(rest) = cwd.strip_prefix(prefix) else {
             continue;
@@ -1022,12 +1022,6 @@ pub(super) fn SessionRow(
         HostLocality::Remote => "remote",
         HostLocality::Unknown => "unknown",
     };
-    // Only a registry-confirmed local row earns the GUI's local wording.
-    // Legacy rows and rows waiting for the hosts read keep their supplied name.
-    let shown_host_name = session
-        .host_name
-        .as_deref()
-        .map(|name| gui_host_name(name, locality == HostLocality::Local));
     let open_session = session.clone();
     // A row shows its bell while any notification is left uncleared; the
     // helm has already dropped the cleared ones.
@@ -1615,17 +1609,7 @@ pub(super) fn SessionRow(
                         // uses for a status word next to a color-only dot),
                         // since the icon itself is `aria-hidden`.
                         span { class: "session-locality-slot",
-                        match locality {
-                            HostLocality::Local => rsx! {
-                                LocalHostIcon {}
-                                span { class: "visually-hidden", "local" }
-                            },
-                            HostLocality::Remote => rsx! {
-                                HostMark { icon: host_icon, color: host_color }
-                                span { class: "visually-hidden", "remote" }
-                            },
-                            HostLocality::Unknown => rsx! {},
-                        }
+                            SessionHostIcon { locality, icon: host_icon, color: host_color }
                         }
                         // One grid child owns the title and compact-only
                         // qualifiers. Noncompact qualifier words move into
@@ -1749,13 +1733,8 @@ pub(super) fn SessionRow(
                     // stays missing: locality can establish an icon, never
                     // an invented machine name.
                     span { class: "session-row-line session-row-meta",
-                        if let Some(host_name) = &shown_host_name {
-                            span {
-                                class: "session-host peer-value",
-                                dir: "ltr",
-                                "data-tooltip": "{display_peer(host_name)}",
-                                "{host_name}"
-                            }
+                        if let Some(host_name) = &session.host_name {
+                            SessionHostName { name: host_name.clone(), locality }
                             span {
                                 class: "session-host-separator",
                                 "data-separator": if session.working_copy.is_some() { "dot" } else { "colon" },

@@ -216,7 +216,7 @@ test("Escape cancels header restart replace and delete questions and restores te
     await attachSession(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
     await waitForTermText(page, "> ");
-    await expect(page.locator(".titlebar .status-badge")).toHaveClass(/\brunning\b/);
+    await expect(page.locator(".session-details .status-badge")).toHaveClass(/\brunning\b/);
     const terminal = page.locator("#terminal .xterm-helper-textarea");
     await expect(terminal).toBeFocused();
     await page.keyboard.type("header-escape-live");
@@ -331,7 +331,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
     statusRoutes.push(stopShowingRunning);
     await page.goto("/");
     await row(resumable.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .status-badge")).toHaveClass(/\brunning\b/);
+    await expect(page.locator(".session-details .status-badge")).toHaveClass(/\brunning\b/);
     const restart = page.locator(".restart-primary");
     await expect(restart).not.toHaveAttribute("aria-disabled", "true");
     await expect(restart).toHaveAttribute("data-confirms", "false");

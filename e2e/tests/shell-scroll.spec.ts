@@ -64,7 +64,8 @@ test("a wheel over the header or the sidebar edge never scrolls the document", a
       .poll(() => page.locator("[data-session-id]").count(), { timeout: 20_000 })
       .toBeGreaterThanOrEqual(FILLER_ROWS + 1);
     await page.locator(`[data-session-id="${target.id}"]`).click();
-    await expect(page.locator(".app-main .titlebar")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".app-main .session-topbar")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".app-main .session-details")).toBeVisible();
 
     const sidebar = page.locator(".app-sidebar");
     const sidebarOverflow = await sidebar.evaluate((el) => el.scrollHeight - el.clientHeight);
@@ -93,6 +94,11 @@ test("a wheel over the header or the sidebar edge never scrolls the document", a
     // neither region has a scroller of its own, so a chained scroll here
     // can only be the document's.
     await page.mouse.move(sidebarBox.x + sidebarBox.width + 120, 12);
+    await page.mouse.wheel(0, 300);
+    // Identity moved to the bottom; that chrome must not become another
+    // route for a wheel to scroll the whole document.
+    const detailsBox = (await page.locator(".session-details").boundingBox())!;
+    await page.mouse.move(detailsBox.x + 20, detailsBox.y + detailsBox.height / 2);
     await page.mouse.wheel(0, 300);
     await page.mouse.move(sidebarBox.x + sidebarBox.width + 2, 200);
     await page.mouse.wheel(0, 300);

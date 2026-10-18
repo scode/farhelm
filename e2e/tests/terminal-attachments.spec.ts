@@ -1902,7 +1902,7 @@ test("leaving mid-upload and reopening leaves exactly one set of hooks", async (
     await expect(page.locator('[data-terminal="agent"] .attach-busy')).toBeVisible();
 
     await sharedSessionRow(page).click();
-    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
     await page.locator(`[data-session-id="${id}"]`).click();
     await waitForSessionRevealed(page, id);
     await waitForTermText(page, "FAKE-AGENT READY");

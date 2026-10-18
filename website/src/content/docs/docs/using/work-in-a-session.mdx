@@ -10,16 +10,20 @@ import Screenshot from '../../../../components/Screenshot.astro';
 A session's terminal is the agent's own terminal: you type to the agent exactly as you would if you had started it in a
 terminal yourself, and everything it prints shows up here. Farhelm does not sit between you and the agent's prompts.
 
-## The header
+## Session details and actions
 
 <Screenshot
   name="work-in-a-session/header"
   alt="The session header with its title, age, directory, and command, and the copy-on-click directory explained."
 />
 
-The buttons at the header's right end restart, replace, clone, and delete the session; [Stop, restart, and
-resume](/docs/using/stop-restart-resume/) covers them. **Cmd+W** in the Mac app, or **Ctrl+Shift+Backspace** in a browser,
-does the same as the open session's Delete button.
+The slim bar under the terminal shows the session's name and host, followed by its age, directory, and command. The host
+has the same icon and color as in the [session list](/docs/using/session-list/), so you can see where you are working.
+Click the directory or command to copy it; your home directory appears as `~`.
+
+The terminal tabs and action buttons share the row above the terminal. The buttons at its right end restart, replace,
+clone, and delete the session; [Stop, restart, and resume](/docs/using/stop-restart-resume/) covers them. **Cmd+W** in the
+Mac app, or **Ctrl+Shift+Backspace** in a browser, does the same as the open session's Delete button.
 
 ## Open a shell beside the agent
 
@@ -93,9 +97,9 @@ your browser's private-network checks. Any program on your Mac can connect to th
 `127.0.0.1` page into the browser helm are also refused; opening the helm from the address bar or a bookmark still works.
 You can turn tunnels off in settings, which closes the ones already open.
 
-Open tunnels appear below the session's title, with the port on your Mac, the host's port, and a close button. Opening
-another link to the same service reuses its tunnel. Deleting the session or quitting Farhelm closes it; stopping or
-restarting the agent leaves it open. A disconnected host makes new connections fail until it returns.
+Open tunnels appear below the row of tabs and action buttons, with the port on your Mac, the host's port, and a close
+button. Opening another link to the same service reuses its tunnel. Deleting the session or quitting Farhelm closes it;
+stopping or restarting the agent leaves it open. A disconnected host makes new connections fail until it returns.
 
 This works for localhost names and loopback addresses, including a development server that listens only on IPv6. It
 does not forward browser-login callbacks automatically. When an agent asks to open a link, its

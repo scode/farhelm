@@ -33,7 +33,7 @@ test("header restart and replace refresh the sidebar under build skew", async ({
     await expect(sourceRow.locator(".status-badge")).toHaveClass(/\bexited\b/);
     await sourceRow.locator(".session-row-open").click();
     await waitForSessionRevealed(page, source.id);
-    await expect(page.locator(".titlebar .status-badge")).toHaveClass(/\bexited\b/);
+    await expect(page.locator(".session-details .status-badge")).toHaveClass(/\bexited\b/);
     const beforeRestart = agentAttachments;
     await page.locator(".restart-primary").click();
     await expect.poll(() => agentAttachments, { timeout: 20_000 }).toBeGreaterThan(beforeRestart);

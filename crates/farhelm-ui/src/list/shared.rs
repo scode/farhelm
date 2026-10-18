@@ -1,11 +1,15 @@
 //! Shared session-list state and host-selection rules.
 //!
 //! These types keep the view, row, and create form on one representation of
-//! row state and host identity.
+//! row state and host identity. The open session reuses the host presentation
+//! components so its host name and locality mark follow the sidebar's rules.
 
 use crate::activity::ActivityStamp;
 use crate::hosts::{gui_host_name, host_incarnation, is_connected, phase_display_label};
+use crate::icons::{HostMark, LocalHostIcon};
 use crate::{Host, HostId, Session, SessionStatus};
+use dioxus::prelude::*;
+use farhelm_proto::host_appearance::{HostColor, HostIcon};
 
 /// The subset of `Session` `view::ListView`'s `on_delete` actually needs:
 /// the id the API call targets, plus `status` to decide whether this click
@@ -123,8 +127,8 @@ pub(super) struct RowState {
     pub(super) selected: bool,
     /// Whether this row's session runs on the helm's OWN machine, is on
     /// another one, or cannot yet be placed either way — which decides both
-    /// which locality glyph the title line draws (if any) and whether it
-    /// names the host at all (see [`session_locality`] for why the row
+    /// which locality glyph the title line draws (if any) and how the
+    /// host name is worded (see [`session_locality`] for why the row
     /// cannot answer this itself).
     ///
     /// Part of `RowState` rather than a prop of its own for the reason the
@@ -170,7 +174,7 @@ pub(super) struct RowState {
 ///
 /// A third state alongside `Local`/`Remote` is not an implementation detail
 /// of the boolean this type replaced — it is load-bearing for the sidebar's
-/// icon (`icons::LocalHostIcon`/`RemoteHostIcon`). The old boolean could
+/// icon (`icons::LocalHostIcon`/`HostMark`). The old boolean could
 /// already draw a LOCAL glyph safely whenever it answered true — a
 /// confirmed match against the registry's local row is exactly the
 /// evidence that claim needs. What it could not do was draw a REMOTE
@@ -183,7 +187,7 @@ pub(super) struct RowState {
 /// never suppress a host name it already has in the meantime (see
 /// [`session_locality`] below).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum HostLocality {
+pub(crate) enum HostLocality {
     /// The session's host id matches the registry's local row.
     Local,
     /// Both ids are known and unequal — the session's host is confirmed to
@@ -198,7 +202,7 @@ pub(super) enum HostLocality {
 /// The row itself cannot answer this: a `Session` carries a host id and the
 /// helm's rendering of that host's NAME, but nothing that says which kind of
 /// registry row it is — `HostKind::Local` lives on the `Host`, which only
-/// `ListView` reads.
+/// the shared hosts read carries.
 ///
 /// Comparing ids rather than names is deliberate. The name is a DISPLAY
 /// string the helm derives for humans (`host_display_name`: the words "this
@@ -220,12 +224,9 @@ pub(super) enum HostLocality {
 /// registry actually agrees. Whether a name actually appears is a separate
 /// question the row answers on its own: a legacy row with no `host_name` at
 /// all necessarily shows none, this function's verdict notwithstanding. The
-/// visible cost, for a row that does carry a name, is a host name that
-/// disappears from the title line on a fresh page load once `/api/hosts`
-/// answers; the alternative is a row that silently claims a remote session
-/// is local while the registry is still unknown, and that one is a lie
-/// rather than a flicker.
-pub(super) fn session_locality(
+/// visible cost is an absent locality icon until the registry answers;
+/// an available host name remains visible throughout.
+pub(crate) fn session_locality(
     session_host: Option<HostId>,
     local_host: Option<HostId>,
 ) -> HostLocality {
@@ -241,6 +242,47 @@ pub(super) fn session_locality(
         // be read as Remote just because the equality check above did not
         // match.
         _ => HostLocality::Unknown,
+    }
+}
+
+/// Draw the same registry-confirmed host mark wherever a session is named.
+///
+/// Unknown locality draws nothing: a session's host name cannot establish
+/// which machine is local. The caller owns the surrounding layout slot, so
+/// the sidebar can keep its icon separate from the host's second-line label.
+#[component]
+pub(crate) fn SessionHostIcon(locality: HostLocality, icon: HostIcon, color: HostColor) -> Element {
+    match locality {
+        HostLocality::Local => rsx! {
+            LocalHostIcon {}
+            span { class: "visually-hidden", "local" }
+        },
+        HostLocality::Remote => rsx! {
+            HostMark { icon, color }
+            span { class: "visually-hidden", "remote" }
+        },
+        HostLocality::Unknown => rsx! {},
+    }
+}
+
+/// Show a session's own host name with the GUI's local wording and peer isolation.
+///
+/// Pass the raw name carried by the session, not the registry's current name.
+/// Only confirmed local sessions earn the local wording; unknown locality
+/// still shows an available name. Callers omit this component when the legacy
+/// session has no host name at all rather than inventing one.
+#[component]
+pub(crate) fn SessionHostName(name: String, locality: HostLocality) -> Element {
+    // gui_host_name escapes peer controls itself; only its fixed local label
+    // bypasses that path. Keep text and tooltip on the same escaped value.
+    let shown_name = gui_host_name(&name, locality == HostLocality::Local);
+    rsx! {
+        span {
+            class: "session-host peer-value",
+            dir: "ltr",
+            "data-tooltip": "{shown_name}",
+            "{shown_name}"
+        }
     }
 }
 
