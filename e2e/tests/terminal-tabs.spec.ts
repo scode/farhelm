@@ -2243,7 +2243,13 @@ test("a tab opened and closed before any poll observes it does not come back", a
   } finally {
     releaseDetail();
     releaseLaterDetail();
-    if (id) await cleanupSession(request, id);
+    try {
+      // The page may start another detail read during teardown. Let its
+      // intercepted reads finish before deleting the session they fetch.
+      await page.unrouteAll({ behavior: "wait" });
+    } finally {
+      if (id) await cleanupSession(request, id);
+    }
   }
 });
 
