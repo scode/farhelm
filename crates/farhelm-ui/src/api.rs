@@ -4234,16 +4234,44 @@ pub(crate) async fn update_host(
     })
 }
 
+/// A planning refusal keeps the helm's prose and its separately trusted
+/// Remove remedy. Transport and reply failures have no remedy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UninstallPlanError {
+    pub(crate) reason: String,
+    pub(crate) remove_instead: bool,
+}
+
 /// Freeze an UNINSTALL plan without changing the host.
-pub(crate) async fn plan_host_uninstall(base: &str, host: HostId) -> Result<UninstallPlan, String> {
+pub(crate) async fn plan_host_uninstall(
+    base: &str,
+    host: HostId,
+) -> Result<UninstallPlan, UninstallPlanError> {
     let url = format!("{base}/api/hosts/{host}/uninstall");
-    let resp = send(client().post(&url)).await?;
+    let resp = send(client().post(&url))
+        .await
+        .map_err(|reason| UninstallPlanError {
+            reason,
+            remove_instead: false,
+        })?;
     if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
+        let remove_instead = resp
+            .headers()
+            .get(farhelm_proto::http::UNINSTALL_REMEDY_HEADER)
+            .is_some_and(|value| value == farhelm_proto::http::UNINSTALL_REMEDY_REMOVE);
+        return Err(UninstallPlanError {
+            reason: refusal_text("POST", &url, resp).await,
+            remove_instead,
+        });
     }
-    resp.json::<UninstallPlan>().await.map_err(|error| {
-        format!("the helm planned the uninstall, but its reply could not be read: {error}")
-    })
+    resp.json::<UninstallPlan>()
+        .await
+        .map_err(|error| UninstallPlanError {
+            reason: format!(
+                "the helm planned the uninstall, but its reply could not be read: {error}"
+            ),
+            remove_instead: false,
+        })
 }
 
 /// Consume the one-use plan returned by [`plan_host_uninstall`].

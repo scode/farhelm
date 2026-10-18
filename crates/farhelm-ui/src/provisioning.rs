@@ -66,6 +66,7 @@ use crate::api::{
 };
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::settings_dialog;
+use crate::hosts::{HostRefusal, HostRefusalAction, HostRefusalEntry};
 use crate::list::SharedPreferences;
 use crate::ops::{OpGuard, OpLock, ReadGate};
 use crate::peer::{DetailPart, PeerBlock, PeerLine, display_peer};
@@ -825,6 +826,74 @@ enum Preparation {
     Unvalidated(String),
 }
 
+/// The planning route's displayable failure and its trusted Remove remedy.
+/// Only uninstall's typed response can set the remedy; other planning errors
+/// carry prose alone, whether they came from the helm or from transport.
+struct PreparationError {
+    reason: String,
+    remove_instead: bool,
+}
+
+impl From<String> for PreparationError {
+    fn from(reason: String) -> Self {
+        Self {
+            reason,
+            remove_instead: false,
+        }
+    }
+}
+
+impl From<crate::api::UninstallPlanError> for PreparationError {
+    fn from(error: crate::api::UninstallPlanError) -> Self {
+        Self {
+            reason: error.reason,
+            remove_instead: error.remove_instead,
+        }
+    }
+}
+
+/// Turn a failed explicit plan into the modal outcome for that action.
+/// The local setup handoff is a state and stays in the row; no local Update
+/// or uninstall plan can be offered.
+fn planning_refusal(operation: ProvisioningOperation, error: PreparationError) -> HostRefusal {
+    let action = match operation {
+        ProvisioningOperation::Add => HostRefusalAction::Setup,
+        ProvisioningOperation::Update => HostRefusalAction::Update,
+        ProvisioningOperation::Uninstall => HostRefusalAction::Uninstall,
+    };
+    HostRefusal {
+        action,
+        reason: error.reason,
+        remove_instead: error.remove_instead,
+    }
+}
+
+/// A definite refusal of confirmed remote setup or uninstall reopens a
+/// dialog. An ambiguous reply may have started a run and remains in the row;
+/// one-click Update submission outcomes keep their row semantics too.
+fn confirmed_submission_refusal(
+    plan: &PendingPlan,
+    error: &SubmissionError,
+) -> Option<HostRefusal> {
+    let SubmissionError::Refused(reason) = error else {
+        return None;
+    };
+    if plan.operation == ProvisioningOperation::Update
+        || (plan.operation == ProvisioningOperation::Add && plan.binding.kind.sets_up_locally())
+    {
+        return None;
+    }
+    Some(HostRefusal {
+        action: if plan.operation == ProvisioningOperation::Uninstall {
+            HostRefusalAction::Uninstall
+        } else {
+            HostRefusalAction::Setup
+        },
+        reason: reason.clone(),
+        remove_instead: false,
+    })
+}
+
 /// Show the helm's ordered actions without reconstructing their wording.
 ///
 /// Each path uses the helm's short spelling in the narrow dialog and exposes
@@ -1069,11 +1138,13 @@ pub(crate) fn UninstallConfirmation(
 }
 
 /// Prepare a fresh plan for the requested idempotent operation.
+/// Only uninstall's planning error can carry the helm's typed Remove remedy;
+/// all other errors preserve their display text without classifying status.
 async fn prepare(
     base: &str,
     host: &Host,
     operation: ProvisioningOperation,
-) -> Result<Preparation, String> {
+) -> Result<Preparation, PreparationError> {
     let binding = HostBinding::from(host);
     match operation {
         ProvisioningOperation::Update => {
@@ -1117,7 +1188,8 @@ async fn prepare(
                 HostKind::Unrecognized => {
                     return Err(
                         "this build does not recognize the host kind, so it cannot provision it"
-                            .to_string(),
+                            .to_string()
+                            .into(),
                     );
                 }
             };
@@ -1150,6 +1222,9 @@ async fn prepare(
 struct Submission<R> {
     base: String,
     host_id: HostId,
+    /// The row can disappear before a definite reply arrives, but its
+    /// refusal dialog still needs the identity the user acted on.
+    host_snapshot: Host,
     /// The submitting update intent's epoch, or `None` for an explicit ADD
     /// confirmation. Correlates the outcome with the intent it ends.
     submitted_epoch: Option<u64>,
@@ -1177,11 +1252,13 @@ struct Submission<R> {
     local_auto_retry: Signal<bool>,
     on_running: EventHandler<bool>,
     on_changed: EventHandler<()>,
-    /// Called when the helm definitively refused an UNINSTALL submission,
-    /// so the notice registered for it before the POST is withdrawn. Never
-    /// called for other operations, and not for a lost reply: that run may
-    /// have committed, and if it removes the host the notice is owed.
-    on_uninstall_refused: EventHandler<()>,
+    /// The panel owns this notice beyond the row's lifetime. A definite
+    /// uninstall refusal withdraws it even when another window removed the
+    /// row while the submission reply was in flight.
+    uninstall_notices: Signal<HashMap<HostId, UninstallNotice>>,
+    /// Definite setup-rerun and uninstall refusals reopen as modal outcomes;
+    /// Update submissions keep their existing row diagnostic.
+    refusals: Signal<HashMap<HostId, HostRefusalEntry>>,
     reread: R,
 }
 
@@ -1203,7 +1280,8 @@ fn release_outstanding(
     }
 }
 
-/// Submit one binding-checked plan exactly once, then reconcile its outcome.
+/// Submit one binding-checked plan exactly once, retaining its reply if the
+/// host row disappears before the helm answers.
 ///
 /// The caller has already validated the plan against the live binding,
 /// claimed the page token, and removed the plan from client state, so every
@@ -1220,6 +1298,8 @@ fn release_outstanding(
 /// accepted-but-unreadable body paints busy until reads say otherwise.
 /// UPDATE is host-bound instead: a wrong-host acceptance keeps a
 /// source-row protocol warning and reconciles without claiming success.
+/// The POST task outlives this row; after it resolves, only parent-owned
+/// refusal and refresh state may be touched if the row was removed.
 fn submit_plan<R>(submission: Submission<R>, plan: PendingPlan)
 where
     R: Fn(Trigger) + Clone + 'static,
@@ -1227,6 +1307,7 @@ where
     let Submission {
         base,
         host_id,
+        host_snapshot,
         submitted_epoch,
         claim,
         current_binding,
@@ -1243,10 +1324,11 @@ where
         mut local_auto_retry,
         on_running,
         on_changed,
-        on_uninstall_refused,
+        mut uninstall_notices,
+        mut refusals,
         reread,
     } = submission;
-    spawn(async move {
+    dioxus::core::spawn_forever(async move {
         let result = match plan.operation {
             ProvisioningOperation::Add => provision_host(&base, &plan.probe_id).await,
             ProvisioningOperation::Update => update_host(&base, host_id, &plan.probe_id).await,
@@ -1254,14 +1336,33 @@ where
                 uninstall_host(&base, host_id, &plan.probe_id).await
             }
         };
+        // The task survives its row so a concurrent removal cannot eat a
+        // definite reply. It also survives navigation away from the hosts
+        // panel; in that case there is no UI owner left to receive it.
+        drop(claim);
+        if refusals.try_peek().is_err() {
+            return;
+        }
         if plan.operation == ProvisioningOperation::Uninstall
             && matches!(result, Err(SubmissionError::Refused(_)))
         {
-            on_uninstall_refused.call(());
+            uninstall_notices.write().remove(&host_id);
         }
-        // Progress reads and registry reconciliation are ordinary reads;
-        // release the page token as soon as submission has an outcome.
-        drop(claim);
+        // A confirmed POST can outlive its host row (another window may
+        // remove that host while this reply is in flight). The parent owns
+        // refusals and the registry refresh; the row's signals have already
+        // been disposed, so only those parent-owned outcomes survive here.
+        if current_binding.try_peek().is_err() {
+            if let Err(error) = result
+                && let Some(refusal) = confirmed_submission_refusal(&plan, &error)
+            {
+                refusals
+                    .write()
+                    .insert(host_id, HostRefusalEntry::new(&host_snapshot, refusal));
+            }
+            on_changed.call(());
+            return;
+        }
         // Reads overlapping submission describe the pre-submission world.
         // Reject them before installing anything, then read fresh.
         read_gate.write().fence();
@@ -1369,7 +1470,13 @@ where
                         {
                             local_auto_retry.set(true);
                         }
-                        action_error.set(Some(error.into_text()));
+                        if let Some(refusal) = confirmed_submission_refusal(&plan, &error) {
+                            refusals
+                                .write()
+                                .insert(host_id, HostRefusalEntry::new(&host_snapshot, refusal));
+                        } else {
+                            action_error.set(Some(error.into_text()));
+                        }
                     }
                 }
                 reread(Trigger::Explicit);
@@ -1423,7 +1530,9 @@ async fn submit_accepted<R>(
             // feed-driven reader will publish that state. This
             // immediate read still catches a run that cannot be
             // reconciled after acceptance.
-            if let Err(error) = fetch_provisioning(base, accepted.host_id).await {
+            if let Err(error) = fetch_provisioning(base, accepted.host_id).await
+                && current_binding.try_peek().is_ok()
+            {
                 action_warning.set(Some(format!(
                     "the helm accepted run {} for host {}, but its progress could not yet be read: {}",
                     accepted.run_id, accepted.host_id, error
@@ -1972,6 +2081,9 @@ pub(crate) fn ProvisioningPanel(
     /// panel unmounts with its row and the helm keeps no result for a host
     /// it forgot.
     mut uninstall_notices: Signal<HashMap<HostId, UninstallNotice>>,
+    /// Panel-owned refusals outlive row detail disclosure and show one modal
+    /// at a time across hosts.
+    mut refusals: Signal<HashMap<HostId, HostRefusalEntry>>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let mut preferences = use_context::<SharedPreferences>();
@@ -2193,7 +2305,17 @@ pub(crate) fn ProvisioningPanel(
                     if is_local_add {
                         local_auto_retry.set(false);
                     }
-                    action_error.set(Some(reason));
+                    if is_local_add {
+                        action_error.set(Some(reason));
+                    } else {
+                        refusals.write().insert(
+                            host_id,
+                            HostRefusalEntry::new(
+                                &host,
+                                planning_refusal(operation, reason.into()),
+                            ),
+                        );
+                    }
                     if is_local_add {
                         on_reveal_details.call(());
                     }
@@ -2212,7 +2334,14 @@ pub(crate) fn ProvisioningPanel(
                     if is_local_add {
                         local_auto_retry.set(true);
                     }
-                    action_error.set(Some(error));
+                    if is_local_add {
+                        action_error.set(Some(error.reason));
+                    } else {
+                        refusals.write().insert(
+                            host_id,
+                            HostRefusalEntry::new(&host, planning_refusal(operation, error)),
+                        );
+                    }
                     if is_local_add {
                         on_reveal_details.call(());
                     }
@@ -2240,8 +2369,8 @@ pub(crate) fn ProvisioningPanel(
         // uncertainty survives: only this attempt's correlated success
         // supersedes that.
         pending.set(None);
-        // Setup/uninstall diagnostics share the Update display slots. A new
-        // Update must not hide its own result behind a previous action's error.
+        // Setup/uninstall row diagnostics can still occupy the Update display
+        // slots. A new Update must not hide its own result behind one.
         action_error.set(None);
         action_warning.set(None);
         if update_error
@@ -2313,7 +2442,13 @@ pub(crate) fn ProvisioningPanel(
                 }
                 Ok(Preparation::Manual(reason)) => {
                     intent.set(None);
-                    set_planning_diagnostic(&mut update_error, epoch_now, reason);
+                    refusals.write().insert(
+                        host_id,
+                        HostRefusalEntry::new(
+                            &host,
+                            planning_refusal(ProvisioningOperation::Update, reason.into()),
+                        ),
+                    );
                 }
                 Ok(Preparation::Unvalidated(problem)) => {
                     intent.set(None);
@@ -2321,12 +2456,17 @@ pub(crate) fn ProvisioningPanel(
                     on_changed.call(());
                 }
                 Err(error) => {
-                    // Planning failure submits nothing; the diagnostic
-                    // and the row's expansion stay behind it — unless a
-                    // sticky uncertainty from an earlier submission
-                    // outranks it (see `set_planning_diagnostic`).
+                    // Planning failure submits nothing. Its modal is separate
+                    // from any sticky uncertainty an earlier submission left
+                    // in the row.
                     intent.set(None);
-                    set_planning_diagnostic(&mut update_error, epoch_now, error);
+                    refusals.write().insert(
+                        host_id,
+                        HostRefusalEntry::new(
+                            &host,
+                            planning_refusal(ProvisioningOperation::Update, error),
+                        ),
+                    );
                 }
             }
         });
@@ -2366,6 +2506,7 @@ pub(crate) fn ProvisioningPanel(
             }
         }
     };
+    let update_submission_host = host.clone();
     use_effect(move || {
         planning();
         ops.busy();
@@ -2464,6 +2605,7 @@ pub(crate) fn ProvisioningPanel(
             Submission {
                 base: claim_base.clone(),
                 host_id,
+                host_snapshot: update_submission_host.clone(),
                 submitted_epoch: Some(epoch),
                 claim,
                 current_binding,
@@ -2480,8 +2622,8 @@ pub(crate) fn ProvisioningPanel(
                 local_auto_retry,
                 on_running,
                 on_changed,
-                // Only an UNINSTALL owes a notice; this path submits updates.
-                on_uninstall_refused: EventHandler::new(|()| {}),
+                uninstall_notices,
+                refusals,
                 reread: claim_progress.clone(),
             },
             plan,
@@ -2748,6 +2890,7 @@ pub(crate) fn ProvisioningPanel(
     let submit_base = base.clone();
     let submit_progress = request_progress.clone();
     let notice_host_name = host.name.clone();
+    let confirmed_submission_host = host.clone();
     let preference_base = base.clone();
     // `skip_future` is setup's permanent answer ("don't ask in the
     // future"), remembered only once this confirmation has consumed the plan
@@ -2806,6 +2949,7 @@ pub(crate) fn ProvisioningPanel(
             Submission {
                 base: submit_base.clone(),
                 host_id,
+                host_snapshot: confirmed_submission_host.clone(),
                 submitted_epoch: None,
                 claim,
                 current_binding,
@@ -2822,9 +2966,8 @@ pub(crate) fn ProvisioningPanel(
                 local_auto_retry,
                 on_running,
                 on_changed,
-                on_uninstall_refused: EventHandler::new(move |()| {
-                    uninstall_notices.write().remove(&host_id);
-                }),
+                uninstall_notices,
+                refusals,
                 reread: submit_progress.clone(),
             },
             plan,
@@ -3192,6 +3335,85 @@ fn operation_label(operation: Option<ProvisioningOperation>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A requested plan's failure opens the matching modal, while the
+    /// trusted Remove marker survives only uninstall planning. This pins
+    /// the client routing separately from the helm's header producer.
+    #[farhelm_testtrace::test]
+    fn planning_failures_keep_their_action_and_narrow_remedy() {
+        for (operation, action) in [
+            (ProvisioningOperation::Add, HostRefusalAction::Setup),
+            (ProvisioningOperation::Update, HostRefusalAction::Update),
+            (
+                ProvisioningOperation::Uninstall,
+                HostRefusalAction::Uninstall,
+            ),
+        ] {
+            let refusal = planning_refusal(operation, "planning failed".to_string().into());
+            assert_eq!(refusal.action, action);
+            assert_eq!(refusal.reason, "planning failed");
+            assert!(!refusal.remove_instead);
+        }
+        let typed = crate::api::UninstallPlanError {
+            reason: "remove it from the list".into(),
+            remove_instead: true,
+        };
+        let refusal = planning_refusal(ProvisioningOperation::Uninstall, typed.into());
+        assert!(refusal.remove_instead);
+    }
+
+    /// A confirmed plan closes before its POST. Only a definite remote
+    /// refusal reopens the question; lost replies and local handoffs must
+    /// remain with their existing row outcome paths.
+    #[farhelm_testtrace::test]
+    fn confirmed_submission_routing_separates_refusals_from_uncertainty() {
+        let plan = |operation, kind| PendingPlan {
+            operation,
+            binding: HostBinding {
+                id: 1,
+                kind,
+                destination: None,
+                identity: None,
+                remote_farhelm: None,
+                remote_state_dir: None,
+                incarnation: 0,
+            },
+            probe_id: "one-use".into(),
+            confirmation: String::new(),
+            steps: None,
+            kept_state_dir: None,
+        };
+        let refused = SubmissionError::Refused("expired plan".into());
+        let ambiguous = SubmissionError::Ambiguous("lost reply".into());
+        for (operation, expected) in [
+            (ProvisioningOperation::Add, HostRefusalAction::Setup),
+            (
+                ProvisioningOperation::Uninstall,
+                HostRefusalAction::Uninstall,
+            ),
+        ] {
+            let remote = plan(operation, HostKind::Ssh);
+            let shown = confirmed_submission_refusal(&remote, &refused).unwrap();
+            assert_eq!(shown.action, expected);
+            assert_eq!(shown.reason, "expired plan");
+            assert!(!shown.remove_instead);
+            assert!(confirmed_submission_refusal(&remote, &ambiguous).is_none());
+        }
+        assert!(
+            confirmed_submission_refusal(
+                &plan(ProvisioningOperation::Add, HostKind::Local),
+                &refused
+            )
+            .is_none()
+        );
+        assert!(
+            confirmed_submission_refusal(
+                &plan(ProvisioningOperation::Update, HostKind::Ssh),
+                &refused
+            )
+            .is_none()
+        );
+    }
 
     /// Updates keep their own row busy without excluding Settings elsewhere.
     /// ADD/Uninstall preparation and pending plans still exclude other dialogs,

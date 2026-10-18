@@ -3791,7 +3791,10 @@ mod tests {
     /// than a transport failure or an internal error.
     fn refusal_text(error: anyhow::Error) -> String {
         match error.downcast_ref::<ProvisioningRequestError>() {
-            Some(ProvisioningRequestError::Refused(text)) => text.clone(),
+            Some(
+                ProvisioningRequestError::Refused(text)
+                | ProvisioningRequestError::RemoveInstead(text),
+            ) => text.clone(),
             _ => panic!("expected a provisioning refusal, got {error:#}"),
         }
     }
@@ -4168,14 +4171,24 @@ mod tests {
             .unwrap()
             .insert(lib.join("farhelm"), target.join("farhelm"));
 
-        let linked = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        let linked_error = service.plan_uninstall(host).await.unwrap_err();
+        assert!(matches!(
+            linked_error.downcast_ref::<ProvisioningRequestError>(),
+            Some(ProvisioningRequestError::RemoveInstead(_))
+        ));
+        let linked = refusal_text(linked_error);
         assert!(linked.contains(&lib.display().to_string()), "{linked}");
         assert!(linked.contains(&target.display().to_string()), "{linked}");
         assert!(linked.contains("does not run on this layout"), "{linked}");
         assert!(linked.contains("remove it from the list"), "{linked}");
 
         backend.symlinks.lock().unwrap().insert(lib.clone(), None);
-        let dangling = refusal_text(service.plan_uninstall(host).await.unwrap_err());
+        let dangling_error = service.plan_uninstall(host).await.unwrap_err();
+        assert!(matches!(
+            dangling_error.downcast_ref::<ProvisioningRequestError>(),
+            Some(ProvisioningRequestError::RemoveInstead(_))
+        ));
+        let dangling = refusal_text(dangling_error);
         assert!(dangling.contains("cannot resolve"), "{dangling}");
         assert!(!dangling.contains("cannot tell where"), "{dangling}");
         assert!(dangling.contains("remove it from the list"), "{dangling}");

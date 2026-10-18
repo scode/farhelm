@@ -5,7 +5,7 @@ use super::plan::{PlanStepPath, PlanSteps, ProvisioningOperation, ProvisioningPl
 use crate::store::HostId;
 use crate::{AppState, http_error};
 use axum::extract::{Path as AxPath, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -19,6 +19,10 @@ pub(super) enum ProvisioningRequestError {
     /// supplied handoff or manual-install instruction.
     #[error("{0}")]
     Refused(String),
+    /// Uninstall cannot safely remove the installation, but forgetting the
+    /// host leaves it untouched and is an available remedy.
+    #[error("{0}")]
+    RemoveInstead(String),
     #[error("the provisioning plan is unknown or has already been used; probe again")]
     UnknownPlan,
     #[error("host {0} already has a provisioning operation in flight")]
@@ -255,6 +259,8 @@ pub(crate) async fn provisioning_state(
 }
 
 /// Map provisioning's own typed refusals without parsing their diagnostics.
+/// Only the Remove remedy carries a machine-readable header: the response
+/// body can include remote text and is never authority for a UI action.
 fn provisioning_error(error: anyhow::Error) -> Response {
     if error.is::<BackendFailure>() {
         return (StatusCode::BAD_GATEWAY, format!("{error:#}")).into_response();
@@ -263,10 +269,50 @@ fn provisioning_error(error: anyhow::Error) -> Response {
         let status = match request {
             ProvisioningRequestError::InvalidProbe(_) => StatusCode::BAD_REQUEST,
             ProvisioningRequestError::Refused(_)
+            | ProvisioningRequestError::RemoveInstead(_)
             | ProvisioningRequestError::UnknownPlan
             | ProvisioningRequestError::Busy(_) => StatusCode::CONFLICT,
         };
-        return (status, format!("{error:#}")).into_response();
+        let mut response = (status, format!("{error:#}")).into_response();
+        if matches!(request, ProvisioningRequestError::RemoveInstead(_)) {
+            response.headers_mut().insert(
+                farhelm_proto::http::UNINSTALL_REMEDY_HEADER,
+                HeaderValue::from_static(farhelm_proto::http::UNINSTALL_REMEDY_REMOVE),
+            );
+        }
+        return response;
     }
     http_error(error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Remove action is offered only for the helm's typed remedy, so a
+    /// remote diagnostic that happens to mention Remove cannot alter the UI.
+    #[test]
+    fn only_typed_uninstall_remedy_sets_the_remove_header() {
+        let remove = provisioning_error(anyhow::Error::new(
+            ProvisioningRequestError::RemoveInstead("remove this host".into()),
+        ));
+        assert_eq!(remove.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            remove
+                .headers()
+                .get(farhelm_proto::http::UNINSTALL_REMEDY_HEADER),
+            Some(&HeaderValue::from_static(
+                farhelm_proto::http::UNINSTALL_REMEDY_REMOVE
+            ))
+        );
+        let plain = provisioning_error(anyhow::Error::new(ProvisioningRequestError::Refused(
+            "remove this host".into(),
+        )));
+        assert_eq!(plain.status(), StatusCode::CONFLICT);
+        assert!(
+            !plain
+                .headers()
+                .contains_key(farhelm_proto::http::UNINSTALL_REMEDY_HEADER)
+        );
+    }
 }
