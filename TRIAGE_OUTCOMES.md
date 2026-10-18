@@ -15813,3 +15813,295 @@
   explicitly empty message is legal" is replaced by the refusal; the CLI test that pins `--prompt ""` as legal expects a
   refusal; a supervisor test covers the refusal. Remove the feedback file and its index entry.
 - Execution: `pending`.
+
+## create-reply-foreign-id-bypasses-cache-refusal.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (9ba6b0e9); nothing was run. Session IDs are fleet-wide keys and
+  ownership is first claim wins; the helm refuses a Create reply naming another host's session only when it saves the
+  new row to its database (`store.rs` around 6776–6784). Two paths skip that check: a host that reports no installation
+  identity, whose new session is kept in memory with no owner check (`manager.rs` around 2034–2118), and a host that
+  answers and then disconnects, where the save fails its same-connection check, is only logged, and the create still
+  reports success (`client.rs` around 1822–1824, `manager.rs` around 2006–2012, `sessions.rs` around 1428–1434). Clone
+  and interrupted-create follow-up finish through the same step. The create then opens, or sends input to, the other
+  host's session once the claim stops being contested.
+- Decision: on 2026-10-18, answering a grouped question about a dishonest host reusing another host's session IDs, the
+  user chose to fix this half in code and accept the waiting-approval half in the spec. They asked why session IDs are
+  not rejected per connection unless they belong to that host; the session's answer was that this fix is exactly that
+  rule applied to creates, while the helm can only know which IDs belong to a host from the host itself, so the rule
+  cannot cover a host whose remembered sessions were cleared (see `pending-approval-can-cross-host-entries.md`). The
+  waiting-approval half is not recorded yet: after that answer the user was offered a cheaper code fix (each card and
+  GUI destructive confirmation remembers its host) to weigh against the spec acceptance.
+- Completion criteria: the final step of accepting a create (create, clone and interrupted-create follow-up) refuses a
+  reply whose session ID a different host owns in the database or holds in memory, whatever happened to the save, with
+  the existing conflict error and an immediate refresh of the creating host; the in-memory path also refuses to record
+  an ID the database gives to another host. Simulated-host tests cover the no-identity and answer-then-disconnect cases.
+  SPEC_impl.md says the refusal holds whichever storage path is used. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## tunnel-error-notice-obscures-link-disclosure.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (9ba6b0e9). The click-time covered-hover check counts only approval
+  cards as covering (`terminal.js` around 3591–3600, `terminal-files.js` around 12–21 and 365–371); file links, web
+  hyperlinks, plain URLs showing the tunnel hint and Cmd-click tunnel opens all share it. The desktop-only tunnel-error
+  notice persists until Dismiss, sits at layer 1100 above hovers (layer 40), and has no height cap, so a retried
+  Cmd-click after a failed tunnel open can proceed with its hover partly hidden. SPEC.md already says a hover counts
+  only when "not covered by another Farhelm surface". #2254's report calls the notice short-lived, which is wrong.
+- Decision: on 2026-10-18, answering a grouped question about Farhelm surfaces covering or taking focus from guards, the
+  user chose to fix this one (and the focus steal) and accept the refusal banner overlapping a card.
+- Completion criteria: the covered-hover check also treats the tunnel-error notice as covering, for file and web links
+  alike; the refusal text no longer claims the cover is an approval request; browser tests on Chromium and WebKit inject
+  a notice over a web-link hover and a file hover and expect refusal with nothing opened. SPEC.md may name the notice
+  beside "such as an approval card", and SPEC_impl.md may list the covering surfaces. Also in scope, added by the user
+  on 2026-10-18 ("sure fix with complexity gate"): the notice must not hide the refusal explanation itself (raise the
+  explanation above the notice, or cap and lower the notice); if that part is not cheap, leave it out and say so. Remove
+  the feedback file and its index entry.
+- Execution: `pending`.
+
+## refusal-banner-hides-approval-context.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by reading current main (9ba6b0e9); the geometry was not rendered. The raised link-refusal
+  explanation (layer 46) sits above approval cards (layer 45) at the top of the terminal, opaque and up to 4.5em tall,
+  while cards start 12px below the terminal's top, so with both showing it covers the card's top: its heading and, when
+  the text wraps, the requesting session and host. Keyboard approval still works meanwhile. The explanation withdraws
+  when the pointer leaves the link. #2254's report calls this the expected trade-off; no spec text accepts it.
+- Decision: on 2026-10-18 the user chose to accept the overlap in the spec.
+- Completion criteria: SPEC.md, after the file-link refusal sentence ("otherwise the click is refused with a visible
+  explanation…"), states that while the pointer stays on a refused link its explanation may cover the top of an approval
+  card, including the heading and the requesting session and host, that the card stays answerable from the keyboard
+  meanwhile, and that the cover ends when the pointer leaves the link. No code change. Remove the feedback file and its
+  index entry.
+- Execution: `pending`.
+
+## terminal-recovery-steals-confirmation-focus.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (9ba6b0e9). The "something else owns the keyboard" check (`terminal.js`
+  around 1114–1121) covers modal dialogs, approval cards, the sidebar separator, the notification list and menus, but
+  not the session header's Restart, Replace and Delete questions (non-modal `.header-confirm` panels). Replay finishing,
+  the host coming back, and the selected tab disappearing all hand focus to the terminal through that check, so Enter
+  meant for an open question can go to the terminal and submit what is waiting there. SPEC.md has confirmations own
+  keyboard focus and SPEC_impl.md says recovery preserves deliberate focus in other keyboard owners.
+- Decision: on 2026-10-18 the user chose to fix the focus steal (same grouped question as the tunnel notice).
+- Completion criteria: automatic recovery, availability recovery and tab fallback do not take focus from an open header
+  Restart, Replace or Delete question (the keyboard-owner check includes those panels); Escape still returns focus to
+  the terminal. Browser tests cover a replay released and a selected tab closed while a question is focused.
+  SPEC_impl.md says these paths yield to an open header question. Also in scope, added by the user on 2026-10-18: the
+  same guard for the sidebar row's Delete and Replace questions, the interrupted-session card's Replace and tab close
+  (for example through a shared keyboard-owner marker). Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## queued-launch-can-change-template.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (9ba6b0e9). The armed quick-launch sequence's pill names templates from
+  this window's saved shortcut settings, but the queue stores only key and ⚡ references and Enter resolves them against
+  a fresh read, so the pill can show template A while Enter launches B, possibly on another host or folder. Sequences
+  have no timeout. The one-GUI rule covers a second GUI changing the binding, but an agent can also move a number key or
+  the ⚡ mark through `farhelm agent template edit`, which SPEC.md says must behave correctly alongside a GUI. The
+  in-flight `repeat-quick-launch` plan does not touch the queue.
+- Decision: on 2026-10-18 the user said this "IS covered the the rule, but again if it's cheap lets fix", choosing the
+  cheap fix with a complexity gate.
+- Completion criteria: at Enter, bound references become by-name references using the snapshot the pill showed, so the
+  launch uses the templates shown (a renamed or deleted template still refuses), with a unit test and the module doc and
+  SPEC_impl.md sentences that say references resolve from a fresh read corrected. Complexity gate: if this is not a
+  small, localized change of about an hour or two, discard instead. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## download-opens-without-hover-hint.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (9ba6b0e9). The hover offers "⌘-click to open" only when the file check
+  says it can open, but the click opens on the modifier alone (`terminal-files.js` around 470), and the helm checks the
+  current opening policy only after saving. If another window adds the type between hover and click, the file opens
+  although the hover offered only a download. A JS test pins the current behavior deliberately. Only the desktop
+  Settings dialog writes the opening policy, so the trigger is always a second GUI, which the one-GUI rule covers.
+- Decision: on 2026-10-18 the user said this is covered by the rule but chose the cheap fix with a complexity gate.
+- Completion criteria: a modified click requests opening only when the hover offered opening; otherwise it saves the
+  file and notes that opening was not offered. JS tests updated, including the one pinning today's behavior, and one
+  SPEC_impl.md sentence. Complexity gate: if not a small, localized change, discard instead. Remove the feedback file
+  and its index entry.
+- Execution: `pending`.
+
+## payload-workers-outlive-state-lock.md
+
+- Outcome: `other`.
+- Assessment: the lock gap still applies on current main (9ba6b0e9): serving returns and the helm's state-directory lock
+  drops without draining blocking payload work (`lib.rs` around 2123–2133), while the payload cache assumes no second
+  writer. The trigger is exceptional (realistically a desktop startup failing after the embedded helm is ready, during
+  provisioning, plus a second helm claiming the state directory first). A static read lowers the damage claim:
+  extraction and the tmux copy write randomly named temp files renamed into place, the cache is per release version, and
+  the only byte-mixing writer, the async download, is cancelled at runtime shutdown; the likely worst case is a safe
+  failure or a re-download. Not reproduced.
+- Decision: on 2026-10-18 the user kept the 2026-10-11 rule (discard rare-trigger findings without shown damage unless
+  super cheap) but asked for this one, being close to lasting damage, to be reproduced first.
+- Completion criteria: run a focused reproduction in an isolated workspace through the test recorder (scratch-only pause
+  hooks, never committed): first confirm a successor can claim the state directory while old extraction work is parked;
+  then park an old payload source after staging, after hashing, and after writing its checksum marker, let a new source
+  finish, release the old one, and check whether a later lookup counts bytes that differ from the signed archive member
+  as a cache hit. Bring the evidence back to the user for a decision; record the result here. The feedback item stays
+  until that decision is executed.
+- Execution: `pending`.
+
+## cancelled-startup-loses-archive-location.md
+
+- Outcome: `other`.
+- Assessment: still applies on current main (9ba6b0e9). A cancelled supervisor startup leaves archive recovery running
+  as blocking work with no ownership (`store.rs` around 3318–3338), and the journal update is guarded only by row state
+  (`working_copies.rs` around 1739–1749); in the trash-name collision branch an old worker can point the record at a
+  fresh name and then fail its rename, leaving the record naming a nonexistent folder while the files stay in the trash
+  unlisted. The trigger stacks a crash mid-Delete, an existing folder at the archive name, a cancelled startup and a
+  successor finishing recovery inside a microsecond window that only a stalled filesystem widens. SPEC.md's 2026-10-10
+  lifecycle acceptance matches the trigger's shape but rules out "similar lasting damage", so it does not cover this
+  wrong durable record. No file loss. Not reproduced.
+- Decision: on 2026-10-18 the user kept the 2026-10-11 rule but asked for this one to be reproduced first.
+- Completion criteria: run a focused reproduction in an isolated workspace through the test recorder (scratch-only
+  hooks): first show that a cancelled startup releases ownership while recovery is parked and a second supervisor can
+  claim the state directory; then drive the collision interleaving with a hook before re-journaling and check whether
+  the moved folder exists on disk while the trash listing omits it and no record names it. Report the evidence,
+  including that the window is artificial on healthy storage, to the user for a decision; record the result here. The
+  feedback item stays until that decision is executed.
+- Execution: `pending`.
+
+## orphan-git-outlives-cache-lock.md
+
+- Outcome: `discard`.
+- Assessment: still applies on current main (9ba6b0e9): the launch shim holds the repository-cache lock on a
+  close-on-exec descriptor, and its Git children are not tied to its death, so killing only the shim's own PID can leave
+  Git using the cache after the lock is released. Closing the pane, Ctrl-C, Stop and Delete reach the whole process
+  group. Git's own lockfiles make overlapping fetches fail visibly, and a checkout that completed `--dissociate` no
+  longer depends on the cache. Damage not shown. The killed-preparation filter covers only the orphan's own checkout.
+- Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: `pending`.
+
+## restart-abort-admits-old-child-report.md
+
+- Outcome: `discard`.
+- Assessment: still applies on current main (9ba6b0e9): a relaunch clears the Codex conversation pin and an aborted
+  relaunch restores the pane but not the pin, so a hook-enabled nested Codex report landing in that window can become
+  the Resume target, with no surviving ancestor to correct it. Needs that report in the drain window plus a definitive
+  failure before the agent starts. Not reproduced. SPEC.md's nested-Codex rules accept first-report selection only where
+  a later ancestor report corrects it.
+- Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: `pending`.
+
+## capture-marker-collision-misframes-replay.md
+
+- Outcome: `discard`.
+- Assessment: still applies on current main (9ba6b0e9) in the tmux control-mode reply parser. A collision needs pane
+  text matching the exact marker of the command in flight (timestamp, command counter, flags), in practice deliberate
+  construction from the same account, which the local-authority rule covers. A lone collision fails the attach; a
+  multi-block one truncates replay until the next attach; captured text can reach diagnostics only the same account can
+  read.
+- Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: `pending`.
+
+## initial-launch-retains-uncanonicalized-path.md
+
+- Outcome: `discard`.
+- Assessment: still applies on current main (9ba6b0e9): initial create records the canonical path but passes the
+  caller's spelling to tmux, so an accidental symlink retarget in the milliseconds between resolving and starting can
+  start the agent elsewhere. The deliberate case is already accepted. No accidental trigger or harm shown.
+- Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: `pending`.
+
+## tunnel-never-pins-learned-identity.md
+
+- Outcome: `discard`.
+- Assessment: still applies on current main (9ba6b0e9) in the helm's tunnel routing, but needs a supervisor that reports
+  no installation identity, which only a construction without the state-directory claim does (older builds are refused
+  by the protocol version gate), plus a replacement installation advertising the same session ID. No shipped trigger.
+- Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: no reachable trigger, discard.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: `pending`.
+
+## installation-colon-splits-session-path.md
+
+- Outcome: `fix spec+code`.
+- Assessment: still applies on current main (9ba6b0e9): sessions get the Farhelm program's folder joined onto PATH with
+  `:`, so a colon in that folder splits it into unintended entries, one possibly relative to the checkout. The practical
+  trigger is a Mac folder named with `/` in Finder, which is `:` in the POSIX path. The supervisor already refuses
+  non-UTF-8 program paths at startup but not colons; Linux unit writing refuses colons separately. Command hijack not
+  shown.
+- Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group, with the colon getting a cheap refusal if
+  it really is that cheap; the check found it is (about 15 lines plus a test).
+- Completion criteria: supervisor startup refuses, before creating anything, when the folder sessions get on PATH
+  contains `:`, with a message naming the folder; the desktop app shows that clearly instead of a bare child exit; a
+  test modeled on the non-UTF-8 startup refusal; SPEC.md "Supported user environments" gains a sentence beside the `$`
+  refusal. Complexity gate: if it is not that small, discard instead. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## header-copy-warning-follows-refreshed-value.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (9ba6b0e9): the session header's copy buttons store only the click
+  number and compute the hidden-character warning at render time from the current folder or command, so a refresh or
+  Restart with inside the 1.5-second feedback window shows the warning for the new value rather than the copied bytes.
+- Decision: on 2026-10-18 the user said these are aids, not safeguards, "but again still lets fix with complexity gate".
+- Completion criteria: the warning is computed at click time from the copied value and kept with the feedback state,
+  with a test showing it survives a change of the shown value. Complexity gate: if not cheap, discard instead. Remove
+  the feedback file and its index entry.
+- Execution: `pending`.
+
+## session-accessible-names-use-raw-titles.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (9ba6b0e9): the session row builds its menu toggle and its Delete,
+  Replace and rename prompts' accessible names from the raw title (`list/row.rs` around 213 and 1116–1120), while the
+  bell, host menu and Restart-with dialog escape first. SPEC.md's 2026-10-10 rule (host-supplied text is escaped
+  "wherever it appears") covers accessible names; the earlier ledger exclusion under `titles-raw-in-confirm-prompts.md`
+  ("accessibility labels are out of scope") predates it and is superseded by this decision.
+- Decision: on 2026-10-18 the user said these are aids, not safeguards, but chose the cheap fix with a complexity gate.
+- Completion criteria: escape the title before shortening it in those four names, with a unit test using a direction
+  override and a zero-width space. SPEC.md may say "including accessible names" in the escaping rule. Complexity gate:
+  if not cheap, discard instead. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## approval-session-id-display-collision.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (9ba6b0e9): approval cards render session IDs as ordinary values
+  (`approvals.rs` around 1150), which leave literal `<U+…>` text and spaces alone, so a dishonest host can make two IDs
+  look identical; installation IDs already get the stricter identity rendering. The card also shows title and host, and
+  the action goes to the exact ID. SPEC.md says compared identity labels never look alike.
+- Decision: on 2026-10-18 the user said these are aids, not safeguards, but chose the cheap fix with a complexity gate.
+- Completion criteria: session IDs on approval cards use the identity rendering (keeping the shortened labels), with a
+  test that two IDs colliding today render differently while the action still sends the raw ID. Complexity gate: if not
+  cheap, discard instead. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## agent-approval-omits-workspace-trust.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (9ba6b0e9): #2256 removed the plain-language workspace-trust line from
+  agent launch cards when trust moved to per-agent Settings switches; the card still receives the normalized launch, but
+  shows trust only as a flag in the command. Claude's trust is an edit to its own settings during checkout preparation,
+  not part of the launch, so the card has no field for it.
+- Decision: on 2026-10-18 the user said these are aids, not safeguards, but chose the cheap fix with a complexity gate.
+- Completion criteria: agent launch and Restart cards for Codex, Muse and Pi show a plain line when the launch carries
+  trust (trusted by Settings in a managed checkout, so the repository's hooks, settings and commands can run without
+  asking) or a stored "not trusted"; no line when unset; unit tests. Claude is out of scope. SPEC.md may add trust to
+  what a launch card shows. Complexity gate: if not cheap, discard instead. Remove the feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## tunnel-port-can-divert-local-traffic.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading current main (9ba6b0e9): a localhost tunnel first listens on the remote URL's own
+  port on the Mac and falls back only if that fails, and the one-time consent warning does not mention ports. The
+  warning is helm-wide, not per tunnel, so it cannot name a port; the per-tunnel port already shows in the hover and the
+  tunnel strip. Unverified: whether address reuse on macOS lets a tunnel take 127.0.0.1:port while another program holds
+  the same port on all addresses.
+- Decision: on 2026-10-18 the user said these are aids, not safeguards, but chose the cheap fix with a complexity gate.
+- Completion criteria: the consent warning gains a general sentence that a tunnel uses the remote service's port number
+  on the Mac when free, so a Mac program expecting that port may reach the remote host instead; SPEC.md's list of what
+  the warning explains and the docs page that repeats the warning say the same; edit the tunnel feature's existing
+  changelog fragment if it is unreleased. Remove the feedback file and its index entry.
+- Execution: `pending`.
