@@ -15,6 +15,8 @@
 //! preferences: each explicitly saves validated text and shows its outcome.
 //! Ntfy alerts follow that explicit-save contract too, with a secret that is
 //! never part of the shared client snapshot or replayed preference writes.
+//! Terminal frame coloring is a helm preference too: an open session sees the
+//! new choice through the shared signal, while other clients reload to get it.
 //! Native tunnel consent also requires an acknowledged save; its controller
 //! owns the shared warning and revokes listeners when the switch turns off.
 
@@ -73,6 +75,7 @@ pub(crate) fn SettingsDialog(
     let setup_base = base.clone();
     let session_base = base.clone();
     let naming_base = base.clone();
+    let frame_base = base.clone();
     let mut preferences = use_context::<SharedPreferences>();
     let setup = preferences.0.read().skip_host_setup_confirmation == Some(true);
     let remove = preferences.0.read().skip_host_remove_confirmation == Some(true);
@@ -80,6 +83,7 @@ pub(crate) fn SettingsDialog(
     // The positive naming preference defaults on for upgraded helms too;
     // treating an absent value like the confirmation opt-outs would disable it.
     let name_quick_launches = preferences.0.read().name_session_on_quick_launch != Some(false);
+    let color_frames = preferences.0.read().color_terminal_frames == Some(true);
     // Superseded writes also report false. Only the latest click may explain
     // its failure, including when an intervening click opted out again.
     let mut session_generation = use_signal(|| 0_u64);
@@ -199,6 +203,25 @@ pub(crate) fn SettingsDialog(
                         }
                         p { id: "quick-launch-naming-help", class: "host-settings-help",
                             "Offer to name a quick-launched session while its agent starts. Enter keeps its default name. This choice applies to this helm; other open clients pick it up when they reload."
+                        }
+                        label {
+                            class: "app-settings-choice",
+                            "data-tooltip": "color each terminal's frame to match its host icon",
+                            span { "color terminal frames by host" }
+                            input {
+                                r#type: "checkbox",
+                                class: "host-settings-switch",
+                                checked: color_frames,
+                                aria_describedby: "terminal-frame-color-help",
+                                onchange: move |event| {
+                                    let color = event.checked();
+                                    preferences.0.write().color_terminal_frames = Some(color);
+                                    store_preference(&frame_base, PreferenceValue::ColorTerminalFrames(color));
+                                },
+                            }
+                        }
+                        p { id: "terminal-frame-color-help", class: "host-settings-help",
+                            "Match the thin frame around every session's terminal to its host icon color. The terminal background stays the same. This choice applies to this helm; other open clients pick it up when they reload."
                         }
                     }
                     section { class: "host-settings-section", aria_label: "hosts",

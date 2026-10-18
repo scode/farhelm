@@ -181,18 +181,18 @@ links without asking (see Agent-spawned sessions). The header and footer, includ
 changes save as you make them, stay visible while only the settings between them scroll. A remote host offers sixteen
 icons, with the cloud as the default, and the default foreground or one of seven identity colors: lavender, orchid,
 teal, steel, sand, copper and red. The local host starts with the laptop in red, but offers the same choices. The choice
-is kept by the helm and shared with every client. It tints only the icon, never a status or the host name; red
-identifies a host and says nothing about its state. Every host asks before YOLO launches, and before carrying out an
-acting `farhelm` command from one of its sessions, and both link permissions start off, until the user explicitly turns
-them on, including hosts that existed before the settings did. Adopting a new identity for a host, described next,
-resets all four permissions to asking: each is a judgment about the install the user knew, and a new identity, whether a
-reinstall or a different machine, is one they have not judged. If a destination turns out to present a different
-identity than recorded (a wiped and reinstalled host, a recycled address), the helm says so and asks whether to adopt
-the new host or fix the destination — it never silently merges. An entry that reaches a machine another entry already
-holds connects nothing: it says which entry holds the machine, by name, and asks the user to remove that entry or change
-this one's destination and then press Retry. Farhelm never connects two entries to one machine and never resolves this
-on its own. Last-known sessions of a host that is permanently gone are disposed of by removing the host from the
-registry.
+is kept by the helm and shared with every client. It tints the icon, and the host's terminal frames when **color
+terminal frames by host** is on, never a status or the host name; red identifies a host and says nothing about its
+state. Every host asks before YOLO launches, and before carrying out an acting `farhelm` command from one of its
+sessions, and both link permissions start off, until the user explicitly turns them on, including hosts that existed
+before the settings did. Adopting a new identity for a host, described next, resets all four permissions to asking: each
+is a judgment about the install the user knew, and a new identity, whether a reinstall or a different machine, is one
+they have not judged. If a destination turns out to present a different identity than recorded (a wiped and reinstalled
+host, a recycled address), the helm says so and asks whether to adopt the new host or fix the destination — it never
+silently merges. An entry that reaches a machine another entry already holds connects nothing: it says which entry holds
+the machine, by name, and asks the user to remove that entry or change this one's destination and then press Retry.
+Farhelm never connects two entries to one machine and never resolves this on its own. Last-known sessions of a host that
+is permanently gone are disposed of by removing the host from the registry.
 
 Confirmed 2026-10-10: a host entry is one logical host from the user's point of view. Correcting its destination, or
 adopting a new identity for it, changes the machine or installation behind the entry, not which host it is to the user;
@@ -1250,37 +1250,39 @@ can be ordered independently by most recent activity, by creation time, or by ti
 remembered by the helm as one preference shared by every client, together with the last-selected session and compact-row
 choice, and most recent activity is what a client shows until someone picks otherwise. The same shared preference row
 carries terminal web-link click ownership, the quick-launch template name and number-key bindings, the
-session-confirmation opt-out, the quick-launch naming choice, and whether host setup or host removal confirmation should
-be skipped after an explicit permanent answer; a client that has already loaded its preferences keeps its previous
-behavior until it reloads, except that template shortcuts read their bindings on each invocation. The gear immediately
-to the right of the sidebar version opens a settings dialog with an off-by-default **skip session confirmations** switch
-under **sessions**. Its help names Delete, Replace, Restart and tab Close and excludes YOLO, host and trash questions
-(see Lifecycle operations). Beside it, **name sessions on quick launch** is on by default, including when the helm has
-never stored a choice. Turning it off disables the naming prompt for quick launches. The dialog also has the host
-switches `set up new hosts without asking` and `remove hosts without asking`, on when the respective confirmation is
-skipped. Turning one off restores that confirmation; turning one on makes the same choice as the host dialog's permanent
-answer. Changes take effect immediately in the current client. Each switch explains the current behavior, and each host
-dialog's permanent answer points to the gear as the place to undo it. A separate **terminal links** section chooses
-whether web links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the click
-on, or only pass the click on. The latter two choices explain the risk of a second browser tab and that a program
-without mouse reporting cannot act on a click. This choice covers every client of the helm and takes effect in every
-mounted terminal of the current client immediately; other open clients pick it up when they reload, like the host
-choices. Sounds has three device switches (see Status). A separate **ntfy alerts** section has an off-by-default switch,
-server URL (default `https://ntfy.sh`), topic, optional access token, and priority (min, low, default, high, urgent;
-default default). These are explicitly saved helm configuration, shared by every client, outside the preference row.
-Save refusals appear inline. The stored token is never returned: the form shows whether one exists and allows replacing
-or clearing it. Changing to another server clears a saved token unless a new one is entered, and the form says so before
-saving. **Send test** uses the saved configuration, even while disabled, and reports success or failure inline. The
-dialog also holds the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone
-command field (see [Managed checkouts](#managed-checkouts)). The folder's help explains expansion on each host,
-first-use folder creation, and that command-line host overrides keep their folder. The command's help explains that it
-runs in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts
-only, and that command-line host overrides keep their command. The installed desktop app's dialog also has a switch for
-installing updates automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it
-is a setting of that app installation, kept with the app rather than by the helm, and a browser never shows it. The two
-host confirmation choices apply to every host and client of this helm; existing controls with a natural place in the
-main UI stay there. No client keeps its own copy: every client reads the helm's preference once after authenticating and
-writes it on change, so a browser tab and the desktop app open in the same order and on the same session. Per-client
+session-confirmation opt-out, the quick-launch naming choice, terminal-frame coloring, and whether host setup or host
+removal confirmation should be skipped after an explicit permanent answer; a client that has already loaded its
+preferences keeps its previous behavior until it reloads, except that template shortcuts read their bindings on each
+invocation. The gear immediately to the right of the sidebar version opens a settings dialog with an off-by-default
+**skip session confirmations** switch under **sessions**. Its help names Delete, Replace, Restart and tab Close and
+excludes YOLO, host and trash questions (see Lifecycle operations). Beside it, **name sessions on quick launch** is on
+by default, including when the helm has never stored a choice. Turning it off disables the naming prompt for quick
+launches. Beside it, **color terminal frames by host** starts off and colors every session's thin terminal frame to
+match its host icon when turned on. The dialog also has the host switches `set up new hosts without asking` and
+`remove hosts without asking`, on when the respective confirmation is skipped. Turning one off restores that
+confirmation; turning one on makes the same choice as the host dialog's permanent answer. Changes take effect
+immediately in the current client. Each switch explains the current behavior, and each host dialog's permanent answer
+points to the gear as the place to undo it. A separate **terminal links** section chooses whether web links open in
+Farhelm without passing the click on (the default), open in Farhelm and also pass the click on, or only pass the click
+on. The latter two choices explain the risk of a second browser tab and that a program without mouse reporting cannot
+act on a click. This choice covers every client of the helm and takes effect in every mounted terminal of the current
+client immediately; other open clients pick it up when they reload, like the host choices. Sounds has three device
+switches (see Status). A separate **ntfy alerts** section has an off-by-default switch, server URL (default
+`https://ntfy.sh`), topic, optional access token, and priority (min, low, default, high, urgent; default default). These
+are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
+inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
+Changing to another server clears a saved token unless a new one is entered, and the form says so before saving. **Send
+test** uses the saved configuration, even while disabled, and reports success or failure inline. The dialog also holds
+the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command field (see
+[Managed checkouts](#managed-checkouts)). The folder's help explains expansion on each host, first-use folder creation,
+and that command-line host overrides keep their folder. The command's help explains that it runs in each new checkout on
+its host, after cloning and before the agent starts, that changes affect future checkouts only, and that command-line
+host overrides keep their command. The installed desktop app's dialog also has a switch for installing updates
+automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of
+that app installation, kept with the app rather than by the helm, and a browser never shows it. The two host
+confirmation choices apply to every host and client of this helm; existing controls with a natural place in the main UI
+stay there. No client keeps its own copy: every client reads the helm's preference once after authenticating and writes
+it on change, so a browser tab and the desktop app open in the same order and on the same session. Per-client
 persistence — browser storage, a desktop state file, anything that lets two clients remember different answers — is not
 wanted for these shared preferences, including welcome-card dismissal (sidebar width, terminal text size and sound
 switches, by contrast, are deliberately per device; see Session list, Terminal experience and Status). A client that
@@ -1605,6 +1607,11 @@ whatever the agent renders is what you see. There is no composer, no message abs
 
 - Full fidelity: colors, cursor movement, alternate screens, resize. If it works over plain SSH it must work here. The
   default palette, foreground, and background are Ghostty's defaults, and launched agents see `COLORTERM=truecolor`.
+- Settings can color the thin frame around every session's terminal with that session's host identity color. This is off
+  by default and shared by every device. When on, a host with the default color uses the ordinary foreground color;
+  every other host uses its chosen icon color at full strength. A host color change updates open session frames through
+  the existing hosts feed, and a switch change applies immediately in the current client. Other open clients pick up the
+  switch change when they reload. The terminal background, text palette and size do not change.
 - The quick-switcher's Cmd+K on macOS or Ctrl+Shift+K elsewhere never reaches the terminal's program; plain Ctrl+K off
   macOS keeps the terminal program's own behavior.
 - Shift+Enter (the exact chord — no other modifier held, not mid-IME-composition) is sent as ESC CR in a SINGLE write,

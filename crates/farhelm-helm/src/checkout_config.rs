@@ -2575,6 +2575,10 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN tunnel_consent;
                  ALTER TABLE preferences DROP COLUMN name_session_on_quick_launch;
+                 ALTER TABLE preferences DROP COLUMN codex_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN muse_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN pi_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN color_terminal_frames;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;

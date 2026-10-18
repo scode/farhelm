@@ -44,9 +44,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Per-host terminal background color.** Allow setting a terminal background color for each host. Plan:
-  `plans/queue/host-terminal-colors.md`.
-
 - **Official support for agent wrappers.** Allow running an agent through a wrapper while treating it exactly like the
   real agent. Details TBD; the maintainer knows what they want here. Ask before designing or implementing it. Plan:
   `plans/queue/agent-wrappers.md`.
