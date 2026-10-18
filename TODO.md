@@ -58,6 +58,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   search does, instead of starting a session. This should work for the quick-launch bolt and number shortcuts, so
   pressing several hotkeys can stack their template edits before Launch.
 
+- **Open a template-only launcher with Cmd-J.** Make Cmd-J work like Cmd-K, but show only templates. Typing a template
+  name and pressing Enter should launch it, so `Cmd-J, foo, Enter` starts the `foo` template.
+
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
 
