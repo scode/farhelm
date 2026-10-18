@@ -810,18 +810,20 @@ Hover help is Farhelm's own tooltip, `assets/tooltip.js`, not the browser's `tit
 belongs to the engine and cannot be shortened by any attribute, style or script, and WebKit, which the macOS desktop app
 embeds, also ignores the macOS tooltip-delay default; at a second or more, nobody discovered the hover texts that
 existed. So no element keeps a `title` as hover help, because one would bring the slow native box back on top. Elements
-opt in with a `data-tooltip` attribute, set like any other attribute by components, and by scripts on elements they
-create (terminal.js does for its reconnect and take-control buttons); one delegated listener set on `document` and one
-body-level `role="tooltip"` element serve the whole page, keeping the mechanism out of every component's props. The
-tooltip appears 300 ms after the pointer comes to rest on a target (each movement inside it restarts the wait) or
-keyboard focus (`:focus-visible`) reaches one. Host confirmations suppress hover help during their automatic initial
-focus on their enabled confirming answer (Cancel while disabled), preserving its visible focus ring; later pointer entry
-or moving focus away restores ordinary help. Other programmatic focus keeps its existing behavior. The tooltip appears
-at once when another target is entered while one is showing or within 300 ms of the pointer or focus leaving one (a
-press, Escape, a scroll or window blur does not open that window, so the next tooltip after a dismissal waits the full
-delay). It hides on leaving, any press (which keeps that element's tooltip down until the pointer leaves it or it loses
-focus), Escape, losing focus, window blur, the target leaving the document (checked on a short timer rather than with a
-DOM observer, which would run on every live status update), and a scroll of the document or of a container holding the
+opt in with a `data-tooltip` attribute for text, or `data-tooltip-card` naming a hidden DOM source for a styled card,
+set like any other attribute by components; scripts can also add targets (terminal.js does for its reconnect and
+take-control buttons). A card clones the source's child nodes into the tooltip, rather than parsing markup from a
+string, so peer text remains DOM text rendered by Rust. One delegated listener set on `document` and one body-level
+`role="tooltip"` element serve the whole page, keeping the mechanism out of every component's props. The tooltip appears
+300 ms after the pointer comes to rest on a target (each movement inside it restarts the wait) or keyboard focus
+(`:focus-visible`) reaches one. Host confirmations suppress hover help during their automatic initial focus on their
+enabled confirming answer (Cancel while disabled), preserving its visible focus ring; later pointer entry or moving
+focus away restores ordinary help. Other programmatic focus keeps its existing behavior. The tooltip appears at once
+when another target is entered while one is showing or within 300 ms of the pointer or focus leaving one (a press,
+Escape, a scroll or window blur does not open that window, so the next tooltip after a dismissal waits the full delay).
+It hides on leaving, any press (which keeps that element's tooltip down until the pointer leaves it or it loses focus),
+Escape, losing focus, window blur, the target leaving the document (checked on a short timer rather than with a DOM
+observer, which would run on every live status update), and a scroll of the document or of a container holding the
 target, but not a scroll elsewhere such as the terminal under live output. Touch never shows it. It is placed above the
 target with a 6 px gap and, only without room there, below with a 28 px gap: a page cannot know the cursor's size, and
 standard cursors extend downward from their hot spot, so space above a control is never under the cursor while a box

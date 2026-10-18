@@ -1455,6 +1455,18 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 .farhelm-tooltip[data-paragraphs="true"][hidden] { display: none; }
 
+/* A card keeps the shared tooltip surface and placement, but its own rows
+   need the full width and their own line wrapping rather than text help's
+   eight-line clamp. */
+.farhelm-tooltip[data-kind="card"] {
+  display: block;
+  width: min(310px, calc(100vw - 8px));
+  max-width: none;
+  padding: 0;
+  -webkit-line-clamp: unset;
+}
+.farhelm-tooltip[data-kind="card"][hidden] { display: none; }
+
 /* The hidden-characters warning opens above the bottom bar, keeping it
    inside the window. It lives outside the copy button, whose text shrinks
    and ellipsizes in crowded details: the

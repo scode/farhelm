@@ -15,9 +15,10 @@
 // ## Shape
 //
 // One delegated listener set on `document` and one tooltip element appended
-// to `body`. Dioxus components set `data-tooltip` like any other attribute,
-// and a script can set it on elements it creates, so the mechanism stays out
-// of every component's props. The listeners run in the capture phase so
+// to `body`. Dioxus components set `data-tooltip` for text, or
+// `data-tooltip-card` to name a hidden, Rust-rendered card source. The latter
+// is cloned as DOM nodes, never parsed from a string, so peer text remains
+// text. Scripts can also add targets. The listeners run in the capture phase so
 // a component that stops propagation of a pointer or key event cannot hide
 // that event from the tooltip.
 //
@@ -25,10 +26,8 @@
 // measured rectangle, never anchored inside the target. That is what keeps
 // it from being clipped by a scroll container: `.app-sidebar` is
 // `overflow: hidden auto`, which clips anything positioned inside a row.
-// The text is set with `textContent`, never as markup, so peer-supplied
-// text (session titles, paths, agent invocations) stays text; the Rust side
-// still passes it through `display_peer` first, exactly as it did for the
-// native tooltips this replaces.
+// Text help uses `textContent`; card help clones the source's children without
+// copying its id. Peer strings pass through `display_peer` on the Rust side.
 //
 // ## When it shows and hides
 //
@@ -62,8 +61,8 @@
 // while a tooltip is pending or showing, rather than with a DOM-change
 // observer: Dioxus rewrites the DOM constantly, and an observer on the whole
 // tree would run on every live status update for the sake of one tooltip.
-// The same tick picks up a `data-tooltip` whose text changed under a
-// showing tooltip (a status dot that moved from running to waiting), and a
+// The same tick picks up text or card markup changed under a showing tooltip
+// (a status dot that moved from running to waiting), and a
 // target that moved without any scroll (the sidebar re-sorting on a status
 // change, the header reflowing, the window resizing), so the tooltip follows
 // it instead of staying beside whatever took its place.
@@ -166,14 +165,16 @@
 
   /**
    * The tooltip target for an event target: the nearest element at or
-   * above it carrying a non-empty `data-tooltip`, or null. Nearest wins, so
-   * an icon with its own text inside a button with another shows its own.
+   * above it carrying non-empty text or a card source id, or null. Nearest
+   * wins, so an icon with its own text inside a card-bearing button keeps
+   * its own help.
    */
   function tooltipTarget(node) {
     let el = node && node.nodeType === 1 ? node : node && node.parentElement;
     while (el) {
       const text = el.getAttribute("data-tooltip");
-      if (text !== null && text.trim() !== "") return el;
+      const card = el.getAttribute("data-tooltip-card");
+      if ((text !== null && text.trim() !== "") || (card !== null && card.trim() !== "")) return el;
       el = el.parentElement;
     }
     return null;
@@ -214,6 +215,9 @@
     // The target's rectangle at the last placement, which `watch` compares
     // against to follow a target that moved without a scroll.
     let placedAt = { left: 0, top: 0, width: 0, height: 0 };
+    // The source's serialization is only a change detector. It is never
+    // assigned to the tooltip, which would parse peer text as markup.
+    let placedContent = "";
     // The element a press or Escape dismissed, kept down until the pointer leaves it.
     let suppressed = null;
     // Automatic Cancel focus is quieter than a deliberate dismissal: the
@@ -270,13 +274,21 @@
       viaFocus = false;
     }
 
-    function position(text) {
+    function position(content) {
       const box = element();
       // Permission help deliberately includes mode, flags and caveats as
       // paragraphs. Its target opts out of the short-help line clamp; this
       // metadata is app-authored, never inferred from peer command text.
-      box.dataset.paragraphs = target.getAttribute("data-tooltip-paragraphs") === "true" ? "true" : "false";
-      box.textContent = text;
+      box.dataset.kind = content.kind;
+      box.dataset.paragraphs = content.kind === "text" && target.getAttribute("data-tooltip-paragraphs") === "true"
+        ? "true" : "false";
+      box.replaceChildren();
+      if (content.kind === "card") {
+        box.append(...Array.from(content.source.childNodes, (node) => node.cloneNode(true)));
+      } else {
+        box.textContent = content.text;
+      }
+      placedContent = content.signature;
       box.hidden = false;
       // Measure at the origin first, so the width it wraps to is its own
       // maximum width rather than whatever room was left at the previous
@@ -297,19 +309,24 @@
       box.dataset.side = place.side;
     }
 
-    function currentText() {
+    /** Prefer a live card source, falling back to short text if one exists. */
+    function currentContent() {
+      const card = target && target.getAttribute("data-tooltip-card")?.trim();
+      const source = card && doc.getElementById(card);
+      if (source) return { kind: "card", source, signature: `card:${card}:${source.innerHTML}` };
       const text = target && target.getAttribute("data-tooltip");
-      return text === null || text === undefined ? "" : text.trim();
+      const trimmed = text === null || text === undefined ? "" : text.trim();
+      return trimmed === "" ? null : { kind: "text", text: trimmed, signature: `text:${trimmed}` };
     }
 
     function show() {
       showTimer = null;
-      const text = currentText();
-      if (!target || !target.isConnected || text === "") {
+      const content = currentContent();
+      if (!target || !target.isConnected || content === null) {
         hide();
         return;
       }
-      position(text);
+      position(content);
       shown = true;
     }
 
@@ -319,15 +336,15 @@
         return;
       }
       if (!shown) return;
-      const text = currentText();
-      if (text === "") {
+      const content = currentContent();
+      if (content === null) {
         hide();
         return;
       }
       const rect = target.getBoundingClientRect();
       const moved = rect.left !== placedAt.left || rect.top !== placedAt.top
         || rect.width !== placedAt.width || rect.height !== placedAt.height;
-      if (moved || text !== tip.textContent) position(text);
+      if (moved || content.signature !== placedContent) position(content);
     }
 
     function schedule(next, focus) {
