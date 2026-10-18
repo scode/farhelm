@@ -7,4 +7,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight efd9f8] `session-hover-text.md` — hovering a session row shows one styled summary card: host, checkout, agent, times
 - [pending] `launcher-template-keys.md` — template shortcuts apply templates inside the open launcher, through one shared shortcut definition, and Cmd-J launches a template by name
 - [pending] `repeat-quick-launch.md` — templates name sessions with a base name (numbered when taken) or a fixed name, so a named template can be quick-launched repeatedly into managed checkouts
-- [pending] `host-uninstall-dialogs.md` — host setup, update and uninstall show their steps as a stepper in the dialog and in the row's progress, refusals open in dialogs, and the post-uninstall notice shrinks to one line
+- [in-flight cbc1f9] `host-uninstall-dialogs.md` — host setup, update and uninstall show their steps as a stepper in the dialog and in the row's progress, refusals open in dialogs, and the post-uninstall notice shrinks to one line
