@@ -633,3 +633,47 @@ each PR passed its review gate, and the last code PR removes the three TODO.md e
 `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md` (Executing one plan, steps 11 and 12): deliver its report through the queue script, write a
 closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked while landing on 2026-10-18 (claim 0294d2).
+
+### The stack breaks six existing host browser tests
+
+This plan changes how host setup, update and uninstall look in the hosts panel: one numbered step list for confirmation
+and progress, progress in the host row, refusals in dialogs, and a one-line uninstall result. None of its six PRs has
+merged; main holds nothing of the plan.
+
+At landing, after rebasing onto current main, the full `provisioning.spec.ts` and `terminal-multihost.spec.ts` browser
+files were run for the first time on this stack; the executor had run only named cases from them. Six existing tests
+fail on both Chromium and WebKit (run `314b942e-cf94-494a-b0ba-1d63d28face3`), and the same six pass on main without the
+stack (run `6155f930-866d-4ce2-804d-24f04575ca12`):
+
+- `accepted ADD registers before execution and releases the page lock while running`
+- `collapsed trace transitions invalidate fixed-surface geometry`
+- `failed ADD rerun probes the registered destination and discovery resolves the run`
+- `update all skips a host already busy with setup`
+- `a failed removal stays visible with details collapsed`
+- `host-list-phase-table: every phase renders status and details`
+
+Five of them look for the old host-row progress line, the old progress wording ("setup provisioning running") or a
+refusal shown in the row, which this plan deliberately replaced with the numbered step list and refusal dialogs; they
+most likely need updating to the new design. The sixth may be a real regression: in the table of host states, a host
+that should read "old version" instead shows "setting up 0/0", as if an empty setup run were in progress.
+
+Everything else passed at landing: the whole helm, protocol and UI library tests (one unrelated, already known timing
+test failed once under load), the UI JavaScript tests, the website build, and 306 other browser cases, including the
+template shortcut files from the plan that landed just before. The landing also added hover text to the refusal dialog's
+two buttons and reworded a TODO.md entry that pointed at an entry this plan removes; those edits sit in the last PR.
+
+### Question
+
+How should this plan continue?
+
+- (a) Send it back to an executor: update the five tests to the new numbered step list and refusal dialogs, find out why
+  the host-state table shows "setting up 0/0" for an "old version" host and fix the product if it is a regression, then
+  run the two browser files in full and deliver again. The landing monitor then lands it in a later round.
+- (b) Land it as it is and leave the six tests failing on main for a follow-up. This leaves main red and hides whether
+  the host-state display regressed.
+
+The landing monitor recommends (a).
