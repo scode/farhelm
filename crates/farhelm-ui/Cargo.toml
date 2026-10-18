@@ -68,6 +68,13 @@ gloo-timers.workspace = true
 # the close snapshot replacement atomic without deleting the prior record.
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# The drag region starts native window drags itself (`window_chrome.rs`,
+# `start_native_drag`) because Tao's helper can hand AppKit a pressure event
+# instead of the press. Same versions Tao already pulls in.
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSGraphicsContext", "NSResponder", "NSWindow"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # Use the desktop's dispatch API, already present through GTK, rather than
 # waiting for xdg-open: its generic fallback can wait for the app to exit.

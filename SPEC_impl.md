@@ -805,11 +805,21 @@ component remounts; a missing report against an empty slot, or a count stuck at 
 fail-safe does not cover complementary loss in both directions at once — report A arrives, event A never consumes it,
 report B fails to replace it, event B consumes A — which borrows the wrong press's report and stays a documented
 residual. Other builds keep that spacer hidden and inert, and receive no macOS shell class. Browser tests can apply the
-class to production markup to verify geometry, without enabling native actions. Fullscreen, resizing, and button
-behavior remain AppKit-owned; actual native appearance and interactions require the manual Mac checklist. The window
-root installs native layout before authentication completes. Bootstrap and error pages reserve a top band without
-requiring the sidebar to mount. A build-mismatch notice stays below that band and above the scrolling shell, with the
-app bar pinned above it so the warning remains readable.
+class to production markup to verify geometry, without enabling native actions.
+
+The drag itself is started with `performWindowDragWithEvent:` on the window's own NSWindow, not through Tao's
+`drag_window` (which Dioxus's `drag` wraps). Tao hands AppKit `NSApp.currentEvent`, assuming the press is still current
+when the Dioxus handler runs. It often is not: on a Force Touch trackpad AppKit delivers pressure events while the
+button is down, and by the time a press has crossed the webview and the bridge, a pressure or mouse-dragged event is
+frequently current. AppKit silently ignores a drag started from anything but a mouse-down, so before this, many presses
+on the spacer did nothing (observed 2026-10: in one logged session three of eight presses found such an event current).
+When the current event is not a left mouse-down, the spacer builds one at the pointer's present location in the window,
+as Tao itself does for one other event type, and drags from that. Only the event's type is read from an arbitrary
+current event; AppKit throws when a pressure event is asked for a click count. The drag keeps Dioxus's fullscreen guard.
+Fullscreen, resizing, and button behavior remain AppKit-owned; actual native appearance and interactions require the
+manual Mac checklist. The window root installs native layout before authentication completes. Bootstrap and error pages
+reserve a top band without requiring the sidebar to mount. A build-mismatch notice stays below that band and above the
+scrolling shell, with the app bar pinned above it so the warning remains readable.
 
 Hover help is Farhelm's own tooltip, `assets/tooltip.js`, not the browser's `title` tooltip. The native tooltip's delay
 belongs to the engine and cannot be shortened by any attribute, style or script, and WebKit, which the macOS desktop app
