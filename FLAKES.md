@@ -2316,3 +2316,117 @@ identities remain in the earlier entries; retained private traces may expire.
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-10-17 — same-source Replace pointer race (e2e/tests/replace.spec.ts)
+
+The header-cancellation case recorded earlier on 2026-10-17 failed five of ten exact WebKit attempts in retained run
+`0c25b7f9-40a5-47d2-af94-0c93edf7a331`, on clean main `dd365da2`. Selection was
+`npx playwright test --project=webkit-replace --grep 'plain Replace keeps a newer same-source key after old header YOLO cancellation' --repeat-each=10`,
+one worker, zero retries. All five failures waited five seconds for the source menu to become visible. Trace and code
+review identify the pointer race: the other row has an open menu containing its error; pressing the source toggle
+outside it dismisses that menu, moves the error into the other row and shifts the source toggle before release. The
+click therefore misses. A test-only explicit close was rejected because it would hide the product defect. Reserving
+error space or changing dismissal/input ordering affects layout or focus/cancellation semantics; leave the TODO and
+exclusion open for that decision. This was a shared Linux x86_64 machine; contemporaneous load and browser executable
+identity are unavailable. The recorder verified tmux 3.7c, SHA256
+`f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, locale `C.UTF-8`, and only `FARHELM_TEST_TRACE_DIR`
+in the child's `FARHELM_*` environment. Private traces and screenshots were retained with the run and may expire.
+
+```text
+Error: expect(locator).toBeVisible() failed
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Class: product
+
+Cause: established
+
+## 2026-10-17 — parent-SIGTERM startup-delay experiment (scripts/test-start-stack-cleanup.sh)
+
+The historical leak remains open. Retained run `b9d6942f-1800-40f4-b65d-45f4bd078afa` ran
+`bash scripts/test-start-stack-cleanup.sh` with a child-PATH curl shim delaying only startup `POST /api/sessions` by 25
+seconds. Every cleanup phase passed, including parent SIGKILL and SIGTERM. Watcher TERM-to-trap delays were about 24 and
+26 seconds, confirming bash trap deferral but not the old leak: the check's nominal 20 iterations include command
+latency and still allowed cleanup to complete. No startup-command rewrite is claimed as a fix. Source was `1cf0ef89`,
+with only unrelated rollback-test/flake-record edits dirty; one owned stack phase at a time, zero retries. The shared
+Linux x86_64 run verified the same tmux executable hash and locale as the Replace repetition above, with only
+`FARHELM_TEST_TRACE_DIR` in the child's `FARHELM_*` environment. Contemporaneous load is unavailable. The shim was
+supplied to the child, without mutating a test process's environment. Full markers remain in private retained output and
+may expire; no new failure occurred to quote.
+
+Class: peer-lifecycle
+
+Cause: hypothesis
+
+## 2026-10-17 — shallow-pause reset attribution (crates/farhelm/tests/e2e/terminal_backpressure.rs)
+
+Exact-test repetition batch `2304a82c-76fe-466a-a4b7-d7a1ddf66fe1` failed, passed, failed on shared Linux x86_64. The
+failed runs are `6704f6ec-579f-4a5d-99a3-ebc5c7c901d6` and `f1d6e2d1-fc94-4851-95d1-6b74c5a5699a`; the pass is
+`a405fc83-60fc-4adf-a1b6-ab3721bc08b6`. Selection was
+`cargo nextest run -p farhelm --test e2e -E 'test(=terminal_backpressure::shallow_pause_resumes_without_reset_or_replay)'`,
+four-slot budget with only this test selected, zero retries. Test execution lasted about 12.5 seconds in the first
+failure and the pass. Source was `867cbaf0`, dirty only with unrelated checkout-fixture and flake-record edits; tmux
+3.7c, executable SHA256 `f676550f5197e5eb1d0a393ae8afda45237561250168f2299959d9cb9ec1154f`, locale `C.UTF-8`, child
+`FARHELM_*` names only `FARHELM_TEST_TRACE_DIR`. Contemporaneous load was not sampled. The earlier batch
+`18a485cb-d9da-40a4-9152-6e419dc34b65` was interrupted by its 300-second command budget after compilation/setup; it has
+no assertion result and is retained separately, not counted among these attempts.
+
+The two failures logged reset/replay at 9.450 and 8.300 seconds with the producer still alive. The bounded trace lost
+the pause/resume events, so those timestamps do not establish whether the client pause caused the reset. The test
+rejects every reset throughout its ten-second drain, including a possible legitimate tmux `pause-after=5` recovery under
+load. A fixed record-count seam would be unsound: already-flushed output can precede a queued `%pause`, allowing
+thousands of consecutive records before a pause-caused reset. A sound correction needs a complete filtered trace or
+per-channel test observable attributing every reset, plus proof that flood start to resume was below `pause-after`.
+Leave the assertion, TODO and exclusion unchanged until that distinction exists. Private output and traces remain with
+the batch and may expire.
+
+```text
+a pause lifted inside tmux's pause-after window must not trigger a catch-up reset
+```
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-10-17 — reconnect timing non-reproduction (e2e/tests/terminal-reconnect.spec.ts)
+
+The exact WebKit case `view-changes-do-not-postpone-a-recovery` passed five of five attempts in retained run
+`6328360c-ab06-4f40-884c-86b979f3a1a9` using
+`npx playwright test --project=webkit-terminal-reconnect --grep view-changes-do-not-postpone-a-recovery --repeat-each=5`,
+one worker, zero retries. Source was `7c586405` with unrelated build-skew fixture and flake-record edits dirty, on
+shared Linux x86_64. The recorder verified the same tmux executable hash and locale as the Replace repetition above;
+child `FARHELM_*` names were only `FARHELM_TEST_TRACE_DIR`. Contemporaneous load and browser executable identity are
+unavailable. The original 4185 ms failure's trace is no longer available. Code review confirms that its test-side
+elapsed time includes driver and terminal-mount latency, so it cannot distinguish a retry deadline rearmed by view churn
+from a delayed observation. A page-clock observable needs a verified churn premise and must account for deferred
+terminal mounting before treating socket construction as timer firing. No budget increase or assertion rewrite was made;
+retain the TODO and exclusion. This run adds non-reproduction evidence, not proof of a fix; no new failure occurred to
+quote. Private retained output may expire.
+
+Class: ambiguous-observable
+
+Cause: hypothesis
+
+## 2026-10-17 — installer request attribution (scripts/test-install-sh.sh)
+
+The historical Alpine/BusyBox extra GET remains unidentified. GNU baseline run `fd05cf9b-aed3-40b8-8ea4-74f6b5ab1664`
+passed 549 checks and Alpine baseline `877cb943-3346-44d5-a822-0b7581b18670` passed 544. PR #2263 attributes
+refused-latest GETs by the scenario's origin path, still fails on any second GET within that scenario, prints the full
+log window on failure and reports other scenarios' GETs even on success. Every installer fixture URL derives from that
+origin; this preserves the assertion while preventing another scenario's late response from counting against it. It does
+not establish that a late response caused the old failure, so the TODO remains open. Changed GNU run
+`ee5b37ce-1acc-415e-9a7e-37d0d5b235fa` passed 549 checks; changed Alpine run `762f5279-0080-4301-a143-0c57fe644935`
+passed 544, with no failures, runtime skips or other-scenario request notes in either. Both ran the monolithic
+`bash scripts/test-install-sh.sh` harness sequentially, one fixture scenario at a time, zero retries, on shared Linux
+x86_64, source `377bc42a` dirty only with the accounting change, its inventory documentation and TODO update. Alpine ran
+in an isolated `alpine:3` container with a read-only checkout mount; image SHA256
+`294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6`. tmux was not used. Host locale was `C.UTF-8`; the
+container's effective locale and contemporaneous load are unavailable. The recorder child carried only
+`FARHELM_TEST_TRACE_DIR`; each installer child received the harness's explicit isolated environment. Private retained
+output may expire; no new failure occurred to quote.
+
+Class: ambiguous-observable
+
+Cause: unknown

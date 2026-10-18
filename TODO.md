@@ -211,7 +211,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `plain Replace keeps a newer same-source key after old header YOLO cancellation` in `e2e/tests/replace.spec.ts` failed
   in WebKit waiting five seconds for the source row's menu in browser run `d01a19ad-811c-4dae-90b8-2c22a70ab473`.
   Isolated classification reruns failed, passed, failed: `213407df-5293-46eb-87ca-d08bbe6b3535`,
-  `46df9503-ab98-4587-a36d-c8392c58183d`, `a4bb8764-8cf4-42f0-aeee-d97ad0267184`. Cause unknown (FLAKES.md, 2026-10-17).
+  `46df9503-ab98-4587-a36d-c8392c58183d`, `a4bb8764-8cf4-42f0-aeee-d97ad0267184`. A further WebKit repetition failed
+  five of ten attempts (`0c25b7f9-40a5-47d2-af94-0c93edf7a331`). Trace and code review identify a product pointer race:
+  dismissing the other row's open menu moves its error into that row, shifting the source toggle between pointer press
+  and release. Leave the exclusion in place. An explicit test-side close would hide the bug; choosing between stable
+  error space and changed dismissal/input ordering needs a product decision (FLAKES.md, 2026-10-17).
 
 - **Browser stack parent-SIGTERM cleanup.** `scripts/test-start-stack-cleanup.sh` left the stack serving, with state and
   processes intact, after killing its spawner with SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`. The isolated
@@ -224,8 +228,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   log tails before its emergency cleanup. On the next failure, compare the watcher's `sent TERM` marker (and the check's
   own timestamped kill of the spawner) with the `signal trap` marker, and look for a long-running foreground command in
   the dump. A missing `sent TERM` line alone is not proof the TERM was not sent: cleanup can kill the watcher between
-  its signal and its marker. A cheap check of the mechanism is a PATH `curl` shim that delays the startup
-  `POST /api/sessions` by 25 seconds.
+  its signal and its marker. A PATH `curl` shim delaying startup `POST /api/sessions` by 25 seconds confirmed trap
+  deferral of about 24–26 seconds in run `b9d6942f-1800-40f4-b65d-45f4bd078afa`, but all cleanup phases passed. The
+  check's 20 iterations also include command latency. This did not reproduce the historical leak; retain the markers and
+  investigate a retained failure before treating interruptible startup commands as its fix.
 
 - **Shared-checkout browser timeout.** The Chromium test
   `borrowers retain the checkout until the final stopped session is deleted` in `e2e/tests/github-checkouts.spec.ts`
@@ -271,8 +277,13 @@ Deferred work, with its original triggers:
   `24210386-9d75-4b28-a0ca-5ffda7955268`, `b45bc530-d343-458c-8de0-2481a6a8e2ca` and
   `61bfb8d8-ccdf-4e54-a7b2-61df5fba317f` passed) on a machine at load average about 20 (FLAKES.md, 2026-10-09).
   Hypothesis: the reset check spans the whole 10-second drain after resume, so a load stall past tmux's `pause-after`
-  window anywhere in that drain produces a correct reset that the test reads as a shallow-pause failure. First step:
-  find in the failed run's traces when the `%pause` arrived relative to the resume.
+  window anywhere in that drain produces a correct reset that the test reads as a shallow-pause failure. Exact-test
+  repetition batch `2304a82c-76fe-466a-a4b7-d7a1ddf66fe1` failed twice in three attempts; resets were observed at 9.45
+  and 8.30 seconds, but trace eviction lost the pause/resume boundary. Neither that timing nor a fixed number of
+  consecutive records establishes the cause: already-flushed output can precede a queued `%pause`. A sound assertion
+  needs a complete filtered trace or per-channel test observable attributing each reset to tmux's pause notification,
+  together with a flood-start-to-resume premise below `pause-after`. Leave the assertion and exclusion unchanged until
+  that distinction is available (FLAKES.md, 2026-10-17).
 
 - **Reconnect recovery misses its window under load.** The WebKit case of `view-changes-do-not-postpone-a-recovery` in
   `e2e/tests/terminal-reconnect.spec.ts` measured a recovery at 4185 ms against its 4000 ms bound in deflake run
@@ -280,8 +291,11 @@ Deferred work, with its original triggers:
   `b421c4bd-45b0-49d5-a970-9ba0b6323efe`, `a30e12c5-bc71-48df-be05-71c954456dfa` and
   `85cd1460-b130-4ada-9dc9-ecd6450dd513` passed) on a machine at load average about 16 (FLAKES.md, 2026-10-09).
   Hypothesis: the bound is wall-clock time measured from the test's side, so the view churn's own round trips under load
-  eat the margin above the 1.5-second rung; no reset was shown. First step: read the failed trace for when the page
-  scheduled and started its reconnect attempt relative to the socket close.
+  eat the margin above the 1.5-second rung; no reset was shown. Five exact WebKit reruns passed in
+  `6328360c-ab06-4f40-884c-86b979f3a1a9`; the original failed trace is no longer available. A replacement observable
+  must distinguish a rearmed retry from driver and terminal-mount latency, using the page's clock and a verified churn
+  premise. Verify mount deferral before treating socket construction as the timer firing. Keep the existing assertion
+  and exclusion; widening the budget alone would not establish the cause (FLAKES.md, 2026-10-17).
 
 - **Installer test counts an extra request under BusyBox.** In CI's Alpine/BusyBox leg of `scripts/test-install-sh.sh`,
   the check "G2-G4 (pre /latest): nothing but /latest was requested" saw two GET lines where one was expected, in the
