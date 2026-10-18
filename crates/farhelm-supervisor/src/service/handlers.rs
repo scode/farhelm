@@ -3530,8 +3530,12 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         // and is a template name's shape, and the fields are bounded by the
         // same cap the helm stores a template under, counted as the JSON they
         // travel as. Whether the write is acceptable is the helm's.
-        AgentVerb::TemplateCreate { name, fields, host }
-        | AgentVerb::TemplateEdit { name, fields, host } => {
+        AgentVerb::TemplateCreate {
+            name, fields, host, ..
+        }
+        | AgentVerb::TemplateEdit {
+            name, fields, host, ..
+        } => {
             validate_template_name(name)?;
             let fields_bytes = serde_json::to_string(fields).map_or(usize::MAX, |json| json.len());
             if fields_bytes > farhelm_proto::launcher::TEMPLATE_FIELDS_CAP {
@@ -5773,6 +5777,7 @@ mod tests {
                 ..Default::default()
             },
             host: None,
+            shortcuts: Default::default(),
         };
         let longest = "n".repeat(TEMPLATE_NAME_CAP);
         assert!(validate_agent_verb(&create(&longest, None)).is_ok());

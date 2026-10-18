@@ -205,7 +205,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_59` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_60` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -216,7 +216,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 59;
+pub const PROTOCOL_VERSION: u32 = 60;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -1677,6 +1677,37 @@ pub const UPLOAD_WINDOW_BYTES: u64 = 4 * 1024 * 1024;
 /// as a bare cause: one line, user-legible, no leading "aborted:".
 pub const UPLOAD_ABORT_REASON_STALLED: &str = "transfer stopped making progress (stalled)";
 
+/// A template write's optional edits to the fleet's shortcut bindings.
+///
+/// The bindings are deliberately outside [`launcher::TemplateFields`]:
+/// templates can stack, while a shortcut names one saved template. `None`
+/// means leave that binding alone; `Some(false)` or `Clear` removes the
+/// named template's own binding after the helm verifies it owns one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateShortcutEdit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quick_launch: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<TemplateKeyEdit>,
+}
+
+impl TemplateShortcutEdit {
+    /// Whether the request leaves both fleet bindings alone. Such writes
+    /// retain the older template-only approval kind.
+    pub fn is_empty(&self) -> bool {
+        self.quick_launch.is_none() && self.key.is_none()
+    }
+}
+
+/// Give a template one physical number key, or clear the key it owns.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TemplateKeyEdit {
+    Set(String),
+    Clear,
+}
+
 /// What an agent inside a session is asking the helm for
 /// ([`ControlMsg::AgentRequest`]).
 ///
@@ -1885,6 +1916,10 @@ pub enum AgentVerb {
         fields: crate::launcher::TemplateFields,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         host: Option<String>,
+        /// Optional quick-launch and number-key changes, separate from the
+        /// template's fields because bindings live on fleet preferences.
+        #[serde(default, skip_serializing_if = "TemplateShortcutEdit::is_empty")]
+        shortcuts: TemplateShortcutEdit,
     },
     /// `farhelm agent template edit`: set `fields` (and `host`, as for
     /// [`Self::TemplateCreate`]) on the existing template `name`, leaving
@@ -1898,6 +1933,8 @@ pub enum AgentVerb {
         fields: crate::launcher::TemplateFields,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         host: Option<String>,
+        #[serde(default, skip_serializing_if = "TemplateShortcutEdit::is_empty")]
+        shortcuts: TemplateShortcutEdit,
     },
     /// `farhelm agent template delete`. Answered with
     /// [`AgentReply::TemplateDeleted`].
@@ -2020,10 +2057,19 @@ pub struct AgentTemplate {
     /// identity) currently names, or `None` when it sets no host or no
     /// host here has that install.
     pub host_name: Option<String>,
+    /// The ⚡ mark and number key are fleet bindings, not template fields.
+    /// Both are always present in listing JSON, including `false` and `null`.
+    #[serde(default)]
+    pub quick_launch: bool,
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 impl AgentTemplate {
-    /// The listing form of `template`: its command texts withheld.
+    /// Redact command text for an agent-facing listing or write reply.
+    ///
+    /// The caller fills in the current fleet shortcut bindings, which are
+    /// stored separately from this template's fields.
     pub fn listed(template: &crate::launcher::LaunchTemplate, host_name: Option<String>) -> Self {
         let mut fields = template.fields.clone();
         let sets_command = fields.command.take().is_some();
@@ -2037,6 +2083,8 @@ impl AgentTemplate {
             sets_command,
             sets_resume_command,
             host_name,
+            quick_launch: false,
+            key: None,
         }
     }
 }
@@ -5091,8 +5139,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_59() {
-        assert_eq!(PROTOCOL_VERSION, 59);
+    fn protocol_version_is_pinned_at_60() {
+        assert_eq!(PROTOCOL_VERSION, 60);
     }
 
     /// A follow-up is an approved mutation even though its success has no
@@ -5299,6 +5347,9 @@ mod tests {
         assert!(listed.sets_command && listed.sets_resume_command);
         let json = serde_json::to_string(&listed).unwrap();
         assert!(!json.contains("secret-tool"), "{json}");
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["quick_launch"], false);
+        assert_eq!(value["key"], serde_json::Value::Null);
         assert_eq!(listed.fields.yolo, Some(false));
 
         let cleared = crate::launcher::LaunchTemplate {

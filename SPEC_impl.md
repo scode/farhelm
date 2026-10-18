@@ -4796,6 +4796,17 @@ surrounding spaces or control characters, and fields within the 64 KiB a create 
 decided only when it is applied. An agent's template writes share the same store path but carry a precondition and a few
 refusals of their own (see "Permission prompts for agent actions").
 
+An agent's quick-launch and number-key edits travel separately from template fields in protocol 60: those bindings
+belong to fleet preferences, not to a template's composable choices. The helm and Templates editor share the ⚡
+eligibility check. An agent write that changes a binding uses `TemplateWriteWithShortcuts`, a distinct approval kind
+whose card shows each change and the previous template for a move. An older UI cannot decode that kind and therefore
+cannot approve a move it cannot show. As with `LaunchWithPrompt` below, its approval-list decoder fails the whole list
+while such a card waits and keeps showing its last successfully decoded list; this is the accepted older-UI behavior,
+consistent with SPEC.md's "Upgrade compatibility and client scale" update rule rather than a supported downgrade path.
+At approval, the store compares the named template and the entire ⚡/number-key snapshot from the card under one
+immediate transaction, then writes the template and both binding columns together. The GUI's template and preference
+writes keep their existing last-write-wins behavior.
+
 Application is one pure function, `farhelm_proto::launcher::apply_template`, compiled into both the UI and the helm: a
 launcher state plus a template gives a new launcher state or a refusal naming the field, in SPEC.md's order (launch
 kind, then agent type, then the rest). Choosing an agent type on the agent launch kind runs

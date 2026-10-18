@@ -283,6 +283,18 @@ pub struct TemplateFields {
     pub name: Option<String>,
 }
 
+/// Whether one saved template can carry the direct quick-launch mark.
+///
+/// This rule is shared by the editor and agent template writes. A key may
+/// still name a partial template; only the ⚡ mark promises a direct launch.
+pub fn quick_launch_eligible(fields: &TemplateFields) -> bool {
+    fields.agent.is_some()
+        || fields
+            .command
+            .as_ref()
+            .is_some_and(|command| !command.trim().is_empty())
+}
+
 impl TemplateFields {
     /// Whether the template sets a command-launch choice, including a false
     /// YOLO assertion or an explicit null reset of the resume command.

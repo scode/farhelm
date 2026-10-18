@@ -17,6 +17,7 @@ use crate::menu_panel::{
 };
 use crate::peer::display_peer;
 use dioxus::prelude::*;
+pub(super) use farhelm_proto::launcher::quick_launch_eligible;
 use farhelm_proto::launcher::{
     LaunchCatalogModel, LaunchTemplate, LauncherKind, TEMPLATE_NAME_CAP, TemplateDestination,
     TemplateFields, check_template_shape,
@@ -26,17 +27,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 const DIALOG_SELECTOR: &str = r#".templates-dialog[role="dialog"]"#;
-
-/// A quick template must choose a runnable side of New's otherwise blank draft.
-/// This is an editor affordance, not backend validation: later edits may make
-/// the marked setup incomplete, in which case quick launch reveals ordinary New.
-pub(super) fn quick_launch_eligible(fields: &TemplateFields) -> bool {
-    fields.agent.is_some()
-        || fields
-            .command
-            .as_ref()
-            .is_some_and(|command| !command.trim().is_empty())
-}
 
 /// Estimate whether ordered template edits supply the active launch kind.
 /// This intentionally knows no catalog or hosts: the mounted New form still
