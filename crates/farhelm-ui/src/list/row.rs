@@ -416,7 +416,7 @@ struct AgentBadge {
 }
 
 /// Keep the specific approval mode audible even when several modes share a shield.
-fn permission_description(permission: PermissionGlyph) -> &'static str {
+pub(crate) fn permission_description(permission: PermissionGlyph) -> &'static str {
     match permission {
         PermissionGlyph::Yolo => "YOLO permission bypass",
         PermissionGlyph::Guarded => "guarded permission mode",
@@ -438,6 +438,64 @@ fn permission_description(permission: PermissionGlyph) -> &'static str {
     }
 }
 
+/// Classify the shield once for the sidebar and an existing-target approval.
+/// Stored command assertions remain assertions; observed bypass can only
+/// escalate the mark. Neither absence nor screen evidence makes a launch safer.
+pub(crate) fn session_permission(
+    launch: Option<&crate::SessionLaunch>,
+    screen_yolo: bool,
+) -> PermissionGlyph {
+    let permission = match launch {
+        Some(crate::SessionLaunch::Agent { selection, .. }) => {
+            // A stored omission means the agent's own setting, never today's
+            // default for a newly composed launch.
+            if selection
+                .harness
+                .stored_permission(selection.permissions)
+                .is_none()
+            {
+                PermissionGlyph::OwnSetting
+            } else if farhelm_proto::yolo::selection_is_yolo(selection) {
+                PermissionGlyph::Yolo
+            } else {
+                match selection.harness.stored_permission(selection.permissions) {
+                    Some(crate::LaunchPermission::Guarded) => PermissionGlyph::Guarded,
+                    Some(crate::LaunchPermission::Yolo | crate::LaunchPermission::Custom) => {
+                        unreachable!("the shared classifier handled YOLO")
+                    }
+                    Some(crate::LaunchPermission::Approve) => PermissionGlyph::Approve,
+                    Some(crate::LaunchPermission::SmartApprove) => PermissionGlyph::SmartApprove,
+                    Some(crate::LaunchPermission::Chat) => PermissionGlyph::Chat,
+                    None => unreachable!("own-setting was handled above"),
+                }
+            }
+        }
+        Some(crate::SessionLaunch::Command(command)) => {
+            if command.yolo {
+                PermissionGlyph::AssertedYolo
+            } else {
+                PermissionGlyph::AssertedNotYolo
+            }
+        }
+        Some(crate::SessionLaunch::Legacy { .. }) | None => PermissionGlyph::Unknown,
+    };
+    let observed = screen_yolo
+        && launch
+            .and_then(|launch| launch.agent_type())
+            .and_then(crate::launch_composer::screen_yolo_mode)
+            .is_some();
+    if observed
+        && !matches!(
+            permission,
+            PermissionGlyph::Yolo | PermissionGlyph::AssertedYolo
+        )
+    {
+        PermissionGlyph::Yolo
+    } else {
+        permission
+    }
+}
+
 /// Describe a session's agent and permission from its stored launch, never
 /// from its command line (SPEC.md: Farhelm does not parse a command to
 /// classify it).
@@ -447,31 +505,9 @@ fn permission_description(permission: PermissionGlyph) -> &'static str {
 /// YOLO assertion it was launched with; a legacy session its stored agent
 /// kind and the unclassified mark.
 fn launch_badge(session: &Session) -> AgentBadge {
+    let permission = session_permission(session.launch.as_ref(), false);
     if let Some(launch) = session.agent_selection() {
         let harness = harness_glyph(launch.harness);
-        // Own-setting needs the same admission gate as YOLO but a different
-        // mark. Resolve the stored choice before using that shared gate so an
-        // older omission cannot borrow today's guarded request default.
-        let permission = if launch
-            .harness
-            .stored_permission(launch.permissions)
-            .is_none()
-        {
-            PermissionGlyph::OwnSetting
-        } else if farhelm_proto::yolo::selection_is_yolo(launch) {
-            PermissionGlyph::Yolo
-        } else {
-            match launch.harness.stored_permission(launch.permissions) {
-                Some(crate::LaunchPermission::Guarded) => PermissionGlyph::Guarded,
-                Some(crate::LaunchPermission::Yolo | crate::LaunchPermission::Custom) => {
-                    unreachable!("the shared classifier handled YOLO")
-                }
-                Some(crate::LaunchPermission::Approve) => PermissionGlyph::Approve,
-                Some(crate::LaunchPermission::SmartApprove) => PermissionGlyph::SmartApprove,
-                Some(crate::LaunchPermission::Chat) => PermissionGlyph::Chat,
-                None => unreachable!("own-setting was handled above"),
-            }
-        };
         let mut description = harness_name(launch.harness).to_string();
         description.push_str(" — ");
         description.push_str(&crate::launch_composer::permission_help(
@@ -497,14 +533,9 @@ fn launch_badge(session: &Session) -> AgentBadge {
         };
     }
 
-    let (harness, permission, mut description) = match &session.launch {
+    let (harness, mut description) = match &session.launch {
         Some(crate::SessionLaunch::Command(command)) => (
             command.agent.map_or(HarnessGlyph::Terminal, harness_glyph),
-            if command.yolo {
-                PermissionGlyph::AssertedYolo
-            } else {
-                PermissionGlyph::AssertedNotYolo
-            },
             command
                 .agent
                 .map(harness_name)
@@ -512,11 +543,7 @@ fn launch_badge(session: &Session) -> AgentBadge {
         ),
         Some(crate::SessionLaunch::Legacy { .. })
         | Some(crate::SessionLaunch::Agent { .. })
-        | None => (
-            kind_glyph(session.agent_kind),
-            PermissionGlyph::Unknown,
-            "command".to_string(),
-        ),
+        | None => (kind_glyph(session.agent_kind), "command".to_string()),
     };
     description.push_str(" — ");
     description.push_str(permission_description(permission));
@@ -536,6 +563,7 @@ fn launch_badge(session: &Session) -> AgentBadge {
 /// already treats that choice as YOLO. Screen evidence never makes a launch safer.
 fn agent_badge(session: &Session) -> AgentBadge {
     let mut badge = launch_badge(session);
+    badge.permission = session_permission(session.launch.as_ref(), session.screen_yolo);
     if let Some(mode) = session
         .launch
         .as_ref()
@@ -543,12 +571,6 @@ fn agent_badge(session: &Session) -> AgentBadge {
         .and_then(crate::launch_composer::screen_yolo_mode)
         .filter(|_| session.screen_yolo)
     {
-        if !matches!(
-            badge.permission,
-            PermissionGlyph::Yolo | PermissionGlyph::AssertedYolo
-        ) {
-            badge.permission = PermissionGlyph::Yolo;
-        }
         // Lead with the observation: a red shield's hover and screen-reader
         // text must not open by describing the safer launch mode.
         badge.description = format!(

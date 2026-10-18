@@ -247,6 +247,21 @@ enum AgentCmd {
         #[arg(long = "session", allow_hyphen_values = true)]
         session: String,
     },
+    /// Send a prompt to another session's running Claude or Codex agent.
+    #[command(group(clap::ArgGroup::new("prompt_source").required(true).args(["prompt", "prompt_file"])))]
+    Prompt {
+        /// Exact target id from `farhelm agent sessions`; never this session.
+        #[arg(long = "session", allow_hyphen_values = true)]
+        session: String,
+        /// Message to submit, queued after the current turn if the agent is busy.
+        /// Newlines and tabs are allowed; other control characters are refused.
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true, value_parser = parse_initial_prompt)]
+        prompt: Option<String>,
+        /// Read the message from a UTF-8 file, or - for stdin (64 KiB cap).
+        /// Cannot be combined with --prompt; takes contents, not a target-host path.
+        #[arg(long, value_name = "PATH", allow_hyphen_values = true, value_parser = read_initial_prompt)]
+        prompt_file: Option<String>,
+    },
     /// Delete an explicitly named session and its stored state; never this session.
     Delete {
         /// Exact session id from `farhelm agent sessions`.
@@ -511,6 +526,17 @@ impl AgentCmd {
             }),
             AgentCmd::Stop { session } => Some(farhelm_proto::AgentVerb::Stop {
                 session_id: Some(session.clone()),
+            }),
+            AgentCmd::Prompt {
+                session,
+                prompt,
+                prompt_file,
+            } => Some(farhelm_proto::AgentVerb::Prompt {
+                session_id: Some(session.clone()),
+                prompt: prompt
+                    .clone()
+                    .or_else(|| prompt_file.clone())
+                    .expect("clap requires exactly one prompt source"),
             }),
             AgentCmd::Delete {
                 session,
@@ -895,9 +921,9 @@ fn parse_initial_prompt(text: &str) -> Result<String, String> {
     Ok(text.to_string())
 }
 
-/// Read at most one launch budget plus one byte, including for stdin.
-/// Parsing materializes the file once, so the relayed request and retry digest
-/// describe its contents rather than a path that could change before approval.
+/// Materialize one bounded UTF-8 message for initial or running-agent prompts.
+/// Reading the cap plus one byte also bounds stdin. Approval and any create
+/// retry digest see these contents, never a path that could change while waiting.
 fn read_initial_prompt(path: &str) -> Result<String, String> {
     use std::io::Read;
     let reader: Box<dyn Read> = if path == "-" {
@@ -1579,7 +1605,7 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
     {
         return print_agent_listing(verb, *json);
     }
-    // The lifecycle and creating verbs share one `agent_request`
+    // The acting verbs share one `agent_request`
     // round trip here, rather than each making its own the way the
     // listings do. The authenticated caller returned alongside the
     // reply is retained for attribution even though every
@@ -1646,6 +1672,14 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
                 anyhow::bail!("the helm answered stop with something other than confirmation");
             };
             println!("stopped {}", safe_cell(&target_for_reply));
+        }
+        AgentCmd::Prompt { session, .. } => {
+            let AgentReply::Prompted {} = reply else {
+                anyhow::bail!("the helm answered prompt with something other than confirmation");
+            };
+            // This confirms terminal input acceptance, not the agent's work.
+            // The empty reply leaves the exact requested target as attribution.
+            println!("prompt sent to {}", safe_cell(&session));
         }
         AgentCmd::Delete { session, .. } => {
             let AgentReply::Deleted { outcome } = reply else {

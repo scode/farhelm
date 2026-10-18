@@ -630,7 +630,9 @@ fn lost_reply(cause: &str, mutating: bool) -> anyhow::Error {
 /// re-checks the shape, so this is the only place a mismatch can be caught.
 ///
 /// `Session` is the rename reply shape, so this check confirms the helm
-/// answered with the kind of payload that command promises.
+/// answered with the kind of payload that command promises. Empty replies
+/// need the same separation: accepting `Stopped` for `Prompt` would claim
+/// delivery merely because an unrelated action also returns no fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReplyKind {
     UrlOpened,
@@ -640,6 +642,7 @@ enum ReplyKind {
     Session,
     Restarted,
     Stopped,
+    Prompted,
     Deleted,
     Created,
     TemplateWritten,
@@ -655,6 +658,7 @@ impl ReplyKind {
             farhelm_proto::AgentVerb::OpenUrl { .. } => ReplyKind::UrlOpened,
             farhelm_proto::AgentVerb::Rename { .. } => ReplyKind::Session,
             farhelm_proto::AgentVerb::Stop { .. } => ReplyKind::Stopped,
+            farhelm_proto::AgentVerb::Prompt { .. } => ReplyKind::Prompted,
             farhelm_proto::AgentVerb::Delete { .. } => ReplyKind::Deleted,
             farhelm_proto::AgentVerb::Restart { .. } => ReplyKind::Restarted,
             // `Created`, not `Session`: the two payloads are identical and
@@ -681,6 +685,7 @@ impl ReplyKind {
             AgentReply::Session { .. } => ReplyKind::Session,
             AgentReply::Restarted { .. } => ReplyKind::Restarted,
             AgentReply::Stopped {} => ReplyKind::Stopped,
+            AgentReply::Prompted {} => ReplyKind::Prompted,
             AgentReply::Deleted { .. } => ReplyKind::Deleted,
             AgentReply::Created { .. } => ReplyKind::Created,
             AgentReply::TemplateWritten { .. } => ReplyKind::TemplateWritten,
@@ -703,6 +708,7 @@ impl ReplyKind {
             ReplyKind::Session => "session row",
             ReplyKind::Restarted => "restarted session row",
             ReplyKind::Stopped => "stop confirmation",
+            ReplyKind::Prompted => "prompt delivery confirmation",
             ReplyKind::Deleted => "session delete confirmation",
             // "created", not "new": the whole point of this noun is to
             // read differently from `Session`'s in a message that names

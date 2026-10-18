@@ -205,7 +205,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_56` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_57` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -216,7 +216,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 56;
+pub const PROTOCOL_VERSION: u32 = 57;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -1765,6 +1765,17 @@ pub enum AgentVerb {
         /// The exact target id, including for an intentional self action.
         session_id: Option<String>,
     },
+    /// Type a literal follow-up into another live Claude or Codex session.
+    /// The owning supervisor checks status, liveness and paste mode after
+    /// approval. Busy agents queue it in their TUI; no Farhelm queue exists.
+    /// Answered with [`AgentReply::Prompted`]. A retry sends the message again.
+    Prompt {
+        /// Required exact target id. Self-targets are refused at both relay hops.
+        session_id: Option<String>,
+        /// The initial-prompt validation rule applies, including its byte cap
+        /// and legal empty string. ESC cannot terminate the enclosing paste.
+        prompt: String,
+    },
     /// Remove an explicitly named session and its state. Self-deletion is
     /// refused: the relay's requesting-session fence must outlive the reply.
     /// Answered with [`AgentReply::Deleted`], including checkout recovery advice.
@@ -1894,7 +1905,7 @@ pub enum AgentVerb {
 }
 
 impl AgentVerb {
-    /// Whether answering this verb CHANGES something durable at its target,
+    /// Whether answering this verb changes state or delivers input at its target,
     /// as opposed to only describing the fleet.
     ///
     /// The single authority for a distinction three separate places have to
@@ -1922,6 +1933,7 @@ impl AgentVerb {
             // reported as a free retry.
             AgentVerb::Rename { .. }
             | AgentVerb::Stop { .. }
+            | AgentVerb::Prompt { .. }
             | AgentVerb::Delete { .. }
             | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
@@ -1953,6 +1965,7 @@ impl AgentVerb {
             AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => false,
             AgentVerb::Rename { .. }
             | AgentVerb::Stop { .. }
+            | AgentVerb::Prompt { .. }
             | AgentVerb::Delete { .. }
             | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
@@ -2105,6 +2118,9 @@ pub enum AgentReply {
     /// `sessions` listing observes rather than something this reply could
     /// know synchronously.
     Stopped {},
+    /// Both the prompt paste and submit were accepted by tmux. This does not
+    /// acknowledge vendor processing or completion; retrying sends another prompt.
+    Prompted {},
     /// A completed session deletion. A checkout notice is part of the
     /// success and must be reported even though the session is gone.
     Deleted { outcome: SessionDeleteOutcome },
@@ -4972,8 +4988,29 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_56() {
-        assert_eq!(PROTOCOL_VERSION, 56);
+    fn protocol_version_is_pinned_at_57() {
+        assert_eq!(PROTOCOL_VERSION, 57);
+    }
+
+    /// A follow-up is an approved mutation even though its success has no
+    /// session row. The distinct reply prevents another empty acknowledgement
+    /// from being mistaken for prompt delivery.
+    #[farhelm_testtrace::test]
+    fn agent_prompt_wire_shape_retains_fencing_and_approval() {
+        let verb = AgentVerb::Prompt {
+            session_id: Some("target".into()),
+            prompt: "first\n\tlast".into(),
+        };
+        let wire =
+            serde_json::json!({"verb":"prompt","session_id":"target","prompt":"first\n\tlast"});
+        assert_eq!(serde_json::to_value(&verb).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<AgentVerb>(wire).unwrap(), verb);
+        assert!(verb.is_mutating());
+        assert!(verb.may_wait_for_user());
+        let reply = AgentReply::Prompted {};
+        let wire = serde_json::json!({"reply":"prompted"});
+        assert_eq!(serde_json::to_value(&reply).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<AgentReply>(wire).unwrap(), reply);
     }
 
     /// The relay's open fixes the binary channel's bidirectional meaning.

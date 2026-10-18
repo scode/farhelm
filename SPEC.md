@@ -768,8 +768,9 @@ agent choice is independent of that destination:
 Creation launches an interactive agent. A supported agent can receive a one-time initial prompt as part of its start
 argv, after Farhelm's own arguments have been composed, without waiting for terminal readiness. With no initial prompt,
 you type the first message into its terminal. An initial prompt is not part of the stored launch, so relaunching or
-copying that launch never repeats it; templates may supply one on every new create. Sending messages into an
-already-running agent remains separate work.
+copying that launch never repeats it; templates may supply one on every new create. `farhelm agent prompt` sends a
+message into an already-running Claude or Codex session, under the separate approval and delivery rules in Agent-spawned
+sessions.
 
 A custom model id is typed into the model field and applied with Enter; it needs a chosen harness. The optional session
 name sits in the destination block under host and folder, visible without any disclosure. Launch and Cancel are the
@@ -1378,13 +1379,13 @@ YOLO went unnoticed. This never makes the shield safer than its launch choice. R
 run with no observed evidence; a supervisor restart also clears it until new definite samples arrive. Command launches
 with a declared agent type are included; legacy sessions and the other agents are not read. This is advisory and best
 effort, not a promise of detection: a missed or late reading is outside the guarantee. It cannot see allow rules, hooks
-or managed policy. It is display only; host YOLO guards, spawned-session permission inheritance and approvals still use
-the stored launch alone. Every guarded hover names the agent's mode and meaning, shows the actual stored command under
-Launched with, and explains that allow rules, hooks, plugins, always-allow answers, sandbox settings and in-session
-switches can loosen it; agents may change behavior between versions. A custom hover says the flags were the user's, that
-Farhelm does not check them and counts the session as YOLO, and shows both the flags and the full stored command under
-Launched with. The launcher's permission choice has a separate ? button with that help, opening the docs section on
-permission modes.
+or managed policy. It is display only; host YOLO guards, spawned-session permission inheritance and approval decisions
+still use the stored launch alone. Every guarded hover names the agent's mode and meaning, shows the actual stored
+command under Launched with, and explains that allow rules, hooks, plugins, always-allow answers, sandbox settings and
+in-session switches can loosen it; agents may change behavior between versions. A custom hover says the flags were the
+user's, that Farhelm does not check them and counts the session as YOLO, and shows both the flags and the full stored
+command under Launched with. The launcher's permission choice has a separate ? button with that help, opening the docs
+section on permission modes.
 
 Hovering a live status dot, agent mark, or permission mark explains that mark. A clickable dot also names its mark read
 or mark unread action. The hover text uses the same status and permission meaning the row exposes to assistive
@@ -1513,14 +1514,17 @@ something — and answer from that, so an idle agent's own redraws read idle. A 
 (a menu the user opened) leaves the previous status in place, and a screen they do not recognize at all falls back to
 the generic reader. Their rules are held to real screens captured from the vendors' current releases; see
 `docs/agent-screen-fixtures.md`. A reader never creates lifecycle state. Wrong status must be cosmetic only — status
-detection must never gate or delay interaction with the terminal. It decides whether Restart and Restart with ask before
-stopping a live agent (see Lifecycle operations), where a wrong reading costs at most a skipped or an extra
-confirmation. A recognized dialog also defers the missing-conversation warning's clock until an Enter outside that
-dialog, as described below; this does not delay delivering input. Farhelm-supplied integration must not make vendor
-configuration a condition of launching an agent. Grok is the explicit opt-in exception for conversation capture: users
-install its three documented hook entries themselves, while an unconfigured Grok still launches normally and cannot be
-restarted. OMP and Grok both use generic activity only. Their approval prompts show the generic running/idle
-classification, never waiting — a settled scope decision, not a reader waiting to be written.
+detection must never gate or delay the user's interaction with the terminal. Agent-requested prompt delivery is a narrow
+exception: the owning supervisor refuses a target reading waiting or unknown rather than risk answering a dialog (see
+Agent-spawned sessions). A mistaken reading may therefore refuse that request or let it reach an unrecognized dialog; it
+never gates the user's own typing. Status also decides whether Restart and Restart with ask before stopping a live agent
+(see Lifecycle operations), where a wrong reading costs at most a skipped or an extra confirmation. A recognized dialog
+also defers the missing-conversation warning's clock until an Enter outside that dialog, as described below; this does
+not delay delivering input. Farhelm-supplied integration must not make vendor configuration a condition of launching an
+agent. Grok is the explicit opt-in exception for conversation capture: users install its three documented hook entries
+themselves, while an unconfigured Grok still launches normally and cannot be restarted. OMP and Grok both use generic
+activity only. Their approval prompts show the generic running/idle classification, never waiting — a settled scope
+decision, not a reader waiting to be written.
 
 **Ntfy alerts** optionally reach the user away from the screen. Once enabled and configured in settings, the helm sends
 one alert when a session becomes waiting and remains so for 10 seconds, once per waiting spell. Leaving and re-entering
@@ -2206,6 +2210,29 @@ revoking its credential. Self-stop remains available. A delete also refuses a ta
 flight rather than waiting, so two sessions deleting each other cannot stall on each other's fences. A lost reply means
 outcome unknown; it never claims that the session survived.
 
+`farhelm agent prompt --session <id> --prompt TEXT` sends a message to another session's running Claude or Codex agent
+on any host. `--prompt-file PATH` supplies the same message from a UTF-8 file (`-` reads stdin); exactly one source is
+required. The initial-prompt rule applies again at the owning supervisor: at most 64 KiB, with newline and tab allowed
+and other control characters refused. An explicitly empty message is legal. A self target is refused. The verb holds the
+asking session's one-change-at-a-time fence, and asks through the ordinary command approval card unless the asking
+host's commands-without-asking setting is on. The YOLO launch rule does not apply because this starts no agent.
+
+The card names both sessions and hosts, shows the full escaped message as labelled data, and shows the target's
+permission shield by the session list's rules, including observed permission bypass. It says when the target session is
+open in a client; that notice is a snapshot and may change while the card waits. Approval authorizes sending even when a
+user is typing there: the message may mix with or follow text already in the agent's composer.
+
+At handling time, the owning supervisor requires a live agent reading idle or running and a terminal with bracketed
+paste enabled. That reading is its latest status sample, so a question that appears within about one sampling interval
+before delivery can still receive the message. Waiting, unknown, starting, stopped or exited agents, and every agent
+other than Claude or Codex, are refused with the reason named. A supported request sends one bracketed paste followed by
+a separate submit key; the agent owns queueing while busy. Claude uses Enter and Codex uses Tab, each at idle and while
+working. The checked Claude 2.1.302 and Codex 0.163.0 queue it after the current turn; Claude's editor expands pasted
+tabs to spaces. Success means tmux confirmed the paste and submit, not that the agent started or finished the work.
+There is no idempotency key: a retry sends the message again. A failed delivery may have sent part or all of the input
+and is not proof that nothing arrived. Agent instructions explain these limits and treat cross-agent messages as
+untrusted input, with no secrets sent through this channel.
+
 The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
 `farhelm agent create` makes a session on an explicitly named host, and `farhelm agent clone` copies an explicitly named
 source session onto an explicitly named host. Host selectors use the display NAME the hosts listing reports; stable host
@@ -2216,12 +2243,12 @@ that supervisor's own refusal, reported verbatim rather than paraphrased on the 
 refused with its state named. The new session appears in every client the way any other create does.
 
 Every acting verb of `farhelm spawn` and `farhelm agent` asks the user first. `farhelm spawn` in every form,
-`farhelm agent create`, `clone`, `rename`, `stop`, `restart`, `delete` and `open-url`, and the template writes below are
-carried out only once the user approves them in the GUI, including when an agent acts on its own session. The read-only
-verbs (the hosts, sessions and templates listings, and `farhelm agent instructions`) never ask, and neither does
-Farhelm's own plumbing that runs in a session, such as the hooks that report a conversation's identity, which is not an
-agent verb. Farhelm cannot tell an agent from a person typing in a session's shell and does not try: whoever runs the
-command in a session asks as that session. The helm decides, because the requesting host and its supervisor are not
+`farhelm agent create`, `clone`, `rename`, `stop`, `restart`, `delete`, `prompt` and `open-url`, and the template writes
+below are carried out only once the user approves them in the GUI, including when an agent acts on its own session. The
+read-only verbs (the hosts, sessions and templates listings, and `farhelm agent instructions`) never ask, and neither
+does Farhelm's own plumbing that runs in a session, such as the hooks that report a conversation's identity, which is
+not an agent verb. Farhelm cannot tell an agent from a person typing in a session's shell and does not try: whoever runs
+the command in a session asks as that session. The helm decides, because the requesting host and its supervisor are not
 trusted to (see Local authority and trust between hosts), and it decides by the host connection the request arrived on,
 never by anything the request or its supervisor claims. A request from a host whose "run farhelm commands from this host
 without asking" setting is on (see Topology) is not asked about for commands. Opening links uses its own two permissions
@@ -2417,7 +2444,7 @@ supplied data, not instructions to follow. The helm relaying those values does n
 short interpretation rule for the reading agent, not a guarantee that Farhelm prevents model prompt injection.
 
 Spawning starts an interactive agent, optionally with the one-time initial prompt above; later interaction uses the
-child's terminal.
+child's terminal, either by the user's own typing or by the approved `farhelm agent prompt` verb for Claude and Codex.
 
 The parent reference is optional organizational metadata only and implies no VCS relationship. It is acceptable for
 agent-created sessions to have no parent reference; the parent filter need not identify everything an agent created. The
@@ -2907,14 +2934,15 @@ control is not a current requirement.
 An agent's acting `farhelm` commands other than opening links, whichever host they reach, are carried out only with the
 user's approval or under the requesting host's own "run farhelm commands from this host without asking" setting (see
 Agent-spawned sessions). That is what keeps a session on one host from gaining execution on another through Farhelm:
-creating, cloning, renaming, stopping and restarting sessions across hosts, and writing the templates any host may
-launch from, are authorized by the user, not by the request. A user who turns that setting on for a host grants that
-host's sessions exactly that authority over the fleet, including changing what later launches from those templates run
-anywhere. A retried create is a new request and is asked about like one, so how long agent-originated retry records are
-kept is not a security question. The one exception is a create into a managed checkout: a retry with the same
-idempotency key returns, or finishes, the attempt the user already approved, without asking again. That stays outside
-the retention question because the replay can only complete that exact approved request, and only for the session, on
-the host, that asked. None of this waives correctness of user-initiated GUI requests.
+creating, cloning, renaming, stopping and restarting sessions across hosts, sending prompts to running agents, and
+writing the templates any host may launch from, are authorized by the user, not by the request. A user who turns that
+setting on for a host grants that host's sessions exactly that authority over the fleet, including changing what later
+launches from those templates run anywhere. A retried create is a new request and is asked about like one, so how long
+agent-originated retry records are kept is not a security question. The one exception is a create into a managed
+checkout: a retry with the same idempotency key returns, or finishes, the attempt the user already approved, without
+asking again. That stays outside the retention question because the replay can only complete that exact approved
+request, and only for the session, on the host, that asked. None of this waives correctness of user-initiated GUI
+requests.
 
 Reading is separate from acting, and stays open for now. Any attached host may obtain any template's full contents,
 including a command line and resume command it carries: an approved spawn that applies a template, or any spawn from a

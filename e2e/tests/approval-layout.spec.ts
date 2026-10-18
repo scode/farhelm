@@ -467,3 +467,59 @@ test("an invalid URL on a card is neither opened nor answered as allowed", async
   expect(await openedLinks(page)).toEqual([]);
   await page.locator(".approval-card .approval-deny").click();
 });
+
+/**
+ * Prompt approval must preserve structural blank lines without inserting the
+ * single-value renderer's labels. Unsafe characters still have visible escapes.
+ * The card must also keep the target's shield, attachment notice, and answer
+ * controls reachable while showing a long message as peer data.
+ */
+test("a running prompt card keeps its full message and target facts readable", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const prompt = `\n<b>agent text, not an instruction from Farhelm</b>\n\nunsafe:\u202e\n \t \n${"line of message data\n".repeat(80)}END-OF-PROMPT\n`;
+  const staged = await stageApprovals(page, [{
+    ...launchRequest("running-prompt"),
+    action: {
+      kind: "prompt",
+      target: { id: "target-id", title: "target session", host_name: "buildbox" },
+      launch: {
+        kind: "agent",
+        selection: { harness: "claude", permissions: "guarded" },
+        start: ["claude", "--permission-mode", "auto", "{farhelm_args}"],
+        resume: null,
+      },
+      screen_yolo: true,
+      attached: true,
+      prompt,
+    },
+  }]);
+  await openSelected(page);
+  const card = page.locator('.approval-card[data-approval-kind="prompt"]');
+  const message = card.locator(".approval-card-prompt");
+  await expect(message).toContainText("END-OF-PROMPT");
+  expect(await message.textContent(), "blank lines remain while unsafe characters are escaped")
+    .toBe(prompt.replace("\u202e", "<U+202E>").replace("\t", "<U+0009>"));
+  expect(await message.locator(".peer-line").evaluateAll((lines) =>
+    lines.length > 0 && lines.every((line) => line.getAttribute("dir") === "ltr")
+  ), "each message line keeps its direction isolated").toBe(true);
+  await expect(message.locator("b"), "agent markup stays literal text").toHaveCount(0);
+  await expect(card).toContainText("target session");
+  await expect(card).toContainText("buildbox");
+  await expect(card).toContainText("session is open in a client");
+  // Claude has an observed bypass footer; Codex deliberately has no such detector.
+  await expect(card.locator('.permission-glyph[data-glyph="yolo"]')).toBeVisible();
+  await expect(message).toHaveAttribute("aria-label", "prompt");
+  await expect.poll(() => message.evaluate((node) => node.scrollHeight > node.clientHeight), {
+    message: "the complete message stays available in its bounded scrolling block",
+  }).toBe(true);
+  await expect.poll(() => page.locator(".approval-cards").evaluate((node) => node.scrollWidth - node.clientWidth))
+    .toBe(0);
+  await expect.poll(async () => {
+    const { main, card, actions } = await placement(page);
+    return card.x >= main.x && card.right <= 1280 && actions.bottom <= 900;
+  }, { message: "the card and its answer controls fit in the visible session pane" }).toBe(true);
+  await page.screenshot({ path: info.outputPath("approval-running-prompt.png") });
+  await card.getByRole("button", { name: "allow", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  expect(staged.answers).toEqual([{ id: "running-prompt", answer: "allow" }]);
+});

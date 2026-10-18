@@ -16,12 +16,15 @@
 //!
 //! # Same answers as the UI, on purpose
 //!
-//! Every verb here is served from the exact code path its REST counterpart
-//! uses — `hosts::host_views` for hosts, `aggregate::session_list` for
+//! Listings, lifecycle changes, creates and template writes use the exact
+//! code path their REST counterparts use — `hosts::host_views` for hosts,
+//! `aggregate::session_list` for
 //! sessions, `sessions::do_rename_session`/`do_stop_session`/
 //! `do_restart_session`/`do_delete_session` for the lifecycle verbs,
 //! `sessions::do_create_session` for `create` and `clone`, and
 //! `templates::store_template`/`remove_template` for the template writes.
+//! Prompt delivery has no REST counterpart: [`agent_prompt`] routes the
+//! approved message to the owning supervisor's confirmed input operation.
 //! Not for economy:
 //! the point of routing an agent's questions (and its actions) through the
 //! helm at all is that the agent and the user see, and act on, one fleet.
@@ -70,7 +73,7 @@
 //!
 //! # Acting verbs wait for the user first
 //!
-//! Every verb that changes something (rename, stop, restart, create, clone,
+//! Every verb that changes something (rename, stop, restart, delete, prompt, create, clone,
 //! `farhelm spawn` through create, and the template writes) is carried out
 //! only once the user has
 //! approved it on a card in the GUI, or the requesting host's "run farhelm
@@ -386,6 +389,23 @@ impl AgentRequestHandler for HelmAgentRequests {
                 }
                 agent_delete(&state, origin, session_id, &target, stop_if_running).await
             }
+            AgentVerb::Prompt {
+                session_id: target,
+                prompt,
+            } => {
+                let target = resolve_target(target.expect("validated"), session_id, "prompt");
+                if target == session_id {
+                    return outcome_of(
+                        Err(anyhow::Error::new(crate::SupervisorError {
+                            origin: crate::client::ErrorOrigin::Helm,
+                            kind: ErrorKind::InvalidRequest,
+                            message: "a session cannot send a prompt to itself".to_string(),
+                        })),
+                        mutating,
+                    );
+                }
+                agent_prompt(&state, origin, session_id, &target, &prompt).await
+            }
             AgentVerb::Restart {
                 session_id: target,
                 stop_if_running,
@@ -683,10 +703,9 @@ fn transport_outcome(error: &anyhow::Error, mutating: bool) -> Option<AgentOutco
 /// performing it.
 ///
 /// Attached as anyhow context at the read itself, and consulted by
-/// [`transport_outcome`], which is the only reader. There is exactly one
-/// producer today: `clone_for_agent` snapshots its source session with a
-/// listing before any create is dispatched, and without this marker a
-/// supervisor that mishandles THAT listing would tell the agent its clone
+/// [`transport_outcome`], which is the only reader. Clone, delete and prompt
+/// gather source or target facts before dispatch. Without this marker a
+/// supervisor that mishandles that read would tell the agent its mutation
 /// might have happened — the one thing that is certainly untrue at that
 /// point, since nothing has been sent to any target yet.
 ///
@@ -732,6 +751,16 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
         _ => Err(format!("{flag} is required and must not be empty")),
     };
     match verb {
+        AgentVerb::Prompt { session_id, prompt } => {
+            required(session_id.as_deref(), "--session")?;
+            if session_id
+                .as_deref()
+                .is_some_and(|id| id.chars().any(char::is_control))
+            {
+                return Err("--session must not contain control characters".to_string());
+            }
+            farhelm_proto::launcher::check_initial_prompt(prompt)
+        }
         AgentVerb::Rename {
             session_id,
             expected_title,
@@ -1724,6 +1753,66 @@ async fn approve_launch(
         }));
     }
     crate::yolo_guard::check_agent(state, host, &launch).await
+}
+
+/// Approve a message using the target's current display facts and pinned owner.
+///
+/// Attachment and shield facts are informational snapshots. The connection is
+/// not: approval cannot carry over to a replacement host connection. Delivery
+/// uses the original client after checking the route again, while eligibility
+/// and the input lifecycle remain the owning supervisor's responsibility.
+async fn agent_prompt(
+    state: &AppState,
+    origin: AgentOrigin,
+    asking: &str,
+    target: &str,
+    prompt: &str,
+) -> anyhow::Result<AgentReply> {
+    let (claim, client) = crate::sessions::route_session(state, target).await?;
+    let (shown, attached) = client
+        .prompt_target_info(target)
+        .await
+        .context(ReadOnlyPhase("reading the session to prompt"))?;
+    let snapshot =
+        state.manager.snapshots().into_iter().find(|snapshot| {
+            snapshot.id == claim.host && snapshot.incarnation == claim.incarnation
+        });
+    let Some(snapshot) = snapshot.filter(|_| shown.id == target) else {
+        return Err(anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::Unavailable,
+            message: "Farhelm cannot confirm the target session's current owner, so no prompt was sent; retry".to_string(),
+        }));
+    };
+    let action = ApprovalAction::Prompt {
+        target: farhelm_proto::approvals::ApprovalSession {
+            id: target.to_string(),
+            title: Some(shown.title),
+            host_name: Some(crate::aggregate::host_display_name(
+                snapshot.kind,
+                snapshot.destination.as_deref(),
+                snapshot.alias.as_deref(),
+            )),
+        },
+        launch: shown.launch,
+        screen_yolo: shown.screen_yolo,
+        attached,
+        prompt: prompt.to_string(),
+    };
+    approved(state, origin, asking, action).await?;
+    let (current_claim, current_client) = crate::sessions::route_session(state, target).await?;
+    if current_claim.host != claim.host
+        || current_claim.incarnation != claim.incarnation
+        || current_client.connection_id() != client.connection_id()
+    {
+        return Err(anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: ErrorKind::Unavailable,
+            message: "the target host's connection changed while this request waited for approval, so no prompt was sent; retry".to_string(),
+        }));
+    }
+    client.prompt_session(target, prompt).await?;
+    Ok(AgentReply::Prompted {})
 }
 
 /// Bind an approved deletion to one target snapshot. The supervisor checks
@@ -4229,6 +4318,376 @@ mod tests {
                  answer, so the handler resolved without forwarding one. It answered: {outcome:?}"
             ),
         }
+    }
+
+    /// Answer only prompt exchanges, retaining every request for assertions.
+    /// The stop channel keeps the peer alive through refusal assertions, so
+    /// an empty observation queue really means no mutation was dispatched.
+    fn prompt_peer(
+        shown: SessionInfo,
+        wrong_ack: bool,
+    ) -> (
+        tokio::io::DuplexStream,
+        tokio::task::JoinHandle<()>,
+        tokio::sync::mpsc::UnboundedReceiver<farhelm_proto::ControlMsg>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let (observed, received) = tokio::sync::mpsc::unbounded_channel();
+        let (stop, mut stopped) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            loop {
+                let frame = tokio::select! {
+                    _ = &mut stopped => break,
+                    frame = reader.read_frame() => match frame.unwrap() {
+                        Some(frame) => frame,
+                        None => break,
+                    },
+                };
+                let request = parse_control(&frame).unwrap();
+                observed.send(request.clone()).unwrap();
+                let reply = match request {
+                    ControlMsg::PromptTargetInfo { req_id, session_id } => {
+                        assert_eq!(session_id, "target");
+                        ControlMsg::PromptTarget {
+                            req_id,
+                            session: shown.clone(),
+                            attached: true,
+                        }
+                    }
+                    ControlMsg::PromptSession { req_id, .. } if wrong_ack => {
+                        ControlMsg::SessionRenamed {
+                            req_id,
+                            session: session_info("secret-reply-payload", SessionStatus::Idle),
+                        }
+                    }
+                    ControlMsg::PromptSession { req_id, .. } => {
+                        ControlMsg::SessionPrompted { req_id }
+                    }
+                    other => panic!("unexpected prompt peer request: {other:?}"),
+                };
+                writer.write_control(&reply).await.unwrap();
+            }
+        });
+        (client, task, received, stop)
+    }
+
+    /// Cards show authoritative target facts and the full approved text. A
+    /// denial must stop after preflight; Allow must send exactly those bytes.
+    #[farhelm_testtrace::test]
+    async fn prompt_approval_binds_full_text_and_authoritative_target_facts() {
+        use farhelm_proto::ControlMsg;
+        const PROMPT: &str = "first\n<script>second</script>\t\u{202e}third";
+        for allow in [false, true] {
+            let mut shown = session_info("target", SessionStatus::Running);
+            shown.title = "fresh target title".into();
+            shown.screen_yolo = true;
+            let (client, peer, mut received, stop) = prompt_peer(shown.clone(), false);
+            let (h, local) =
+                spliced_local_fleet(client, vec![session("asker", 1), shown.clone()]).await;
+            h.store
+                .set_commands_without_asking(local, false)
+                .await
+                .unwrap();
+            let _gui = h.manager.events().admit(1).unwrap();
+            let handler = HelmAgentRequests::for_state(&h.state);
+            let origin = origin_of(&h, local);
+            let task = tokio::spawn(async move {
+                handler
+                    .handle(
+                        origin,
+                        "asker",
+                        AgentVerb::Prompt {
+                            session_id: Some("target".into()),
+                            prompt: PROMPT.into(),
+                        },
+                    )
+                    .await
+            });
+            let card = await_card(&h, &task).await;
+            assert!(matches!(
+                received.try_recv(),
+                Ok(ControlMsg::PromptTargetInfo { .. })
+            ));
+            let ApprovalAction::Prompt {
+                target,
+                launch,
+                screen_yolo,
+                attached,
+                prompt,
+            } = card.action
+            else {
+                panic!("prompt needs its own card kind");
+            };
+            assert_eq!(target.id, "target");
+            assert_eq!(target.title.as_deref(), Some("fresh target title"));
+            assert!(target.host_name.is_some());
+            assert_eq!(launch, shown.launch);
+            assert!(screen_yolo && attached);
+            assert_eq!(prompt, PROMPT);
+            assert!(
+                received.try_recv().is_err(),
+                "no mutation before the answer"
+            );
+            assert_eq!(
+                answer_card(&h, if allow { "allow" } else { "deny" }).await,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+                .await
+                .unwrap()
+                .unwrap();
+            if allow {
+                assert!(
+                    matches!(
+                        outcome,
+                        AgentOutcome::Ok {
+                            reply: AgentReply::Prompted {}
+                        }
+                    ),
+                    "{outcome:?}"
+                );
+                assert!(
+                    matches!(received.try_recv(), Ok(ControlMsg::PromptSession { session_id, prompt, .. }) if session_id == "target" && prompt == PROMPT)
+                );
+            } else {
+                assert!(
+                    matches!(outcome, AgentOutcome::Err { ref message, .. } if message.contains("declined")),
+                    "{outcome:?}"
+                );
+                assert!(
+                    received.try_recv().is_err(),
+                    "declined prompt must never dispatch"
+                );
+            }
+            let _ = stop.send(());
+            join_responder(peer, &outcome).await;
+        }
+    }
+
+    /// No window means no prompt delivery; a trusted host needs no window and
+    /// no launch permission override. Wrong delivery acknowledgements remain
+    /// unknown without reflecting their potentially secret payload to the caller.
+    #[farhelm_testtrace::test]
+    async fn prompt_no_gui_trust_and_wrong_ack_preserve_delivery_boundaries() {
+        use farhelm_proto::ControlMsg;
+        for (trusted, wrong_ack) in [(false, false), (true, false), (true, true)] {
+            let shown = session_info("target", SessionStatus::Running);
+            let (client, peer, mut received, stop) = prompt_peer(shown.clone(), wrong_ack);
+            let (h, local) = spliced_local_fleet(client, vec![session("asker", 1), shown]).await;
+            h.store
+                .set_commands_without_asking(local, trusted)
+                .await
+                .unwrap();
+            h.store.set_yolo_without_asking(local, false).await.unwrap();
+            assert_eq!(h.manager.events().subscriber_count(), 0, "premise: no GUI");
+            let outcome = HelmAgentRequests::for_state(&h.state)
+                .handle(
+                    origin_of(&h, local),
+                    "asker",
+                    AgentVerb::Prompt {
+                        session_id: Some("target".into()),
+                        prompt: "exact message".into(),
+                    },
+                )
+                .await;
+            assert!(matches!(
+                received.try_recv(),
+                Ok(ControlMsg::PromptTargetInfo { .. })
+            ));
+            assert!(h.state.approvals.list().is_empty());
+            if !trusted {
+                assert!(
+                    matches!(outcome, AgentOutcome::Err { ref message, .. } if message == crate::approvals::NO_GUI_REFUSAL),
+                    "{outcome:?}"
+                );
+                assert!(received.try_recv().is_err(), "no GUI must prevent delivery");
+            } else {
+                assert!(matches!(
+                    received.try_recv(),
+                    Ok(ControlMsg::PromptSession { .. })
+                ));
+                if wrong_ack {
+                    assert!(
+                        matches!(outcome, AgentOutcome::Err { kind: ErrorKind::Timeout, ref message } if message.contains("unknown") && !message.contains("secret-reply-payload")),
+                        "{outcome:?}"
+                    );
+                } else {
+                    assert!(
+                        matches!(
+                            outcome,
+                            AgentOutcome::Ok {
+                                reply: AgentReply::Prompted {}
+                            }
+                        ),
+                        "{outcome:?}"
+                    );
+                }
+            }
+            let _ = stop.send(());
+            join_responder(peer, &outcome).await;
+        }
+    }
+
+    /// Validation and target-id binding happen before a card or typed input.
+    /// Even a supervisor returning another session's facts cannot substitute it.
+    #[farhelm_testtrace::test]
+    async fn prompt_refuses_invalid_self_and_mismatched_preflight_targets() {
+        let (client, peer, mut received, stop) =
+            prompt_peer(session_info("different", SessionStatus::Running), false);
+        let (h, local) =
+            spliced_local_fleet(client, vec![session("asker", 1), session("target", 2)]).await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        for (target, prompt) in [
+            (None, "ok"),
+            (Some(""), "ok"),
+            (Some("bad\n"), "ok"),
+            (Some("asker"), "ok"),
+            (Some("target"), "bad\u{1b}"),
+        ] {
+            let outcome = handler
+                .handle(
+                    origin_of(&h, local),
+                    "asker",
+                    AgentVerb::Prompt {
+                        session_id: target.map(str::to_string),
+                        prompt: prompt.into(),
+                    },
+                )
+                .await;
+            assert!(
+                matches!(
+                    outcome,
+                    AgentOutcome::Err {
+                        kind: ErrorKind::InvalidRequest,
+                        ..
+                    }
+                ),
+                "{outcome:?}"
+            );
+            assert!(
+                received.try_recv().is_err(),
+                "invalid input must fail before preflight"
+            );
+        }
+        let outcome = handler
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Prompt {
+                    session_id: Some("target".into()),
+                    prompt: "ok".into(),
+                },
+            )
+            .await;
+        assert!(
+            matches!(outcome, AgentOutcome::Err { kind: ErrorKind::Unavailable, ref message } if message.contains("current owner")),
+            "{outcome:?}"
+        );
+        assert!(matches!(
+            received.try_recv(),
+            Ok(farhelm_proto::ControlMsg::PromptTargetInfo { .. })
+        ));
+        assert!(
+            received.try_recv().is_err(),
+            "mismatched facts must never dispatch"
+        );
+        assert!(h.state.approvals.list().is_empty());
+        let _ = stop.send(());
+        join_responder(peer, &outcome).await;
+    }
+
+    /// Replacing the target connection while its card waits invalidates that
+    /// approval even if the registry still routes the same session id.
+    #[farhelm_testtrace::test]
+    async fn prompt_refuses_a_target_connection_replaced_during_approval() {
+        let shown = session_info("target", SessionStatus::Running);
+        let (client, peer, mut received, stop) = prompt_peer(shown.clone(), false);
+        let (builder, remote) = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("local-identity".into()),
+                sessions: vec![session("asker", 1)],
+                ..HostScript::default()
+            })
+            .await
+            .ssh(
+                "user@builder",
+                HostScript {
+                    identity: Some("remote-identity".into()),
+                    sessions: vec![shown],
+                    peer: Some(client),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        h.await_refreshed(remote).await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Prompt {
+                        session_id: Some("target".into()),
+                        prompt: "ok".into(),
+                    },
+                )
+                .await
+        });
+        let _card = await_card(&h, &task).await;
+        assert!(matches!(
+            received.try_recv(),
+            Ok(farhelm_proto::ControlMsg::PromptTargetInfo { .. })
+        ));
+        let before = h.manager.status(remote).unwrap();
+        h.fleet.kill_connection(remote);
+        h.await_refreshed_after(remote, before.incarnation).await;
+        assert_ne!(
+            h.manager.status(remote).unwrap().incarnation,
+            before.incarnation,
+            "premise: target connection replaced"
+        );
+        assert_eq!(
+            origin_of(&h, local),
+            origin,
+            "premise: origin connection stayed live"
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(outcome, AgentOutcome::Err { kind: ErrorKind::Unavailable, ref message } if message.contains("connection changed") && message.contains("no prompt was sent")),
+            "{outcome:?}"
+        );
+        assert!(
+            received.try_recv().is_err(),
+            "withdrawn connection must never receive input"
+        );
+        let _ = stop.send(());
+        join_responder(peer, &outcome).await;
     }
 
     /// Spec: an agent's restart of a session the helm still routes but whose

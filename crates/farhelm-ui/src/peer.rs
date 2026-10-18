@@ -244,6 +244,10 @@ pub(crate) fn PeerLine(
 /// across browser engines and cannot preserve the helm's exact copy text. An
 /// empty end marker lets plan CSS retain that terminator in native selection
 /// without adding any text to what the user authorizes or copies.
+/// Empty lines stay literal, and whitespace-only lines never become placeholder
+/// labels. Unsafe whitespace such as tabs is still escaped visibly; otherwise
+/// the copied approval text would invent words absent from the action while
+/// hiding characters the user needs to notice.
 /// A caller that caps this text in a scrollport supplies `scroll_label` so
 /// keyboard users can enter it without adding stops to ordinary text blocks.
 #[component]
@@ -270,7 +274,7 @@ pub(crate) fn PeerBlock(class: String, text: String, scroll_label: Option<String
                     key: "{index}",
                     class: if line.starts_with("- ") { "peer-value peer-line peer-plan-step" } else { "peer-value peer-line" },
                     dir: "ltr",
-                    "{display_peer(line)}"
+                    "{editable_peer(line)}"
                     if *newline {
                         "\n"
                     }

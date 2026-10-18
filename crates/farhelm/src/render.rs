@@ -44,11 +44,10 @@ pub(crate) fn truncation_notice(reply: &AgentReply) -> Option<String> {
 /// asking session, and which host it is on.
 ///
 /// Only ever called with the reply to `Hosts`, `Sessions` or `Templates` —
-/// the four lifecycle verbs print their own one-line confirmation instead
-/// (see `main`'s `Rename`/`Stop`/`Restart` arms) and the two creating verbs
-/// print an id on stdout with their confirmation on stderr — which is why
-/// the lifecycle and `Created` tags are an ERROR here rather than tables of
-/// their own.
+/// the lifecycle and prompt verbs print their own one-line confirmation
+/// instead, and the two creating verbs print an id on stdout with their
+/// confirmation on stderr. A non-listing reply is an error here rather than
+/// a table that could be mistaken for an empty fleet.
 ///
 /// A `Result` rather than a panic on those tags, deliberately. The
 /// precondition is real and holds today, but it is a fact about this
@@ -130,14 +129,15 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
             // own: it is the selector `--template` matches exactly.
             Ok(aligned(&rows, &[0]))
         }
-        // Refused rather than rendered: a lifecycle or creating reply has
-        // one row and no table to be, and printing an empty one would read
-        // as an empty fleet. `main` never routes one here — see this
+        // Refused rather than rendered: acting replies have no discovery
+        // table to be, and printing an empty one would read as an empty
+        // fleet. `main` never routes one here — see this
         // function's docs for why that is stated as an error and not
         // asserted.
         AgentReply::Session { .. }
         | AgentReply::Restarted { .. }
         | AgentReply::Stopped {}
+        | AgentReply::Prompted {}
         | AgentReply::Deleted { .. }
         | AgentReply::Created { .. }
         | AgentReply::TemplateWritten { .. }

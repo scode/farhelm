@@ -3075,6 +3075,49 @@ impl SupervisorClient {
         }
     }
 
+    /// Read the target's current display and attachment facts before approval.
+    /// This observation does not reserve a run or authorize later delivery;
+    /// the supervisor checks eligibility again when the approved prompt arrives.
+    pub async fn prompt_target_info(&self, id: &str) -> anyhow::Result<(SessionInfo, bool)> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::PromptTargetInfo {
+                    req_id,
+                    session_id: id.to_string(),
+                },
+            )
+            .await?
+        {
+            ControlMsg::PromptTarget {
+                session, attached, ..
+            } => Ok((session, attached)),
+            other => Err(wrong_reply("PromptTargetInfo", &other)),
+        }
+    }
+
+    /// Confirm the prompt's paste and submit input, without waiting for agent work.
+    /// A missing or wrong acknowledgement leaves delivery unknown: some input
+    /// may already have reached the agent, and retrying sends another prompt.
+    pub async fn prompt_session(&self, id: &str, prompt: &str) -> anyhow::Result<()> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::PromptSession {
+                    req_id,
+                    session_id: id.to_string(),
+                    prompt: prompt.to_string(),
+                },
+            )
+            .await?
+        {
+            ControlMsg::SessionPrompted { .. } => Ok(()),
+            other => Err(wrong_reply("PromptSession", &other)),
+        }
+    }
+
     /// Relaunch a session's agent (SPEC.md's restart, PLAN_M3.md item 9),
     /// returning the session's freshly recomputed state.
     ///

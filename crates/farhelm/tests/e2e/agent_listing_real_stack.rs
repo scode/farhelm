@@ -773,24 +773,11 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
 
     // The stop below must find a launched agent: creating a session returns
     // once its pane exists, not once the agent has passed Farhelm's exec
-    // shim, and a stop that lands in between ends the session as "never
-    // started" instead of exited, failing the assertion after the stop for
-    // a reason that has nothing to do with `farhelm agent stop`.
-    let launch_deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
-    loop {
-        let detail = get_json(&client, &target_url).await;
-        let info: SessionInfo = serde_json::from_value(detail.clone())
-            .expect("the session detail decodes as a SessionInfo");
-        if info.status.is_live() {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < launch_deadline,
-            "the target's agent never started before the stop: {detail}"
-        );
-        // sleep-ok: poll the helm's view of the target's launch, bounded by REAL_STACK_SETTLE.
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
+    // shim. Even a live status can describe that pre-exec pane, so it is
+    // not a readiness oracle. The shared post-exec marker proves the fake
+    // agent ran before Stop; otherwise stopping the wrapper legitimately
+    // records "never started" rather than the exit this test must exercise.
+    wait_for_agent_ready(&supervisor.state.path().join("tmux.sock"), &target_id).await;
 
     // `stop`, with an explicit `--session` naming the
     // TARGET — see the module docs for why acting on a different session

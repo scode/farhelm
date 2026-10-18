@@ -124,6 +124,17 @@ pub enum ApprovalAction {
     },
     /// `farhelm agent stop`.
     Stop { target: ApprovalSession },
+    /// A message typed into an existing agent. Its own tag keeps an older UI
+    /// from approving text it cannot show. Launch and observed bypass are
+    /// display evidence for the target's shield, not instructions to relaunch it.
+    Prompt {
+        target: ApprovalSession,
+        launch: SessionLaunch,
+        screen_yolo: bool,
+        /// Informational snapshot: a client may attach or leave during the wait.
+        attached: bool,
+        prompt: String,
+    },
     /// The guard describes the same snapshot shown to the user; it is never
     /// recomputed after approval, when more processes might be running.
     Delete {
@@ -195,6 +206,40 @@ pub enum ApprovalAnswer {
 
 #[cfg(test)]
 mod tests {
+    /// Existing-agent messages need a distinct card tag: an older UI must
+    /// fail closed instead of offering approval while omitting the message.
+    #[test]
+    fn running_prompt_cards_fail_an_older_action_decoder() {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum OlderAction {
+            Stop {},
+        }
+        let card = super::ApprovalAction::Prompt {
+            target: super::ApprovalSession {
+                id: "target".into(),
+                title: Some("title".into()),
+                host_name: Some("host".into()),
+            },
+            launch: crate::SessionLaunch::Command(crate::CommandLaunch {
+                command: "codex".into(),
+                agent: Some(crate::LaunchHarness::Codex),
+                yolo: false,
+                resume: None,
+            }),
+            screen_yolo: true,
+            attached: true,
+            prompt: "first\nsecond\t<script>".into(),
+        };
+        let value = serde_json::to_value(&card).unwrap();
+        assert_eq!(value["kind"], "prompt");
+        assert_eq!(
+            serde_json::from_value::<super::ApprovalAction>(value.clone()).unwrap(),
+            card
+        );
+        assert!(serde_json::from_value::<OlderAction>(value).is_err());
+    }
+
     /// Old card payloads must not advertise a new native capability, while the
     /// new answer needs its own wire tag so it cannot be mistaken for raw Allow.
     #[test]

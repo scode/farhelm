@@ -163,9 +163,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`download-eof-cancellation-retains-route.md`](download-eof-cancellation-retains-route.md) — Cancellation during
   successful download cleanup can retain completed-transfer bookkeeping.
 
-- [`approval-blank-lines-gain-empty-labels.md`](approval-blank-lines-gain-empty-labels.md) — Approval cards insert
-  empty-value labels into blank lines of displayed prompt text.
-
 - [`tab-attach-blocks-host-reader-during-stop.md`](tab-attach-blocks-host-reader-during-stop.md) — Attaching a tab
   during Stop can temporarily block unrelated requests on the host connection.
 
