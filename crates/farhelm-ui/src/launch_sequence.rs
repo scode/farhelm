@@ -115,7 +115,7 @@ pub(crate) struct NumberShortcutKey {
 /// The single source of physical template keys, modifiers, and binding order.
 ///
 /// Rust renders labels from this value and serializes it to the JS listener.
-/// Cmd-J is defined now but its action stays inactive until the switcher PR.
+/// Cmd-J uses the same serialized definition to open the template list.
 #[derive(Clone, Copy, Serialize)]
 pub(crate) struct TemplateShortcutDefinition {
     pub(crate) mac_desktop: bool,
@@ -234,6 +234,8 @@ pub(crate) enum TemplateReference {
     Bolt,
     /// A physical number key's stored value, resolved against fresh bindings.
     Number(String),
+    /// A switcher row names a template from its snapshot; resolve it afresh.
+    Name(String),
 }
 
 /// One synchronous JS observation of dialog ownership and its opening epoch.
@@ -283,6 +285,7 @@ pub(crate) fn resolve_template_references(
             let name = match reference {
                 TemplateReference::Bolt => preferences.quick_launch_template.as_ref(),
                 TemplateReference::Number(key) => preferences.template_shortcuts.get(key),
+                TemplateReference::Name(name) => Some(name),
             }?;
             templates
                 .iter()
@@ -329,6 +332,7 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
                     .as_ref()
                     .map(|name| display_peer(name))
                     .unwrap_or_else(|| "unbound ⚡".into()),
+                TemplateReference::Name(name) => display_peer(name),
             }
         })
         .collect::<Vec<_>>();
@@ -430,6 +434,28 @@ mod tests {
                 &templates,
             )
             .is_none()
+        );
+    }
+
+    /// A Cmd-J row supplies only its name. A rename or deletion between the
+    /// switcher snapshot and Enter cannot launch the old captured definition.
+    #[test]
+    fn name_reference_uses_the_current_catalog() {
+        use farhelm_proto::launcher::TemplateFields;
+
+        let preferences = crate::api::Preferences::default();
+        let reference = [TemplateReference::Name("chosen".into())];
+        let template = LaunchTemplate {
+            name: "chosen".into(),
+            fields: TemplateFields::default(),
+        };
+        assert_eq!(
+            resolve_template_references(&reference, &preferences, std::slice::from_ref(&template)),
+            Some(vec![template])
+        );
+        assert_eq!(
+            resolve_template_references(&reference, &preferences, &[]),
+            None
         );
     }
 }

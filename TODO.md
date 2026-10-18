@@ -59,15 +59,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   button. The text wraps across several lines and dominates the narrow panel. Find a better way to present this result;
   the design details are TBD. Plan: `plans/queue/host-uninstall-dialogs.md`.
 
-- **Apply template hotkeys in the launcher.** While New, Clone, or Replace with is open, pressing a bound template
-  hotkey should apply that template to the current launcher draft, exactly as accepting `tl:name` in the launcher's
-  search does, instead of starting a session. This should work for the quick-launch bolt and number shortcuts, so
-  pressing several hotkeys can stack their template edits before Launch. Plan: `plans/queue/launcher-template-keys.md`.
-
-- **Open a template-only launcher with Cmd-J.** Make Cmd-J work like Cmd-K, but show only templates. Typing a template
-  name and pressing Enter should launch it, so `Cmd-J, foo, Enter` starts the `foo` template. Plan:
-  `plans/queue/launcher-template-keys.md`.
-
 - **Allow repeated quick launches from one setup.** Quick-launching a recent managed-checkout setup while an earlier
   session from it is still running can strand New Session with the repository name prefilled in Name. The checkout
   preview request (`POST /api/github-checkout-preview`) returns

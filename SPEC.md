@@ -719,23 +719,23 @@ agent choice is independent of that destination:
   directory, else this machine's home, with the template overriding only its own fields. Success selects the created
   session. When New was never shown, the rename dialog opens over it while its agent is already starting, unless
   Settings' on-by-default **name sessions on quick launch** choice is off. This applies to the bolt shortcut, number
-  shortcuts, composed sequences and the quick-switcher row, even when a template supplied the name. The actual created
-  name is focused and fully selected. Enter with the name unchanged or Escape keeps it without sending a rename; a
-  changed name uses ordinary rename. Closing returns to the new terminal, which takes no input while the dialog is open.
-  A launch that revealed New gets no naming dialog, even if a later submission succeeds. A held chord starts only once;
-  the chord never reaches the terminal and visible modals other than the launcher keep the keyboard. With no usable mark
-  on the page it opens Templates with an explanation. An edited marked template that no longer supplies an agent or
-  command opens New with it applied. A launch refusal or YOLO question reveals New with the same draft, error or
-  confirmation; nothing bypasses host admission, and the shortcut never retries itself. The mark is a nullable template
-  name on the helm's shared preferences, independent of the template fields. Clicking another bolt moves it; clicking
-  the lit bolt clears it. A template that chooses neither an agent nor a nonblank command cannot be marked in the
-  interface. Renaming repoints the mark before deleting the old name; deleting that name clears its mark through the
-  shared delete path, and Undo never restores the mark. The editor says whether its saved template is marked. The
-  shortcut reads the mark and templates fresh on each use, so another window's change takes effect without reloading.
-  Templates' hover and a separate quick-switcher row advertise the chord and marked name. A browser that reserves the
-  chord keeps its behavior; the quick-switcher row remains available. An agent may set or clear the mark through
-  `farhelm agent template create` or `edit`, behind a template approval card. The helm applies the same eligibility rule
-  to an agent's write as the Templates editor does.
+  shortcuts, composed sequences, the quick-switcher row and the Cmd+J template list, even when a template supplied the
+  name. The actual created name is focused and fully selected. Enter with the name unchanged or Escape keeps it without
+  sending a rename; a changed name uses ordinary rename. Closing returns to the new terminal, which takes no input while
+  the dialog is open. A launch that revealed New gets no naming dialog, even if a later submission succeeds. A held
+  chord starts only once; the chord never reaches the terminal and visible modals other than the launcher keep the
+  keyboard. With no usable mark on the page it opens Templates with an explanation. An edited marked template that no
+  longer supplies an agent or command opens New with it applied. A launch refusal or YOLO question reveals New with the
+  same draft, error or confirmation; nothing bypasses host admission, and the shortcut never retries itself. The mark is
+  a nullable template name on the helm's shared preferences, independent of the template fields. Clicking another bolt
+  moves it; clicking the lit bolt clears it. A template that chooses neither an agent nor a nonblank command cannot be
+  marked in the interface. Renaming repoints the mark before deleting the old name; deleting that name clears its mark
+  through the shared delete path, and Undo never restores the mark. The editor says whether its saved template is
+  marked. The shortcut reads the mark and templates fresh on each use, so another window's change takes effect without
+  reloading. Templates' hover and a separate quick-switcher row advertise the chord and marked name. A browser that
+  reserves the chord keeps its behavior; the quick-switcher row remains available. An agent may set or clear the mark
+  through `farhelm agent template create` or `edit`, behind a template approval card. The helm applies the same
+  eligibility rule to an agent's write as the Templates editor does.
 - Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit in
   the Mac desktop app, or Ctrl+Shift+digit everywhere else (including a Mac browser), starts its template through the
   same direct launch path as quick launch on the page, and applies it to an open New, Clone or Replace with draft under
@@ -1647,8 +1647,8 @@ whatever the agent renders is what you see. There is no composer, no message abs
   every other host uses its chosen icon color at full strength. A host color change updates open session frames through
   the existing hosts feed, and a switch change applies immediately in the current client. Other open clients pick up the
   switch change when they reload. The terminal background, text palette and size do not change.
-- The quick-switcher's Cmd+K on macOS or Ctrl+Shift+K elsewhere never reaches the terminal's program; plain Ctrl+K off
-  macOS keeps the terminal program's own behavior.
+- The quick-switcher's Cmd+K and template list's Cmd+J on macOS, or Ctrl+Shift+K and Ctrl+Shift+J elsewhere, never reach
+  the terminal's program when Farhelm accepts them; plain Ctrl+K off macOS keeps the terminal program's own behavior.
 - Shift+Enter (the exact chord — no other modifier held, not mid-IME-composition) is sent as ESC CR in a SINGLE write,
   in every terminal tab alike, agent and shell. Single-write delivery is part of the promise, not an implementation
   detail: a lone ESC arriving in its own read is indistinguishable from the Escape key to line editors that disambiguate
@@ -1932,6 +1932,19 @@ as the session name. New shows a cancellable loading state until the template in
 edits. Neither name nor template pick launches a session: Launch remains the user's action. With no query, a separate
 final "Quick launch: <template>" row uses the direct quick-launch path, or opens Templates to mark one; the first recent
 session stays initially selected. After a failed session read, New and template search remain usable.
+
+Cmd+J on macOS, Ctrl+Shift+J elsewhere, opens a template-only list in the web UI and desktop app when no dialog is open.
+It follows the quick switcher's focus, Escape, loading and modal rules. Typing filters template names as `tl:` does,
+without a prefix. Rows show the template name, summary and its ⚡ or number shortcut when assigned. Enter starts the
+highlighted template through the fresh quick-launch path; clicking a row does the same. A name exactly equal to the
+trimmed query (case-sensitively) is highlighted over an earlier substring match, and Enter starts it; arrowing to
+another row changes that choice. With no match, Enter does nothing. A partial template opens New with its choices
+applied. A template renamed or deleted since the list opened shows a preparation error in New. The chord never reaches
+the terminal's program and does nothing while any modal is open, including New, Clone, Replace with and hidden
+quick-launch preparation, or before sign-in and preference loading finish. Chrome, Edge and Firefox document
+Ctrl+Shift+J as a browser console shortcut on Windows and Linux; Firefox documents Cmd+J as Downloads on macOS. Those
+browsers may keep their own action. Browser shortcut lists do not establish whether the page receives the key; the
+desktop app is the guaranteed target.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size

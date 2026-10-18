@@ -1509,6 +1509,12 @@ fn install_quick_switcher_shortcut() {
     document::eval(
         r#"if (!window.__farhelmQuickSwitcherShortcut) {
         window.__farhelmQuickSwitcherShortcut = true;
+        // Both switcher chords use this opener after their own admission test.
+        // Capture focus before the modal mounts so Escape can restore it.
+        window.farhelmOpenQuickSwitcher = trigger => {
+            window.__farhelmQuickSwitcherFocus = document.activeElement;
+            trigger.click();
+        };
         window.addEventListener('keydown', (event) => {
             const mac = /Mac/.test(navigator.platform || '');
             const chord = mac
@@ -1521,8 +1527,7 @@ fn install_quick_switcher_shortcut() {
             event.preventDefault();
             event.stopPropagation();
             if (event.repeat || trigger.disabled) return;
-            window.__farhelmQuickSwitcherFocus = document.activeElement;
-            trigger.click();
+            window.farhelmOpenQuickSwitcher(trigger);
         }, true);
     }"#,
     );

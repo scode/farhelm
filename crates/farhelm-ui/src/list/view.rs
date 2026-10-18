@@ -1013,6 +1013,7 @@ pub(crate) fn ListView(
     let mut initial_template = use_signal(|| None::<farhelm_proto::launcher::LaunchTemplate>);
     // The switcher stays list-owned so picks use the ordinary navigation gate.
     let mut quick_switcher_open = use_signal(|| false);
+    let mut quick_switcher_mode = use_signal(|| super::quick_switcher::SwitcherMode::Sessions);
     // A close owns one focus/navigation handoff until the DOM removal is
     // acknowledged. Reopening in that gap would give the old task a new
     // dialog and a new focus target to wait for.
@@ -3573,6 +3574,18 @@ pub(crate) fn ListView(
                                         }
                                         initial_quick_templates.set(templates);
                                     }
+                                } else if let [
+                                    crate::launch_sequence::TemplateReference::Name(name),
+                                ] = references.as_slice()
+                                {
+                                    // The row came from an earlier switcher snapshot. New
+                                    // keeps the ordinary quick-launch refusal visible when
+                                    // another window has since renamed or deleted it.
+                                    if open_new.call(None) {
+                                        initial_create_error.set(Some(format!(
+                                            "template {name} is no longer available"
+                                        )));
+                                    }
                                 } else {
                                     initial_template.set(None);
                                     quick_launch_hint.set(references.iter().any(|reference| {
@@ -3654,11 +3667,27 @@ pub(crate) fn ListView(
                         .call((vec![crate::launch_sequence::TemplateReference::Bolt], false));
                     restore = false;
                 }
+                Some(super::quick_switcher::SwitcherPick::TemplateLaunch(name)) => {
+                    quick_launch.call((
+                        vec![crate::launch_sequence::TemplateReference::Name(name)],
+                        false,
+                    ));
+                    restore = false;
+                }
                 None => {}
             }
             super::quick_switcher::restore_focus(restore);
             quick_switcher_closing.set(false);
         });
+    });
+    let open_switcher = use_callback(move |mode: super::quick_switcher::SwitcherMode| {
+        if *quick_switcher_closing.peek() {
+            return;
+        }
+        opening_generation += 1;
+        quick_launch_pending.set(false);
+        quick_switcher_mode.set(mode);
+        quick_switcher_open.set(true);
     });
 
     // A navigation can precede the keyed view's first publishing effect. An
@@ -3744,19 +3773,21 @@ pub(crate) fn ListView(
         // Status sounds follow the very replies these rows display. Keeping
         // the observer here avoids another session read or a mirrored listing.
         crate::sounds::SessionSounds { selected, listing, listing_scope }
+        // Both keyboard relays enter one opener; only the mode and the
+        // resulting rows differ. Closing still waits for dialog DOM removal.
         button {
             class: "quick-switcher-trigger", r#type: "button", hidden: true,
             tabindex: "-1", disabled: quick_switcher_closing(),
-            onclick: move |_| {
-                if !*quick_switcher_closing.peek() {
-                    opening_generation += 1;
-                    quick_launch_pending.set(false);
-                    quick_switcher_open.set(true);
-                }
-            },
+            onclick: move |_| open_switcher.call(super::quick_switcher::SwitcherMode::Sessions),
+        }
+        button {
+            class: "quick-switcher-template-trigger", r#type: "button", hidden: true,
+            tabindex: "-1", disabled: quick_switcher_closing(),
+            onclick: move |_| open_switcher.call(super::quick_switcher::SwitcherMode::Templates),
         }
         if quick_switcher_open() {
             super::quick_switcher::QuickSwitcher {
+                mode: quick_switcher_mode(),
                 hosts,
                 on_close: move |_| finish_switcher.call(None),
                 on_pick: move |pick| finish_switcher.call(Some(pick)),
