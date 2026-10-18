@@ -58,9 +58,9 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 use crate::api::{
-    Commit, PreferenceValue, ProbeResponse, ProvisioningOperation, ProvisioningSubmission,
-    adopt_host, probe_ssh_host, provision_host, remove_host, retry_host, set_alias,
-    set_commands_without_asking, set_host_appearance, set_host_destination,
+    Commit, PlanSteps, PreferenceValue, ProbeResponse, ProvisioningOperation,
+    ProvisioningSubmission, adopt_host, probe_ssh_host, provision_host, remove_host, retry_host,
+    set_alias, set_commands_without_asking, set_host_appearance, set_host_destination,
     set_yolo_without_asking, store_preference,
 };
 use crate::app_updater::use_app_updater;
@@ -3791,11 +3791,12 @@ fn take_add_offer<G>(
     AddConfirm::Accepted(claim)
 }
 
-/// One-use ADD authority paired with the inputs the helm inspected.
+/// One-use ADD authority paired with the inspected inputs and helm's display plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AddOffer {
     probe_id: String,
     confirmation: String,
+    steps: Option<PlanSteps>,
     binding: AddBinding,
 }
 
@@ -3994,8 +3995,9 @@ fn AddHostForm(
                         Ok(ProbeResponse::Provisionable {
                             probe_id,
                             confirmation,
+                            steps,
                         }) => {
-                            offer.open(AddOffer { probe_id, confirmation, binding }, ());
+                            offer.open(AddOffer { probe_id, confirmation, steps, binding }, ());
                             auto_submit.set(
                                 preferences.0.peek().skip_host_setup_confirmation == Some(true),
                             );
@@ -4018,6 +4020,7 @@ fn AddHostForm(
             if let Some(planned) = offer.current_key() {
                 SetupPlanConfirmation {
                     confirmation: planned.confirmation.clone(),
+                    steps: planned.steps.clone(),
                     name: display_peer(&ssh()),
                     local: false,
                     error: error.read().clone().map(|err| rsx! {
@@ -5778,6 +5781,7 @@ mod tests {
         let offer = |probe_id: &str| AddOffer {
             probe_id: probe_id.to_string(),
             confirmation: "install farhelm".to_string(),
+            steps: None,
             binding: binding.clone(),
         };
         // A claim that counts how many are still held.

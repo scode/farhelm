@@ -3568,6 +3568,10 @@ pub(crate) enum ProbeResponse {
         probe_id: String,
         /// The plan rendered by the helm from the executor's own actions.
         confirmation: String,
+        /// The helm's ordered descriptions of the actions this plan will run.
+        /// Older test replies may omit it and use the plain-text rendering.
+        #[serde(default)]
+        steps: Option<PlanSteps>,
     },
     /// The transport worked, but automatic provisioning does not cover the
     /// target.
@@ -3592,6 +3596,8 @@ pub(crate) struct UpdatePlan {
     pub(crate) probe_id: String,
     /// The concrete converge plan the second request authorizes.
     pub(crate) confirmation: String,
+    #[serde(default)]
+    pub(crate) steps: Option<PlanSteps>,
 }
 
 /// The one-use plan returned by the first UNINSTALL request.
@@ -3607,7 +3613,36 @@ pub(crate) struct UninstallPlan {
     pub(crate) probe_id: String,
     /// The removal the second request authorizes, rendered by the helm.
     pub(crate) confirmation: String,
+    #[serde(default)]
+    pub(crate) steps: Option<PlanSteps>,
     pub(crate) plan: UninstallPlanFacts,
+}
+
+/// One plan description, authored by the helm from the actions it retains.
+/// The client displays it but does not derive wording from action ids.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct PlanSteps {
+    pub(crate) lead: String,
+    pub(crate) steps: Vec<PlanStep>,
+    /// Uninstall's kept-data note sits outside the action list because no
+    /// action removes that directory.
+    pub(crate) kept: Option<String>,
+}
+
+/// A single action's readable name and details in run order.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct PlanStep {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) paths: Vec<PlanStepPath>,
+    pub(crate) explanation: Option<String>,
+}
+
+/// The visible home-relative path and the full host path shown on hover.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct PlanStepPath {
+    pub(crate) full: String,
+    pub(crate) short: String,
 }
 
 /// The part of the helm's frozen UNINSTALL plan this client reads.
@@ -5107,12 +5142,13 @@ mod tests {
     }
 
     /// Provisioning decoders keep the opaque plan out of the UI while
-    /// preserving the server-rendered confirmation and progress vocabulary.
+    /// preserving the server-authored confirmation and step descriptions.
     ///
     /// The plan is intentionally not mirrored: execution and confirmation
     /// both belong to the helm, and teaching this client every action field
     /// would create a second renderer that can drift. The opaque one-use id
-    /// and confirmation text are the complete client contract before POST.
+    /// and its display description are the client's contract before POST;
+    /// older stub replies can still use the plain-text confirmation alone.
     #[farhelm_testtrace::test]
     fn provisioning_replies_decode_without_reimplementing_the_plan() {
         let offered: ProbeResponse = serde_json::from_value(serde_json::json!({
@@ -5130,6 +5166,7 @@ mod tests {
             ProbeResponse::Provisionable {
                 probe_id: "add-plan".to_string(),
                 confirmation: "line one\nline two\n".to_string(),
+                steps: None,
             }
         );
 
@@ -5141,6 +5178,36 @@ mod tests {
         .unwrap();
         assert_eq!(update.probe_id, "update-plan");
         assert_eq!(update.confirmation, "replace then restart\n");
+        assert!(update.steps.is_none());
+
+        let structured: UninstallPlan = serde_json::from_value(serde_json::json!({
+            "probe_id": "uninstall-plan",
+            "confirmation": "Farhelm will uninstall:\n- remove the unit\n",
+            "steps": {
+                "lead": "Farhelm will uninstall:",
+                "steps": [{
+                    "id": "remove-unit",
+                    "name": "remove the systemd user unit",
+                    "paths": [{"full": "/home/host/.config/systemd/user/farhelm.service", "short": "~/.config/systemd/user/farhelm.service"}],
+                    "explanation": null
+                }],
+                "kept": "Kept: host data."
+            },
+            "plan": {"state_dir": "/home/host/.local/state/farhelm"}
+        }))
+        .expect("the UI accepts the helm's structured step list beside its opaque plan");
+        let steps = structured.steps.expect("the helm supplied a step list");
+        assert_eq!(steps.steps[0].id, "remove-unit");
+        assert_eq!(steps.steps[0].name, "remove the systemd user unit");
+        assert_eq!(
+            steps.steps[0].paths[0].short,
+            "~/.config/systemd/user/farhelm.service"
+        );
+        assert_eq!(
+            steps.steps[0].paths[0].full,
+            "/home/host/.config/systemd/user/farhelm.service"
+        );
+        assert_eq!(steps.kept.as_deref(), Some("Kept: host data."));
 
         let progress: ProvisioningView = serde_json::from_value(serde_json::json!({
             "host_id": 7,

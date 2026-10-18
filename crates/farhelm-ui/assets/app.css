@@ -3512,8 +3512,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   min-height: 0;
   overflow: auto;
 }
-/* Text-only regions have no focusable controls. Keep their keyboard ring inside
-   the scrollport so the dialog frame cannot clip it. */
+/* Keep the scroll region's keyboard ring inside its own scrollport so the
+   dialog frame cannot clip it, including when a plan has a copy control. */
 .host-settings-refreshed > .host-settings-body[tabindex="0"]:focus-visible,
 .host-dialog-framed > .host-settings-body[tabindex="0"]:focus-visible {
   outline-offset: -2px;
@@ -5193,11 +5193,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   padding: 2px 8px;
 }
 
-/* The helm rendered this text from the same plan the executor consumes.
-   Preserve its line boundaries and whitespace; wrapping long paths is the
-   layout intervention. A step's continuation aligns after its literal `- `;
-   headings and Kept lines remain flush. Browser copy tests guard the line
-   boundaries, since block-level spans can otherwise add copied newlines. */
+/* Older plan replies still use the helm's plain text. Preserve its line
+   boundaries and whitespace: the structured stepper below copies the raw
+   confirmation through its button, but these older replies use selection. */
 .provisioning-plan {
   background: var(--well);
   border: 1px solid var(--border-dim);
@@ -5218,6 +5216,90 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    rendered box after it. This empty one-pixel box retains the helm's final
    newline without inserting selectable text or a blank line of plan content. */
 .provisioning-plan .peer-block-end { display: block; height: 1px; }
+
+/* The confirmation and progress descriptions come from the same helm plan.
+   The numbered rail gives each action its own place while letting unbounded
+   host paths wrap inside the scrollable dialog body. */
+.provisioning-plan-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.provisioning-plan-lead {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.provisioning-copy-plan {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.provisioning-plan-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.provisioning-plan-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  position: relative;
+  padding-bottom: 14px;
+}
+.provisioning-plan-step:last-child { padding-bottom: 0; }
+.provisioning-plan-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  top: 24px;
+  bottom: 0;
+  left: 11px;
+  width: 1px;
+  background: var(--accent-edge);
+}
+.provisioning-plan-number {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--accent-edge);
+  border-radius: 50%;
+  background: var(--well);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  position: relative;
+  z-index: 1;
+}
+.provisioning-plan-detail { min-width: 0; }
+.provisioning-plan-step-name { color: var(--fg-0); font-weight: 600; }
+.provisioning-plan-paths { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.provisioning-plan-path {
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  color: var(--fg-1);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.provisioning-plan-explanation {
+  color: var(--fg-dim);
+  font-size: 11px;
+  margin-top: 5px;
+}
+.provisioning-plan-kept {
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border-left: 2px solid var(--warn);
+  color: var(--fg-0);
+  margin-top: 14px;
+  padding: 7px 9px;
+}
 
 .provisioning-title {
   color: var(--fg-0);

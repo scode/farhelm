@@ -266,38 +266,29 @@ async function expectManagementAnswers(dialog: Locator, labels: string[], phone:
 }
 
 /**
- * Uninstall's retained-data line is part of the authorization text too. Native
- * selection must preserve the real helm reply, including its final LF, while
- * glyph measurements distinguish hanging action steps from flush Kept text.
+ * Uninstall keeps the helm's exact authorization text available through Copy
+ * plan, including its final LF. Its kept-data note is visually separate from
+ * the numbered actions, so readers cannot mistake retained data for a step.
  */
-async function expectUninstallText(plan: Locator, confirmation: string): Promise<void> {
+async function expectUninstallText(page: Page, plan: Locator, confirmation: string, steps: { steps: { name: string }[]; kept: string | null }): Promise<void> {
   expect(confirmation.endsWith("\n"), "the real plan has a final LF").toBe(true);
   expect(confirmation, "Kept follows the last step without a blank line").not.toContain("\n\nKept:");
-  const result = await plan.evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const selection = getSelection()!;
-    selection.removeAllRanges(); selection.addRange(range);
-    const copied = selection.toString(); selection.removeAllRanges();
-    const lines = Array.from(element.querySelectorAll(".peer-line"), (line) => {
-      const node = line.firstChild!;
-      const rows = new Map<number, number>();
-      for (let offset = 0; offset < (node.textContent?.length ?? 0); offset++) {
-        const glyph = document.createRange(); glyph.setStart(node, offset); glyph.setEnd(node, offset + 1);
-        const rect = glyph.getBoundingClientRect();
-        if (rect.width) rows.set(rect.top, Math.min(rows.get(rect.top) ?? Infinity, rect.left));
-      }
-      return { step: line.classList.contains("peer-plan-step"), kept: node.textContent?.startsWith("Kept:"), lefts: [...rows.values()] };
-    });
-    return { copied, lines };
+  await page.evaluate(() => {
+    (window as any).__planCopies = [];
+    (window as any).__farhelmNativeClipboardWrite = (value: string) => {
+      (window as any).__planCopies.push(value);
+    };
   });
-  expect(result.copied, "native selection equals the actual uninstall offer").toBe(confirmation);
-  const wrapped = result.lines.filter((line) => line.step && line.lefts.length > 1);
-  expect(wrapped.length, "fixture contains a visibly wrapped uninstall step").toBeGreaterThan(0);
-  for (const line of wrapped) for (const left of line.lefts.slice(1)) expect(left - line.lefts[0]).toBeGreaterThan(8);
-  const kept = result.lines.find((line) => line.kept)!;
-  expect(kept, "the real plan names the data it keeps").toBeDefined();
-  for (const left of kept.lefts.slice(1)) expect(Math.abs(left - kept.lefts[0])).toBeLessThan(1);
+  await plan.locator(".provisioning-copy-plan").click();
+  await expect.poll(() => page.evaluate(() => (window as any).__planCopies),
+    { message: "Copy plan sends the exact helm confirmation" }).toEqual([confirmation]);
+  await expect(plan.locator(".provisioning-plan-step")).toHaveCount(steps.steps.length);
+  await expect(plan.locator(".provisioning-plan-step-name")).toHaveText(steps.steps.map((step) => step.name));
+  await expect(plan.locator(".provisioning-plan-kept")).toHaveText(steps.kept!);
+  expect(await plan.locator(".provisioning-plan-kept").evaluate((node) => getComputedStyle(node).whiteSpace),
+    "kept paths preserve ordinary spaces too").toBe("pre-wrap");
+  expect(await plan.locator(".provisioning-plan-kept").evaluate((node) =>
+    node.closest(".provisioning-plan-steps") === null), "kept note sits outside the action list").toBe(true);
 }
 
 /**
@@ -4092,22 +4083,22 @@ test.describe("multi-host", () => {
       await row.locator(".provisioning-uninstall").press("Enter");
       const reply = await offered;
       expect(reply.ok(), "real helm uninstall plan succeeded").toBe(true);
-      const confirmation = (await reply.json()).confirmation as string;
+      const offer = await reply.json() as { confirmation: string; steps: { steps: { name: string }[]; kept: string | null } };
+      const confirmation = offer.confirmation;
       const dialog = page.locator(".host-uninstall-dialog");
       await expect(dialog).toContainText(`Farhelm will uninstall from ${info.remote_ssh}`, {
         timeout: 30_000,
       });
-      await expect(dialog).toContainText(lib);
+      await expect(dialog.locator(".provisioning-plan-path").filter({ hasText: "~/.local/lib/farhelm" }).first()).toHaveAttribute("data-tooltip", lib);
       await expect(dialog).toContainText(`Kept: the host's Farhelm data in ${kept}`);
       // A new Enter would accept the requested uninstall plan.
       await expect(dialog.locator(".uninstall-confirm")).toBeFocused();
+      await expectQuietInitialFocus(page, dialog.locator(".uninstall-confirm"));
       await expect(dialog.getByRole("heading")).toHaveText(`uninstall Farhelm · ${info.remote_ssh}`);
       for (const phone of [false, true]) {
         await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
-        await expect(dialog.locator(".uninstall-confirm")).toBeFocused();
-        await expectQuietInitialFocus(page, dialog.locator(".uninstall-confirm"));
         await expectManagementAnswers(dialog, ["cancel", "uninstall"], phone);
-        await expectUninstallText(dialog.locator(".provisioning-plan"), confirmation);
+        await expectUninstallText(page, dialog.locator(".provisioning-plan"), confirmation, offer.steps);
         await testInfo.attach(`host-uninstall-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
       }
       await page.setViewportSize({ width: 390, height: 420 });
