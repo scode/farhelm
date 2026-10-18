@@ -443,7 +443,7 @@ test.describe("session list ordering", () => {
     await listWithStubbedFeed(page);
     await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });
     await row(page, ids.a).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toContainText(`sortfix-${stamp}-aaa`);
+    await expect(page.locator(".session-details .title")).toContainText(`sortfix-${stamp}-aaa`);
     await expect(row(page, ids.a)).toHaveAttribute("data-session-selected", "true");
 
     await page.locator(".sort-select").selectOption("title");
@@ -451,7 +451,7 @@ test.describe("session list ordering", () => {
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.a, ids.m, ids.z]);
 
-    await expect(page.locator(".titlebar .title")).toContainText(`sortfix-${stamp}-aaa`);
+    await expect(page.locator(".session-details .title")).toContainText(`sortfix-${stamp}-aaa`);
     await expect(row(page, ids.a)).toHaveAttribute("data-session-selected", "true");
     await expect(row(page, ids.a)).toHaveClass(/(^| )selected( |$)/);
     await expect(row(page, ids.z)).toHaveAttribute("data-session-selected", "false");
@@ -821,7 +821,7 @@ test.describe("session list ordering", () => {
     feed.notify(1);
     await expect(page.locator(".sort-select")).toHaveValue("title", { timeout: 20_000 });
     await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
-    await expect(page.locator(".titlebar .title")).toContainText(`sortfix-${stamp}-mmm`, {
+    await expect(page.locator(".session-details .title")).toContainText(`sortfix-${stamp}-mmm`, {
       timeout: 20_000,
     });
     for (const sort of asked) {
@@ -1103,7 +1103,7 @@ test.describe("session list ordering", () => {
     const helm = await helmStamp(request);
     const newestReads = await stubFallbackListing(page, helm, false);
     await listWithStubbedFeed(page);
-    await expect(page.locator(".titlebar .title")).toHaveText("sortfallback-zzz", {
+    await expect(page.locator(".session-details .title")).toHaveText("sortfallback-zzz", {
       timeout: 20_000,
     });
     // Settled before the negative is claimed: the extra read, if it were
@@ -1137,7 +1137,7 @@ test.describe("session list ordering", () => {
     const helm = await helmStamp(request);
     const newestReads = await stubFallbackListing(page, helm, true);
     await listWithStubbedFeed(page);
-    await expect(page.locator(".titlebar .title")).toHaveText("sortfallback-mmm", {
+    await expect(page.locator(".session-details .title")).toHaveText("sortfallback-mmm", {
       timeout: 20_000,
     });
     // sleep-ok: a truncated listing must also avoid a later fallback request; keep the same negative window as the complete-list case.

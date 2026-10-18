@@ -1,5 +1,5 @@
 /**
- * The sidebar/titlebar/menu-panel chrome's own layering contract — the
+ * The sidebar/session chrome/menu-panel layering contract — the
  * three-level surface ladder and the single keyboard-focus accent that
  * app.css's `:root` block declares as design constraints, not accidents
  * (see that file's header comment and the surface-levels paragraph inside
@@ -58,14 +58,16 @@ test("the three-level surface ladder renders distinct, correctly grouped levels"
     // token this test means to pin.
     const ground = await backgroundOf(page.locator("body"));
 
-    // RAISED CHROME: the sidebar and the main pane's titlebar are two
-    // unrelated elements the palette comments claim sit at the SAME
+    // RAISED CHROME: the sidebar and both session rows are separate
+    // elements the palette comments claim sit at the SAME
     // level. If they only look alike by coincidence rather than by
     // both citing `--bg-1`, a future edit to either could drift them
     // apart with nothing here to notice.
     const sidebarBg = await backgroundOf(page.locator(".app-sidebar"));
-    const titlebarBg = await backgroundOf(page.locator(".titlebar"));
-    expect(sidebarBg, "sidebar and titlebar are both declared RAISED CHROME").toBe(titlebarBg);
+    const topbarBg = await backgroundOf(page.locator(".session-topbar"));
+    const detailsBg = await backgroundOf(page.locator(".session-details"));
+    expect(sidebarBg, "sidebar and top row are both declared RAISED CHROME").toBe(topbarBg);
+    expect(sidebarBg, "identity stays on the same raised surface").toBe(detailsBg);
     expect(sidebarBg, "raised chrome must be visibly above the ground").not.toBe(ground);
 
     // FLOATING: the row actions menu panel, opened for real through the

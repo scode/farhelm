@@ -154,7 +154,7 @@ test.describe("read ordering and recovery", () => {
     const registry = await holdReads(page, (url) => url.pathname === "/api/hosts");
 
     await row(page, session.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toHaveText(session.title, { timeout: 20_000 });
+    await expect(page.locator(".session-details .title")).toHaveText(session.title, { timeout: 20_000 });
     // The list can ask for hosts too, so capture #1 need not be the session's
     // request. The reader snapshot below establishes the held session read.
     await expect(page.locator(".host-stale-notice")).toBeVisible({ timeout: 20_000 });

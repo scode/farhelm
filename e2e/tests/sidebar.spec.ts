@@ -335,7 +335,7 @@ test("macOS header controls stay clear of native buttons while the shell scrolls
   const bar = page.locator(".app-bar");
   const version = bar.locator(".app-version");
   const drag = bar.locator(".window-drag-region");
-  const header = page.locator(".titlebar");
+  const header = page.locator(".session-topbar");
   await expect(version).not.toHaveText("");
   await expect(header).toBeVisible();
   await expect(drag).toBeHidden();
@@ -394,6 +394,10 @@ test("macOS header controls stay clear of native buttons while the shell scrolls
         const headerBox = await header.boundingBox();
         expect(headerBox).not.toBeNull();
         expect(headerBox!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);
+      } else {
+        const headerBox = (await header.boundingBox())!;
+        expect(headerBox.height, "macOS session top row shares the app bar's 48px alignment").toBe(48);
+        expect(headerBox.y).toBeCloseTo(barBox!.y, 0);
       }
       await expect(drag).toBeVisible();
     }
@@ -1048,7 +1052,7 @@ test("switching sessions directly tears the old view down and mounts the new one
     await expect(row(page, b.id)).toBeVisible({ timeout: 20_000 });
 
     await row(page, a.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toContainText(a.title);
+    await expect(page.locator(".session-details .title")).toContainText(a.title);
     // The sidebar highlight (SPEC.md: the selected session's row is
     // visibly marked) tracks the selection through the whole switch.
     // Three layers, each catching a different regression: the data
@@ -1085,7 +1089,7 @@ test("switching sessions directly tears the old view down and mounts the new one
 
     // No Back in between — this is the direct switch the key exists for.
     await row(page, b.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toContainText(b.title);
+    await expect(page.locator(".session-details .title")).toContainText(b.title);
     // The highlight moved with the selection: exactly one row marked, in
     // every layer.
     await expect(row(page, b.id)).toHaveAttribute("data-session-selected", "true");
@@ -1384,7 +1388,7 @@ test("an unanswered view operation disables row selection until it completes", a
     await page.goto("/");
     await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
     await row(page, a.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toContainText(a.title);
+    await expect(page.locator(".session-details .title")).toContainText(a.title);
 
     // Wait for the view's status-derived decision to settle on "this
     // click restarts directly" (the view opens on the create reply's
@@ -1396,7 +1400,7 @@ test("an unanswered view operation disables row selection until it completes", a
     // While held: B's open control is disabled — the gate made visible —
     // and the pane still belongs to A.
     await expect(row(page, b.id).locator(".session-row-open")).toBeDisabled();
-    await expect(page.locator(".titlebar .title")).toContainText(a.title);
+    await expect(page.locator(".session-details .title")).toContainText(a.title);
 
     releaseRestart();
     // Once the reply lands the gate lifts and the switch works normally.
@@ -1404,7 +1408,7 @@ test("an unanswered view operation disables row selection until it completes", a
       timeout: 15_000,
     });
     await row(page, b.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toContainText(b.title);
+    await expect(page.locator(".session-details .title")).toContainText(b.title);
   } catch (error) {
     bodyFailed = true;
     throw error;
@@ -2666,13 +2670,13 @@ test("opening another row's menu does not change the selection", async ({ page, 
     await page.goto("/");
     await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
     await row(page, a.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toContainText(a.title);
+    await expect(page.locator(".session-details .title")).toContainText(a.title);
 
     await openRowMenu(row(page, b.id));
     await expect(row(page, b.id).locator(".session-row-menu-panel")).toBeVisible();
     // Still A's session view, still mounted — the menu open was not a
     // navigation.
-    await expect(page.locator(".titlebar .title")).toContainText(a.title);
+    await expect(page.locator(".session-details .title")).toContainText(a.title);
   } finally {
     await cleanupSession(request, a.id);
     if (b) await cleanupSession(request, b.id);
@@ -3011,7 +3015,7 @@ test("filtering out the active session preserves its terminal and restores its s
     await page.goto("/");
     await expect(row(page, active.id)).toBeVisible({ timeout: 20_000 });
     await row(page, active.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toHaveText(active.title, { timeout: 20_000 });
+    await expect(page.locator(".session-details .title")).toHaveText(active.title, { timeout: 20_000 });
     const terminal = page.locator("#terminal");
     await expect(terminal).toBeVisible();
     await terminal.evaluate((node) => {
@@ -3024,7 +3028,7 @@ test("filtering out the active session preserves its terminal and restores its s
     await host.selectOption(String(remote.id));
     await expect(row(page, active.id)).toHaveCount(0, { timeout: 20_000 });
     await expect(row(page, decoy.id)).toBeVisible();
-    await expect(page.locator(".titlebar .title")).toHaveText(active.title);
+    await expect(page.locator(".session-details .title")).toHaveText(active.title);
     await expect(terminal).toBeVisible();
     expect(await terminal.evaluate((node) => (
       node === (window as typeof window & { __farhelmHostFilterTerminal?: Element }).__farhelmHostFilterTerminal
@@ -3033,7 +3037,7 @@ test("filtering out the active session preserves its terminal and restores its s
     await host.selectOption("");
     await expect(row(page, active.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, active.id)).toHaveAttribute("data-session-selected", "true");
-    await expect(page.locator(".titlebar .title")).toHaveText(active.title);
+    await expect(page.locator(".session-details .title")).toHaveText(active.title);
     expect(await terminal.evaluate((node) => (
       node === (window as typeof window & { __farhelmHostFilterTerminal?: Element }).__farhelmHostFilterTerminal
     ))).toBe(true);
@@ -3858,7 +3862,7 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
     await page.goto("/");
     await expect(row(page, older.id)).toBeVisible({ timeout: 20_000 });
     await row(page, older.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toContainText("policy-older-");
+    await expect(page.locator(".session-details .title")).toContainText("policy-older-");
     // The preference write is fire-and-forget: only the helm's row itself
     // says the click was persisted, and reloading before it lands would
     // race the very state this test restores from.
@@ -3866,7 +3870,7 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
       .poll(async () => (await readPreferences(request)).last_selected, { timeout: 20_000 })
       .toBe(older.id);
     await page.reload();
-    await expect(page.locator(".titlebar .title")).toContainText("policy-older-", {
+    await expect(page.locator(".session-details .title")).toContainText("policy-older-", {
       timeout: 20_000,
     });
     // The auto-selection is a real requested-session attachment, not just a view.
@@ -3878,7 +3882,7 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
       last_selected: "00000000-0000-0000-0000-000000000000",
     });
     await page.reload();
-    await expect(page.locator(".titlebar .title")).toContainText("policy-newer-", {
+    await expect(page.locator(".session-details .title")).toContainText("policy-newer-", {
       timeout: 20_000,
     });
   } finally {
@@ -3959,11 +3963,11 @@ test("the back button and titlebar rename do not come back", async ({ page, requ
     await page.goto("/");
     await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
     await row(page, session.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toContainText("retired-");
+    await expect(page.locator(".session-details .title")).toContainText("retired-");
 
     await expect(page.locator(".back-button")).toHaveCount(0);
     await expect(page.locator(".session-rename")).toHaveCount(0);
-    await expect(page.locator(".titlebar .rename-form")).toHaveCount(0);
+    await expect(page.locator(".session-details .rename-form")).toHaveCount(0);
 
     await openRowMenu(row(page, session.id));
     await expect(row(page, session.id).locator(".session-row-rename")).toBeVisible();
@@ -4028,7 +4032,7 @@ test("the empty-fleet placeholder appears only when proven and yields to auto-se
   // The pane replaces the placeholder with the auto-selected session's
   // view (the attach itself will fail against this fabricated session,
   // which is fine — the placeholder yielding is the contract here).
-  await expect(page.locator(".titlebar .title")).toHaveText("placeholder-cycle", {
+  await expect(page.locator(".session-details .title")).toHaveText("placeholder-cycle", {
     timeout: 20_000,
   });
 });
@@ -7982,7 +7986,7 @@ test("a manual mark-unread on the open session sticks", async ({ page, request }
     expect(reads.count("listing")).toBeGreaterThan(listingReadsAfterUnread);
     await expect(target).toContainText(refreshedTitle);
     expect(await (await laterDetail).finished(), "the renamed session detail reply must finish").toBeNull();
-    await expect(page.locator(".titlebar .title")).toHaveText(refreshedTitle);
+    await expect(page.locator(".session-details .title")).toHaveText(refreshedTitle);
     // Cross the frame-batched commit after both independent readers have
     // rendered, before inspecting effects the detail reply could schedule.
     await page.evaluate(() => new Promise<void>((resolve) =>
@@ -8273,7 +8277,7 @@ test("the dot click marks a different row read without moving the selection", as
       await expect(rowB.locator(".status-badge.idle.unseen")).toHaveCount(0);
       // The click never even routed through the row's open handler — the
       // terminal pane on screen must still be A's, not B's.
-      await expect(page.locator(".titlebar .title")).toContainText(`seen-state-dot-a-${stamp}`);
+      await expect(page.locator(".session-details .title")).toContainText(`seen-state-dot-a-${stamp}`);
     } finally {
       await cleanupSession(request, b.id);
     }

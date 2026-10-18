@@ -220,7 +220,7 @@ test("a create whose reply is lost is retried with the same key and yields one s
     await form.locator('button[type="submit"]').click();
     const id = await sessionIdFor(rowByTitle(page, title));
     await waitForSessionRevealed(page, id);
-    await expect(page.locator(".titlebar .title")).toHaveText(title);
+    await expect(page.locator(".session-details .title")).toHaveText(title);
 
     expect(keys).toHaveLength(2);
     expect(keys[0]).toBeTruthy();
@@ -464,7 +464,7 @@ test("with no CSPRNG, a create still carries a key while the session view refuse
     // The create went through on the weak key, and landed in the session
     // view — the titlebar is the proof, since it renders from the created
     // session regardless of whether any terminal attaches.
-    await expect(page.locator(".titlebar .title")).toHaveText(title, {
+    await expect(page.locator(".session-details .title")).toHaveText(title, {
       timeout: 15_000,
     });
     expect(keys).toHaveLength(1);

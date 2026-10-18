@@ -1604,6 +1604,11 @@ fn AppBody() -> Element {
         }
     });
     let mut current = use_signal(|| None::<Session>);
+    // The list owns refreshing this registry snapshot, but the open session
+    // needs the same locality and appearance facts. Both panes are siblings,
+    // so the plain signal lives here rather than starting a second read.
+    let hosts = use_signal(hosts::HostsRead::default);
+    use_context_provider(|| hosts);
     use_context_provider(|| launch_sequence::LaunchSequence(Signal::new(None)));
     // Selection is a navigation snapshot; detail reads live in SessionView.
     // Keep Rename's raw seed separate so refreshed titles do not masquerade

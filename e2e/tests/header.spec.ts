@@ -1,11 +1,9 @@
 /**
- * The consolidated session header (the 2026-08 UI refresh): status, title,
- * age, copyable fields, and six lifecycle actions folded into one row over
- * the tab strip. `session_view.rs`'s own docs carry the design; this file
- * proves the two properties that only a real layout engine can check —
- * that the row survives the SUPPORTED minimum width without clipping a
- * control, and that the truncated identity fields still carry their full
- * value somewhere a user can read it.
+ * Session chrome has two rows around the terminal: tabs and lifecycle
+ * actions above it, identity and copy fields below it. Geometry matters:
+ * all six actions must survive a 650px pane, identity must not consume
+ * extra rows, and copy feedback must remain readable above the bottom edge.
+ * The tests also preserve full values behind truncated peer fields.
  */
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
@@ -21,11 +19,12 @@ import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { FAKE_AGENT_INVOCATION } from "./helpers/terminal-suite";
 
+/** Find only this test's owned session; other specs can share the listing. */
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
 }
 
-// The header's six full labels need a 650px main pane. The app still permits
+// The top row's six full labels need a 650px main pane. The app still permits
 // a 320px pane, where its single row may clip; this test exercises the
 // narrowest rounded width expected to keep all six actions visible. Measured
 // when Delete joined the row: the actions end at a 598px pane in Chromium and
@@ -35,7 +34,7 @@ const SUPPORTED_MAIN_PANE_WIDTH = 650;
 const VIEWPORT_HEIGHT = 600;
 
 test(
-  "the header stays one row and every control stays reachable at the supported minimum width",
+  "tabs and actions share one top row above the terminal and details stay below it",
   async ({ page, request }) => {
     const marker = `header-geometry-${Date.now()}`;
     // The title carries the hostile length; the invocation is the real
@@ -77,23 +76,44 @@ test(
       await expect(restartButton).toHaveAttribute("data-confirms", "true", {
         timeout: 15_000,
       });
+      await page.evaluate(() => document.fonts.ready);
 
-      // One row: the header's `min-height: 40px` target should never need
-      // to grow past a couple of pixels of platform font-metric slack, and
-      // never, under the oversized fields above, wrap to two.
-      const headerBox = (await page.locator(".titlebar").boundingBox())!;
-      expect(headerBox.height, "the header must stay one row even under long fields").toBeLessThanOrEqual(
-        48,
+      // Identity must not grow a second row or take the old separate
+      // header's height. No conditional band is active in this fixture.
+      const headerBox = (await page.locator(".session-topbar").boundingBox())!;
+      const detailsBox = (await page.locator(".session-details").boundingBox())!;
+      const terminalBox = (await page.locator(".terminal-panes").boundingBox())!;
+      const tabsBox = (await page.locator(".session-topbar .tab-strip").boundingBox())!;
+      const actionsBox = (await page.locator(".session-topbar .titlebar-actions").boundingBox())!;
+      await expect(page.locator("header.titlebar")).toHaveCount(0);
+      expect(headerBox.height, "browser top chrome stays about one tab row tall").toBeLessThanOrEqual(32);
+      expect(detailsBox.height, "details stay about one tab row tall").toBeLessThanOrEqual(32);
+      expect(tabsBox.x + tabsBox.width, "tabs yield width before the actions").toBeLessThanOrEqual(actionsBox.x + 1);
+      expect(Math.abs(tabsBox.y + tabsBox.height / 2 - actionsBox.y - actionsBox.height / 2)).toBeLessThanOrEqual(1);
+      expect(terminalBox.y).toBeCloseTo(headerBox.y + headerBox.height, 0);
+      expect(detailsBox.y).toBeCloseTo(terminalBox.y + terminalBox.height, 0);
+      expect(detailsBox.y + detailsBox.height).toBeCloseTo(VIEWPORT_HEIGHT, 0);
+      expect(headerBox.height + detailsBox.height, "browser chrome gains about 10px over the old 40px header plus 30px tabs").toBeLessThanOrEqual(62);
+      expect(await page.locator(".tab-strip").evaluate((node) => node.scrollWidth > node.clientWidth),
+        "tabs scroll instead of pushing the actions out of a 650px pane").toBe(true);
+      await expect(page.locator(".session-details-host .session-host")).toHaveText("local (this machine)");
+      await expect(page.locator(".session-details-host .host-kind-icon")).toHaveCount(1);
+      const identityOrder = await page.locator(".session-details").evaluate((node) =>
+        Array.from(node.querySelectorAll(".status-badge, .title, .session-details-host, .status-time, .header-copy"))
+          .map((field) => field.classList.contains("header-copy") ? "copy" :
+            field.classList.contains("session-details-host") ? "host" : field.classList[0])
       );
+      expect(identityOrder).toEqual(["status-badge", "title", "host", "status-time", "copy", "copy"]);
 
-      // Action labels remain intact; the status and identity fields give
-      // up width before an action can leave the supported main pane.
-      const badgeBox = (await page.locator(".titlebar .status-badge").boundingBox())!;
+      // All six action labels stay intact while the tab strip shrinks.
+      const badgeBox = (await page.locator(".session-details .status-badge").boundingBox())!;
       const restartBox = (await restartButton.boundingBox())!;
       for (const [name, box] of [
         ["badge", badgeBox],
         ["restart button", restartBox],
         ["restart with button", (await page.locator(".restart-with-trigger").boundingBox())!],
+        ["replace button", (await page.locator(".header-replace").boundingBox())!],
+        ["clone button", (await page.locator(".header-clone").boundingBox())!],
         ["replace with button", (await page.locator(".header-replace-with").boundingBox())!],
         ["delete button", (await page.locator(".header-delete").boundingBox())!],
       ] as const) {
@@ -109,13 +129,12 @@ test(
       // than a dedicated test, and `status_badge_destination`'s own unit
       // test already covers the logic; this is the render actually
       // obeying it.
-      await expect(page.locator(".titlebar .status-badge")).toHaveCount(1);
+      await expect(page.locator(".session-details .status-badge")).toHaveCount(1);
 
       const tabStripBoxBefore = (await page.locator(".tab-strip").boundingBox())!;
 
-      // Opening a popover must not reflow anything below the header: the
-      // panel is `position: absolute`, out of flow, so the tab strip's own
-      // box is the cheapest proof that holds.
+      // Confirmation stays under the top action and leaves the terminal
+      // and details in place; moving identity must not move this anchor.
       await restartButton.click();
       const restartPanel = page.locator("#restart-confirm-panel");
       await expect(restartPanel).toBeVisible();
@@ -124,6 +143,8 @@ test(
         (await page.locator(".tab-strip").boundingBox())!,
         "an open restart confirmation must not move the tab strip",
       ).toEqual(tabStripBoxBefore);
+      expect(await page.locator(".terminal-panes").boundingBox()).toEqual(terminalBox);
+      expect(await page.locator(".session-details").boundingBox()).toEqual(detailsBox);
       expect(restartPanelBox.x).toBeGreaterThanOrEqual(0);
       expect(restartPanelBox.x + restartPanelBox.width).toBeLessThanOrEqual(VIEWPORT_WIDTH + 1);
       expect(restartPanelBox.y + restartPanelBox.height).toBeLessThanOrEqual(VIEWPORT_HEIGHT + 1);
@@ -131,14 +152,17 @@ test(
         restartPanelBox.y,
         "the restart confirmation must hang BENEATH the button that opened it",
       ).toBeGreaterThanOrEqual(restartBox.y + restartBox.height - 1);
-      await page.locator(".restart-cancel").click();
+      const restartCancel = restartPanel.getByRole("button", { name: "cancel", exact: true });
+      await restartCancel.focus();
+      await expect(restartCancel).toBeFocused();
+      await page.keyboard.press("Escape");
       await expect(restartPanel).toHaveCount(0);
 
       // A stopped session has a much longer badge than the live dot. It
-      // must yield width to the same controls, with its full status still
-      // available in the tooltip.
+      // must remain in the details bar, with its full status still
+      // available in the tooltip; it cannot take room from the actions.
       await stopSession(request, session.id);
-      const badge = page.locator(".titlebar .status-badge");
+      const badge = page.locator(".session-details .status-badge");
       await expect(badge).toHaveClass(/\bexited\b/, { timeout: 20_000 });
       await expect(badge).toContainText("stopped by user");
       await expect(badge).toHaveAttribute("data-tooltip", /exited.*stopped by user/);
@@ -178,14 +202,14 @@ test("oversized title and copy fields overflow their boxes, with full tooltips",
     await sessionRow.locator(".session-row-open").click();
     await waitForSessionRevealed(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
-    await expect(page.locator(".titlebar .title")).toHaveAttribute("data-tooltip", title);
-    await expect(page.locator(".titlebar .header-copy").nth(0)).toHaveAttribute("data-tooltip", /\/tmp/);
-    await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAttribute("data-tooltip", `${invocation} — click to copy`);
+    await expect(page.locator(".session-details .title")).toHaveAttribute("data-tooltip", title);
+    await expect(page.locator(".session-details .header-copy").nth(0)).toHaveAttribute("data-tooltip", /\/tmp/);
+    await expect(page.locator(".session-details .header-copy").nth(1)).toHaveAttribute("data-tooltip", `${invocation} — click to copy`);
     // The tooltip is not in the accessibility tree, so the full value and
     // the copy action reach assistive technology through each button's
     // accessible description, as the `title` it replaced once provided.
-    await expect(page.locator(".titlebar .header-copy").nth(0)).toHaveAccessibleDescription("/tmp — click to copy");
-    await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAccessibleDescription(
+    await expect(page.locator(".session-details .header-copy").nth(0)).toHaveAccessibleDescription("/tmp — click to copy");
+    await expect(page.locator(".session-details .header-copy").nth(1)).toHaveAccessibleDescription(
       `${invocation} — click to copy`,
     );
 
@@ -193,10 +217,10 @@ test("oversized title and copy fields overflow their boxes, with full tooltips",
     // single-line box (`white-space: nowrap; overflow: hidden` on both
     // spans) — the only way the FULL string above is unreadable without
     // the tooltip this test also pins.
-    const titleOverflows = await page.locator(".titlebar .title").evaluate(
+    const titleOverflows = await page.locator(".session-details .title").evaluate(
       (el) => el.scrollWidth > el.clientWidth,
     );
-    const commandOverflows = await page.locator(".titlebar .header-copy").nth(1).evaluate(
+    const commandOverflows = await page.locator(".session-details .header-copy").nth(1).evaluate(
       (el) => el.scrollWidth > el.clientWidth,
     );
     expect(titleOverflows, "the title must actually be clipped, or the tooltip is untested").toBe(
@@ -211,19 +235,19 @@ test("oversized title and copy fields overflow their boxes, with full tooltips",
 });
 
 /**
- * The directory and command fields must use the room the header has before
+ * The directory and command fields must use the room the details bar has before
  * truncating. They used to be capped at a fixed 18 characters, so even an
  * ordinary command ellipsized in a wide window while a large empty gap sat
- * before the actions. In a wide viewport, a normal-length title, directory,
+ * in the row. In a wide viewport, a normal-length title, directory,
  * and command must all render in full.
  */
-test("copy fields use the header's free width before truncating", async ({ page, request }) => {
+test("copy fields use the details bar's free width before truncating", async ({ page, request }) => {
   await page.setViewportSize({ width: 1920, height: 800 });
   // A command of fixed, known length rather than the fake agent's absolute
   // binary path, whose length depends on where the checkout lives: 60
   // characters is far past the old 18-character cap yet leaves a 1920px
-  // window ample room for the title, directory, and every action. The
-  // header renders from the session record, so no agent output is needed.
+  // window ample room for the title, host, directory, and command. The
+  // details render from the session record, so no agent output is needed.
   const invocation = `sleep 300 #${"x".repeat(49)}`;
   const session = await createSession(request, {
     title: `header-width-${Date.now()}`,
@@ -236,15 +260,15 @@ test("copy fields use the header's free width before truncating", async ({ page,
     await expect(sessionRow, "the created session must be listed before opening it").toBeVisible();
     await sessionRow.locator(".session-row-open").click();
     await waitForSessionRevealed(page, session.id);
-    await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAttribute(
+    await expect(page.locator(".session-details .header-copy").nth(1)).toHaveAttribute(
       "data-tooltip",
       `${invocation} — click to copy`,
     );
     const clipped = (selector: string, index = 0) =>
       page.locator(selector).nth(index).evaluate((el) => el.scrollWidth > el.clientWidth);
-    expect(await clipped(".titlebar .title"), "a short title must not be clipped").toBe(false);
-    expect(await clipped(".titlebar .header-copy", 0), "the directory must not be clipped").toBe(false);
-    expect(await clipped(".titlebar .header-copy", 1), "the command must not be clipped").toBe(false);
+    expect(await clipped(".session-details .title"), "a short title must not be clipped").toBe(false);
+    expect(await clipped(".session-details .header-copy", 0), "the directory must not be clipped").toBe(false);
+    expect(await clipped(".session-details .header-copy", 1), "the command must not be clipped").toBe(false);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -293,7 +317,7 @@ test("header actions stay ordered, copy full values, and open the right flows", 
         (window as any).__headerCopies.push(value);
       };
     });
-    const copyButtons = page.locator(".titlebar .header-copy");
+    const copyButtons = page.locator(".session-details .header-copy");
     await copyButtons.nth(0).click();
     await expect
       .poll(() => page.evaluate(() => (window as any).__headerCopies), {
@@ -338,16 +362,16 @@ test("header actions stay ordered, copy full values, and open the right flows", 
 });
 
 /**
- * Why this matters: the header's command tooltip is the only full view of a
+ * Why this matters: the details bar's command tooltip is the only full view of a
  * long command, and its copy button is how people take it to a shell. A host
  * or agent can put a direction override or a newline in the command, so the
- * shown text could read differently from the bytes copied. Spec: the header
+ * shown text could read differently from the bytes copied. Spec: the bar
  * shows the command escaped (`<U+202E>`, `<U+000A>`) in a direction-isolated
  * element and in its tooltip, the clipboard receives the exact raw bytes,
  * and after copying the button shows a readable hidden-characters warning;
  * an ordinary value keeps the ordinary feedback.
  */
-test("header copy shows escaped peer text, copies raw bytes, and warns", async ({
+test("details copy shows escaped peer text, copies raw bytes, and warns upward", async ({
   page,
   request,
 }) => {
@@ -355,7 +379,7 @@ test("header copy shows escaped peer text, copies raw bytes, and warns", async (
   // Everything after `#` is a shell comment on both lines, so the agent
   // still starts normally.
   const invocation = `${FAKE_AGENT_INVOCATION} # \u202Eabc\n# tail`;
-  // A long title and a narrow window crowd the header so the copy buttons
+  // A long title and a narrow window crowd the details so the copy buttons
   // shrink, which is the condition that used to clip an in-button warning.
   await page.setViewportSize({ width: 900, height: 700 });
   const session = await createSession(request, {
@@ -371,7 +395,7 @@ test("header copy shows escaped peer text, copies raw bytes, and warns", async (
     await waitForSessionRevealed(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
 
-    const command = page.locator(".titlebar .header-copy").nth(1);
+    const command = page.locator(".session-details .header-copy").nth(1);
     const shown = command.locator(".peer-value");
     await expect(shown).toHaveAttribute("dir", "ltr");
     await expect(shown).toContainText("<U+202E>abc<U+000A># tail");
@@ -379,7 +403,7 @@ test("header copy shows escaped peer text, copies raw bytes, and warns", async (
     await expect(command).toHaveAttribute("data-tooltip", /<U\+202E>abc<U\+000A># tail — click to copy$/);
     expect(
       await command.evaluate((el) => el.scrollWidth > el.clientWidth),
-      "premise: the crowded header has shrunk the command button",
+      "premise: the crowded details bar has shrunk the command button",
     ).toBe(true);
 
     await page.evaluate(() => {
@@ -394,20 +418,23 @@ test("header copy shows escaped peer text, copies raw bytes, and warns", async (
         message: "the clipboard gets the exact raw command",
       })
       .toEqual([invocation]);
-    const warning = page.locator(".titlebar .copy-warning");
+    const warning = page.locator(".session-details .copy-warning");
     await expect(warning).toHaveText(
       "⚠ the copied command contains hidden characters, shown above as <U+…>",
     );
-    // Readable, not merely present: nothing clips it and it lies inside the
-    // viewport even in the crowded header this test sets up.
+    // The warning opens upward from the bottom bar. Checking both vertical
+    // edges catches an otherwise visible warning clipped by the window.
     const box = await warning.boundingBox();
+    const detailsBox = (await page.locator(".session-details").boundingBox())!;
     const viewport = page.viewportSize();
     expect(box && viewport && box.x >= 0 && box.x + box.width <= viewport.width).toBe(true);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(detailsBox.y + 1);
     expect(await warning.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 
     // An ordinary value gets the ordinary feedback and no warning.
-    await page.locator(".titlebar .header-copy").nth(0).click();
-    await expect(page.locator(".titlebar .header-copy").nth(0).locator(".copy-feedback")).toHaveText(
+    await page.locator(".session-details .header-copy").nth(0).click();
+    await expect(page.locator(".session-details .header-copy").nth(0).locator(".copy-feedback")).toHaveText(
       "✓ copied",
     );
     await expect(warning).toHaveCount(0);
@@ -459,7 +486,7 @@ test("the header delete confirms in place and deletes through the list", async (
     await waitForTermText(page, "FAKE-AGENT READY");
     // Classified live (any live status), the point at which the header's
     // delete knows there is an agent to warn about.
-    await expect(page.locator(".titlebar .status-badge")).toHaveClass(/\b(running|waiting|idle)\b/, {
+    await expect(page.locator(".session-details .status-badge")).toHaveClass(/\b(running|waiting|idle)\b/, {
       timeout: 15_000,
     });
 
@@ -485,8 +512,8 @@ test("the header delete confirms in place and deletes through the list", async (
     await page.keyboard.press("Enter");
     await expect(row(page, live.id)).toHaveCount(0, { timeout: 20_000 });
     // The main pane lets go of the deleted session. Auto-select may open
-    // another one straight away, so the check is on whose header shows.
-    await expect(page.locator(".titlebar .title")).not.toContainText(liveTitle);
+    // another one straight away, so the check is on whose details show.
+    await expect(page.locator(".session-details .title")).not.toContainText(liveTitle);
     expect((await listSessions(request)).sessions.some((listed) => listed.id === live.id)).toBe(false);
     expect(deleteUrls).toHaveLength(1);
     expect(deleteUrls[0].searchParams.get("only_if_nothing_alive")).toBeNull();
@@ -502,7 +529,7 @@ test("the header delete confirms in place and deletes through the list", async (
       .toBe("exited");
     await expect(row(page, ended.id).locator(".status-badge")).toHaveText(/exited/, { timeout: 20_000 });
     await row(page, ended.id).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar")).toBeVisible();
+    await expect(page.locator(".session-topbar")).toBeVisible();
     await deleteButton.click();
     await expect(confirmation).toBeVisible();
     // The premise is the prompt the user reads, not the sidebar: the header
@@ -578,7 +605,7 @@ test("a committed delete shows its progress until the reply lands", async ({ pag
     await waitForTermText(page, "FAKE-AGENT READY");
     // Classified live (any live status), the point at which the header's
     // delete knows there is an agent to warn about.
-    await expect(page.locator(".titlebar .status-badge")).toHaveClass(/\b(running|waiting|idle)\b/, {
+    await expect(page.locator(".session-details .status-badge")).toHaveClass(/\b(running|waiting|idle)\b/, {
       timeout: 15_000,
     });
     const rowProgress = target.locator(".delete-progress");

@@ -915,7 +915,7 @@ test("a client that stops draining is detached with the stall reason after the f
     // A real unmount/remount: bounce through the shared session (there
     // is no back), then reselect.
     await sharedSessionRow(page).click();
-    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
     await row.click();
     await waitForSessionRevealed(page, id);
     await waitForTermText(page, "FLOOD-DONE", 15_000);
@@ -1039,7 +1039,7 @@ test("reconnecting within the same page resets flow-control state; the new attac
     // tears down the mounted terminal; reselecting mounts a fresh one" test;
     // here only the DETACH matters).
     await sharedSessionRow(page).click();
-    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
     await waitForIslandMounted(page, "terminal");
 
     // The flood session has no attachment now — the page holds the shared

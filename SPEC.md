@@ -1614,25 +1614,35 @@ whatever the agent renders is what you see. There is no composer, no message abs
   client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and
   replay covers, at least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the selected
   session's row whenever that session is listed, so which session the main pane is interacting with is readable at a
-  glance rather than only from the titlebar. A filter that excludes the selected session leaves no row to mark — the
-  titlebar remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
-  deselecting).
-- The typical session header is one keyboard-reachable row ordered status, session name, age, directory, command line,
-  then Restart, Restart with, Replace, Clone, Replace with, and Delete. All six actions remain in the row and are fully
-  visible from a 650px main pane; narrower panes may clip the trailing actions. Restart and Restart with are greyed out
-  when the session cannot resume its conversation (see Lifecycle operations); their tooltips and accessible descriptions
-  explain the specific reason, such as an agent type without conversation reporting, a command launch that declared no
-  agent type or did not opt into Resume, or a conversation not captured yet. For an agent that reports conversations, a
-  running session's explanation says, naming the agent, when Restart normally becomes available for it (Codex, for
-  instance, once the first prompt is submitted), and an ended session's says its conversation was never captured; both
-  invite the user to send feedback if that is not what happened, since Farhelm cannot tell a report still to come from
-  one that never will. The supervisor's refusal of such a restart and the agent instructions state the same timing,
-  without the invitation. Directory and command line are muted click-to-copy buttons that take the width their values
-  need and ellipsize only when the row runs out of room; a click confirms locally for about 1.5 seconds. Clipboard
-  writes use the native bridge first and `navigator.clipboard` second, with JSON serialization and silent failures.
-  Replace has its own anchored danger confirmation and neutral cancellation. Delete is styled as the danger action and
-  asks first in the same anchored way, even for a session that has ended, with the same consequence text the row's
-  delete prompt shows. The session-confirmation setting skips the header's Delete, Replace and Restart questions, the
+  glance rather than only from the bottom bar's session name. A filter that excludes the selected session leaves no row
+  to mark — the bottom bar's session name remains the identifier in that state, and the main pane deliberately stays put
+  (filtering the list is not deselecting).
+- The typical session view has one top row, with terminal tabs on the left and Restart, Restart with, Replace, Clone,
+  Replace with, and Delete on the right, followed by the terminal and a slim details bar below it. All six actions
+  remain fully visible and keyboard reachable from a 650px main pane; the tab strip takes the remaining width and
+  scrolls horizontally when needed. Narrower panes may clip the row, which never wraps. The bottom bar is about one
+  tab-strip row high and shows, in order, status, session name, host, age, the managed-checkout branch mark when
+  present, directory, and command line. The host's icon and name follow the session list's rules, with the host
+  prominent beside the session name; a missing host name omits the host rather than inventing one. Directory display
+  still abbreviates the home directory to `~`. Keyboard order follows the top row, terminal, then bottom bar. The
+  terminal loses no height in the steady state. Conditional notices and the desktop tunnel strip stay between the top
+  row and terminal, notices first; a stale session's status appears only in its stale notice, not again in the bottom
+  bar. Restart and Restart with are greyed out when the session cannot resume its conversation (see Lifecycle
+  operations); their tooltips and accessible descriptions explain the specific reason, such as an agent type without
+  conversation reporting, a command launch that declared no agent type or did not opt into Resume, or a conversation not
+  captured yet. For an agent that reports conversations, a running session's explanation says, naming the agent, when
+  Restart normally becomes available for it (Codex, for instance, once the first prompt is submitted), and an ended
+  session's says its conversation was never captured; both invite the user to send feedback if that is not what
+  happened, since Farhelm cannot tell a report still to come from one that never will. The supervisor's refusal of such
+  a restart and the agent instructions state the same timing, without the invitation. Directory and command line are
+  muted click-to-copy buttons that take the width their values need and ellipsize before the session name or host when
+  the bar runs out of room; a click confirms locally for about 1.5 seconds. A hidden-characters copy warning opens
+  upward from the bar and stays within the window. Clipboard writes use the native bridge first and
+  `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its own anchored danger
+  confirmation and neutral cancellation. Delete is styled as the danger action and asks first in the same anchored way,
+  even for a session that has ended, with the same consequence text the row's delete prompt shows. Restart's
+  confirmation is likewise anchored under its top-row button; Escape cancels these questions and returns focus to the
+  terminal. The session-confirmation setting skips the top row's Delete, Replace and Restart questions, the
   interrupted-card Replace question, and tab Close, using the screen's consent and existing guards.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
@@ -1725,9 +1735,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   it off, closing existing tunnels. A later tunnel request then needs the warning again. Each tunnel is kept only in
   helm memory until the session is deleted, Farhelm quits, or the user closes it. Restarting or stopping the agent does
   not close it. Reopening a link for the same session and loopback target reuses its tunnel. A host disconnect fails new
-  connections until the host returns; an existing TCP stream is never replayed. A strip under the session header shows
-  one local-port → host-port chip per tunnel, with a close button. The list and close actions stay available while the
-  host is disconnected. This feature does not forward login callbacks.
+  connections until the host returns; an existing TCP stream is never replayed. A strip under the top row shows one
+  local-port → host-port chip per tunnel, with a close button. The list and close actions stay available while the host
+  is disconnected. This feature does not forward login callbacks.
 
 - File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
   paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;
@@ -1801,13 +1811,13 @@ completed is best effort.
 
 The macOS desktop window integrates its native title bar with the app header: native traffic-light controls sit in the
 sidebar's top row beside the version readout, with no separate visible app-title strip. The Templates control sits
-beside New in the session list header. The session header and terminal tabs continue the app's surface to the top edge.
-Empty header space provides window dragging, and double-clicking it zooms the window (repeating the gesture restores the
-prior frame); a single click without movement never zooms. Controls and terminal text retain their own interactions.
-Browser and Linux window layouts retain their existing appearance and gain no drag or zoom behavior. In narrow macOS
-windows, the app-level row stays fixed above both scrolling panes so horizontal scrolling cannot move application
-controls underneath native window buttons. Startup, authentication errors, and build-mismatch notices also keep their
-content clear of native controls.
+beside New in the session list header. The merged row of terminal tabs and session actions continues the app's surface
+to the top edge, aligned with the sidebar's app bar at 48px high. Empty header space provides window dragging, and
+double-clicking it zooms the window (repeating the gesture restores the prior frame); a single click without movement
+never zooms. Controls and terminal text retain their own interactions. Browser and Linux window layouts retain their
+existing appearance and gain no drag or zoom behavior. In narrow macOS windows, the app-level row stays fixed above both
+scrolling panes so horizontal scrolling cannot move application controls underneath native window buttons. Startup,
+authentication errors, and build-mismatch notices also keep their content clear of native controls.
 
 Cmd+N in the Mac desktop app opens New with the same prefill, even from a focused terminal, unless a modal is open or
 New is disabled. New's hover text names the shortcut in the Mac desktop app only; the web UI has no such shortcut

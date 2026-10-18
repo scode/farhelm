@@ -21,7 +21,7 @@ import { recordPage } from "./timeline";
  * option's comment below.
  */
 export async function restartIdleAgent(page: Page, options: { afterInput?: boolean } = {}): Promise<void> {
-  const badge = page.locator(".titlebar .status-badge");
+  const badge = page.locator(".session-details .status-badge");
   if (options.afterInput) {
     // A spec that has just typed into the agent may still see the idle
     // reading from BEFORE that input, while the supervisor has already

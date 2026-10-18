@@ -17,8 +17,13 @@
     }
     if (!pane?.isConnected) return;
     const bounds = pane.getBoundingClientRect();
-    const chrome = pane.querySelector(".tab-strip") || pane.querySelector(".titlebar");
-    const top = (chrome ? chrome.getBoundingClientRect().bottom : bounds.top) + 12;
+    // Tabs now share the top row with actions. Notices and tunnel chips can
+    // follow that row, so only the terminal area's top clears all of them.
+    const terminal = pane.querySelector(".terminal-panes");
+    const chrome = pane.querySelector(".session-topbar");
+    const top = (terminal
+      ? terminal.getBoundingClientRect().top
+      : chrome ? chrome.getBoundingClientRect().bottom : bounds.top) + 12;
     const width = Math.min(660, Math.max(0, bounds.width - 24));
     // The cap preserves the prompt below the overlay; a tall header must not
     // let a nominal fraction of the pane extend past its remaining space.
@@ -52,8 +57,8 @@
       structure.observe(pane, { childList: true });
     }
     if (layout) {
-      // Direct chrome bands can change the tab strip's position without
-      // changing its own size. Terminal descendants cannot move that anchor,
+      // Direct chrome bands can move the terminal area's top without
+      // changing the pane's own size. Terminal descendants cannot move that anchor,
       // so never observe their output mutations.
       structure.observe(layout, { childList: true });
       for (const child of layout.children) sizes.observe(child);

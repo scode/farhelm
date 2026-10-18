@@ -427,7 +427,7 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   const expectedTitle = await page
     .locator(`[data-session-id="${sessionId}"] .session-title`)
     .textContent();
-  await expect(page.locator(".titlebar .title")).toHaveText(expectedTitle ?? "", {
+  await expect(page.locator(".session-details .title")).toHaveText(expectedTitle ?? "", {
     timeout: 20_000,
   });
   await expect

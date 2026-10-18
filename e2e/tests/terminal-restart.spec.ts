@@ -188,7 +188,7 @@ test("an interrupted session's view leads with the resume offer, and declining c
   // And the header states the session's last-known status beside the
   // title, which is where the reason a user is being offered a restart now
   // lives (the offer prose used to carry it in a band of its own).
-  await expect(page.locator(".titlebar .status-badge")).toHaveText("interrupted");
+  await expect(page.locator(".session-details .status-badge")).toHaveText("interrupted");
   // An interrupted session has nothing running, so there is no confirm
   // step in front of it.
   await expect(page.locator(".restart-confirm")).toHaveCount(0);
@@ -218,7 +218,7 @@ test("an interrupted session's view leads with the resume offer, and declining c
   // itself must not send anything: a regression that fired the restart on
   // navigate-away would pass a stay-put assertion.
   await sharedSessionRow(page).click();
-  await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+  await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
   const row = rowByTitle(page, title);
   await expect(row.locator(".status-badge")).toHaveText("interrupted");
   expect(counter.restartRequests).toBe(0);
@@ -242,7 +242,7 @@ test("an interrupted session that cannot resume greys out Restart and offers onl
 
   await page.goto("/");
   await rowByTitle(page, title).locator(".session-row-open").click();
-  await expect(page.locator(".titlebar .status-badge")).toHaveText("interrupted");
+  await expect(page.locator(".session-details .status-badge")).toHaveText("interrupted");
 
   const restart = page.locator(".restart-primary");
   await expect(restart).toBeVisible();
@@ -350,7 +350,7 @@ test("Replace confirms inline, can cancel, selects the fresh session, and surfac
   await expect(notice.locator(".replace-confirm-submit")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect.poll(() => counter.replaceRequests).toBe(1);
-  await expect(page.locator(".titlebar .title")).toHaveText(`${title} (replaced)`);
+  await expect(page.locator(".session-details .title")).toHaveText(`${title} (replaced)`);
 
   const refusedId = "11111111-2222-3333-4444-888888888888";
   const refusedTitle = `interrupted-replace-refused-${Date.now()}`;
@@ -506,7 +506,7 @@ test("don't ask again on a refused YOLO replace marks the host, then replaces wi
 
   control.refuseMark = false;
   await confirmation.locator(".yolo-confirm-stop-asking").click();
-  await expect(page.locator(".titlebar .title")).toHaveText(`${title} (replaced)`);
+  await expect(page.locator(".session-details .title")).toHaveText(`${title} (replaced)`);
   expect(sequence, "the host is marked before the replace goes out").toEqual([
     "replace",
     "mark",
@@ -1155,7 +1155,7 @@ test("a restarted session reconnects without a detach banner", async ({
     // API creates it and the page opens it.
     const created = await createResumableSession(request, { cwd: "/tmp", title });
     await rowByTitle(page, title).locator(".session-row-open").click();
-    await expect(page.locator(".titlebar .title")).toHaveText(title, { timeout: 15_000 });
+    await expect(page.locator(".session-details .title")).toHaveText(title, { timeout: 15_000 });
     await waitForSessionRevealed(page, created.id);
     await waitForTermText(page, "FAKE-AGENT READY");
 

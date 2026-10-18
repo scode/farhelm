@@ -12,6 +12,9 @@ again; after a stop its terminal stays readable too. Only deleting a session rem
 
 ## The header's actions
 
+The action buttons share the row above the terminal with its tabs. The session's name, host, and other details are in
+the bar below the terminal.
+
 <Screenshot
   name="stop-restart-resume/header-actions"
   alt="The buttons at the right of the session header, with restart, replace, and clone explained."
@@ -59,13 +62,13 @@ launches.
 />
 
 Both are in a session's menu in the [session list](/docs/using/session-list/), and delete is also the red button at the
-right of the session header. Delete asks you to confirm, with one exception: from the session list, a session that has
-already ended and has no shell tabs open is deleted at once.
+right of the row above the terminal, beside its tabs. Delete asks you to confirm, with one exception: from the session
+list, a session that has already ended and has no shell tabs open is deleted at once.
 When a confirmation opens, Enter confirms it; **cancel** backs out. The YOLO question still starts on **cancel**.
 
-**Cmd+W** in the Mac app, or **Ctrl+Shift+Backspace** in a browser, deletes the open session the same way as its header
-button, including the confirmation setting below. Escape cancels the header's Restart, Replace or Delete question and
-returns you to the terminal.
+**Cmd+W** in the Mac app, or **Ctrl+Shift+Backspace** in a browser, deletes the open session the same way as its Delete
+button, including the confirmation setting below. Escape cancels the Restart, Replace or Delete question under those
+buttons and returns you to the terminal.
 
 To delete, replace, restart and close shell tabs on the first click, turn on **skip session confirmations** in
 **settings**, behind the gear beside the sidebar version. It starts off and applies to your helm; other open windows

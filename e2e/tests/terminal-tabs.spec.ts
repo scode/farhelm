@@ -809,7 +809,7 @@ test("leaving a session with tabs tears down every island and reopening builds n
     // the stash is what keeps the assertion about the departed session
     // rather than about whatever mounted next.
     await sharedSessionRow(page).click();
-    await expect(page.locator(".titlebar .title")).toHaveText("e2e-session");
+    await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
 
     const after = await mountedIslands(page);
     expect(after).not.toContain(`terminal-${session.tabs[0]}`);
@@ -2233,10 +2233,10 @@ test("a tab opened and closed before any poll observes it does not come back", a
     // A pre-open read cannot retire an unseen optimistic open. Missing
     // retirement on close therefore resurfaces here, before a newer reply
     // could erase the bug and make the eventual zero count look correct.
-    await expect(page.locator(".titlebar .title")).toHaveText(staleTitle, { timeout: 15_000 });
+    await expect(page.locator(".session-details .title")).toHaveText(staleTitle, { timeout: 15_000 });
     expect(await page.locator(".tab-slot").count(), "a held pre-open read must not revive the closed tab").toBe(0);
     releaseLaterDetail();
-    await expect(page.locator(".titlebar .title")).toHaveText(appliedTitle, { timeout: 15_000 });
+    await expect(page.locator(".session-details .title")).toHaveText(appliedTitle, { timeout: 15_000 });
     expect(await page.locator(".tab-slot").count(), "post-close reconciliation must not revive the optimistic tab").toBe(0);
     const detail = await (await request.get(`/api/sessions/${id}`)).json();
     expect(detail.tabs ?? []).toEqual([]);

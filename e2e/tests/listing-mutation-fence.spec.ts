@@ -76,7 +76,7 @@ for (const operation of ["create", "replace"] as const) {
       old.release();
       await expect.poll(() => freshCaptured, { message: "the fenced read must have a fresh successor" }).toBe(true);
       await waitForSessionRevealed(page, newId!);
-      await expect(page.locator(".titlebar .title")).toHaveText(operation === "create" ? title : source.title);
+      await expect(page.locator(".session-details .title")).toHaveText(operation === "create" ? title : source.title);
       fresh.release();
       const created = page.locator(`[data-session-id="${newId}"]`);
       await expect(created).toHaveAttribute("data-session-selected", "true");

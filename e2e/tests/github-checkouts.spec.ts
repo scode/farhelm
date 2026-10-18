@@ -440,7 +440,7 @@ async function assertManagedMark(page: Page, id: string, repo: string, root: str
   const directory = new RegExp(cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   await expect(row.locator(".session-row-open")).toHaveAccessibleName(directory);
   await expect(row.locator(".session-row-open")).toHaveAccessibleName(/When the last session using it is deleted, the checkout moves to the trash\./);
-  await expect(page.locator(".titlebar .managed-checkout-mark")).toHaveAttribute("data-tooltip", await mark.getAttribute("data-tooltip") as string);
+  await expect(page.locator(".session-details .managed-checkout-mark")).toHaveAttribute("data-tooltip", await mark.getAttribute("data-tooltip") as string);
   await compact.check();
   await expect(row.locator(".session-identity-copy .managed-checkout-mark")).toBeVisible();
   await expect(row.locator(".session-repository")).toHaveCount(0);
@@ -649,9 +649,9 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     await assertLive(page, foreign.id);
     const foreignRow = page.locator(`.session-row[data-session-id="${foreign.id}"]`);
     await expect(foreignRow.locator(".session-cwd")).toBeVisible();
-    await expect(page.locator(".titlebar .header-copy").first()).toContainText(unmanaged);
+    await expect(page.locator(".session-details .header-copy").first()).toContainText(unmanaged);
     await expect(foreignRow.locator(".managed-checkout-mark")).toHaveCount(0);
-    await expect(page.locator(".titlebar .managed-checkout-mark")).toHaveCount(0);
+    await expect(page.locator(".session-details .managed-checkout-mark")).toHaveCount(0);
     await deleteSession(request, foreign.id);
 
     // Existing-folder mode makes a borrower; Clone otherwise allocates fresh.

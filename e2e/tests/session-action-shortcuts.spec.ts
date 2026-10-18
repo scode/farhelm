@@ -23,7 +23,7 @@ async function openLiveSession(page: Page, id: string) {
   await page.keyboard.type(marker);
   await page.keyboard.press("Enter");
   await waitForTermText(page, `echo:${marker}`);
-  await expect(page.locator(".titlebar .status-badge")).toHaveText(LIVE_BADGE);
+  await expect(page.locator(".session-details .status-badge")).toHaveText(LIVE_BADGE);
   return terminal;
 }
 
@@ -227,13 +227,13 @@ test("browser Rename chord edits the filtered open session and returns live term
   });
   try {
     const terminal = await openLiveSession(page, session.id);
-    await expect(page.locator(".titlebar .title")).toHaveText(initialTitle);
+    await expect(page.locator(".session-details .title")).toHaveText(initialTitle);
     // This API client does not patch the page's navigation snapshot. Wait
     // for the actual header refresh before hiding the row and opening Rename.
     const externalRename = await request.post(`/api/sessions/${session.id}/rename`, { data: { title } });
     expect(externalRename.ok(), await externalRename.text()).toBe(true);
     expect((await externalRename.json()).title).toBe(title);
-    await expect(page.locator(".titlebar .title")).toHaveText(shown);
+    await expect(page.locator(".session-details .title")).toHaveText(shown);
     const filteredReply = await request.get(`/api/sessions?host=${remote!.id}`);
     expect(filteredReply.ok(), await filteredReply.text()).toBe(true);
     const filtered = await filteredReply.json();
@@ -241,7 +241,7 @@ test("browser Rename chord edits the filtered open session and returns live term
     await page.locator(".filter-host").selectOption(String(remote!.id));
     await expect(page.locator(".filter-host")).toHaveValue(String(remote!.id));
     await expect(page.locator(`.session-row[data-session-id="${session.id}"]`)).toHaveCount(0, { timeout: 20_000 });
-    await expect(page.locator(".titlebar .title")).toHaveText(shown);
+    await expect(page.locator(".session-details .title")).toHaveText(shown);
     await expect(page.locator(".session-rename-trigger")).toBeEnabled();
     await terminal.focus();
     await expect(terminal).toBeFocused();
@@ -294,7 +294,7 @@ test("browser Rename chord edits the filtered open session and returns live term
       await expect(page.locator(`.session-row[data-session-id="${session.id}"]`)).toHaveCount(0);
     }
     expect(submittedTitles).toEqual([title, edited]);
-    await expect(page.locator(".titlebar .title")).toHaveText(edited);
+    await expect(page.locator(".session-details .title")).toHaveText(edited);
     // A later opening must use the accepted local title rather than either
     // the initial navigation snapshot or the earlier external title.
     await page.keyboard.press("Control+Shift+l");

@@ -681,6 +681,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   overflow-wrap: anywhere;
   pointer-events: none;
 }
+/* An open session ends in its details bar, which shares this pane's bottom
+   edge. Lift the pill above the bar so a pending sequence keeps the bottom
+   of the terminal as its place and never hides the session name or host.
+   44px is the bar's 30px height (`.session-details`) plus the usual 14px. */
+.layout:has(.session-details) ~ .launch-sequence-indicator {
+  bottom: 44px;
+}
 .launch-sequence-hint {
   margin-left: 12px;
   color: var(--fg-1);
@@ -725,7 +732,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   padding-left: 88px;
 }
 
-.macos-window .titlebar {
+.macos-window .session-topbar {
   min-height: 48px;
 }
 
@@ -1170,7 +1177,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   padding: 4px 8px;
 }
 
-/* ===== Main pane titlebar ========================================= */
+/* ===== Main pane controls and session details ===================== */
 
 .layout {
   display: flex;
@@ -1178,29 +1185,16 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   height: 100%;
 }
 
-/* The consolidated header (the 2026-08 UI refresh): status, title, age,
-   copyable fields, and six lifecycle actions on ONE row, where four stacked
-   bands used to cost ~170px before the terminal began. Everything that made
-   that stack — the restart explanation, the confirmations, the failure
-   lines — moved to a tooltip, to anchored popovers, and to conditional bands
-   respectively; see `SessionView`'s own docs for the reasoning behind each.
-
-   `min-height` rather than a fixed height, and that is deliberate: 40px is
-   the target, but a browser whose default UI metrics make the controls
-   taller must grow the bar rather than clip a button. `flex-shrink: 0`
-   keeps the terminal below from squeezing the header away in a short
-   window — the terminal is the flexible member here, this is not.
-
-   Directory and command line give up width first, then the session name;
-   status, age, and the action cluster never shrink or hide. That ordering is
-   deliberate: the two copy buttons preserve their full values in their tooltips,
-   while the actions must remain readable and keyboard reachable. At widths
-   below the header's 650px full-visibility width the row may clip; it never wraps or moves the
-   actions into another menu. */
-.titlebar {
+/* Tabs spend the width left by the six actions, scrolling inside their own
+   track rather than squeezing a lifecycle button. Both chrome rows keep
+   their height when the window is short; only the terminal gives up space.
+   The old 40px header plus tab row is now two 30px rows, with identity below
+   the terminal so paths and host names no longer compete with actions. */
+.session-topbar,
+.session-details {
   box-sizing: border-box;
-  min-height: 40px;
-  padding: 4px 10px;
+  min-height: 30px;
+  padding: 3px 10px;
   background: var(--bg-1);
   font-size: 13px;
   display: flex;
@@ -1208,13 +1202,46 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   align-items: center;
   flex-shrink: 0;
 }
+.session-topbar { padding-top: 0; padding-bottom: 0; }
+.session-topbar .tab-strip {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  /* A classic scrollbar would spend another line of terminal height at the
+     supported narrow width. Wheel/trackpad scrolling and focus reveal still
+     use overflow-x; only the scrollbar's extra chrome is suppressed. */
+  scrollbar-width: none;
+}
+.session-topbar .tab-strip::-webkit-scrollbar { display: none; }
+.session-details { position: relative; }
+
+/* The host is a peer of the session name, ahead of the quieter age/path
+   fields. Long names may ellipsize, but their full escaped value remains
+   available through the shared host label's tooltip. */
+.session-details-host {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 0 1 auto;
+  font-weight: 600;
+  color: var(--fg-bright);
+}
+.session-details-host .session-host {
+  color: inherit;
+  font-size: inherit;
+  min-width: 0;
+  max-width: none;
+}
+.session-details-host .host-kind-icon { flex-shrink: 0; }
 
 /* `min-width: 0` overrides a flex item's automatic minimum, which for
    `white-space: nowrap` text defaults to the full min-content width —
    without it, a title (sharing `CreateSession`'s 64 KiB combined field
    cap with cwd and invocation, so a legal one can still run long) would
    refuse to shrink and the row would overflow instead of ellipsizing. */
-.titlebar .title {
+.session-details .title {
   font-weight: 600;
   flex: 0 1 auto;
   min-width: 0;
@@ -1427,15 +1454,14 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 .farhelm-tooltip[data-paragraphs="true"][hidden] { display: none; }
 
-/* The hidden-characters warning after a header copy. It hangs below the
-   titlebar (its positioning anchor) instead of living inside the copy
-   button, whose text shrinks and ellipsizes in a crowded header: the
+/* The hidden-characters warning opens above the bottom bar, keeping it
+   inside the window. It lives outside the copy button, whose text shrinks
+   and ellipsizes in crowded details: the
    warning is the one message a copy must never lose, so it wraps rather
    than clipping and is capped only by the viewport. */
-.titlebar { position: relative; }
 .copy-warning {
   position: absolute;
-  top: calc(100% + 4px);
+  bottom: calc(100% + 4px);
   left: 10px;
   z-index: 30;
   max-width: min(60ch, 80vw);
@@ -1450,7 +1476,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .header-replace-anchor,
 .header-delete-anchor { position: relative; display: inline-flex; }
 
-/* The session's status, in the header rather than in a band of its own —
+/* The session's status, in the bottom bar rather than in a band of its own —
    the same badge the sidebar's rows draw, so one session cannot be
    described two ways on two surfaces. A stale session's copy lives under
    its host-unreachable notice instead (see `.stale-metadata` and
@@ -1460,21 +1486,20 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    dot-only rule in the status-badge section below is later in the sheet at
    equal specificity, so it still wins for the three that draw as a dot.
 
-   Ended and failed badges can be longer than the remaining space at the
-   supported 650px main-pane width. Their words ellipsize before the action
-   cluster moves outside the header; the tooltip retains the full status. */
-.titlebar .status-badge {
+   Ended and failed badges can be longer than the remaining space. Their
+   words may ellipsize in the details bar; the tooltip retains the full status. */
+.session-details .status-badge {
   padding: 1px 6px;
   flex-shrink: 1;
 }
 /* The live statuses draw only an 8px dot, which shrinking would clip in a
-   crowded header; only the worded statuses may give up width. */
-.titlebar .status-badge:is(.running, .waiting, .idle) {
+   crowded details bar; only the worded statuses may give up width. */
+.session-details .status-badge:is(.running, .waiting, .idle) {
   flex-shrink: 0;
 }
 
 /* The actions cluster, pinned to the trailing edge by `margin-left: auto`
-   so the identity half of the row can grow into whatever is left. It never
+   so tabs can use whatever width is left. It never
    shrinks: a control that ellipsizes is a control someone cannot read
    before clicking. */
 .titlebar-actions {
@@ -5127,7 +5152,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   flex-wrap: wrap;
   gap: 12px;
   max-width: 42rem;
-  min-height: 100%;
+  /* This is the terminal's replacement, so it gets only the remaining
+     space between chrome rows. A 100% minimum pushes the details bar below
+     the window precisely when that identity is needed for recovery. */
+  flex: 1 1 0;
+  min-height: 0;
   margin: 0 auto;
   padding: 2rem;
   color: var(--fg-0);
@@ -6449,11 +6478,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 /* ===== Session view: restart and banners ========================= */
 
 /* The restart affordance (PLAN_M3.md item 9) is a header control now — its
-   box model lives with the header, under "Main pane titlebar". What is left
+   box model lives under "Main pane controls and session details". What is left
    here is its conditional prose, plus the session view's other notices.
 
-   All of these are BANDS, and all of them are conditional: the header's
-   ~40px steady state is the promise this section must not quietly break,
+   All of these are BANDS, and all of them are conditional: the chrome's
+   compact steady state is the promise this section must not quietly break,
    so nothing below may render when it has nothing to say. */
 
 /* A restart refusal is the supervisor's own prose — a stale-offer conflict

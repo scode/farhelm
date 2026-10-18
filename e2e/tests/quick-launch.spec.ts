@@ -236,7 +236,9 @@ test("launch sequence stacks a number template and bolt without showing New", as
 });
 
 /** Cancelling by ordinary typing must deliver that same key to the old agent.
- * Escape and programmatic modal focus instead cancel without creating anything. */
+ * Escape and programmatic modal focus instead cancel without creating anything.
+ * The pending-sequence pill sits over the bottom of the terminal, above the
+ * open session's details bar, so it never hides that session's name or host. */
 test("launch sequence cancellation leaves ordinary terminal input and modals in control", async ({ page, request }) => {
   const source = await createSession(request, { title: `sequence-cancel-${Date.now()}` });
   try {
@@ -246,8 +248,19 @@ test("launch sequence cancellation leaves ordinary terminal input and modals in 
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
     const indicator = page.locator(".launch-sequence-indicator");
+    const details = page.locator(".session-details");
+    await expect(details, "the open session shows its details bar below the terminal").toBeVisible();
     await page.keyboard.press("Control+Shift+KeyX");
     await expect(indicator).toBeVisible();
+    await expect.poll(async () => {
+      const pill = await indicator.boundingBox();
+      const bar = await details.boundingBox();
+      const terminal = await page.locator(".terminal-panes").boundingBox();
+      if (!pill || !bar || !terminal) return `missing: pill ${!!pill}, bar ${!!bar}, terminal ${!!terminal}`;
+      if (pill.y + pill.height > bar.y) return `pill bottom ${pill.y + pill.height} overlaps bar top ${bar.y}`;
+      if (pill.y < terminal.y || pill.y + pill.height > terminal.y + terminal.height) return "pill outside the terminal area";
+      return "ok";
+    }, { message: "the pill is inside the terminal area and clear of the details bar" }).toBe("ok");
     const probe = `sequence-pass-${Date.now()}`;
     await page.keyboard.type(probe);
     await page.keyboard.press("Enter");
