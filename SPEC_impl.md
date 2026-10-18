@@ -732,6 +732,9 @@ custom and the approval modes require `perms:`. Bare `own` and `custom` would ma
 a permission row updates the same explicit-choice bookkeeping as the segmented control and leaves the other draft fields
 intact. Command mode has no active structured harness, so it offers no permission actions.
 
+The `effort:` scope offers `default` whenever the chosen harness offers effort, even while the model catalog is empty.
+Bare `default` does not offer an effort action. Accepting it clears the explicit effort, as the default button does.
+
 The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
 `HostId` is a registry row that outlives a retarget or an adopt) before the selector trusts it. A row whose install this
 client cannot currently confirm is left at the ordinary host default with a note explaining why, rather than risking a

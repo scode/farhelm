@@ -600,24 +600,24 @@ agent choice is independent of that destination:
   their terminal prompts. "reset choices" returns permissions and the wrapper prefix to their remembered values, and a
   recent setup's saved choices override them when used. A recent setup's historical trust value is ignored. The
   launch-composer search matches harnesses, launch templates (`tl:name`), models scoped by the chosen harness, effort
-  words offered by that harness and model, bare `yolo` and `guarded` plus the `perms:` choices for those modes, custom,
-  own setting and supported approval modes, host and name actions, folders and recent setups. Permission actions are
-  offered only when the selected harness can represent them; own setting is offered only on Cursor. `name:foo` applies
-  the entire value as the session name. `host:foo` filters host choices, and `host:local` selects the helm-local host
-  even if it has an alias. The default local host label in the GUI is `local (this machine)`. Accepting a result applies
-  it and clears the box while keeping focus there, except custom moves focus to its flags editor. Enter on an empty box
-  launches only a complete, valid selection through the ordinary Launch path; an incomplete attempt says why beside
-  Launch, as does a refused Launch press, and the greyed-out button's hover names what is missing. Enter when the
-  launcher itself has focus uses that same Launch path and refusal. Request refusals appear there too, within the
-  initial dialog viewport. Enter on a non-empty query with no result never launches, and Escape closes the result list
-  without clearing the query, so Enter after Escape does nothing until the box is emptied. Enter on a choice button
-  (launch-kind tab, harness, effort, or permissions) applies that choice and then launches through the ordinary Launch
-  path, or shows its refusal beside Launch; custom instead selects the mode and focuses its required flags editor. Enter
-  on the closed host picker or the agent-type dropdown, YOLO radios, or Resume checkbox launches with the values shown,
-  without changing them; those native controls retain their Space and arrow behavior. Action buttons keep their normal
-  press. The search box, model field, YOLO confirmation, and save-as-template panel keep their own Enter rules. In the
-  editable folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with no highlighted entry
-  it launches as before. A held Enter never launches.
+  words offered by that harness and model plus `effort:default`, bare `yolo` and `guarded` plus the `perms:` choices for
+  those modes, custom, own setting and supported approval modes, host and name actions, folders and recent setups.
+  Permission actions are offered only when the selected harness can represent them; own setting is offered only on
+  Cursor. `name:foo` applies the entire value as the session name. `host:foo` filters host choices, and `host:local`
+  selects the helm-local host even if it has an alias. The default local host label in the GUI is
+  `local (this machine)`. Accepting a result applies it and clears the box while keeping focus there, except custom
+  moves focus to its flags editor. Enter on an empty box launches only a complete, valid selection through the ordinary
+  Launch path; an incomplete attempt says why beside Launch, as does a refused Launch press, and the greyed-out button's
+  hover names what is missing. Enter when the launcher itself has focus uses that same Launch path and refusal. Request
+  refusals appear there too, within the initial dialog viewport. Enter on a non-empty query with no result never
+  launches, and Escape closes the result list without clearing the query, so Enter after Escape does nothing until the
+  box is emptied. Enter on a choice button (launch-kind tab, harness, effort, or permissions) applies that choice and
+  then launches through the ordinary Launch path, or shows its refusal beside Launch; custom instead selects the mode
+  and focuses its required flags editor. Enter on the closed host picker or the agent-type dropdown, YOLO radios, or
+  Resume checkbox launches with the values shown, without changing them; those native controls retain their Space and
+  arrow behavior. Action buttons keep their normal press. The search box, model field, YOLO confirmation, and
+  save-as-template panel keep their own Enter rules. In the editable folder field, Enter chooses an arrow-highlighted
+  dropdown entry without launching; with no highlighted entry it launches as before. A held Enter never launches.
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector for every agent launch. Claude,
   Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP session file.
   Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or the session's

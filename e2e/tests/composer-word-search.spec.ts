@@ -57,11 +57,13 @@ async function listedSessions(request: APIRequestContext) {
 }
 
 /**
- * The complete word path applies harness, model, effort, and the YOLO and
- * Guarded permission choices in sequence, then launches through the ordinary button
- * path with the stored selection intact. Each Enter is preceded by an assertion that the intended option
- * is the preselected one: the Enter handler takes whatever row the last
- * render highlighted, so the premise has to hold before the key. The full
+ * Search applies a complete draft and preserves it through launch. The test
+ * chooses a harness, model, effort, and YOLO then Guarded permissions. It
+ * also returns from an explicit effort to default and back before launch,
+ * proving the scoped reset reaches the pressed button without changing the
+ * stored-launch assertion. Each Enter is preceded by an assertion that the
+ * intended option is preselected: Enter takes the row the last render
+ * highlighted, so the premise has to hold before the key. The full
  * model id is typed so the option Enter will accept is the one named; with
  * the shipped catalog no Codex id contains the harness word, so this test
  * does NOT exercise the exact-word preselection rule — the unit test
@@ -102,6 +104,20 @@ test("composer word search drives a structured launch", async ({ page, request }
     .toHaveAttribute("aria-pressed", "true");
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
+
+  // Default is a scoped search choice even after a model supplied an explicit
+  // level. Restore that level afterward so the launch assertion below still
+  // checks the complete structured draft.
+  await search.fill("effort:default");
+  await expect(form.getByRole("option", { name: "Effort: default", exact: true, selected: true })).toBeVisible();
+  await search.press("Enter");
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "default", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await search.fill(effort);
+  await expect(form.getByRole("option", { name: `Effort: ${effort}`, exact: true, selected: true })).toBeVisible();
+  await search.press("Enter");
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: effort, exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
 
   await search.fill("perms:yolo");
   await expect(form.getByRole("group", { name: "Permissions" })).toBeVisible();

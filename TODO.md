@@ -59,12 +59,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   button. The text wraps across several lines and dominates the narrow panel. Find a better way to present this result;
   the design details are TBD. Plan: `plans/queue/host-uninstall-dialogs.md`.
 
-- **Select Guarded by typing in the launcher.** Make bare `guarded` offer and preselect the Guarded permission choice,
-  as bare `yolo` does today, while keeping `perms:guarded` available. During planning, audit every choice in the New,
-  Clone, and Replace with launcher dialog for whether it can be set through typing alone (in search or a text field),
-  and identify any other choices that need a typed route or an intentional exception. Plan:
-  `plans/queue/launcher-typed-guarded.md`.
-
 - **Apply template hotkeys in the launcher.** While New, Clone, or Replace with is open, pressing a bound template
   hotkey should apply that template to the current launcher draft, exactly as accepting `tl:name` in the launcher's
   search does, instead of starting a session. This should work for the quick-launch bolt and number shortcuts, so
