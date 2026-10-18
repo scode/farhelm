@@ -397,6 +397,7 @@ The bonus checkpoint names retain RECIPE's broader acceptance obligations:
 | Fresh   | `remote-provision`      | Candidate remote supervisor and service evidence.                                              |
 | Fresh   | `codex-conversation`    | Meaningful conversation, terminal response and captured conversation.                          |
 | Fresh   | `remote-terminal`       | Responsive plain Linux command session.                                                        |
+| Fresh   | `window-drag`           | Title-bar band drags and zooms/restores the window; its settings gear still opens settings.    |
 | Upgrade | `old-fixture`           | Old app/local/remote versions; automatic updates disabled before first launch.                 |
 | Upgrade | `seed-state`            | Real Codex conversation/session identity, template, changed setting and unchanged old version. |
 | Upgrade | `continuity-before`     | Original Linux process alive and advancing.                                                    |

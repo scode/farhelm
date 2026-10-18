@@ -19,7 +19,7 @@ import unittest
 import uuid
 from unittest import mock
 
-from brick_test import Run, artifact, metadata, plan, priority_entry, smoke, version
+from brick_test import Run, artifact, checks, metadata, plan, priority_entry, smoke, version
 from control import Control, Refused, atomic_json
 from machine_profile import Profile
 from test_machine_profile import fixture
@@ -58,6 +58,21 @@ class PlanningTests(unittest.TestCase):
                           'fresh', 'upgrade-v0.24.0', 'upgrade-v0.23.0'])
         self.assertEqual(result['p0_sequence'], [v['id'] for v in result['passes'][:3]])
         self.assertEqual(result['passes'][4]['update_path'], 'manual')
+
+    def test_fresh_pass_checks_window_drag_after_its_sessions(self):
+        """The title-bar check needs a selected session and must not cost the bonus session coverage.
+
+Only the full fresh pass declares `window-drag`, as a GUI-only check that comes
+after the session checks and before the addendum: the main pane's top row
+exists only with a session open, and a failed check stops the pass. P0's
+fresh fixture keeps its four checkpoints.
+"""
+        self.assertEqual(list(checks('fresh')),
+                         ['artifact-verification', 'fixture-clean', 'install', 'app-start', 'remote-provision',
+                          'codex-conversation', 'remote-terminal', 'window-drag', 'addendum'])
+        self.assertEqual(checks('fresh')['window-drag'], {'gui': True, 'command': False, 'continuity': False})
+        self.assertNotIn('window-drag', checks('p0-fresh'))
+        self.assertNotIn('window-drag', checks('upgrade-v0.24.0'))
 
     def test_override_uses_old_source_and_never_selects_an_rc(self):
         """A candidate's support cannot make an unsupported old app use its override."""
@@ -405,6 +420,21 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(self.run.verdict(self.run.selected('fresh')), 'could not run')
             with self.assertRaises(Refused):
                 self.run.cleanup('fresh')
+
+    def test_manifest_without_window_drag_keeps_its_declared_checks(self):
+        """A run planned before `window-drag` existed must not gain an obligation it never declared.
+
+The manifest's saved required set, not the current check table, decides what
+a pass must record, so an older fresh pass stays completable as planned.
+"""
+        with self.run.locked():
+            del self.run.selected('fresh')['required']['window-drag']
+            self.run.save()
+        self.prepare()
+        with self.run.locked():
+            self.assertNotIn('window-drag', self.run.selected('fresh')['required'])
+            with self.assertRaisesRegex(Refused, 'declared check'):
+                self.run.record('fresh', 'window-drag', 'could-not-run', [], 'Not declared by this manifest.')
 
     def test_evidence_cannot_escape_or_be_overwritten_as_an_observation(self):
         """Private run references and append-only observations survive later mistakes."""

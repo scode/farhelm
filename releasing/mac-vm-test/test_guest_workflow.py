@@ -56,6 +56,38 @@ independent updater check. These assertions cover instructions, not live UI.
         self.assertIn("Click the old app's actual Check for updates", discovery)
 
 
+class WindowDragInstructionsTests(unittest.TestCase):
+    """Pin the title-bar contract the guest tester receives for the full fresh pass.
+
+The generic bonus text would leave the gestures, the frame observation and the
+could-not-run boundary to the tester's reading of RECIPE. These assertions
+cover the delivered instructions, not live window behavior.
+"""
+
+    def test_contract_names_every_gesture_and_the_input_capability_boundary(self):
+        """An undelivered drag or double-click must read as could-not-run, not as a broken title bar.
+
+The envelope must carry the explicit contract rather than the generic RECIPE
+mapping: an unzoomed starting frame, drags and zoom/restore cycles on both
+surfaces with the restore aimed at the zoomed window's own band, controls
+that must neither drag nor stop working (a session action's confirmation and
+the gear), a fixed ten-image schedule that fits the executor's retention and
+captures the zoomed and dialog states, and the Finder comparison that
+separates missing CUA input from a Farhelm failure.
+"""
+        text = CheckpointInstructionsTests().envelope('fresh', 'window-drag', None)['instructions']
+        self.assertNotIn('Perform RECIPE.md checkpoint', text)
+        for phrase in ("sidebar's top bar", "main pane's", 'find empty top-band background again', 'a control never drags',
+                       'ordinary, unzoomed frame', 'Repeat step 3 from empty background of the main pane',
+                       'confirmation panel to open', 'without deleting anything', 'exactly these ten',
+                       'settings gear', "Finder window's title bar", 'could-not-run, not fail', 'do not create one',
+                       'Window > Zoom', 'Press on the sidebar',
+                       'Click + terminal once', 'click the shell tab and require it', 'only the agent tab remains',
+                       'icon view', 'unselected folder icon'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
+
 class SetupTests(unittest.TestCase):
     """Require prepared native fixtures before any actual test can copy authentication."""
 
