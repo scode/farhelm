@@ -1314,9 +1314,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   right: 4px;
   /* Low on the z-index ladder (see `.header-confirm`): a status line inside
      the terminal must not cover header confirmations, menus, dialogs or the
-     file hover disclosure that names what a click would download. The clipped-
-     disclosure refusal below is the exception: that hover must not hide why
-     the user's click was refused, including during a terminal redraw. */
+     hover disclosure that names what a click would open or download. A refused
+     disclosure is the exception: neither its hover nor an approval card may
+     hide why the click was refused, including during a terminal redraw. */
   z-index: 12;
   padding: 4px 6px;
   background: var(--bg-2);
@@ -1331,9 +1331,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   transition: opacity 200ms;
 }
 .terminal-file-message.showing { opacity: 1; }
-.terminal-file-message[data-outcome="disclosure-refusal"] { z-index: 41; }
+.terminal-file-message[data-outcome="disclosure-refusal"] { z-index: 46; }
 /* Modal isolation already marks background content inert. The refusal only
-   outranks a hover while its terminal is active, never the dialog above it. */
+   outranks hovers and approval cards while its terminal is active, never the
+   dialog above it. */
 [inert] .terminal-file-message[data-outcome="disclosure-refusal"],
 .terminal-file-message[data-outcome="disclosure-refusal"][inert] { z-index: 12; }
 @media (prefers-reduced-motion: reduce) {
@@ -1570,14 +1571,14 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
      30 `.header-confirm` (this rule) — must outrank the row menu above
      40 `.quick-switcher-backdrop` — the quick switcher, a modal dialog like
         the others, so the approval cards and hover help stay above it
-     41 `.terminal-file-message[data-outcome="disclosure-refusal"]` — the
-        clipped file hover's refusal, above that hover (40) so it stays readable;
-        reverts to 12 when modal isolation makes its terminal inert, and drops
-        to the ordinary failure layer once a new hover starts or the pointer
-        leaves, so it never covers a later hover or the header confirmation
      45 `.approval-cards` — an agent's request waiting for the user, above
         every modal dialog's backdrop (40) because an agent that asked while a
         dialog was open is waiting on this answer, not on the dialog
+     46 `.terminal-file-message[data-outcome="disclosure-refusal"]` — a clipped
+        or covered link hover's refusal, above that hover (40) and cards (45);
+        reverts to 12 when modal isolation makes its terminal inert, and drops
+        to the ordinary failure layer once its file or web hover leaves, so it
+        never covers a later disclosure or the header confirmation
      50 `.farhelm-tooltip` — hover help, above every panel and modal backdrop,
         the approval cards included, so a card's buttons can show theirs
    Right-aligned to the anchor, which is at the row's trailing edge, so the
