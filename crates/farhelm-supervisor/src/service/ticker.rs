@@ -361,9 +361,10 @@ pub(crate) const SAMPLING_ADMISSION_PERMITS: usize = 1;
 /// and any interval.
 #[derive(Debug, Default)]
 pub(crate) struct ActivitySample {
-    /// Last definite permission-footer reading of this run. An unreadable screen
-    /// retains it; replacement/reload resets it, so a prior agent cannot lend its
-    /// mode to a new process. It never participates in admission or inheritance.
+    /// Whether this run has ever shown a definite YOLO permission footer. Later
+    /// non-YOLO or unreadable screens cannot withdraw that evidence: a missed
+    /// switch back to bypass must not leave a reassuring shield. Replacement or
+    /// reload resets it; it never participates in admission or inheritance.
     pub(crate) screen_yolo: bool,
     /// Current trust question, cleared on failed capture as well as when the
     /// dialog leaves the screen. A rename shares this run's sample cell.
@@ -457,20 +458,25 @@ pub(crate) struct ActivitySample {
 }
 
 impl ActivitySample {
-    /// Accept definite footer evidence and report whether clients need a fresh list.
+    /// Latch bypass evidence for this run and notify clients only on its first sighting.
+    ///
+    /// A non-bypass footer is still a valid parser result, but cannot make the
+    /// displayed shield safer after bypass was observed. A new run or supervisor
+    /// reload resets it.
     fn observe_permission(
         &mut self,
         harness: Option<farhelm_proto::LaunchHarness>,
         text: &str,
     ) -> bool {
-        let Some(reading) = harness
-            .and_then(|harness| crate::agent_kind::screen_reader::status_line_yolo(harness, text))
-        else {
+        if self.screen_yolo
+            || harness.and_then(|harness| {
+                crate::agent_kind::screen_reader::status_line_yolo(harness, text)
+            }) != Some(true)
+        {
             return false;
-        };
-        let changed = self.screen_yolo != reading;
-        self.screen_yolo = reading;
-        changed
+        }
+        self.screen_yolo = true;
+        true
     }
     /// A cell for a session nothing has looked at yet — what every
     /// freshly built [`SessionEntry`] starts with.
@@ -1931,9 +1937,9 @@ async fn reap_dead_tabs(
 
 #[cfg(test)]
 mod tests {
-    /// Definite modes reach replies, unknown grids retain them, and a replacement
-    /// resets them. Otherwise an unreadable dialog or a restarted agent could
-    /// silently show a safer mode or inherit the old process's bypass evidence.
+    /// Once bypass reaches replies, neither a manual footer nor an unreadable
+    /// screen can withdraw it during the run. Repeated evidence sends no change
+    /// hint; replacement and reload reset it so a new process inherits no evidence.
     #[test]
     fn permission_evidence_reaches_replies_and_resets_with_the_run() {
         use farhelm_proto::LaunchHarness;
@@ -1941,6 +1947,8 @@ mod tests {
         let yolo = "⏵⏵ bypass permissions on (shift+tab to cycle)";
         {
             let mut sample = entry.run.activity.lock().unwrap();
+            assert!(!sample.screen_yolo);
+            assert!(!sample.observe_permission(Some(LaunchHarness::Claude), "⏸ manual mode on"));
             assert!(!sample.screen_yolo);
             assert!(sample.observe_permission(Some(LaunchHarness::Claude), yolo));
             assert!(!sample.observe_permission(Some(LaunchHarness::Claude), yolo));
@@ -1950,7 +1958,7 @@ mod tests {
             super::super::status::entry_info(&entry, &Default::default(), &Default::default());
         assert!(reply.screen_yolo);
         assert!(
-            entry
+            !entry
                 .run
                 .activity
                 .lock()
@@ -1958,15 +1966,17 @@ mod tests {
                 .observe_permission(Some(LaunchHarness::Claude), "⏸ manual mode on")
         );
         assert!(
-            !super::super::status::entry_info(&entry, &Default::default(), &Default::default())
+            super::super::status::entry_info(&entry, &Default::default(), &Default::default())
                 .screen_yolo
         );
-        entry
-            .run
-            .activity
-            .lock()
-            .unwrap()
-            .observe_permission(Some(LaunchHarness::Claude), yolo);
+        assert!(
+            !entry
+                .run
+                .activity
+                .lock()
+                .unwrap()
+                .observe_permission(Some(LaunchHarness::Claude), yolo)
+        );
         entry.run.activity = ActivitySample::replacement(&entry.run.activity);
         assert!(
             !super::super::status::entry_info(&entry, &Default::default(), &Default::default())
