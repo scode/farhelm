@@ -8,5 +8,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `launcher-enter-focus.md` — dialogs keep focus on empty-space clicks, and Enter on the dialog itself presses its main button
 - [pending] `agent-wrappers.md` — optional command prefix for agent launches, treated exactly like the real agent
 - [pending] `agent-quick-launch-templates.md` — agents can set the quick-launch template and number keys through the farhelm command
-- [pending] `prompt-running-agent.md` — farhelm command to type a prompt into another session's running Claude or Codex
+- [in-flight e05e77] `prompt-running-agent.md` — farhelm command to type a prompt into another session's running Claude or Codex
 - [pending] `cheaper-cache-clones.md` — managed checkouts clone from the host's repository cache with hardlinks, behind a default-on setting
