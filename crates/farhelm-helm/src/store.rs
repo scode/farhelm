@@ -305,7 +305,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 57;
+const SCHEMA_VERSION: i64 = 58;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -661,10 +661,9 @@ pub struct HostRow {
     /// Permission to open addresses on the user's own machine or network. Kept separate because
     /// this exposes a different boundary than opening a public site.
     pub local_links_without_asking: bool,
-    /// Durable decorative identity. Null columns decode to cloud/default;
-    /// the local host cannot be assigned either field.
+    /// Durable decorative identity. Null columns decode to the kind's default.
     pub icon: farhelm_proto::host_appearance::HostIcon,
-    /// Identity tint only; null retains the ordinary foreground.
+    /// Identity tint only; null is red for local and ordinary foreground for SSH.
     pub color: farhelm_proto::host_appearance::HostColor,
 }
 
@@ -1406,9 +1405,6 @@ pub enum HostStoreError {
     /// identity the same way" — PLAN_M6.md item 3).
     #[error("the local host's destination cannot be changed and it cannot be removed")]
     LocalHostImmutable,
-    /// The local laptop is a fixed locality cue, never a chosen identity.
-    #[error("the local host keeps its red laptop; icon and color are remote-host settings")]
-    LocalHostAppearanceFixed,
     /// The stored identity no longer matches what a caller assumed it still
     /// was. Two distinct callers hit this: [`HelmStore::adopt_identity`]'s
     /// compare-and-swap, when `expected_old` no longer names the currently
@@ -1987,6 +1983,9 @@ pub struct HelmStore {
 /// - 56: nullable quick-launch naming choice. Unset enables naming on upgraded helms.
 /// - 57: off-by-default Codex, Muse and Pi managed-checkout trust settings,
 ///   with independent nullable hint dismissals; old launcher trust stays inert.
+/// - 58: host icon and color choices open to the local row. Null keeps each
+///   kind's original mark: laptop/red locally, cloud/default over SSH. Only
+///   the two checked columns are replaced, leaving host references intact.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2069,13 +2068,13 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- without the user's approval (added in schema 40); 0 asks
                  -- first. Last for the reason `yolo_without_asking` is.
                  commands_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (commands_without_asking IN (0, 1)),
-                 -- Stable decorative words; appended in schema 44, so the
-                 -- fresh path and the migration ladder retain column order.
-                 icon TEXT CHECK (kind = 'ssh' OR icon IS NULL),
-                 color TEXT CHECK (kind = 'ssh' OR color IS NULL),
                  -- Browser permissions are independent of command authority and start asking.
                  links_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (links_without_asking IN (0, 1)),
                  local_links_without_asking INTEGER NOT NULL DEFAULT 0 CHECK (local_links_without_asking IN (0, 1)),
+                 -- Schema 58 replaces the schema-44 SSH-only columns in place.
+                 -- Their final position matches the swap's appended columns.
+                 icon TEXT,
+                 color TEXT,
                  CHECK (
                      (kind = 'local' AND destination IS NULL AND remote_farhelm IS NULL
                           AND remote_state_dir IS NULL)
@@ -2301,7 +2300,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 57;",
+              PRAGMA user_version = 58;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3553,6 +3552,32 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("PRAGMA user_version = 57;")
             .context("migrating helm.db to schema version 57")?;
         version = 57;
+    }
+    if version == 57 {
+        // SQLite stores the old local-host restriction in column CHECKs.
+        // Dropping only those columns preserves the many foreign keys that
+        // point at hosts; rebuilding the table would cascade their rows.
+        // Rewound fixtures may already have the replacement columns.
+        let sql: String = tx.query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'hosts'",
+            [],
+            |row| row.get(0),
+        )?;
+        if sql.contains("kind = 'ssh' OR icon IS NULL") {
+            tx.execute_batch(
+                "ALTER TABLE hosts ADD COLUMN icon_new TEXT;
+                 ALTER TABLE hosts ADD COLUMN color_new TEXT;
+                 UPDATE hosts SET icon_new = icon, color_new = color;
+                 ALTER TABLE hosts DROP COLUMN icon;
+                 ALTER TABLE hosts DROP COLUMN color;
+                 ALTER TABLE hosts RENAME COLUMN icon_new TO icon;
+                 ALTER TABLE hosts RENAME COLUMN color_new TO color;",
+            )
+            .context("opening host appearance to the local host")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 58;")
+            .context("migrating helm.db to schema version 58")?;
+        version = 58;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -5072,9 +5097,9 @@ impl HelmStore {
                                     commands_without_asking,
                                     links_without_asking,
                                     local_links_without_asking,
-                                    icon: icon.as_deref().unwrap_or("cloud").parse()
+                                    icon: icon.as_deref().unwrap_or(if kind == "local" { "laptop" } else { "cloud" }).parse()
                                         .map_err(anyhow::Error::msg)?,
-                                    color: color.as_deref().unwrap_or("default").parse()
+                                    color: color.as_deref().unwrap_or(if kind == "local" { "red" } else { "default" }).parse()
                                         .map_err(anyhow::Error::msg)?,
                                 })
                             },
@@ -5668,11 +5693,11 @@ impl HelmStore {
             .await
     }
 
-    /// Save a remote host's identity atomically, returning whether it changed.
+    /// Save any host's decorative identity atomically, returning whether it changed.
     ///
     /// Defaults use null columns so an untouched host and an explicitly reset
-    /// one have the same durable shape. The local row is refused even for
-    /// defaults: its fixed laptop is not part of this choice surface.
+    /// one have the same durable shape. Local and SSH rows have different
+    /// defaults, but the caller uses one shared vocabulary.
     pub async fn set_appearance(
         &self,
         host: HostId,
@@ -5698,11 +5723,12 @@ impl HelmStore {
                     let Some((kind, current_icon, current_color)) = current else {
                         return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
                     };
-                    if HostKind::from_column(&kind)? == HostKind::Local {
-                        return Err(anyhow::Error::new(HostStoreError::LocalHostAppearanceFixed));
-                    }
-                    let next_icon = (icon != HostIcon::Cloud).then_some(icon.as_str());
-                    let next_color = (color != HostColor::Default).then_some(color.as_str());
+                    let (default_icon, default_color) = match HostKind::from_column(&kind)? {
+                        HostKind::Local => (HostIcon::Laptop, HostColor::Red),
+                        HostKind::Ssh => (HostIcon::Cloud, HostColor::Default),
+                    };
+                    let next_icon = (icon != default_icon).then_some(icon.as_str());
+                    let next_color = (color != default_color).then_some(color.as_str());
                     let changed = current_icon.as_deref() != next_icon
                         || current_color.as_deref() != next_color;
                     if changed {
@@ -17154,6 +17180,78 @@ mod tests {
             (None, None),
             "reset restores the unset durable shape"
         );
+    }
+
+    /// Schema 58 removes the SSH-only check without replacing the hosts table.
+    ///
+    /// Existing local rows must gain their new default without a backfill,
+    /// while a remote row's saved words survive the column swap. Resetting a
+    /// local choice returns it to null, just as an untouched local row is.
+    #[farhelm_testtrace::test]
+    async fn schema_58_opens_local_appearance_and_preserves_remote_words() {
+        use farhelm_proto::host_appearance::{HostColor, HostIcon};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        let remote = store
+            .add_ssh_host("user@appearance-upgrade", None, None)
+            .await
+            .unwrap();
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE hosts DROP COLUMN icon;
+             ALTER TABLE hosts DROP COLUMN color;
+             ALTER TABLE hosts ADD COLUMN icon TEXT CHECK (kind = 'ssh' OR icon IS NULL);
+             ALTER TABLE hosts ADD COLUMN color TEXT CHECK (kind = 'ssh' OR color IS NULL);
+             PRAGMA user_version = 57;",
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE hosts SET icon = 'castle', color = 'copper' WHERE id = ?1",
+            [remote],
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = HelmStore::open(&path).await.unwrap();
+        let hosts = store.list_hosts().await.unwrap();
+        let local = hosts
+            .iter()
+            .find(|row| row.kind == HostKind::Local)
+            .unwrap();
+        assert_eq!(
+            (local.icon, local.color),
+            (HostIcon::Laptop, HostColor::Red)
+        );
+        let local_id = local.id;
+        let remote_row = hosts.iter().find(|row| row.id == remote).unwrap();
+        assert_eq!(
+            (remote_row.icon, remote_row.color),
+            (HostIcon::Castle, HostColor::Copper)
+        );
+        assert!(
+            store
+                .set_appearance(local_id, HostIcon::House, HostColor::Teal)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .set_appearance(local_id, HostIcon::Laptop, HostColor::Red)
+                .await
+                .unwrap()
+        );
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        let words: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT icon, color FROM hosts WHERE id = ?1",
+                [local_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(words, (None, None));
     }
 
     /// Consent is explicit and shared: sparse patches preserve it, null revokes,

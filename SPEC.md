@@ -175,23 +175,24 @@ wiping and reinstalling a supervisor produces a new host identity whose predeces
 install. Removing a host from the registry merely forgets it — the supervisor and its sessions are untouched and
 reappear on re-registration. Registry entries are editable: an SSH destination can be corrected without touching the
 host's identity or its sessions. Every host, the local one included, has a settings dialog in the GUI that holds its
-destination (SSH hosts), its alias, a chosen icon and color (remote hosts), whether it starts YOLO sessions without
-asking, whether it runs `farhelm` commands from its sessions without asking, and separate permissions to open public and
-local-network links without asking (see Agent-spawned sessions). The header and footer, including the close controls and
-the note that changes save as you make them, stay visible while only the settings between them scroll. A remote host
-offers fifteen icons, with the cloud as the default, and the default foreground or one of six identity colors: lavender,
-orchid, teal, steel, sand and copper. The choice is kept by the helm and shared with every client. It tints only the
-icon, never a status or the host name. The local host keeps its fixed red laptop and offers no appearance choice. Every
-host asks before YOLO launches, and before carrying out an acting `farhelm` command from one of its sessions, and both
-link permissions start off, until the user explicitly turns them on, including hosts that existed before the settings
-did. Adopting a new identity for a host, described next, resets all four permissions to asking: each is a judgment about
-the install the user knew, and a new identity, whether a reinstall or a different machine, is one they have not judged.
-If a destination turns out to present a different identity than recorded (a wiped and reinstalled host, a recycled
-address), the helm says so and asks whether to adopt the new host or fix the destination — it never silently merges. An
-entry that reaches a machine another entry already holds connects nothing: it says which entry holds the machine, by
-name, and asks the user to remove that entry or change this one's destination and then press Retry. Farhelm never
-connects two entries to one machine and never resolves this on its own. Last-known sessions of a host that is
-permanently gone are disposed of by removing the host from the registry.
+destination (SSH hosts), its alias, a chosen icon and color, whether it starts YOLO sessions without asking, whether it
+runs `farhelm` commands from its sessions without asking, and separate permissions to open public and local-network
+links without asking (see Agent-spawned sessions). The header and footer, including the close controls and the note that
+changes save as you make them, stay visible while only the settings between them scroll. A remote host offers sixteen
+icons, with the cloud as the default, and the default foreground or one of seven identity colors: lavender, orchid,
+teal, steel, sand, copper and red. The local host starts with the laptop in red, but offers the same choices. The choice
+is kept by the helm and shared with every client. It tints only the icon, never a status or the host name; red
+identifies a host and says nothing about its state. Every host asks before YOLO launches, and before carrying out an
+acting `farhelm` command from one of its sessions, and both link permissions start off, until the user explicitly turns
+them on, including hosts that existed before the settings did. Adopting a new identity for a host, described next,
+resets all four permissions to asking: each is a judgment about the install the user knew, and a new identity, whether a
+reinstall or a different machine, is one they have not judged. If a destination turns out to present a different
+identity than recorded (a wiped and reinstalled host, a recycled address), the helm says so and asks whether to adopt
+the new host or fix the destination — it never silently merges. An entry that reaches a machine another entry already
+holds connects nothing: it says which entry holds the machine, by name, and asks the user to remove that entry or change
+this one's destination and then press Retry. Farhelm never connects two entries to one machine and never resolves this
+on its own. Last-known sessions of a host that is permanently gone are disposed of by removing the host from the
+registry.
 
 Confirmed 2026-10-10: a host entry is one logical host from the user's point of view. Correcting its destination, or
 adopting a new identity for it, changes the machine or installation behind the entry, not which host it is to the user;
@@ -1356,43 +1357,43 @@ for, and the notice is the whole of the answer to it.
 
 A row's first line shows its status (drawn as described under Status), locality mark, title, agent label, a notification
 bell when the session has notifications (see Status), and last activity time; status and locality marks occupy aligned
-columns. A local row carries the red laptop; a remote row carries its host's chosen icon and color, defaulting to the
-cloud in the ordinary foreground. Compact ended rows replace the live dot with a distinct ended-state icon, preserving
-complete status details in accessible text and a tooltip. Noncompact rows show the complete ended status on a separate
-full-width line that wraps instead of truncating. Times share a right-aligned column before the row menu. A session
-whose host cannot yet be placed either way marks neither, rather than guessing. Its second line shows the helm-supplied
-host name (an alias when set), then `:`, then its working directory; a legacy row with no host name shows only the
-directory, rather than inventing a local identity or a dangling separator. The second line is hidden when the helm-wide
-compact preference is on, which defaults off and is shared at the next preference seed across clients. The working
-directory and launch command remain abbreviated only where shown, with their full, untouched values always available on
-the row (a tooltip on the web and desktop clients); an abbreviation is never the only place a value is recorded. A row's
-own actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread toggle — reachable there
-or by clicking the dot itself — that sets the session's seen state directly (see Status). Directly after it in the
-menu's first metadata group, **Pin to top** / **Unpin** toggles the shared pin. Every session row carries one permission
-mark. An amber slashed shield means the session's launch is YOLO by the rule under Creation: its effective agent-launch
-permission is custom or YOLO, or its command was asserted to be YOLO. A green plain shield means an agent launch in
-guarded or an approval mode, or a command asserted not to be YOLO. A session created before launch kinds existed that
-was not an agent launch has no assertion and carries an amber question mark. Hover and screen-reader text name the
-specific agent-launch mode (guarded, custom, approve, smart approve, chat, or YOLO), or say that the mark is the
-assertion made when the command was launched, by the user or by an agent, and not something Farhelm checked, or that a
-pre-existing session's command was never classified. A grey dashed shield means the agent's own setting, including older
-sessions started without guarded flags. Its hover says Not classified and that the host guard treats it as YOLO. For
-Claude, Grok, Muse and Cursor, Farhelm also tries to read the agent's permission mode from its status line. A definite
-no-checks reading changes any shield other than YOLO or asserted-YOLO to the YOLO shield. Hover and screen-reader text
-name the observed mode and say it was seen on screen, while retaining the launch mode and command. Once observed, YOLO
-stays for the rest of the agent run: a recognized non-YOLO mode, an unreadable or obscured line, or an unrecognized mode
-cannot clear it. This errs toward safety: restoring a safer shield would risk leaving it there if a later switch back to
-YOLO went unnoticed. This never makes the shield safer than its launch choice. Restart, Replace and resume start a new
-run with no observed evidence; a supervisor restart also clears it until new definite samples arrive. Command launches
-with a declared agent type are included; legacy sessions and the other agents are not read. This is advisory and best
-effort, not a promise of detection: a missed or late reading is outside the guarantee. It cannot see allow rules, hooks
-or managed policy. It is display only; host YOLO guards, spawned-session permission inheritance and approval decisions
-still use the stored launch alone. Every guarded hover names the agent's mode and meaning, shows the actual stored
-command under Launched with, and explains that allow rules, hooks, plugins, always-allow answers, sandbox settings and
-in-session switches can loosen it; agents may change behavior between versions. A custom hover says the flags were the
-user's, that Farhelm does not check them and counts the session as YOLO, and shows both the flags and the full stored
-command under Launched with. The launcher's permission choice has a separate ? button with that help, opening the docs
-section on permission modes.
+columns. A local row carries its host's chosen icon and color, defaulting to the red laptop; a remote row carries its
+host's chosen icon and color, defaulting to the cloud in the ordinary foreground. Compact ended rows replace the live
+dot with a distinct ended-state icon, preserving complete status details in accessible text and a tooltip. Noncompact
+rows show the complete ended status on a separate full-width line that wraps instead of truncating. Times share a
+right-aligned column before the row menu. A session whose host cannot yet be placed either way marks neither, rather
+than guessing. Its second line shows the helm-supplied host name (an alias when set), then `:`, then its working
+directory; a legacy row with no host name shows only the directory, rather than inventing a local identity or a dangling
+separator. The second line is hidden when the helm-wide compact preference is on, which defaults off and is shared at
+the next preference seed across clients. The working directory and launch command remain abbreviated only where shown,
+with their full, untouched values always available on the row (a tooltip on the web and desktop clients); an
+abbreviation is never the only place a value is recorded. A row's own actions menu, beyond the lifecycle operations
+above, also offers a mark read / mark unread toggle — reachable there or by clicking the dot itself — that sets the
+session's seen state directly (see Status). Directly after it in the menu's first metadata group, **Pin to top** /
+**Unpin** toggles the shared pin. Every session row carries one permission mark. An amber slashed shield means the
+session's launch is YOLO by the rule under Creation: its effective agent-launch permission is custom or YOLO, or its
+command was asserted to be YOLO. A green plain shield means an agent launch in guarded or an approval mode, or a command
+asserted not to be YOLO. A session created before launch kinds existed that was not an agent launch has no assertion and
+carries an amber question mark. Hover and screen-reader text name the specific agent-launch mode (guarded, custom,
+approve, smart approve, chat, or YOLO), or say that the mark is the assertion made when the command was launched, by the
+user or by an agent, and not something Farhelm checked, or that a pre-existing session's command was never classified. A
+grey dashed shield means the agent's own setting, including older sessions started without guarded flags. Its hover says
+Not classified and that the host guard treats it as YOLO. For Claude, Grok, Muse and Cursor, Farhelm also tries to read
+the agent's permission mode from its status line. A definite no-checks reading changes any shield other than YOLO or
+asserted-YOLO to the YOLO shield. Hover and screen-reader text name the observed mode and say it was seen on screen,
+while retaining the launch mode and command. Once observed, YOLO stays for the rest of the agent run: a recognized
+non-YOLO mode, an unreadable or obscured line, or an unrecognized mode cannot clear it. This errs toward safety:
+restoring a safer shield would risk leaving it there if a later switch back to YOLO went unnoticed. This never makes the
+shield safer than its launch choice. Restart, Replace and resume start a new run with no observed evidence; a supervisor
+restart also clears it until new definite samples arrive. Command launches with a declared agent type are included;
+legacy sessions and the other agents are not read. This is advisory and best effort, not a promise of detection: a
+missed or late reading is outside the guarantee. It cannot see allow rules, hooks or managed policy. It is display only;
+host YOLO guards, spawned-session permission inheritance and approval decisions still use the stored launch alone. Every
+guarded hover names the agent's mode and meaning, shows the actual stored command under Launched with, and explains that
+allow rules, hooks, plugins, always-allow answers, sandbox settings and in-session switches can loosen it; agents may
+change behavior between versions. A custom hover says the flags were the user's, that Farhelm does not check them and
+counts the session as YOLO, and shows both the flags and the full stored command under Launched with. The launcher's
+permission choice has a separate ? button with that help, opening the docs section on permission modes.
 
 Hovering a live status dot, agent mark, or permission mark explains that mark. A clickable dot also names its mark read
 or mark unread action. The hover text uses the same status and permission meaning the row exposes to assistive

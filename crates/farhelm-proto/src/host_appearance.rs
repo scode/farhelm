@@ -14,7 +14,7 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// A remote host's chosen silhouette; cloud is the unset choice.
+/// A host's chosen silhouette; null storage resolves to a kind-specific default.
 ///
 /// The same closed vocabulary validates HTTP input and decodes stored words;
 /// unknown words are refused rather than mapped to a different identity.
@@ -37,11 +37,12 @@ pub enum HostIcon {
     Bug,
     Factory,
     Castle,
+    Laptop,
 }
 
 impl HostIcon {
     /// Picker order only; persisted values never refer to these positions.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Cloud,
         Self::House,
         Self::Flask,
@@ -57,6 +58,7 @@ impl HostIcon {
         Self::Bug,
         Self::Factory,
         Self::Castle,
+        Self::Laptop,
     ];
 
     /// The stable word used in the database and the public JSON fields.
@@ -77,6 +79,7 @@ impl HostIcon {
             Self::Bug => "bug",
             Self::Factory => "factory",
             Self::Castle => "castle",
+            Self::Laptop => "laptop",
         }
     }
 }
@@ -102,6 +105,7 @@ impl FromStr for HostIcon {
             "bug" => Ok(Self::Bug),
             "factory" => Ok(Self::Factory),
             "castle" => Ok(Self::Castle),
+            "laptop" => Ok(Self::Laptop),
             _ => Err("unknown host icon"),
         }
     }
@@ -122,11 +126,12 @@ pub enum HostColor {
     Steel,
     Sand,
     Copper,
+    Red,
 }
 
 impl HostColor {
     /// Picker order only; persisted values never refer to these positions.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Default,
         Self::Lavender,
         Self::Orchid,
@@ -134,6 +139,7 @@ impl HostColor {
         Self::Steel,
         Self::Sand,
         Self::Copper,
+        Self::Red,
     ];
 
     /// The stable word used in the database and the public JSON fields.
@@ -146,6 +152,7 @@ impl HostColor {
             Self::Steel => "steel",
             Self::Sand => "sand",
             Self::Copper => "copper",
+            Self::Red => "red",
         }
     }
 }
@@ -163,6 +170,7 @@ impl FromStr for HostColor {
             "steel" => Ok(Self::Steel),
             "sand" => Ok(Self::Sand),
             "copper" => Ok(Self::Copper),
+            "red" => Ok(Self::Red),
             _ => Err("unknown host color"),
         }
     }

@@ -780,13 +780,11 @@ test.describe("multi-host", () => {
     const local = hostRowByName(page, "local (this machine)");
     await expect(local).toHaveAttribute("data-host-phase", "connected");
     await expect(local).toHaveAttribute("data-host-kind", "local");
-    // The host panel draws the same locality glyphs as the session row
-    // (2026-09-03, `icons.rs`) — a local row gets the local glyph and its
-    // hidden word, never the remote one. `data-glyph` pins the actual SVG
-    // shape: the count and hidden-word checks alone would still pass if
-    // `HostRow` swapped which icon component it called for `Local`/`Ssh`.
+    // The host panel and session row share the saved drawing, while the
+    // hidden word records locality independently. An untouched local row
+    // must still show the familiar laptop in red.
     await expect(local.locator(".host-kind-icon")).toHaveCount(1);
-    await expect(local.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "local");
+    await expect(local.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "laptop");
     await expect(local.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
     await expect(local.locator(".host-status .status-dot")).toBeVisible();
     await expect(local.locator(".host-status-label")).toHaveCount(0);
@@ -1350,11 +1348,12 @@ test.describe("multi-host", () => {
   /**
    * Identity is a helm-kept setting, not one client's decoration. A real
    * remote session and a second already-open client must receive both
-   * choices through the feed, keep them after reload, and preserve the
-   * local laptop. The shared fleet is restored even when an assertion fails.
+   * choices through the feed and keep them after reload. Local appearance
+   * follows the same path without losing the local default or locality cue.
+   * The shared fleet is restored even when an assertion fails.
    */
   test("host-appearance: choices persist and redraw rows in two open clients", async ({ page, browser, timeline, request }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(180_000);
     requireFleet();
     const hostsResponse = await request.get("/api/hosts");
     expect(hostsResponse.ok()).toBe(true);
@@ -1363,11 +1362,15 @@ test.describe("multi-host", () => {
     const local = hosts.find((host: { kind: string }) => host.kind === "local");
     expect(remote?.state.phase, "the owned SSH fixture must be connected").toBe("connected");
     expect(local?.kind).toBe("local");
+    expect([local.icon, local.color], "the untouched local host starts as a red laptop").toEqual(["laptop", "red"]);
     const route = `/api/hosts/${remote.id}/appearance`;
+    const localRoute = `/api/hosts/${local.id}/appearance`;
     const session = await createSession(request, { title: `host-appearance-${Date.now()}`, host: remote.id });
+    let localSession: Awaited<ReturnType<typeof createSession>> | undefined;
     let observerContext: Awaited<ReturnType<typeof newObservedContext>> | undefined;
     let bodyFailed = false;
     try {
+      localSession = await createSession(request, { title: `local-appearance-${Date.now()}`, host: local.id });
       observerContext = await newObservedContext(browser, timeline, { storageState: await page.context().storageState() });
       await page.goto("/");
       const row = page.locator(`[data-session-id="${session.id}"]`);
@@ -1384,8 +1387,8 @@ test.describe("multi-host", () => {
       await expect(dialog.locator(".host-settings-appearance")).toBeVisible();
       const icons = dialog.getByRole("group", { name: "icon", exact: true });
       const colors = dialog.getByRole("group", { name: "color", exact: true });
-      await expect(icons.getByRole("button")).toHaveCount(15);
-      await expect(colors.getByRole("button")).toHaveCount(7);
+      await expect(icons.getByRole("button")).toHaveCount(16);
+      await expect(colors.getByRole("button")).toHaveCount(8);
       await icons.getByRole("button", { name: "rocket", exact: true }).click();
       await expect(icons.getByRole("button", { name: "rocket", exact: true })).toHaveAttribute("aria-pressed", "true");
       await expect(colors.getByRole("button", { name: "teal", exact: true })).toBeEnabled();
@@ -1429,8 +1432,27 @@ test.describe("multi-host", () => {
       await openHostMenu(page.locator(`.host-row[data-host-id="${local.id}"]`));
       await page.locator(".host-settings").click();
       await expect(dialog).toBeVisible();
-      await expect(dialog.locator(".host-settings-appearance")).toHaveCount(0);
-      await expect(dialog.locator(".host-settings-mark [data-glyph=local]")).toBeVisible();
+      await expect(dialog.locator(".host-settings-appearance")).toBeVisible();
+      await expect(dialog.locator(".host-settings-mark [data-glyph=laptop]")).toBeVisible();
+      const localIcons = dialog.getByRole("group", { name: "icon", exact: true });
+      const localColors = dialog.getByRole("group", { name: "color", exact: true });
+      await localIcons.getByRole("button", { name: "house", exact: true }).click();
+      await expect(localIcons.getByRole("button", { name: "house", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(localColors.getByRole("button", { name: "steel", exact: true })).toBeEnabled();
+      await localColors.getByRole("button", { name: "steel", exact: true }).click();
+      await expect(localColors.getByRole("button", { name: "steel", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await dialog.locator(".host-settings-close").click();
+      for (const client of [page, observer]) {
+        const hostMark = client.locator(`.host-row[data-host-id="${local.id}"] .host-kind-icon`);
+        const sessionMark = client.locator(`[data-session-id="${localSession.id}"] .session-locality-slot .host-kind-icon`);
+        await expect(hostMark).toHaveAttribute("data-glyph", "house", { timeout: 20_000 });
+        await expect(hostMark).toHaveCSS("color", "rgb(147, 174, 196)");
+        await expect(hostMark).toHaveAttribute("data-tooltip", "local: on this machine, where the helm runs");
+        await expect(sessionMark).toHaveAttribute("data-glyph", "house");
+        await expect(sessionMark).toHaveCSS("color", "rgb(147, 174, 196)");
+      }
+      await page.reload();
+      await expect(page.locator(`.host-row[data-host-id="${local.id}"] .host-kind-icon`)).toHaveAttribute("data-host-color", "steel");
     } catch (error) {
       bodyFailed = true;
       throw error;
@@ -1443,7 +1465,12 @@ test.describe("multi-host", () => {
           const reset = await request.post(route, { data: { icon: remote.icon, color: remote.color } });
           expect(reset.ok(), "restore the shared fleet's original appearance").toBe(true);
         }],
+        ["local appearance", async () => {
+          const reset = await request.post(localRoute, { data: { icon: local.icon, color: local.color } });
+          expect(reset.ok(), "restore the local host's original appearance").toBe(true);
+        }],
         ["session", () => cleanupSession(request, session.id)],
+        ["local session", () => localSession && cleanupSession(request, localSession.id)],
       ]);
     }
   });
@@ -1552,7 +1579,7 @@ test.describe("multi-host", () => {
         )
         .toBe(true);
       await expect(help).toContainText("These sessions start on this host without asking you to confirm.");
-      await expect(dialog.locator(".host-settings-mark [data-glyph=local]")).toHaveCount(1);
+      await expect(dialog.locator(".host-settings-mark [data-glyph=laptop]")).toHaveCount(1);
       await expect(dialog.locator('[data-setting="destination"]')).toHaveCount(0);
       await expect(dialog.locator(".host-settings-footer")).toContainText("changes save as you make them");
       await test.info().attach("host-settings-local", { body: await dialog.screenshot(), contentType: "image/png" });
@@ -2574,9 +2601,8 @@ test.describe("multi-host", () => {
       await expect(row).toHaveAttribute("data-host-locality", "remote");
       await expect(row.locator(".host-kind-icon")).toHaveCount(1);
       // `data-glyph`, independently of `data-host-locality`: the row's own
-      // attribute proves the VERDICT, not which svg component actually
-      // rendered — a `HostLocality::Remote` arm that called `LocalHostIcon`
-      // by mistake would still satisfy every other assertion here.
+      // attribute proves the VERDICT, not which svg path actually rendered;
+      // a local laptop path here would still satisfy every other assertion.
       await expect(row.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "cloud");
       // Adjacent-sibling, not a bare `.visually-hidden` lookup: a live
       // status badge (this session is `running`) hides its own word the

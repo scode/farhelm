@@ -1066,7 +1066,7 @@ test("switching sessions directly tears the old view down and mounts the new one
     await expect(row(page, b.id)).toHaveAttribute("data-session-selected", "false");
     await expect(row(page, a.id)).toHaveClass(/(^| )selected( |$)/);
     // Selection changes row colors without hiding the local-execution caution.
-    await expect(row(page, a.id).locator(".host-kind-icon[data-glyph='local']")).toHaveCSS("color", "rgb(224, 128, 128)");
+    await expect(row(page, a.id).locator(".host-kind-icon[data-glyph='laptop']")).toHaveCSS("color", "rgb(224, 128, 128)");
     await expect(row(page, b.id)).not.toHaveClass(/(^| )selected( |$)/);
     const background = (id: string) =>
       row(page, id).evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -1193,12 +1193,11 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
     await expect(target.locator(".session-host-separator")).toHaveText(":");
     await expect(target).toHaveAttribute("data-host-locality", "local");
     await expect(target.locator(".host-kind-icon")).toHaveCount(1);
-    // `data-glyph`, not just the count and the hidden word: those two alone
-    // would still pass if the LOCAL and REMOTE svg components were swapped,
-    // since neither depends on which shape actually rendered.
-    await expect(target.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "local");
+    // `data-glyph` pins the untouched local host's drawing independently of
+    // the locality word, which stays truthful after an appearance change.
+    await expect(target.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "laptop");
     await expect(target.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
-    // Local execution remains a red caution cue once identity is confirmed.
+    // The untouched local host keeps its red default once identity is confirmed.
     await expect(target.locator(".host-kind-icon")).toHaveCSS("color", "rgb(224, 128, 128)");
 
     // A deliberately loose ceiling: the point is the density decision (a
@@ -2824,8 +2823,8 @@ test("compact hides the second line and persists across client seeds", async ({
     await expect(target.locator(".session-row-meta")).toHaveCount(0);
     await expect(target.locator(".session-row-open")).toHaveAttribute("data-tooltip", `${session.cwd} — click to open`);
     // Compact mode keeps the first-line local-execution cue visible.
-    await expect(target.locator(".host-kind-icon[data-glyph='local']")).toBeVisible();
-    await expect(target.locator(".host-kind-icon[data-glyph='local']")).toHaveCSS("color", "rgb(224, 128, 128)");
+    await expect(target.locator(".host-kind-icon[data-glyph='laptop']")).toBeVisible();
+    await expect(target.locator(".host-kind-icon[data-glyph='laptop']")).toHaveCSS("color", "rgb(224, 128, 128)");
     expect((await target.boundingBox())!.height).toBeLessThan(expandedHeight);
     await expect.poll(async () => (await readPreferences(request)).compact).toBe(true);
 
@@ -3220,7 +3219,7 @@ test("a local session's host line is provisional until the registry confirms it"
     // gains the local glyph.
     await expect(target).toHaveAttribute("data-host-locality", "local");
     await expect(target.locator(".host-kind-icon")).toHaveCount(1);
-    await expect(target.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "local");
+    await expect(target.locator(".host-kind-icon")).toHaveAttribute("data-glyph", "laptop");
     await expect(target.locator(".host-kind-icon + .visually-hidden")).toHaveText("local");
   } finally {
     await cleanupSession(request, session.id);

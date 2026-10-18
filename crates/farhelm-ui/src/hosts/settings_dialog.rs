@@ -1,4 +1,4 @@
-//! The host settings dialog: connection details, remote identity appearance,
+//! The host settings dialog: connection details, host identity appearance,
 //! and permission choices, in a modal over the whole page.
 //!
 //! It replaced a panel that expanded inline inside the host's sidebar row.
@@ -7,7 +7,7 @@
 //! The dialog shows every value in full and edits one field at a time, in
 //! place, saving each change on its own (there is no dialog-wide Save).
 //! A host-specific header identifies the peer and its reported connection
-//! state, while Connection, remote-only Appearance and Permissions group
+//! state, while Connection, Appearance and Permissions group
 //! the controls. The refresh has its own CSS class because the base dialog styles also serve
 //! unrelated modals. The switches remain native checkboxes, including their
 //! write-disable, refused-write reset and keyboard contracts.
@@ -49,7 +49,7 @@
 use dioxus::prelude::*;
 
 use super::{EditField, HostDestinationForm, gui_host_name, phase_class, phase_display_label};
-use crate::icons::{HostMark, LocalHostIcon};
+use crate::icons::HostMark;
 use crate::modal_isolation;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::{Host, HostId, HostKind, HostPhase};
@@ -457,7 +457,7 @@ pub(crate) fn HostDialogHeader(
                 } else {
                     match host.as_ref() {
                         Some(host) => match host.kind {
-                            HostKind::Local => rsx! { LocalHostIcon {} },
+                            HostKind::Local => rsx! { HostMark { icon: host.icon, color: host.color, local: true } },
                             HostKind::Ssh => rsx! { HostMark { icon: host.icon, color: host.color } },
                             HostKind::Unrecognized => rsx! {},
                         },
@@ -698,7 +698,7 @@ pub(super) fn HostSettingsDialog(
                 }
                 }
                 }
-                if manageable {
+                if host.kind.supports_appearance() {
                     section { class: "host-settings-section host-settings-appearance", aria_label: "Appearance",
                         h3 { class: "host-settings-section-title", "Appearance" }
                         span { class: "host-settings-label", "icon" }
@@ -710,7 +710,7 @@ pub(super) fn HostSettingsDialog(
                                     "data-tooltip": "icon: {icon.as_str()}",
                                     disabled: busy || editing.is_some(),
                                     onclick: move |_| on_appearance.call((id, AppearanceChoice::Icon(icon))),
-                                    HostMark { icon, color: host.color }
+                                    HostMark { icon, color: host.color, local: host.kind.is_this_machine() }
                                 }
                             }
                         }
@@ -733,7 +733,7 @@ pub(super) fn HostSettingsDialog(
                             span { class: "host-settings-help", "in the session list" }
                             div { class: "host-appearance-preview-row",
                                 span { class: "status-dot", "aria-hidden": "true" }
-                                span { class: "session-locality-slot", HostMark { icon: host.icon, color: host.color } }
+                                span { class: "session-locality-slot", HostMark { icon: host.icon, color: host.color, local: host.kind.is_this_machine() } }
                                 span { "session" }
                             }
                         }
