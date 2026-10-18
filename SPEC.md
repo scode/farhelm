@@ -1348,19 +1348,20 @@ pre-existing session's command was never classified. A grey dashed shield means 
 sessions started without guarded flags. Its hover says Not classified and that the host guard treats it as YOLO. For
 Claude, Grok, Muse and Cursor, Farhelm also tries to read the agent's permission mode from its status line. A definite
 no-checks reading changes any shield other than YOLO or asserted-YOLO to the YOLO shield. Hover and screen-reader text
-name the observed mode and say it was seen on screen, while retaining the launch mode and command. The latest definite
-reading wins: a recognized non-YOLO mode restores the launch shield; an unreadable or obscured line, or a mode Farhelm
-does not recognize, keeps the last reading. This never makes the shield safer than its launch choice. Cursor currently
-exposes only Run Everything when enabled, so its observed YOLO reading sticks until the agent or supervisor restarts. A
-supervisor restart clears all these readings until new definite samples arrive. Command launches with a declared agent
-type are included; legacy sessions and the other agents are not read. This is advisory and best effort, not a promise of
-detection: a missed or late reading is outside the guarantee. It cannot see allow rules, hooks or managed policy. It is
-display only; host YOLO guards, spawned-session permission inheritance and approvals still use the stored launch alone.
-Every guarded hover names the agent's mode and meaning, shows the actual stored command under Launched with, and
-explains that allow rules, hooks, plugins, always-allow answers, sandbox settings and in-session switches can loosen it;
-agents may change behavior between versions. A custom hover says the flags were the user's, that Farhelm does not check
-them and counts the session as YOLO, and shows both the flags and the full stored command under Launched with. The
-launcher's permission choice has a separate ? button with that help, opening the docs section on permission modes.
+name the observed mode and say it was seen on screen, while retaining the launch mode and command. Once observed, YOLO
+stays for the rest of the agent run: a recognized non-YOLO mode, an unreadable or obscured line, or an unrecognized mode
+cannot clear it. This errs toward safety: restoring a safer shield would risk leaving it there if a later switch back to
+YOLO went unnoticed. This never makes the shield safer than its launch choice. Restart, Replace and resume start a new
+run with no observed evidence; a supervisor restart also clears it until new definite samples arrive. Command launches
+with a declared agent type are included; legacy sessions and the other agents are not read. This is advisory and best
+effort, not a promise of detection: a missed or late reading is outside the guarantee. It cannot see allow rules, hooks
+or managed policy. It is display only; host YOLO guards, spawned-session permission inheritance and approvals still use
+the stored launch alone. Every guarded hover names the agent's mode and meaning, shows the actual stored command under
+Launched with, and explains that allow rules, hooks, plugins, always-allow answers, sandbox settings and in-session
+switches can loosen it; agents may change behavior between versions. A custom hover says the flags were the user's, that
+Farhelm does not check them and counts the session as YOLO, and shows both the flags and the full stored command under
+Launched with. The launcher's permission choice has a separate ? button with that help, opening the docs section on
+permission modes.
 
 Hovering a live status dot, agent mark, or permission mark explains that mark. A clickable dot also names its mark read
 or mark unread action. The hover text uses the same status and permission meaning the row exposes to assistive

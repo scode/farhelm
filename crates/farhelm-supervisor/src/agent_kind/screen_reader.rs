@@ -47,8 +47,9 @@
 //!
 //! Permission display is separate from activity: [`status_line_yolo`] reads
 //! a launch harness's footer and returns only definite bypass/non-bypass
-//! evidence. Its history also lives in the sampler, so an obscuring dialog
-//! retains the last mode and a replacement starts without old-run evidence.
+//! evidence. The sampler latches bypass evidence for the run: neither a later
+//! non-bypass footer nor an obscuring dialog clears it. A replacement starts
+//! without old-run evidence.
 //!
 //! Robustness: readers run on arbitrary terminal bytes that survived a
 //! lossy UTF-8 decode, on a supervisor that is also serving live
@@ -60,10 +61,11 @@ use farhelm_proto::AgentKind;
 
 /// Read only a vendor's permission footer, never its transcript or slash-command output.
 ///
-/// `None` means there is no definite reading: callers retain their last answer until
-/// another footer says otherwise. This is advisory display evidence, not permission
-/// authority. Dispatch uses the launch harness because Muse and Cursor share the
-/// generic activity reader, and a legacy integration kind does not declare a harness.
+/// `None` means there is no definite reading; `Some(false)` means a recognized
+/// non-bypass footer. The sampler keeps bypass evidence once seen, regardless of
+/// later readings. This is advisory display evidence, not permission authority.
+/// Dispatch uses the launch harness because Muse and Cursor share the generic
+/// activity reader, and a legacy integration kind does not declare a harness.
 #[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) fn status_line_yolo(harness: farhelm_proto::LaunchHarness, text: &str) -> Option<bool> {
     use farhelm_proto::LaunchHarness;

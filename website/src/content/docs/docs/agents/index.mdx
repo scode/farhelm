@@ -137,10 +137,10 @@ the launch choice, not a live audit of its actions.
 
 For Claude, Grok, Muse and Cursor, Farhelm also tries to notice a no-checks mode on the agent's status line and changes
 the shield to YOLO when it sees one. Hover says which mode was seen. This is best effort: detection can be missed or
-late, and it still cannot see allow rules, hooks or managed settings. Returning to a mode Farhelm recognizes as
-asking first restores the launch shield; an obscured status line, or a mode it does not recognize, keeps the YOLO
-shield. Cursor shows only its enabled **Run Everything** label, so once noticed, its YOLO shield stays until the agent
-restarts or the host's [supervisor](/docs/how-it-works/the-pieces/) restarts. After a supervisor restart, the shield
+late, and it still cannot see allow rules, hooks or managed settings. Once noticed, the YOLO shield stays for the rest
+of that agent run, even if you switch back to asking first. This avoids showing a safer shield if a later switch to
+YOLO goes unnoticed. Restart, Replace or resume starts from the launch choice, as does restarting the host's
+[supervisor](/docs/how-it-works/the-pieces/). After a supervisor restart, the shield
 shows the launch choice until Farhelm sees the status line again. The shield never promises more protection than the
 launch choice. This changes only the display; Farhelm's confirmations and permission choices for new sessions still
 follow the launch.

@@ -143,13 +143,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a tag is never deleted or reused. Work out what GitHub rulesets, bypass lists or a separate agent identity can enforce
   without blocking the PR flow.
 
-- **One-way observed YOLO shield.** The sidebar shield now reads the agent's status line (#2063): seeing a no-checks
-  mode turns the shield YOLO, and a later recognized non-YOLO mode restores the launch shield (SPEC.md, Session list,
-  the paragraph on reading the permission mode from the status line). The intent was that this reading only ever moves
-  the shield toward YOLO, for safety. Discuss the details first, including Claude's plan mode (which keeps the last
-  reading) and Cursor (which shows no label when its mode is off), then decide whether to make it one-way. Plan:
-  `plans/queue/one-way-yolo-shield.md`.
-
 - **Consider an upstream xterm.js API for links spanning agent-drawn rows.** Farhelm's `linkHoverText` in
   `crates/farhelm-ui/assets/terminal-links.js` reads the undocumented `extended.urlId` from the cell returned by
   `getCell`, joining consecutive hyperlink rows for the hover mismatch warning (SPEC_impl.md's paragraph beginning "An
