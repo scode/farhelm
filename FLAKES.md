@@ -2294,3 +2294,25 @@ established premature-mismatch mechanism. The TODO entry and sweep exclusion are
 Class: fixture-premise
 
 Cause: established
+
+## 2026-10-17 — checkout fixture restoration (e2e/tests/github-checkouts.spec.ts)
+
+The timeout and cross-engine cleanup cascade recorded on 2026-10-08 and 2026-10-10 have separate dispositions. The
+borrower test now attempts every owned session cleanup and then fixture closure even if a preceding deletion fails.
+Fixture closure independently attempts hook reset, root reset and Git URL mapping restoration, preserving an earlier
+trash error; a failed root reset retains the scratch tree until the owned stack ends. A timeout that disposes the
+browser request context can therefore no longer skip the filesystem-based mapping restore simply because its API cleanup
+threw. The terminal liveness probe also inserts its unique text in one input event before a real Enter; the attachment
+identity, focus, fresh echo and archival assertions remain. This removes the per-character protocol traffic seen
+consuming 5–10 seconds per probe in the earlier traces without changing the 60-second test deadline.
+
+Original-source Chromium repetition `838990ee-87d2-41d1-b206-83517d8f64f6` passed two of two attempts in 27.7 and 39.3
+seconds on main with the unrelated rollback-test fix. Load average was sampled at 19.44 on the shared Linux x86_64
+machine, with about 48 GiB memory available; it does not identify the cause of either historical timeout. The timeout's
+TODO entry and sweep exclusion remain. These changes fix the established cleanup cascade and remove known probe
+overhead, not every possible reason the test could exhaust its deadline. Original failure excerpts and substrate
+identities remain in the earlier entries; retained private traces may expire.
+
+Class: peer-lifecycle
+
+Cause: established

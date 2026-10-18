@@ -156,7 +156,11 @@ async function assertLive(page: Page, id: string) {
   await attachSession(page, id);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);
   const probe = `checkout-live-${id}-${Date.now()}`;
-  await page.keyboard.type(probe);
+  // This is a byte round trip, not a per-key handling test. One text input
+  // avoids dozens of protocol round trips while the real terminal and agent
+  // still have to receive the probe and produce a fresh echo. Attachment
+  // readiness established focus; Enter remains a real key press below.
+  await page.keyboard.insertText(probe);
   await page.keyboard.press("Enter");
   await waitForTermText(page, `echo:${probe}`, 20_000);
 }
@@ -221,9 +225,12 @@ async function checkoutFixture(repoName: string) {
   await config("set-post-clone", "test -f checkout-sentinel && printf 'CHECKOUT-HOOK-READY\\n' && printf 'once\\n' >> hook-count");
   return {
     root, repo, repoName, url, commit, git,
-    /** Call only after cleanupSession: Delete must archive intact content
-     * while both the original root and its recorded identity still exist. */
+    /** Run after session cleanup attempts, while archival inputs still exist.
+     * Restoring private Git configuration must survive both a failed trash
+     * request and a failed checkout-config command, including after timeout
+     * has disposed the browser's request context. */
     async close(request: APIRequestContext) {
+      let trashFailed = false;
       try {
         const host = await localHostId(request);
         const listed = await request.post("/api/checkout-trash/list", { data: { host, measure_sizes: false } });
@@ -236,11 +243,23 @@ async function checkoutFixture(repoName: string) {
           expect(emptied.ok(), await emptied.text()).toBe(true);
           expect((await emptied.json()).removed.sort()).toEqual(ids.sort());
         }
+      } catch (error) {
+        trashFailed = true;
+        throw error;
       } finally {
-        await config("clear-post-clone");
-        await config("clear-root");
-        await fs.writeFile(stack.checkout_git_config, originalConfig);
-        await fs.rm(scratch, { recursive: true, force: true });
+        let rootCleared = false;
+        // A failed configuration command cannot skip the Git URL restore.
+        // Retain the scratch tree if the helm might still name its root;
+        // the enclosing owned stack reclaims it when the run ends.
+        await cleanupOwnedSteps(trashFailed, [
+          ["post-clone hook", () => config("clear-post-clone")],
+          ["checkout root", async () => {
+            await config("clear-root");
+            rootCleared = true;
+          }],
+          ["checkout Git config", () => fs.writeFile(stack.checkout_git_config, originalConfig)],
+          ["scratch", () => rootCleared ? fs.rm(scratch, { recursive: true, force: true }) : undefined],
+        ]);
       }
     },
   };
@@ -605,6 +624,7 @@ test("an unlabeled folder result replaces fresh intent without cloning", async (
 test("borrowers retain the checkout until the final stopped session is deleted", async ({ page, request }) => {
   const fixture = await checkoutFixture("browser-lifetime");
   const ids: string[] = [];
+  let bodyFailed = false;
   try {
     const host = await localHostId(request);
     const form = await openComposer(page, host);
@@ -686,9 +706,17 @@ test("borrowers retain the checkout until the final stopped session is deleted",
     expect([movedIdentity.dev, movedIdentity.ino]).toEqual([identity.dev, identity.ino]);
     expect(await contents(destination)).toEqual(before);
     expect(await fs.readFile(path.join(unmanaged, "foreign"), "utf8")).toBe("unmanaged content\n");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    for (const id of ids.reverse()) await cleanupSession(request, id);
-    await fixture.close(request);
+    // Deletion can fail once the test deadline closes its request context.
+    // Still restore the stack's Git URL mappings, or the next engine can
+    // resolve this fixture's reused repository name to the previous seed.
+    await cleanupOwnedSteps(bodyFailed, [
+      ...ids.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+      ["checkout fixture", () => fixture.close(request)],
+    ]);
   }
 });
 
