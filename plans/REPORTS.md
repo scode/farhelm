@@ -19,3 +19,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`agent-quick-launch-templates`](reports/agent-quick-launch-templates.report.md) landed 2026-10-18 in #2273, #2274: agents can set the quick-launch template and number keys through the farhelm command
 - [`json-download-open`](reports/json-download-open.report.md) landed 2026-10-18 in #2296, #2299: Cmd-click opens downloads of the types listed in a new setting (md, txt, json by default), with loud warnings for types not known to be safe
 - [`launcher-typed-guarded`](reports/launcher-typed-guarded.report.md) landed 2026-10-18 in #2297, #2301: typing guarded in the launcher selects Guarded like yolo, plus typed routes for the remaining permission and effort choices
+- [`session-hover-text`](reports/session-hover-text.report.md) landed 2026-10-18 in #2293, #2300: hovering a session row shows one styled summary card: host, checkout, agent, times

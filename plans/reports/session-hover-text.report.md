@@ -72,3 +72,59 @@ The desktop app itself was not exercised; WebKit checked its browser engine fami
 The required fresh-context gpt-6.1-sol high review found no issue in #2293. The same gate for #2300 found one test gap:
 missing omission assertions for legacy sessions and unknown locality. Two browser cases now cover those facts and passed
 on both engines. It found no product-code defect.
+
+### Landing
+
+Landed in round 97, as #2293 and #2300, merged bottom-up, second of the round's two plans, right after the typed
+launcher choices (launcher-typed-guarded, #2297 and #2301), and unchanged from what the report describes.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since this stack's base, main gained the desktop file-types setting (json-download-open, #2296 and #2299), the fixes
+that close the launcher's host list on an outside click (#2294) and fit a filled-in launcher in a 900-pixel window
+(#2295), TODO.md and plan bookkeeping, and, just before it in this round, the typed launcher choices. The landing
+monitor read the stack against all of them and against the host colors, the session details bar and the earlier
+hover-help and link-refusal changes; a fresh-context reviewer did the same independently. Neither found an interaction:
+
+- The card's host mark copies the host's chosen icon and color, including the local host's new choices, and a host whose
+  locality is unknown gets no mark.
+- Every value from a host or agent on the card (title, host, checkout, directory, agent line) goes through the existing
+  escaping, and the hover help copies the card as page elements rather than reading it as markup, so nothing can be
+  injected. The card shows nothing sensitive that the row hides: its only new fact is the session's start time, and the
+  full launch command stays on the agent mark.
+- The session details bar and the covered-link refusal are unaffected, and only this stack edits the hover-help coverage
+  test.
+
+The only conflict was in TODO.md, where each side had removed its own entry; both removals stay.
+
+#### Fixes made during the landing
+
+None.
+
+#### Things to keep in mind
+
+The card's agent line (for example "codex · guarded · …") shows the permission the session was launched with, the same
+as the row's actions-menu header. When the sidebar shield has switched to YOLO because a no-checks mode was seen on the
+agent's status line, the card can still say "guarded". The shield's own hover still says YOLO was observed, so the
+information is on the row, just not on the card. Options: leave it, which keeps the card consistent with the menu
+header; or have the card follow the shield, for example "guarded, YOLO observed", since people may read the card as the
+full summary. The landing monitor recommends leaving it unless you read the card as authoritative; either way it is a
+small follow-up, not a landing issue.
+
+#### Checks
+
+- Run now, on main with this stack and the typed launcher choices merged together locally (the landed diffs are
+  identical to that tree's): `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, the isolated test-sleep check (304 delays, none without a reason);
+  `cargo nextest run -p farhelm-ui --lib` through the test recorder, four slots and no retries: 534 passed, run
+  `5ed60b24-5901-40ee-89e2-0b8ce2eb8ade`; `node --test` in the UI's JavaScript test directory, run directly: 294 passed
+  (the executor had not run it); `bun run build` for the docs site; then fresh `cargo build` and web builds and
+  `npx playwright test` through the recorder on `tooltip.spec.ts`, `tooltip-coverage.spec.ts`, `sidebar.spec.ts` (all of
+  it, where the executor ran a selection), the launcher files of the other plan, `terminal-create-idempotency.spec.ts`
+  and `launcher-enter.spec.ts`, on both engines, one worker, no retries: 340 passed, run
+  `62f8f0a1-3047-4fa1-8851-31f0a2431993`.
+- Reused: the executor's static checks (dprint, the changelog format check).
+- Skipped: everything else the report skipped, for the reasons it gives, including a light theme, which the app does not
+  have.
+
+Nothing in the executor's report became untrue at landing.
