@@ -10356,6 +10356,119 @@ impl Supervisor {
         }))
     }
 
+    /// Send a follow-up into the current live agent without taking over an
+    /// attachment. The target lifecycle claim spans both confirmed writes:
+    /// Stop, Delete, or Restart cannot replace the checked pane mid-prompt.
+    /// The vendor TUI owns queueing; success means delivery, not execution.
+    ///
+    /// This deliberately takes no target agent-request fence. The asking
+    /// session already holds its own, and two agents prompting each other
+    /// must not form a cycle. Ordinary attached input can interleave.
+    pub(crate) async fn prompt_session(
+        &self,
+        session_id: &str,
+        prompt: &str,
+    ) -> anyhow::Result<()> {
+        farhelm_proto::launcher::check_initial_prompt(prompt)
+            .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
+        let _lifecycle = self.lifecycle_locks.claim(session_id).await;
+        let entry = self
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| {
+                RequestError::new(ErrorKind::NotFound, "the target session does not exist")
+            })?;
+        let delivery = crate::agent_kind::prompt_delivery(entry.snapshot.kind).ok_or_else(|| {
+            let name = entry.snapshot.kind.display_name().map(str::to_string)
+                .or_else(|| entry.info.launch.agent_type().map(|harness| format!("{harness:?}")))
+                .unwrap_or_else(|| "a generic agent".to_string());
+            RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!(
+                    "prompt delivery to {name} is not supported; delivery is only supported for Claude and Codex"
+                ),
+            )
+        })?;
+        if *entry.run.outcome.lock().expect("outcome mutex poisoned") == LastOutcome::Launching {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the target agent is still starting",
+            )
+            .into());
+        }
+        let terminal = entry.terminal.as_ref().ok_or_else(|| {
+            RequestError::new(ErrorKind::Conflict, "the target agent is not running")
+        })?;
+        match self
+            .tmux
+            .pane_process(&terminal.tmux_name, &terminal.pane)
+            .await
+            .context("rechecking the prompt target's live pane")?
+        {
+            PaneProbe::Owned(pane) if !pane.dead => {}
+            PaneProbe::Owned(_) | PaneProbe::Gone | PaneProbe::ForeignOwner { .. } => {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "the target agent is not running in its owned pane",
+                )
+                .into());
+            }
+        }
+        // Read the current stored observation after establishing liveness.
+        // The activity leaf mutex is released synchronously before any I/O;
+        // no screen reader or vendor-composer reservation runs on this path.
+        match super::status::live_status(&entry) {
+            SessionStatus::Running | SessionStatus::Idle => {}
+            SessionStatus::Waiting => return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "cannot send a prompt while the target agent is waiting on a question or approval",
+            )
+            .into()),
+            _ => {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "cannot send a prompt while the target agent's status is unknown",
+                )
+                .into());
+            }
+        }
+        if !self
+            .tmux
+            .bracketed_paste_enabled(&terminal.tmux_name, &terminal.pane)
+            .await?
+        {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "cannot send a prompt: the target agent's bracketed paste mode is off",
+            )
+            .into());
+        }
+        let mut input = self
+            .tmux
+            .open_input_client(&terminal.tmux_name, &terminal.pane)
+            .await?;
+        let crate::agent_kind::PromptDelivery::Typed { submit } = delivery;
+        let mut paste = Vec::with_capacity(prompt.len() + 12);
+        paste.extend_from_slice(b"\x1b[200~");
+        paste.extend_from_slice(prompt.as_bytes());
+        paste.extend_from_slice(b"\x1b[201~");
+        // Validation excludes ESC, so user text cannot close this paste. One
+        // InputClient call retains its ordering and absolute exchange budget
+        // even when the confirmed path chunks a large frame internally.
+        input
+            .send(&paste)
+            .await
+            .context("delivering the prompt paste; delivery may be partial")?;
+        input
+            .send(submit)
+            .await
+            .context("submitting the prompt; delivery may be partial")?;
+        Ok(())
+    }
+
     /// Relaunch a session's agent in place — SPEC.md's restart, PLAN_M3.md
     /// item 9. The only relaunch mechanism there is: the resume offered
     /// when opening an interrupted session lands here too.
@@ -19184,6 +19297,329 @@ pub(crate) mod tests {
                 "{guard:?} covers a lone tab beside an ended agent"
             );
         }
+    }
+
+    /// Create an owned raw-input recorder without a vendor binary or launch
+    /// shim. These tests exercise delivery, not launch compilation. The state
+    /// directory owns the private tmux server until all diagnostics finish.
+    pub(crate) async fn prompt_recorder(
+        sup: &Supervisor,
+        state: &StateDir,
+        kind: AgentKind,
+        paste: bool,
+    ) -> (Arc<SessionEntry>, PathBuf) {
+        let path = state.path().join("prompt-input");
+        let script = format!(
+            "stty raw -echo; printf '\\033[?2004{}'; exec cat > {}",
+            if paste { "h" } else { "l" },
+            shell_words::quote(path.to_str().unwrap())
+        );
+        let name = format!("fh-{}", uuid::Uuid::new_v4());
+        let pane = sup
+            .tmux
+            .create_session(
+                &name,
+                state.path().to_str().unwrap(),
+                80,
+                24,
+                &[],
+                &["/bin/sh".into(), "-c".into(), script],
+            )
+            .await
+            .unwrap();
+        let mut entry = entry_with(
+            Some(Terminal {
+                tmux_name: name,
+                pane,
+            }),
+            LastOutcome::Running,
+        );
+        entry.snapshot.kind = kind;
+        entry.info.agent_kind = kind;
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(entry.info.id.clone(), Arc::clone(&entry));
+        let terminal = entry.terminal.as_ref().unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let probe = sup
+                .tmux
+                .pane_process(&terminal.tmux_name, &terminal.pane)
+                .await
+                .unwrap();
+            assert!(
+                matches!(probe, PaneProbe::Owned(ref process) if !process.dead),
+                "fixture recorder must remain alive: {probe:?}"
+            );
+            let enabled = sup
+                .tmux
+                .bracketed_paste_enabled(&terminal.tmux_name, &terminal.pane)
+                .await
+                .unwrap();
+            if enabled == paste && path.exists() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "recorder did not establish raw input and paste mode {paste}; pane={probe:?}, mode={enabled}, file={}",
+                path.exists()
+            );
+            // sleep-ok: poll this live recorder's paste-mode/file readiness until the original deadline.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"",
+            "recorder starts with no input"
+        );
+        (entry, path)
+    }
+
+    /// Confirm the owned program consumed all accepted bytes, keeping its
+    /// liveness and last bounded observation in timeout diagnostics. tmux's
+    /// command acknowledgment precedes the recorder process reading its PTY.
+    pub(crate) async fn recorded_prompt_bytes(
+        sup: &Supervisor,
+        entry: &SessionEntry,
+        path: &Path,
+        expected: &[u8],
+    ) {
+        let terminal = entry.terminal.as_ref().unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let probe = sup
+                .tmux
+                .pane_process(&terminal.tmux_name, &terminal.pane)
+                .await
+                .unwrap();
+            assert!(
+                matches!(probe, PaneProbe::Owned(ref process) if !process.dead),
+                "recorder died before consuming the prompt: {probe:?}"
+            );
+            let observed = std::fs::read(path).unwrap();
+            assert!(
+                observed.len() <= expected.len(),
+                "extra bytes: {observed:?}"
+            );
+            if observed.len() == expected.len() {
+                assert_eq!(observed, expected);
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "live recorder consumed {} of {} bytes; pane={probe:?}",
+                observed.len(),
+                expected.len()
+            );
+            // sleep-ok: poll the recorder's exact-byte consumption, not a guessed TUI settling interval.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Idle and working both accept one complete bracketed paste, followed by
+    /// the vendor's independently confirmed submit. Exact raw bytes distinguish
+    /// pasted tabs/newlines from terminal keystrokes and cover internal chunks.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn prompt_delivery_preserves_paste_bytes_and_submits_idle_and_working_agents() {
+        use crate::agent_kind::screen_reader::ScreenState;
+        for (kind, submit) in [(AgentKind::Claude, b'\r'), (AgentKind::Codex, b'\t')] {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let (entry, path) = prompt_recorder(&sup, &state, kind, true).await;
+            // The target's own request fence must not block incoming prompts:
+            // two agents may each hold their asking fence while prompting the other.
+            let _target_request = sup.agent_request_locks.claim(&entry.info.id).await;
+            let mut expected = Vec::new();
+            for reading in [ScreenState::Idle, ScreenState::Working] {
+                entry.run.activity.lock().unwrap().reading.state = reading;
+                let prompt = format!("first\n\t{}\nlast λ", "chunk ".repeat(100));
+                tokio::time::timeout(
+                    Duration::from_secs(10),
+                    sup.prompt_session(&entry.info.id, &prompt),
+                )
+                .await
+                .expect("incoming prompts must not acquire the target's request fence")
+                .unwrap();
+                expected.extend_from_slice(b"\x1b[200~");
+                expected.extend_from_slice(prompt.as_bytes());
+                expected.extend_from_slice(b"\x1b[201~");
+                expected.push(submit);
+                recorded_prompt_bytes(&sup, &entry, &path, &expected).await;
+            }
+        }
+    }
+
+    /// Refusal must leave the composer untouched: in particular a waiting
+    /// dialog must never receive the prompt as an answer. Activity is injected
+    /// because this fixture owns no sampler; live paste-mode readiness remains
+    /// an independently established premise.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn prompt_refusals_leave_the_live_recorder_untouched() {
+        use crate::agent_kind::screen_reader::ScreenState;
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let (entry, path) = prompt_recorder(&sup, &state, AgentKind::Claude, true).await;
+        for reading in [ScreenState::Waiting, ScreenState::Unknown] {
+            entry.run.activity.lock().unwrap().reading.state = reading;
+            let error = sup
+                .prompt_session("s1", "do not type this")
+                .await
+                .unwrap_err();
+            assert_eq!(error_kind(&error), ErrorKind::Conflict);
+            let expected = if reading == ScreenState::Waiting {
+                "waiting"
+            } else {
+                "unknown"
+            };
+            assert!(error.to_string().contains(expected), "{error:#}");
+            assert!(std::fs::read(&path).unwrap().is_empty());
+        }
+        entry.run.activity.lock().unwrap().reading.state = ScreenState::Working;
+        let oversized = "x".repeat(64 * 1024 + 1);
+        for prompt in ["bad\x1b[201~", "bad\r", "bad\0", oversized.as_str()] {
+            let error = sup.prompt_session("s1", prompt).await.unwrap_err();
+            assert_eq!(error_kind(&error), ErrorKind::InvalidRequest);
+            assert!(std::fs::read(&path).unwrap().is_empty());
+        }
+        *entry.run.outcome.lock().unwrap() = LastOutcome::Launching;
+        let error = sup
+            .prompt_session("s1", "still starting")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("starting"), "{error:#}");
+        *entry.run.outcome.lock().unwrap() = LastOutcome::Running;
+
+        let terminal = entry.terminal.clone();
+        for kind in [
+            AgentKind::Goose,
+            AgentKind::Pi,
+            AgentKind::Omp,
+            AgentKind::Grok,
+            AgentKind::Generic,
+        ] {
+            let mut unsupported = entry_with(terminal.clone(), LastOutcome::Running);
+            unsupported.snapshot.kind = kind;
+            sup.sessions
+                .lock()
+                .await
+                .insert("s1".into(), Arc::new(unsupported));
+            let error = sup.prompt_session("s1", "unsupported").await.unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("only supported for Claude and Codex"),
+                "{error:#}"
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains(kind.display_name().unwrap_or("generic")),
+                "{error:#}"
+            );
+            assert!(std::fs::read(&path).unwrap().is_empty());
+        }
+        for target in [
+            None,
+            Some(Terminal {
+                tmux_name: "absent-session".into(),
+                pane: terminal.as_ref().unwrap().pane.clone(),
+            }),
+            Some(Terminal {
+                tmux_name: terminal.as_ref().unwrap().tmux_name.clone(),
+                pane: "%999999".into(),
+            }),
+        ] {
+            let mut missing = entry_with(target, LastOutcome::Running);
+            missing.snapshot.kind = AgentKind::Claude;
+            sup.sessions
+                .lock()
+                .await
+                .insert("s1".into(), Arc::new(missing));
+            assert!(sup.prompt_session("s1", "not live").await.is_err());
+            assert!(std::fs::read(&path).unwrap().is_empty());
+        }
+        sup.sessions
+            .lock()
+            .await
+            .insert("s1".into(), Arc::clone(&entry));
+        assert_eq!(
+            error_kind(
+                &sup.prompt_session("missing", "no target")
+                    .await
+                    .unwrap_err()
+            ),
+            ErrorKind::NotFound
+        );
+        let dead_name = format!("fh-{}", uuid::Uuid::new_v4());
+        let dead_pane = sup
+            .tmux
+            .create_session(
+                &dead_name,
+                state.path().to_str().unwrap(),
+                80,
+                24,
+                &[],
+                &["/bin/sh".into(), "-c".into(), "exit 0".into()],
+            )
+            .await
+            .unwrap();
+        wait_for_dead_fixture_pane(&sup, "prompt target exited", |pane, _| pane == dead_pane).await;
+        assert!(
+            matches!(sup.tmux.pane_process(&dead_name, &dead_pane).await.unwrap(), PaneProbe::Owned(process) if process.dead)
+        );
+        let mut dead = entry_with(
+            Some(Terminal {
+                tmux_name: dead_name,
+                pane: dead_pane,
+            }),
+            LastOutcome::Running,
+        );
+        dead.snapshot.kind = AgentKind::Claude;
+        sup.sessions
+            .lock()
+            .await
+            .insert("s1".into(), Arc::new(dead));
+        assert!(sup.prompt_session("s1", "exited target").await.is_err());
+        assert!(std::fs::read(&path).unwrap().is_empty());
+        sup.sessions
+            .lock()
+            .await
+            .insert("s1".into(), Arc::clone(&entry));
+        let agent = terminal.unwrap();
+        sup.tmux.kill_pane_for_test(&agent.pane).await.unwrap();
+        assert!(matches!(
+            sup.tmux
+                .pane_process(&agent.tmux_name, &agent.pane)
+                .await
+                .unwrap(),
+            PaneProbe::Gone
+        ));
+        assert!(sup.prompt_session("s1", "dead target").await.is_err());
+        assert!(std::fs::read(&path).unwrap().is_empty());
+    }
+
+    /// A live raw program that has not enabled bracketed paste is unsafe for
+    /// prompt typing even when its stored activity says working. This refusal
+    /// must happen before opening/sending the input client.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn prompt_delivery_refuses_live_panes_with_paste_mode_off() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let (entry, path) = prompt_recorder(&sup, &state, AgentKind::Codex, false).await;
+        let error = sup
+            .prompt_session(&entry.info.id, "do not type\n\tthis")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("paste mode is off"), "{error:#}");
+        assert!(std::fs::read(path).unwrap().is_empty());
     }
 
     /// Restart without consent is refused only while the agent is working.

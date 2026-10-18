@@ -691,6 +691,7 @@ where
 enum LifecycleMutation {
     Stop,
     Restart,
+    Prompt,
 }
 
 impl LifecycleMutation {
@@ -702,6 +703,9 @@ impl LifecycleMutation {
             Self::Restart => format!(
                 "the session restart task failed, so it is unknown whether the old agent was stopped or a new one started: {join}"
             ),
+            Self::Prompt => {
+                format!("the prompt delivery task failed, so delivery may be partial: {join}")
+            }
         }
     }
 }
@@ -1930,6 +1934,88 @@ struct RestartSessionRequest {
     expected_launch: Option<SessionLaunch>,
 }
 
+/// Snapshot authoritative target facts for an approval card. Any attachment
+/// counts, including terminal tabs and clients connected through another helm.
+/// The snapshot may age while approval waits; no attachment lock crosses I/O.
+async fn handle_prompt_target_info(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    tasks: &mut tokio::task::JoinSet<()>,
+    req_id: u64,
+    session_id: String,
+) {
+    let sup2 = Arc::clone(sup);
+    spawn_admitted(&sup.admission, tasks, tx, req_id, |tx| async move {
+        let attached = sup2
+            .attachments
+            .lock()
+            .await
+            .keys()
+            .any(|key| key.session == session_id);
+        let entry = sup2.sessions.lock().await.get(&session_id).cloned();
+        let Some(entry) = entry else {
+            reply_error(
+                &tx,
+                req_id,
+                ErrorKind::NotFound,
+                "the target session does not exist",
+            )
+            .await;
+            return;
+        };
+        match session_info_now(&sup2, &entry).await {
+            Ok(session) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::PromptTarget {
+                        req_id,
+                        session,
+                        attached,
+                    },
+                )
+                .await
+            }
+            Err(error) => reply_failure(&tx, req_id, &error).await,
+        }
+    })
+    .await;
+}
+
+/// Accepted typing belongs to the supervisor: disconnecting the requesting
+/// helm must not cancel after the paste but before its submit. The connection
+/// owns only the panic/reply waiter, and one management permit bounds the task.
+async fn handle_prompt_session(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    tasks: &mut tokio::task::JoinSet<()>,
+    req_id: u64,
+    session_id: String,
+    prompt: String,
+) {
+    let Some(permit) = admit_or_refuse(&sup.admission, tx, req_id).await else {
+        return;
+    };
+    let sup = Arc::clone(sup);
+    let tx = tx.clone();
+    let waiter_tx = tx.clone();
+    let mutation = tokio::spawn(async move {
+        let _permit = permit;
+        if let Some(panic) = sup.seams.faults.lifecycle_mutation_panic() {
+            panic();
+        }
+        match sup.prompt_session(&session_id, &prompt).await {
+            Ok(()) => send_reply(&tx, &ControlMsg::SessionPrompted { req_id }).await,
+            Err(error) => reply_failure(&tx, req_id, &error).await,
+        }
+    });
+    tasks.spawn(wait_for_mutation_reply(
+        mutation,
+        waiter_tx,
+        req_id,
+        LifecycleMutation::Prompt,
+    ));
+}
+
 /// Spawned for the same reason `StopSession` is: a restart that
 /// has to stop a live agent first runs that handler's whole kill
 /// sweep — a grace period plus repeated `/proc` walks, real
@@ -2504,6 +2590,14 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         ControlMsg::ListSessions { req_id } => {
             handle_list_sessions(sup, ctx.tx, ctx.tasks, req_id).await
         }
+        ControlMsg::PromptTargetInfo { req_id, session_id } => {
+            handle_prompt_target_info(sup, ctx.tx, ctx.tasks, req_id, session_id).await
+        }
+        ControlMsg::PromptSession {
+            req_id,
+            session_id,
+            prompt,
+        } => handle_prompt_session(sup, ctx.tx, ctx.tasks, req_id, session_id, prompt).await,
         ControlMsg::ListCheckoutTrash {
             req_id,
             measure_sizes,
@@ -4571,6 +4665,100 @@ mod tests {
         (tasks, rx)
     }
 
+    /// Disconnect cleanup owns only the reply waiter, so an accepted prompt
+    /// still delivers after that waiter is cancelled. Parking at the target's
+    /// lifecycle claim proves cancellation happens before either write; exact
+    /// recorder bytes then prove the supervisor-owned task survived it.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn accepted_prompt_survives_connection_task_cancellation() {
+        use super::super::core::tests::{prompt_recorder, recorded_prompt_bytes};
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let (entry, path) = prompt_recorder(&sup, &state, AgentKind::Claude, true).await;
+        let lifecycle = sup.lifecycle_locks.claim("s1").await;
+        let (mut tasks, mut replies) = dispatch_for_test(
+            &sup,
+            ControlMsg::PromptSession {
+                req_id: 81,
+                session_id: "s1".into(),
+                prompt: "after disconnect".into(),
+            },
+        )
+        .await;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            sup.lifecycle_locks.claims_reached_for_test("s1", 2),
+        )
+        .await
+        .expect("accepted prompt must reach the held target lifecycle claim");
+        assert!(
+            std::fs::read(&path).unwrap().is_empty(),
+            "no input before the claim"
+        );
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+        drop(lifecycle);
+        let reply = tokio::time::timeout(Duration::from_secs(10), replies.recv())
+            .await
+            .expect("accepted prompt did not settle")
+            .expect("mutation owns its reply sender");
+        assert_eq!(
+            serde_json::from_slice::<ControlMsg>(&reply.body).unwrap(),
+            ControlMsg::SessionPrompted { req_id: 81 }
+        );
+        recorded_prompt_bytes(&sup, &entry, &path, b"\x1b[200~after disconnect\x1b[201~\r").await;
+    }
+
+    /// Target information must return an authoritative single-session snapshot
+    /// and a correlated absence error, rather than leaving an approval caller
+    /// waiting on a wrong reply kind or synthesizing a nonexistent target.
+    #[farhelm_testtrace::test]
+    async fn prompt_target_info_replies_with_display_facts_or_correlated_absence() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        sup.sessions.lock().await.insert(
+            "s1".into(),
+            Arc::new(super::super::core::tests::entry_with(
+                None,
+                LastOutcome::Running,
+            )),
+        );
+        for (req_id, id) in [(82, "s1"), (83, "missing")] {
+            let (mut tasks, mut replies) = dispatch_for_test(
+                &sup,
+                ControlMsg::PromptTargetInfo {
+                    req_id,
+                    session_id: id.into(),
+                },
+            )
+            .await;
+            let frame = tokio::time::timeout(Duration::from_secs(5), replies.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let reply = serde_json::from_slice::<ControlMsg>(&frame.body).unwrap();
+            if id == "s1" {
+                assert!(
+                    matches!(reply, ControlMsg::PromptTarget { req_id: 82, session, attached: false } if session.id == "s1")
+                );
+            } else {
+                assert!(matches!(
+                    reply,
+                    ControlMsg::Error {
+                        req_id: 83,
+                        kind: ErrorKind::NotFound,
+                        ..
+                    }
+                ));
+            }
+            while tasks.join_next().await.is_some() {}
+        }
+    }
+
     /// Spec: an in-flight `AgentRequest` mutation's fence on session `id` —
     /// `Supervisor::agent_request_locks`, claimed by `handle_restricted_control`
     /// for the whole of any `AgentVerb::is_mutating` upcall — makes a
@@ -5932,6 +6120,15 @@ mod tests {
             ControlMsg::SetBrowserForwarding {
                 req_id: 38,
                 enabled: true,
+            },
+            ControlMsg::PromptTargetInfo {
+                req_id: 43,
+                session_id: "parent-session".into(),
+            },
+            ControlMsg::PromptSession {
+                req_id: 44,
+                session_id: "parent-session".into(),
+                prompt: "a direct request must not bypass approval".into(),
             },
             ControlMsg::StatFile {
                 req_id: 39,
