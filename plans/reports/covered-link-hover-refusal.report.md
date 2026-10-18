@@ -62,3 +62,65 @@ The required fresh-context gpt-6.1-sol reviewer at high effort found no correctn
 test-contract findings. Its follow-up accepted the shorter fixture URL. The source review included the full test
 authoring checklist. The commit message and PR wording passed the separate cold read. The feedback file and index entry
 are removed, and the retained triage outcome names the change, bookmark and PR.
+
+### Landing
+
+Landed on its own in round 88, as #2254, with one fix made during the landing (below).
+
+#### What landed since the PR was based, and whether it interacted
+
+Only plan-queue bookkeeping reached main between this PR's base and its landing, and no other plan landed in this round.
+The landing rebase was clean. The landing monitor read the change against what main already holds, and a fresh-context
+reviewer did the same independently. Neither found an interaction with the localhost tunnels, the earlier terminal link
+safety rules, the session action shortcuts, the menu focus fix, naming after quick launch or the one-way YOLO shield. In
+particular, both the plain open and the Cmd-click tunnel open are checked after the existing link-ignoring rules, the
+tunnel hint is rechecked at click time, and a refused tunnel never falls back to opening the raw link.
+
+The clipped-file refusal this change extends shipped in v0.29.0, so the changelog fragment is a new "fixed" entry rather
+than an edit of an earlier one.
+
+#### Fixes made during the landing
+
+The reviewer found a regression. When a program prints a file link as a hyperlink (rather than as plain text), the
+terminal treats a redraw of that row as the pointer leaving the link and coming straight back. Before this PR, leaving
+such a link went through a short delay, and the immediate return cancelled it, so a refusal explanation stayed raised
+through a redraw; v0.29.0's clipped-file refusal depends on that. This PR also lowered the explanation immediately on
+leave, so any redraw of the row would have dropped it beneath the hover and the approval cards. The landing restored the
+delayed path for file links, with a code comment saying why. No test redraws a hyperlinked file's row after a refusal;
+the fix rests on reading the code, and the checks below show it broke nothing else.
+
+#### Possible follow-ups
+
+- Web links have no such delay yet: if a refused web link's row is redrawn while the pointer stays on it, the
+  explanation drops to its ordinary layer, where an approval card can cover it. The click is still refused and nothing
+  opens. Fixing it needs the web-link hover to recognize its own return after a redraw, as file links do, plus a browser
+  test that redraws the row; the landing left it alone because that is new behavior to design, not a regression.
+- While the pointer stays on a refused link, the raised explanation spans the top of the terminal and covers the top of
+  an approval card, where the card names the requesting session and host. It goes away as soon as the pointer leaves the
+  link. Triage asked for the explanation to sit above the cards, so this is the expected trade-off; the case that
+  remains is answering the card from the keyboard with the pointer still on the link.
+- SPEC.md says a hover is not visible when "another Farhelm surface such as an approval card" covers it, but the code
+  checks only the approval-card area. That covers the realistic case today. The other surfaces that can sit above a
+  hover are full-window dialogs, plus a few small, short-lived ones (hover help, the quick-launch echo, a tunnel error
+  notice) that the check ignores. The report and triage record the narrower check, but SPEC_impl.md does not, so a
+  future surface that floats over the terminal would not be checked unless someone adds it.
+- Another plan in flight, session-details-bottom (#2253), moves the approval cards to start just below the top of the
+  terminal. It merges cleanly with this change, but it means the cards will cover link hovers near the top more often
+  and the raised explanation will always overlap the card's top. The browser tests added here measure the card's live
+  position, so they should adapt; that plan's landing should re-run them.
+
+#### Checks
+
+- Run now, on the rebased PR with the landing fix: the UI JavaScript harness through the test recorder (`node --test`,
+  294 passed, run `001bee8a-6a7c-476b-8208-a31d8fa6e42d`), then fresh `cargo build` and
+  `dx build --package farhelm-ui --platform web --release`, then
+  `npx playwright test terminal-link-clicks.spec.ts terminal-links.spec.ts approval-layout.spec.ts` through the recorder
+  with pinned tmux, one browser worker and no retries: 86 passed (43 in Chromium, 43 in WebKit), run
+  `9f6dd468-f8b9-44f9-bd9c-5015f1a5989d`. These are the same three browser files the executor ran, and they include
+  every new case.
+- Reused: the executor's formatting, changelog, instruction and test-sleep checks, which the landing fix does not
+  affect. Its browser and JavaScript runs are superseded by the ones above.
+- Skipped: Rust tests, lints and desktop compilation, because no Rust changed; the desktop app's own webview, native
+  file opening and tunnel paths, as in the report.
+
+Apart from the landing fix, nothing in the executor's report became untrue at landing.
