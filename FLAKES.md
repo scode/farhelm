@@ -57,6 +57,35 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-10-18 — tab opened and closed before polling (e2e/tests/terminal-tabs.spec.ts)
+
+`a tab opened and closed before any poll observes it does not come back` failed in WebKit during the full browser run
+`3727b704-5894-4a20-9fb6-1967d56fabb8`: its held detail route parsed a plaintext `no such session` response as JSON. The
+first isolated classification rerun failed, and the next two passed (`72d1143f-d4bc-4085-9916-ef46949249c0`,
+`3ea7dcc1-4f72-4a1f-a487-18f6521e2f32`, `3b1939c9-7c9c-4d55-a4fb-754b5ce89a82`); Chromium passed in all four runs. The
+route does not check response status before parsing, but why the session disappeared is unknown. A different test
+encountered a similar server reply during restart in September; its established cause does not establish this one's.
+Open in TODO.md and excluded from future sweeps.
+
+The tested tree was clean commit `c7d0058e9937fa897e388e606883637193e8689a` on Linux x86_64, kernel 6.8.0-146-generic.
+The full selection was `browser suite, both engines`; reruns selected this test in both engines. Each used one browser
+worker, zero retries, locale `C.UTF-8`, and recorded pinned tmux 3.7c executable SHA256
+`ee8c7d45ca8b15992f76871eba303c6921d2ad825f53f9aca2e1aa66725a6663`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. The full battery also failed the host
+picker, SSH help tests, launcher geometry, trash layout, and HTTP session lifecycle tests. Machine load and slot peers
+at this test's start were not recorded. The test file was last changed in #2253; no earlier entry for this exact test
+was found. Retained runs and the Playwright trace are under the local test-runs directory; their lifetime is the
+machine's temporary-file cleanup.
+
+```
+SyntaxError: Unexpected token 'o', "no such ses"... is not valid JSON
+```
+
+Class: unknown
+
+Cause: unknown
+
 ## 2026-10-18 — overflowing trash layout (e2e/tests/modal-layout.spec.ts)
 
 `overflowing trash keeps vertical margins at width 1000` found zero archive rows for five seconds in WebKit during the
