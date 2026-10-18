@@ -44,6 +44,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Select Guarded by typing in the launcher.** Make bare `guarded` offer and preselect the Guarded permission choice,
+  as bare `yolo` does today, while keeping `perms:guarded` available. During planning, audit every choice in the New,
+  Clone, and Replace with launcher dialog for whether it can be set through typing alone (in search or a text field),
+  and identify any other choices that need a typed route or an intentional exception.
+
 - **Open JSON downloads with Cmd-click.** Add `.json` to the desktop app's allowed extensions for opening a completed
   file download with Cmd-click (Ctrl-click on non-macOS desktop builds). Keep the final-extension check
   case-insensitive. Update SPEC.md and SPEC_impl.md, which currently limit opening to `.md` and `.txt`.
