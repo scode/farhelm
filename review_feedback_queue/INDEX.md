@@ -57,6 +57,36 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`approval-session-id-display-collision.md`](approval-session-id-display-collision.md) — Approval cards can display
   distinct session IDs identically; mistaken authorization remains unverified.
 
+- [`queued-launch-can-change-template.md`](queued-launch-can-change-template.md) — A queued sequence can show one
+  template and directly launch another after its shortcut changes elsewhere.
+
+- [`tunnel-port-can-divert-local-traffic.md`](tunnel-port-can-divert-local-traffic.md) — A consented tunnel can take a
+  Mac port a later local service expects, without that consequence in the warning.
+
+- [`refusal-banner-hides-approval-context.md`](refusal-banner-hides-approval-context.md) — A link-refusal banner can
+  hide the requesting host or session while keyboard approval remains possible.
+
+- [`inherited-spawn-carries-workspace-trust.md`](inherited-spawn-carries-workspace-trust.md) — Inherited spawn can carry
+  managed-checkout trust into an ordinary folder.
+
+- [`reused-checkout-path-grants-trust.md`](reused-checkout-path-grants-trust.md) — Replacing a managed checkout at its
+  recorded path can make ordinary content appear eligible for automatic trust.
+
+- [`empty-agent-prompt-submits-existing-draft.md`](empty-agent-prompt-submits-existing-draft.md) — An empty approved
+  prompt can submit text already waiting in an agent's composer.
+
+- [`prompt-approval-can-cross-agent-runs.md`](prompt-approval-can-cross-agent-runs.md) — A prompt approval can reach a
+  replacement agent run whose permissions differ from those shown on the card.
+
+- [`agent-approval-omits-workspace-trust.md`](agent-approval-omits-workspace-trust.md) — Agent launch approval cards no
+  longer explain the effective managed-checkout trust choice in plain language.
+
+- [`template-wrapper-follows-different-agent.md`](template-wrapper-follows-different-agent.md) — An agent can pair a
+  saved template wrapper with a different agent type without a fresh wrapper approval.
+
+- [`download-opens-without-hover-hint.md`](download-opens-without-hover-hint.md) — A policy change can make a Cmd-click
+  open a file whose hover offered only a download.
+
 ## High priority: material UX degradation
 
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
@@ -199,3 +229,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`delayed-host-confirmation-conflicts-with-other-dialogs.md`](delayed-host-confirmation-conflicts-with-other-dialogs.md)
   — A delayed host confirmation can disable another open dialog's clicks and normal keyboard interaction; Escape
   recovers.
+
+- [`stale-template-dialog-undoes-agent-shortcut.md`](stale-template-dialog-undoes-agent-shortcut.md) — An open Templates
+  dialog can overwrite an approved agent shortcut move with its old bindings.
+
+- [`noop-shortcut-approval-reports-missing-binding.md`](noop-shortcut-approval-reports-missing-binding.md) — A shortcut
+  request can report success after another client moves its initially satisfied binding during approval.

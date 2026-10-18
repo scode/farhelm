@@ -1,10 +1,31 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `afc828776596f2e6639d16d4203ccc8b3d0f5862`
+Last reviewed commit: `aeeda466fdaee55755a341046cb051e882495dcd`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through aeeda466
+
+Reviewed range: `afc828776596f2e6639d16d4203ccc8b3d0f5862..aeeda466fdaee55755a341046cb051e882495dcd`, 164 commits. The
+tip and checkpoint came from fetched `origin/main`; the saved checkpoint was verified as an ancestor. Eight primary
+reviewers covered contiguous slices of the ordered commit list. Three more reviewers took the large trust and wrapper
+patches so every assigned patch, including intermediate changes and deletions, was read in bounded chunks. Their stated
+coverage accounts for all 164 commits with no unread patch lines. Surrounding code, specifications, and coverage sources
+were read for candidates, not exhaustively across the repository.
+
+Twelve findings were retained: ten conservatively placed in `highest` for possible security, wrong-target or
+authorization consequences, and two in `other` for shortcut persistence and false success. These are source-level
+findings with their own confidence limits, not twelve reproduced bugs. The most consequential paths involve workspace
+trust, launch and prompt approvals, localhost tunnels, and file opening. A separate fresh-context auditor checked the
+proposed exclusions with possible security or user-work impact. It agreed with the exact duplicate, accepted-behavior
+and code-refutation exclusions; four exclusions were ambiguous and became records with their possible cover stated. No
+finding was fixed and no triage decision was made.
+
+No runtime, browser, native Mac or vendor-agent test was run for this static review. The review-result change contains
+feedback records, the index and this checkpoint. Its draft PR is for separate review and merging; the checkpoint does
+not advance on `main` until that PR lands.
 
 ## Completed review
 
