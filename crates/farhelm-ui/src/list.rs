@@ -49,6 +49,8 @@ mod row;
 /// Save a snapshot of the launcher without changing the draft being launched.
 mod save_template;
 mod shared;
+/// The sidebar's one hover summary, rendered as a hidden source for shared hover help.
+mod summary_card;
 /// The Templates panel beside New (SPEC.md, Launch templates).
 mod templates;
 /// Recorded archives, confirmed permanent cleanup, and its local Delete cue.

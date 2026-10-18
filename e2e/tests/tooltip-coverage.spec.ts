@@ -11,7 +11,8 @@
  * What counts as a clickable control is a fixed selector list (below), not a
  * `cursor: pointer` heuristic, so the test's verdict does not depend on
  * styling. A control passes when it carries a non-empty `data-tooltip`
- * (Farhelm's own tooltip, assets/tooltip.js). Natively disabled controls are
+ * or a `data-tooltip-card` naming a hidden source (the same tooltip,
+ * assets/tooltip.js). Natively disabled controls are
  * checked for the attribute too, so the text is there once they enable; the
  * tooltip itself is not required to show on them, because some engines send
  * no pointer events to a disabled button.
@@ -46,7 +47,7 @@ installTerminalSuiteHooks();
  * buttons are included because a click on them changes something; their
  * hover text conventionally sits on the `label` that wraps them, so for
  * those two a tooltip-bearing ancestor counts, exactly as the tooltip script
- * itself resolves the nearest `data-tooltip`. Every other control must carry
+ * itself resolves the nearest target. Every other control must carry
  * its own, so a wrapper's text cannot stand in for a button's.
  */
 const CONTROLS =
@@ -78,16 +79,21 @@ async function sweep(page: Page, root: string): Promise<{ checked: number; missi
     const missing: string[] = [];
     let checked = 0;
     for (const element of document.querySelectorAll<HTMLElement>(controls)) {
+      // The visible tooltip clones inert source markup, including the host
+      // mark's attributes. Its children are not page controls to audit.
+      if (element.closest(".farhelm-tooltip")) continue;
       const box = element.getBoundingClientRect();
       if (box.width === 0 || box.height === 0) continue;
       if (getComputedStyle(element).visibility === "hidden") continue;
       if (scope !== null && scope.contains(element)) checked += 1;
       if (exempt.some((selector) => element.matches(selector))) continue;
       const owner = element.matches("input[type=checkbox], input[type=radio]")
-        ? element.closest("[data-tooltip]")
+        ? element.closest("[data-tooltip], [data-tooltip-card]")
         : element;
       const text = owner?.getAttribute("data-tooltip") ?? null;
       if (text !== null && text.trim() !== "") continue;
+      const card = owner?.getAttribute("data-tooltip-card")?.trim();
+      if (card && document.getElementById(card)) continue;
       const label = element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 40) ?? "";
       missing.push(`<${element.tagName.toLowerCase()} class="${element.className}"> ${JSON.stringify(label)}`);
     }

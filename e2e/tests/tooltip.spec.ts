@@ -25,7 +25,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type Locator, type Page } from "@playwright/test";
-import { SESSION_LISTING } from "./helpers/fleet";
+import { agentLaunchRow, localHostId, patchPreferences, resetPreferences, SESSION_LISTING } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
 installTerminalSuiteHooks();
@@ -43,8 +43,10 @@ function tooltip(page: Page): Locator {
  * The listing is the only stubbed endpoint; everything else (hosts,
  * preferences, the feed) is the suite's real stack, which is why the reply
  * goes through `fulfillAsHelm` and carries the helm's build stamp.
+ * Legacy rows may have no activity timestamp, so callers can wait for the
+ * row itself when an age would be an invented fixture premise.
  */
-async function loadRow(page: Page): Promise<Locator> {
+async function loadRow(page: Page, overrides: Record<string, unknown> = {}, expectAge = true): Promise<Locator> {
   // Fixed once per test: the page re-reads the listing on its own, and a
   // stamp recomputed per reply would change the age's hover text by a
   // second between two reads of it.
@@ -62,6 +64,7 @@ async function loadRow(page: Page): Promise<Locator> {
           status: { state: "running" },
           annotation: null,
           last_activity_at: lastActivity,
+          ...overrides,
         }],
         total: 1,
         truncated: false,
@@ -69,11 +72,151 @@ async function loadRow(page: Page): Promise<Locator> {
     }));
   await page.goto("/");
   const row = page.locator(`[data-session-id="${SESSION_ID}"]`);
-  await expect(row.locator(".status-time"), "the stubbed row must render its activity age").toHaveText("2m", {
-    timeout: 20_000,
-  });
+  if (expectAge) {
+    await expect(row.locator(".status-time"), "the stubbed row must render its activity age").toHaveText("2m", {
+      timeout: 20_000,
+    });
+  } else {
+    await expect(row, "the legacy listing must render before checking omitted facts").toBeVisible({ timeout: 20_000 });
+    await expect(row.locator(".status-time")).toHaveCount(0);
+  }
   return row;
 }
+
+/**
+ * Title, open space and keyboard focus must resolve to one card in either
+ * density. The fixture uses a managed checkout so a missing body row or a
+ * truncated directory cannot be hidden by an ordinary short path.
+ */
+test("a session's title and open area share its summary card", async ({ page, request }) => {
+  const local = await localHostId(request);
+  const started = 1_700_000_000;
+  try {
+    await patchPreferences(request, { compact: false });
+    const row = await loadRow(page, {
+      title: "A <peer> title",
+      cwd: "/srv/checkouts/project-2/src",
+      host: local,
+      host_name: "this machine",
+      created_at: started,
+      launch: agentLaunchRow({ harness: "codex", permissions: "guarded", model: "gpt-6", effort: "high" }),
+      working_copy: {
+        id: "checkout", repo: { owner: "owner", name: "project" },
+        canonical_path: "/srv/checkouts/project-2", origin_session_id: SESSION_ID,
+      },
+    });
+    const source = page.locator(`#session-summary-${SESSION_ID}`);
+    await expect(source).toBeHidden();
+    await expect(row.locator(".session-row-open")).toHaveAttribute("data-tooltip-card", `session-summary-${SESSION_ID}`);
+    await expect(row.locator(".session-title")).not.toHaveAttribute("data-tooltip", /./);
+    await expect(source.locator(".session-summary-title")).toHaveText("A <peer> title");
+    await expect(source.locator(".session-summary-row")).toHaveCount(5);
+
+    let normalMarkup: string | undefined;
+    for (const compact of [false, true]) {
+      await patchPreferences(request, { compact });
+      await page.reload();
+      if (compact) await expect(page.locator(".compact-toggle input")).toBeChecked();
+      else await expect(page.locator(".compact-toggle input")).not.toBeChecked();
+      await parkPointer(page);
+      await row.locator(".session-title").hover();
+      const card = tooltip(page).locator(".session-summary");
+      await expect(card).toBeVisible();
+      await expect(card.locator(".session-summary-title")).toHaveText("A <peer> title");
+      await expect(card.locator(".session-summary-state-word")).toHaveText("running");
+      await expect(card.locator(".session-summary-agent")).toContainText("codex");
+      await expect(card.locator(".session-summary-host")).toContainText("this machine");
+      await expect(card.locator(".session-summary-value")).toContainText([
+        /this machine/, /owner\/project · project-2/, "/srv/checkouts/project-2/src",
+        "2023-11-14 22:13:20 UTC", /\d+m · .* UTC/,
+      ]);
+      await expect(card.locator(".session-summary-footer")).toHaveText("click to open⋯ for actions");
+      const rowIcon = row.locator(".host-kind-icon");
+      const cardIcon = card.locator(".host-kind-icon");
+      await expect(cardIcon).toHaveAttribute("data-glyph", await rowIcon.getAttribute("data-glyph") ?? "");
+      await expect(cardIcon).toHaveCSS("color", await rowIcon.evaluate((icon) => getComputedStyle(icon).color));
+      // The relative age can tick between density changes without changing
+      // what the card offers. Compare the rest of the rendered card exactly.
+      const stableMarkup = async () => card.evaluate((element) => {
+        const copy = element.cloneNode(true) as HTMLElement;
+        copy.querySelector(".session-summary-row:last-child .session-summary-value")?.replaceChildren("<age>");
+        return copy.innerHTML;
+      });
+      const titleMarkup = await stableMarkup();
+      if (normalMarkup) expect(titleMarkup, "compact and normal rows show the same card").toBe(normalMarkup);
+      else normalMarkup = titleMarkup;
+
+      const agentMark = row.locator(".session-agent");
+      await agentMark.hover();
+      await expect(tooltip(page)).not.toHaveAttribute("data-kind", "card");
+      await expect(tooltip(page)).toHaveText(await agentMark.getAttribute("data-tooltip") ?? "");
+
+      await parkPointer(page);
+      const open = row.locator(".session-row-open");
+      const box = (await open.boundingBox())!;
+      await open.hover({ position: { x: box.width / 2, y: box.height - 2 } });
+      await expect(card).toBeVisible();
+      expect(await stableMarkup(), "the open area shows the title's card").toBe(titleMarkup);
+
+      await parkPointer(page);
+      await open.focus();
+      await expect(open).toBeFocused();
+      await expect(card).toBeVisible();
+      expect(await stableMarkup(), "keyboard focus shows the same card").toBe(titleMarkup);
+      await open.blur();
+      await expect(tooltip(page)).toBeHidden();
+    }
+  } finally {
+    await resetPreferences(request);
+  }
+});
+
+/**
+ * The last known status of an unreachable host may still say running, but
+ * its card must not pulse or claim the live status color. Meaningful row
+ * marks remain independent tooltip targets alongside that summary.
+ */
+test("a stale card is dim while row marks keep their own hover", async ({ page }) => {
+  const row = await loadRow(page, { stale: true, status: { state: "running" } });
+  await parkPointer(page);
+  await row.locator(".session-title").hover();
+  const card = tooltip(page).locator(".session-summary");
+  await expect(card).toHaveClass(/stale/);
+  await expect(card.locator(".session-summary-label")).toHaveText(["directory", "last active"]);
+  await expect(card.locator(".status-dot")).toHaveCSS("animation-name", "none");
+  const dimColor = await row.locator(".status-dot").evaluate((dot) => getComputedStyle(dot).color);
+  await expect(card.locator(".session-summary-status")).toHaveCSS("color", dimColor);
+  for (const mark of [row.locator(".status-dot"), row.locator(".status-time")]) {
+    await mark.hover();
+    await expect(tooltip(page)).not.toHaveAttribute("data-kind", "card");
+    await expect(tooltip(page)).toHaveText(await mark.getAttribute("data-tooltip") ?? "");
+  }
+});
+
+/**
+ * Old listings can lack every optional fact. The card should expose the
+ * directory it has without inventing a host identity or epoch timestamps.
+ */
+test("a legacy session card omits unavailable facts", async ({ page }) => {
+  const row = await loadRow(page, { created_at: 0, last_activity_at: 0 }, false);
+  const source = page.locator(`#session-summary-${SESSION_ID}`);
+  await expect(row.locator(".host-kind-icon")).toHaveCount(0);
+  await expect(source.locator(".session-summary-label")).toHaveText(["directory"]);
+  await expect(source.locator(".session-summary-path")).toHaveText("/tmp");
+  await expect(source.locator(".host-kind-icon")).toHaveCount(0);
+});
+
+/**
+ * A host name from the session remains useful when locality is unknown, but
+ * drawing a local or remote mark would claim a placement Farhelm has not made.
+ */
+test("an unplaced host keeps its name without a locality mark", async ({ page }) => {
+  await loadRow(page, { host_name: "unplaced-host" });
+  const source = page.locator(`#session-summary-${SESSION_ID}`);
+  await expect(source.locator(".session-summary-label")).toHaveText(["host", "directory", "last active"]);
+  await expect(source.locator(".session-summary-host")).toHaveText("unplaced-host");
+  await expect(source.locator(".session-summary-host .host-kind-icon")).toHaveCount(0);
+});
 
 /**
  * Park the pointer over a corner of the page that carries no tooltip, so a

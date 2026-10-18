@@ -401,8 +401,8 @@ pub struct Session {
     /// Seconds since the Unix epoch when this session was created, straight
     /// off the wire (`SessionInfo::created_at`).
     ///
-    /// Decoded for ONE reason: the sidebar's auto-select fallback is
-    /// specified as the newest-created session (SPEC.md), and
+    /// The sidebar's auto-select fallback is specified as the newest-created
+    /// session (SPEC.md), and
     /// once the list could be ordered by activity or by title the head of
     /// the rows could no longer be ASSUMED to be that session. The fallback
     /// therefore picks by this field rather than by position — see
@@ -414,7 +414,8 @@ pub struct Session {
     /// fleet served by such a helm degrades to the listing's own first row —
     /// the behavior this fallback had before the field
     /// was decoded — rather than to whichever row a comparator over zeroes
-    /// happened to favor.
+    /// happened to favor. The same positive stamp appears as absolute UTC
+    /// time in the row's hover summary; an older helm's zero is omitted.
     #[serde(default)]
     pub created_at: i64,
     /// Seconds since the Unix epoch when the supervisor last saw this
@@ -434,7 +435,8 @@ pub struct Session {
     /// list's default order is "recently active" (SPEC.md's Session list),
     /// and before this the number behind that order appeared nowhere on
     /// screen. Rendered through `activity::ActivityStamp` as a short age
-    /// beside the status, never as a raw stamp.
+    /// beside the status and as an absolute UTC time in the hover summary,
+    /// never as a bare epoch number.
     ///
     /// `#[serde(default)]` to `0` carries the proto's reading exactly: a
     /// helm that predates the field, not a session last active in 1970. Read
