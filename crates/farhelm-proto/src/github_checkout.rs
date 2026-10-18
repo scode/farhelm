@@ -47,6 +47,46 @@ pub const MAX_REPO_NAME_LEN: usize = 100;
 /// enforced elsewhere; it is not re-implemented here.
 pub const MAX_BASENAME_BYTES: usize = 200;
 
+/// One bounded title series for Clone defaults and template base names.
+///
+/// The literal base is first, followed by `-2` through `-50`. This only
+/// proposes names: callers advance after an occupied preview and the host
+/// still admits the chosen directory atomically. Destination ownership stays
+/// with the caller; changing host or repository starts a fresh sequence.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CheckoutNameSequence {
+    suffix: u32,
+}
+
+impl CheckoutNameSequence {
+    /// The title to preview, with no slugging or truncation. The checkout
+    /// allocator applies its ordinary validation to each proposed title.
+    pub fn name(&self, base: &str) -> String {
+        if self.suffix == 0 {
+            base.to_string()
+        } else {
+            format!("{base}-{}", self.suffix)
+        }
+    }
+
+    /// Whether an occupied candidate has moved the series beyond its base.
+    /// The GUI uses this to explain why the displayed name has a suffix.
+    pub fn is_numbered(&self) -> bool {
+        self.suffix != 0
+    }
+
+    /// Advance only an uncommitted preview search. A retained ambiguous create
+    /// freezes its name because its own directory may be the collision.
+    /// False leaves the last candidate in place, including at the shared cap.
+    pub fn advance(&mut self, reconciling: bool) -> bool {
+        if reconciling || self.suffix >= 50 {
+            return false;
+        }
+        self.suffix = if self.suffix == 0 { 2 } else { self.suffix + 1 };
+        true
+    }
+}
+
 /// Bound the canonical client identity accepted by lookup-only reconciliation.
 /// This transport guard keeps lookup work finite. A new create has the tighter
 /// shared 64 KiB allowance, which also charges its serialized checkout snapshot
@@ -600,6 +640,27 @@ pub struct GithubPreviewResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Clone and agent/template creates must share the literal-first series,
+    /// its cap and its reconciliation freeze. A private counter prevents a
+    /// caller from constructing a skipped or out-of-range candidate.
+    #[test]
+    fn checkout_name_sequence_is_bounded_and_freezes_for_reconciliation() {
+        let mut sequence = CheckoutNameSequence::default();
+        assert_eq!(sequence.name("review"), "review");
+        assert!(!sequence.is_numbered());
+        assert!(!sequence.advance(true));
+        assert_eq!(sequence.name("review"), "review");
+        for suffix in 2..=50 {
+            assert!(sequence.advance(false));
+            assert_eq!(sequence.name("review"), format!("review-{suffix}"));
+            assert!(sequence.is_numbered());
+            assert!(!sequence.advance(true));
+            assert_eq!(sequence.name("review"), format!("review-{suffix}"));
+        }
+        assert!(!sequence.advance(false));
+        assert_eq!(sequence.name("review"), "review-50");
+    }
 
     // -- parse_github_repo -------------------------------------------------
 

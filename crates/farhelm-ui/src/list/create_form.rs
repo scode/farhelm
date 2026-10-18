@@ -4,6 +4,7 @@
 //! define when an idempotency key still describes the submitted create.
 
 use dioxus::prelude::*;
+use farhelm_proto::github_checkout::CheckoutNameSequence;
 
 use crate::api::{self, CreateAgent, create_session, mint_intent_key};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
@@ -2209,35 +2210,6 @@ fn copied_title_ignored(edited: bool, seed: Option<&str>, fresh_checkout: bool) 
     fresh_checkout && !edited && seed.is_some()
 }
 
-/// One bounded name series, shared by Clone defaults and template bases.
-/// The first candidate is the base itself, then -2 through -50. A retained
-/// ambiguous create freezes the sequence because its own directory may be the
-/// collision. Host and repository ownership stay with the enclosing source.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct CheckoutNameSequence {
-    suffix: u32,
-}
-
-impl CheckoutNameSequence {
-    /// Keep the unnumbered base until a real occupied preview advances it.
-    fn name(&self, base: &str) -> String {
-        if self.suffix == 0 {
-            base.to_string()
-        } else {
-            format!("{base}-{}", self.suffix)
-        }
-    }
-
-    /// Refuse unlimited peer-driven preview searches and ambiguous retries.
-    fn advance(&mut self, reconciling: bool) -> bool {
-        if reconciling || self.suffix >= 50 {
-            return false;
-        }
-        self.suffix = if self.suffix == 0 { 2 } else { self.suffix + 1 };
-        true
-    }
-}
-
 /// The one source currently entitled to supply a checkout-name policy.
 /// Keeping Fixed here preserves its template kind for Save as template, even
 /// though it never contributes an automatically numbered candidate.
@@ -3864,7 +3836,7 @@ pub(super) fn CreateSessionForm(
                 .map(|(base, _)| {
                     (
                         base.to_string(),
-                        clone_checkout_naming().sequence.suffix > 0,
+                        clone_checkout_naming().sequence.is_numbered(),
                     )
                 })
         })
@@ -8260,7 +8232,7 @@ mod tests {
             effective_title("escaped", false, Some(raw), &source, &naming),
             "source\tname-clone"
         );
-        naming.sequence.suffix = 2;
+        assert!(naming.advance(false));
         assert_eq!(
             effective_title("escaped", false, Some(raw), &source, &naming),
             "source\tname-clone-2"
@@ -8367,7 +8339,7 @@ mod tests {
             !naming.advance(true),
             "a retained request must keep its original name"
         );
-        assert_eq!(naming.sequence.suffix, 0);
+        assert!(!naming.sequence.is_numbered());
         assert!(naming.advance(false));
         assert_eq!(
             naming
@@ -8377,7 +8349,8 @@ mod tests {
         );
         naming.retarget(host.clone(), Some(repo.clone()));
         assert_eq!(
-            naming.sequence.suffix, 2,
+            naming.sequence.name("base"),
+            "base-2",
             "same destination keeps its search"
         );
         naming.retarget(
@@ -8385,7 +8358,8 @@ mod tests {
             Some(repo.clone()),
         );
         assert_eq!(
-            naming.sequence.suffix, 0,
+            naming.sequence.name("base"),
+            "base",
             "new host searches from the base name"
         );
         assert!(
@@ -8403,7 +8377,8 @@ mod tests {
         naming.advance(false);
         naming.retarget(host, Some(other));
         assert_eq!(
-            naming.sequence.suffix, 0,
+            naming.sequence.name("base"),
+            "base",
             "repository changes reset the counter"
         );
         naming.source = None;
@@ -8415,7 +8390,7 @@ mod tests {
         for _ in 0..49 {
             assert!(naming.advance(false));
         }
-        assert_eq!(naming.sequence.suffix, 50);
+        assert_eq!(naming.sequence.name("base"), "base-50");
         assert!(
             !naming.advance(false),
             "cap leaves a conflict for the person to fix"

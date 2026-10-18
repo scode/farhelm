@@ -26,6 +26,8 @@ const SENTINEL_CONTENT: &str = "private checkout fixture\n";
 /// The shipped CLI must turn repository intent into one owned checkout and
 /// reconcile keyed retries before proposing a new name. The post-clone
 /// marker and retained untracked file distinguish replay from a second clone.
+/// A Base template must reuse the occupied explicit-title fixture by choosing
+/// `Fix parser-2`, while the explicit `--title` refusal above stays exact.
 #[farhelm_testtrace::test]
 async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
     use crate::agent_listing_real_stack::{
@@ -177,6 +179,98 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
     assert_eq!(
         automatic.cwd,
         stack.root_a.path().join("bar-1").to_str().unwrap()
+    );
+
+    // The first explicit-title checkout still occupies the literal base.
+    // Reuse that proved fixture for a named Base and leave its foreign work
+    // intact through both a successful create and a keyed CLI replay.
+    assert_eq!(
+        std::fs::read_to_string(&retained).unwrap(),
+        "keep this work"
+    );
+    let named = spawn_agent_command_args(
+        &[
+            "template",
+            "edit",
+            "managed",
+            "--title",
+            "Fix parser",
+            "--title-kind",
+            "base",
+        ],
+        &requester.id,
+        &token,
+        &socket,
+    )
+    .await;
+    assert!(
+        named.status.success(),
+        "name template: {}",
+        String::from_utf8_lossy(&named.stderr)
+    );
+    let args = [
+        "create",
+        "--host",
+        "this machine",
+        "--template",
+        "managed",
+        "--idempotency-key",
+        "base-checkout-key",
+    ];
+    let numbered = spawn_agent_command_args(&args, &requester.id, &token, &socket).await;
+    assert!(
+        numbered.status.success(),
+        "numbered create: {}",
+        String::from_utf8_lossy(&numbered.stderr)
+    );
+    let numbered_id = String::from_utf8(numbered.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let numbered = await_server_session(stack.supervisor.state.path(), "Fix parser-2").await;
+    assert_eq!(numbered.id, numbered_id);
+    assert_eq!(
+        numbered.cwd,
+        stack
+            .root_a
+            .path()
+            .join("bar-fix-parser-2")
+            .to_str()
+            .unwrap()
+    );
+    wait_for_agent_ready(
+        &stack.supervisor.state.path().join("tmux.sock"),
+        &numbered.id,
+    )
+    .await;
+    stack.git.assert_clone(&numbered.cwd);
+    let retry_proof = Path::new(&numbered.cwd).join("base-retry-proof");
+    std::fs::write(&retry_proof, "keep numbered work").unwrap();
+    let replay = spawn_agent_command_args(&args, &requester.id, &token, &socket).await;
+    assert!(
+        replay.status.success(),
+        "numbered replay: {}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(replay.stdout).unwrap().trim(),
+        numbered_id
+    );
+    assert_eq!(
+        std::fs::read_to_string(&retry_proof).unwrap(),
+        "keep numbered work"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&retained).unwrap(),
+        "keep this work"
+    );
+    assert_eq!(std::fs::read_dir(stack.root_a.path()).unwrap().count(), 3);
+    assert_eq!(
+        std::fs::read_to_string(stack.hook_a())
+            .unwrap()
+            .lines()
+            .count(),
+        3
     );
 }
 

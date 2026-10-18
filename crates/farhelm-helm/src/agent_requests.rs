@@ -1654,17 +1654,50 @@ async fn create_checkout_for_agent(
             ));
         }
     }
-    let preview = on_host(
-        crate::sessions::preview_github_checkout(
-            state,
-            &claim,
-            &client,
-            repo.clone(),
-            resolution.title.clone(),
-        )
-        .await,
-        &resolved.host_name,
-    )?;
+    // Recovery above owns the original accepted name. Only a fresh preview
+    // search may number a template Base; neither a lost create race nor a
+    // keyed retry gets another automatic dispatch.
+    let base = (resolution.title_kind == Some(farhelm_proto::launcher::TemplateNameKind::Base))
+        .then(|| resolution.title.clone())
+        .flatten();
+    let mut sequence = farhelm_proto::github_checkout::CheckoutNameSequence::default();
+    let preview = loop {
+        let result = on_host(
+            crate::sessions::preview_github_checkout(
+                state,
+                &claim,
+                &client,
+                repo.clone(),
+                resolution.title.clone(),
+            )
+            .await,
+            &resolved.host_name,
+        );
+        match result {
+            Ok(preview) => break preview,
+            Err(error) => {
+                // This supervisor endpoint uses Conflict only for Occupied.
+                // Helm conflicts include a missing install identity and must
+                // not advance. Revisit this boundary if the endpoint gains
+                // another Conflict reason; never classify by error prose.
+                let occupied =
+                    error
+                        .downcast_ref::<crate::SupervisorError>()
+                        .is_some_and(|error| {
+                            error.origin == crate::client::ErrorOrigin::SupervisorReply
+                                && error.kind == ErrorKind::Conflict
+                        });
+                if let Some(base) = &base
+                    && occupied
+                    && sequence.advance(false)
+                {
+                    resolution.title = Some(sequence.name(base));
+                } else {
+                    return Err(error);
+                }
+            }
+        }
+    };
     let wrapper_approved = approve_launch(
         state,
         origin,
@@ -1838,6 +1871,9 @@ fn inherited_spawn_resolution(
                 .and_then(|launch| launch.agent_selection())
                 .is_some_and(|selection| selection.wrapper_prefix.is_some()),
             title: name.clone(),
+            title_kind: name
+                .as_ref()
+                .map(|_| farhelm_proto::launcher::TemplateNameKind::Fixed),
             template_host: None,
         },
         template_identity: None,
@@ -9232,6 +9268,253 @@ mod tests {
         );
         drop(h);
         responder.await.unwrap();
+    }
+
+    /// A template Base searches occupied previews before approval, and the
+    /// approved name/path are the ones dispatched. A keyed replay must return
+    /// that child without another preview or card. The same scripted peer
+    /// proves that Fixed/explicit titles, non-occupancy errors and the shared
+    /// cap never turn into another automatic create.
+    #[farhelm_testtrace::test]
+    async fn template_base_checkout_names_are_previewed_before_approval_and_replayed() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::launcher::{TemplateDestination, TemplateFields, TemplateNameKind};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let previews = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let observed = Arc::clone(&previews);
+        let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let mut accepted = None::<(String, String, SessionInfo)>;
+            let mut creates = 0;
+            let mut lookups = 0;
+            loop {
+                let frame = tokio::select! {
+                    _ = &mut finished_rx => break,
+                    frame = reader.read_frame() => frame.unwrap().expect("live target connection"),
+                };
+                let reply = match parse_control(&frame).unwrap() {
+                    ControlMsg::ReconcileGithubCheckout {
+                        req_id,
+                        intent_key,
+                        client_identity,
+                        ..
+                    } => {
+                        lookups += 1;
+                        let session = accepted.as_ref().and_then(|(key, identity, child)| {
+                            (key == &intent_key && identity == &client_identity)
+                                .then(|| child.clone())
+                        });
+                        ControlMsg::GithubCheckoutReconciled {
+                            req_id,
+                            session,
+                            snapshot: None,
+                        }
+                    }
+                    ControlMsg::GithubCheckoutPreview { req_id, request } => {
+                        let title = request.title.expect("all fixture templates set a name");
+                        observed.lock().unwrap().push(title.clone());
+                        if title == "review" || title.starts_with("cap") || title == "invalid" {
+                            ControlMsg::Error {
+                                req_id,
+                                create_unaccepted: false,
+                                kind: if title == "invalid" {
+                                    ErrorKind::InvalidRequest
+                                } else {
+                                    ErrorKind::Conflict
+                                },
+                                // Deliberately unrelated prose: only the typed
+                                // occupied classification may advance a name.
+                                message: "fixture preview refusal".into(),
+                            }
+                        } else {
+                            let basename = format!("project-{title}");
+                            ControlMsg::GithubCheckoutPreviewed {
+                                req_id,
+                                preview: farhelm_proto::GithubPreviewResponse {
+                                    canonical_root: "/checkouts".into(),
+                                    cwd: format!("/checkouts/{basename}"),
+                                    basename,
+                                    config_revision: request.config_revision.unwrap(),
+                                    claim_context: farhelm_proto::ClaimContext {
+                                        host: request.host.unwrap(),
+                                        incarnation: request.expected_incarnation.unwrap(),
+                                    },
+                                },
+                            }
+                        }
+                    }
+                    ControlMsg::CreateSession {
+                        req_id,
+                        title,
+                        cwd,
+                        intent_key,
+                        github_checkout,
+                        ..
+                    } => {
+                        creates += 1;
+                        assert!(accepted.is_none(), "only the approved create may dispatch");
+                        assert_eq!(title.as_deref(), Some("review-2"));
+                        // Fresh managed admission deliberately ignores the
+                        // ordinary cwd field; only the accepted binding may
+                        // choose the directory on the target supervisor.
+                        assert!(cwd.is_empty());
+                        let checkout = github_checkout.expect("managed payload");
+                        assert_eq!(checkout.preview.basename, "project-review-2");
+                        assert_eq!(checkout.preview.cwd, "/checkouts/project-review-2");
+                        let mut child = session("numbered-child", 100);
+                        child.title = title.unwrap();
+                        child.cwd = checkout.preview.cwd;
+                        accepted =
+                            Some((intent_key.unwrap(), checkout.client_identity, child.clone()));
+                        ControlMsg::SessionCreated {
+                            req_id,
+                            session: child,
+                        }
+                    }
+                    other => panic!("unexpected target request: {other:?}"),
+                };
+                writer.write_control(&reply).await.unwrap();
+            }
+            (creates, lookups)
+        });
+        let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        h.store.set_checkout_root(None, "/checkouts").await.unwrap();
+        let _gui = h.manager.events().admit(1).expect("a GUI seat");
+        let fields = TemplateFields {
+            name: Some("review".into()),
+            destination: Some(TemplateDestination::Github("owner/project".into())),
+            ..command_template("echo hi")
+        };
+        put_template(&h, "named", fields.clone()).await;
+        let stored = h.store.launch_templates().await.unwrap();
+        assert_eq!(stored[0].fields, fields, "premise: old-format name is Base");
+        assert!(previews.lock().unwrap().is_empty());
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let request = AgentVerb::Create {
+            host: Some("user@builder".into()),
+            templates: vec!["named".into()],
+            edits: Default::default(),
+            intent_key: Some("numbered-key".into()),
+            confirm_yolo: false,
+            spawn: None,
+        };
+        let asking = Arc::clone(&handler);
+        let first_request = request.clone();
+        let task = tokio::spawn(async move { asking.handle(origin, "asker", first_request).await });
+        let card = await_card(&h, &task).await;
+        let ApprovalAction::Launch {
+            title, cwd, repo, ..
+        } = card.action
+        else {
+            panic!("ordinary create card")
+        };
+        assert_eq!(title.as_deref(), Some("review-2"));
+        assert_eq!(cwd, "/checkouts/project-review-2");
+        assert_eq!(repo.as_deref(), Some("owner/project"));
+        assert_eq!(previews.lock().unwrap().as_slice(), &["review", "review-2"]);
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let first = task.await.unwrap();
+        let AgentOutcome::Ok {
+            reply: AgentReply::Created { session: child, .. },
+        } = first
+        else {
+            panic!("approved create: {first:?}")
+        };
+        assert_eq!(child.id, "numbered-child");
+        assert_eq!(child.title, "review-2");
+        assert_eq!(child.cwd, "/checkouts/project-review-2");
+        let replay = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            handler.handle(origin, "asker", request.clone()),
+        )
+        .await
+        .expect("replay must not wait on approval");
+        assert!(
+            matches!(replay, AgentOutcome::Ok { reply: AgentReply::Created { session, .. } } if session.id == child.id)
+        );
+        assert!(h.state.approvals.list().is_empty());
+        assert_eq!(
+            previews.lock().unwrap().as_slice(),
+            &["review", "review-2"],
+            "recovery precedes preview"
+        );
+
+        // These are fresh requests, so they cannot borrow the successful
+        // key's recovery and bypass the naming/error rules under test.
+        for (base, kind, explicit, expected_count, expected_error) in [
+            ("review", None, true, 1, ErrorKind::Conflict),
+            (
+                "review",
+                Some(TemplateNameKind::Fixed),
+                false,
+                1,
+                ErrorKind::Conflict,
+            ),
+            ("invalid", None, false, 1, ErrorKind::InvalidRequest),
+            ("cap", None, false, 50, ErrorKind::Conflict),
+        ] {
+            put_template(
+                &h,
+                "named",
+                TemplateFields {
+                    name: Some(base.into()),
+                    name_kind: kind,
+                    ..fields.clone()
+                },
+            )
+            .await;
+            let mut fresh = request.clone();
+            let AgentVerb::Create {
+                edits, intent_key, ..
+            } = &mut fresh
+            else {
+                unreachable!()
+            };
+            *intent_key = None;
+            if explicit {
+                edits.name = Some(base.into());
+            }
+            let before = previews.lock().unwrap().len();
+            let refused = tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                handler.handle(origin, "asker", fresh),
+            )
+            .await
+            .expect("refusal must not ask for approval");
+            assert!(
+                matches!(refused, AgentOutcome::Err { kind, .. } if kind == expected_error),
+                "{base}, {kind:?}"
+            );
+            let seen = previews.lock().unwrap();
+            assert_eq!(seen.len() - before, expected_count);
+            assert_eq!(seen[before], base);
+            if base == "cap" {
+                assert_eq!(seen.last().map(String::as_str), Some("cap-50"));
+            }
+            assert!(h.state.approvals.list().is_empty());
+        }
+        finished_tx.send(()).unwrap();
+        assert_eq!(
+            responder.await.unwrap(),
+            (1, 2),
+            "one create and two keyed inspections only"
+        );
     }
 
     /// Only the originating host can recover its approved managed create.
