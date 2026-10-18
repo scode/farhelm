@@ -92,7 +92,8 @@ Generic recorder wrapping is fine but not required for these; record each result
 - `scripts/check-desktop-assets.sh`
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
 - The CI install-script job's Alpine/BusyBox run (the `docker run ... alpine:3` step in `.github/workflows/ci.yml`; the
-  sweep runs `test-install-sh.sh` only under the host's GNU userland)
+  sweep runs `test-install-sh.sh` only under the host's GNU userland). Both runs include the installer's scenario-scoped
+  request counts and diagnostics for unexpected requests in refused `/latest` cases.
 - `dprint check`
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test`
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`

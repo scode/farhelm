@@ -287,8 +287,9 @@ Deferred work, with its original triggers:
   the check "G2-G4 (pre /latest): nothing but /latest was requested" saw two GET lines where one was expected, in the
   first attempt of CI run 38061432384 (job 114240425122) (FLAKES.md, 2026-10-10). The rerun passed, as did the GNU leg
   of the same run and two local Alpine runs. The check only prints a count, so which second request was logged is
-  unknown. First step: make the check print the counted request lines on failure, so the next occurrence says what the
-  extra request was.
+  unknown. The check now attributes requests to the scenario's origin path and prints the full observation window on
+  failure, plus any other scenario's GETs even on success. GNU and Alpine baseline reruns passed on 2026-10-17. A true
+  duplicate request within the scenario still fails; keep this entry until the extra request's identity is established.
 
 ## Broken tests
 
