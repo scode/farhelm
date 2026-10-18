@@ -2557,10 +2557,24 @@ for spec in "pre|a prerelease" "bad|could not determine the latest release" \
   requests=$(tail -n "+$((before + 1))" "$SERVER_LOG")
   check "G2-G4 ($case_name /latest): refused" [ "$RC" -ne 0 ]
   check "G2-G4 ($case_name /latest): /latest was requested" contains "$requests" "GET /latest-$case_name/latest "
-  # One line per request: the fixture server also logs an error line for a
-  # 404, which is not a request.
-  check "G2-G4 ($case_name /latest): nothing but /latest was requested" \
-    [ "$(printf '%s\n' "$requests" | grep -c '"GET ')" -eq 1 ]
+  # Every installer URL derives from this scenario's origin path. The
+  # shared threaded server can finish an earlier interrupted request during
+  # this window, so attribute GETs by that path rather than by log position
+  # alone. A retry or an extra asset request from THIS install still fails.
+  # Error lines accompanying a 404 are not requests.
+  own_requests=$(printf '%s\n' "$requests" | grep -F "\"GET /latest-$case_name/" || true)
+  other_requests=$(printf '%s\n' "$requests" | grep '"GET ' | grep -vF "\"GET /latest-$case_name/" || true)
+  if [ -n "$other_requests" ]; then
+    printf 'note: G2-G4 (%s /latest): requests from other fixture scenarios:\n%s\n' "$case_name" "$other_requests"
+  fi
+  own_count=$(printf '%s\n' "$own_requests" | grep -c '"GET ' || true)
+  if [ "$own_count" -eq 1 ]; then
+    pass "G2-G4 ($case_name /latest): nothing but /latest was requested"
+  else
+    fail "G2-G4 ($case_name /latest): nothing but /latest was requested" \
+      "expected one scenario GET, found $own_count; complete observation window follows"
+    printf '%s\n' "$requests" >&2
+  fi
   check "G2-G4 ($case_name /latest): nothing was created under HOME" \
     [ -z "$(find "$home" -mindepth 1 2>/dev/null)" ]
   check "G2-G4 ($case_name /latest): the refusal says why" contains "$ERR" "$says"

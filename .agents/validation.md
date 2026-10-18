@@ -121,6 +121,8 @@ that its required systemd or SSH substrate ran.
   Linux refuses before downloading or writing; old releases (without app resources, or from before the side-by-side
   layout) refuse before anything changes. Nothing outside `~/.local/bin` and `~/Applications/Farhelm.app` changes, and
   no service manager runs. Every invocation uses `env -i` with an explicit environment, never the harness process's own.
+  Refused `/latest` cases attribute requests by their scenario's origin path and report unexpected request lines, so
+  delayed requests from another fixture cannot silently become this install's request count.
 - `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' --tmux none -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
   — macOS-only, after building the CLI: runs the actual installer and installed uninstaller against private fixture
   homes and release archives. Covers updates, confirmation, dry-run preservation, foreign files and native bundles.
