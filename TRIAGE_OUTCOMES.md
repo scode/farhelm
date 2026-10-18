@@ -15574,7 +15574,11 @@
   hover (with any destination-mismatch warning) is fully visible, inside the window and not covered by an approval card,
   and is otherwise refused with a visible explanation. Web-link clicks have no fits-in-window check today, so the
   web-link part adds that check as well as the covered check. The complexity gate extends to the web-link admission path
-  in the same shape; anything beyond that still returns the item to the maintainer.
+  in the same shape; anything beyond that still returns the item to the maintainer. While planning it, the user chose
+  that every web-link open is covered, Cmd-click tunnel opens included, accepting that a web link whose hover a small
+  window cuts off now refuses; and, once shown that plain URLs printed as text have no hover by design, that the rule
+  covers web links that show a hover (program-emitted hyperlinks, and plain URLs only when they show the tunnel hint),
+  with plain URLs without a hover opening as before.
 - Completion criteria: SPEC.md states the principle for both file-link and web-link hovers, beside the existing rule
   that the file disclosure must fit in the window and the rule that the web-link hover is the safeguard against a
   mismatched label. With an approval card shown and a file link whose disclosure overlaps the card, a click and a
@@ -15582,7 +15586,7 @@
   visible still downloads. A web link whose hover overlaps an approval card or does not fit in the window is refused
   with a visible explanation and opens nothing, while one whose hover is fully visible still opens. Browser regressions
   cover these cases; run them through the recorder on Chromium and WebKit. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/covered-link-hover-refusal.md`.
 
 ## file-disclosure-trailing-space-distinction-unverified.md
 
