@@ -83,3 +83,71 @@ Each PR had the required fresh-context gpt-6.1-sol high review. The reviewers' c
 rechecked, including modifier matching and dialog context in #2304, atomic sequence refusal in #2310, and Cmd-J
 precedence plus browser boundary coverage in #2316. The structural single-definition, label, and resolver checks passed,
 and no review finding remains open. Each commit and PR message passed its separate cold read.
+
+### Landing
+
+Landed on its own in round 98, as #2304, #2306, #2310 and #2316, merged bottom-up, with one fix made during the landing
+(below).
+
+#### What landed since the stack was based, and whether it interacted
+
+Only plan-queue bookkeeping reached main between this stack's base and the landing round's start, and two documentation
+changes (a recorded trailing review and a TODO.md entry) while the stack merged; no other plan landed in this round. The
+landing rebase was clean. The base already held the day's launcher and shortcut work, and the landing monitor and a
+fresh-context reviewer both read the stack against it. Neither found an interaction:
+
+- A template applied by its shortcut in the session launcher keeps, replaces or removes a wrapper prefix exactly as
+  `tl:` does, strips the per-launch trust value the launcher no longer offers, and leaves the typed search and its open
+  results alone. The open question from the agent-wrapper landing, about carrying a template's prefix across an agent
+  change, is inherited unchanged.
+- Applying from the launcher never launches, so it never asks for a name; a pick from the Cmd-J list goes through the
+  ordinary quick launch, so naming after quick launch applies there.
+- A number key in the launcher reads the current shortcut assignments from the helm, so it applies the template the key
+  belongs to now, even after an agent moved it.
+- No other Cmd+J or Ctrl+Shift+J exists in the app, its terminal handling or the Mac menu. Cmd-J respects input-method
+  composition and held keys, opens only when no dialog is open, and opens over approval cards as the quick switcher's
+  Cmd+K does. Cmd+X is still only the start of a launch sequence, never a template key, and the Mac's Edit > Cut keeps
+  working when text is selected.
+
+#### Fixes made during the landing
+
+The changelog fragment described Cmd-J only in its second paragraph, which release curation reads as context rather than
+as an entry, so the new template list could have been left out of the release notes. Cmd-J now has its own "added"
+fragment.
+
+#### Possible follow-ups
+
+- **Pressing an unchanged template again can start a second session after a lost reply.** If a quick launch's reply is
+  lost, New opens with the launch kept for a retry. Pressing the same template key again now re-applies the template;
+  even though nothing changes, that drops the retry identity, so the next Launch can create a second session if the
+  first one had in fact started. `tl:` already behaved this way, and the permission search results do too (the typed
+  launcher choices landing recorded that), so there is no general rule yet. Deciding that re-applying an unchanged
+  choice keeps the retry identity everywhere would cover all three.
+- The Cmd-J list shows ⚡ and number-key badges from the window's cached assignments, so after an agent moves a shortcut
+  a row can show a key that now belongs to another template; pressing the key does the right thing, and starting from
+  the list looks the template up fresh. The agent quick-launch templates landing recorded the same stale-window problem
+  for the Templates dialog.
+- The reviewer found, by reading the code and without reproducing it, a rare sequence in which the app refuses a launch
+  sequence that the page has already started: from then on, template shortcut presses can be silently dropped until the
+  page reloads. Fixing it needs each press's state to carry an identity, not a one-line change.
+- SPEC.md's keyboard section still says the number shortcuts launch directly; inside the launcher they now apply, which
+  the section's pointer to session creation covers.
+
+#### Checks
+
+- Run now, on the rebased stack (the landed diffs are identical to it): `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo check -p farhelm-ui --features desktop`,
+  `python3 releasing/check-changelog.py format` after the fragment split; `cargo nextest run -p farhelm-ui --lib`
+  through the test recorder, four slots and no retries: 537 passed, run `f052858a-a791-4b03-8d87-f618f297b961`;
+  `node --test` in the UI's JavaScript test directory, run directly: 306 passed; then fresh `cargo build` and web builds
+  and `npx playwright test` through the recorder on `quick-launch.spec.ts`, `quick-switcher.spec.ts`,
+  `ime-composition.spec.ts`, `launcher-enter.spec.ts`, `composer-word-search.spec.ts`, `templates.spec.ts`,
+  `session-action-shortcuts.spec.ts`, `tooltip-coverage.spec.ts` and `launcher-tabs.spec.ts`, on both engines, one
+  worker, no retries: 270 passed, run `65d005d2-a5ec-4f43-9899-68efe0c2ce69`. These run in full the files the executor's
+  broadest browser attempt left unfinished.
+- Reused: the executor's website build, dprint and test-sleep checks; the landing changed only a changelog fragment
+  after them.
+- Skipped: a physical Mac desktop key run (Cmd+X against Edit > Cut, an unhandled Cmd+J), and whether browsers deliver
+  Cmd+J or Ctrl+Shift+J to the page, as in the report.
+
+Nothing in the executor's report became untrue at landing.
