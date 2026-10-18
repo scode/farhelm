@@ -12,3 +12,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`covered-link-hover-refusal`](reports/covered-link-hover-refusal.report.md) landed 2026-10-18 in #2254: terminal file and web links refuse a click while an approval card covers their hover
 - [`session-details-bottom`](reports/session-details-bottom.report.md) landed 2026-10-18 in #2253: session view: identity and host in a bar under the terminal, tabs and actions share the top row
 - [`codex-trust-prompts`](reports/codex-trust-prompts.report.md) landed 2026-10-18 in #2255, #2256: Codex, Muse and Pi workspace trust move from the launcher to per-agent Settings switches for managed checkouts
+- [`prompt-running-agent`](reports/prompt-running-agent.report.md) landed 2026-10-18 in #2257, #2265: farhelm command to type a prompt into another session's running Claude or Codex

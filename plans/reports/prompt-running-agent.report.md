@@ -85,3 +85,82 @@ review found one rebase error: PR1 had lost its independent protocol bump. The a
 in PR2; the final wire tests passed. The same reviewer verified both final PR tips and found the correction complete,
 with no other actionable issue. Fresh cold readers also checked the commit and PR wording. Neither PR was marked ready
 or merged by the executor.
+
+### Landing
+
+Landed on its own in round 91, as #2257 and #2265, merged bottom-up, with one wording fix to SPEC.md made during the
+landing (below).
+
+#### What landed since the stack was based, and whether it interacted
+
+Only plan-queue bookkeeping reached main between this stack's base and its landing, and no other plan landed in this
+round; the landing rebase was clean. The executor had already rebased onto the managed-agent trust settings (#2255,
+#2256), which touched the same agent-request and approval-card code, and onto the move of session details below the
+terminal (#2253), which moved the approval cards. The landing monitor read the stack against both, and a fresh-context
+reviewer did the same independently. Neither found a conflict: the new prompt card follows the cards' current
+conventions, its "open in a client" notice comes from the supervisor rather than anything that moved in the session
+view, and its permission shield is the one the session list shows, including an observed switch to a no-checks mode.
+
+The reviewer also checked the new channel's safety boundary and found it holds: a message containing the sequence that
+ends a terminal paste cannot break out of it, because control characters other than newline and tab are refused at the
+command, the helm, the asking host's supervisor and, last, the owning supervisor just before anything is sent. Only the
+helm can deliver directly; a session can only ask through the approval card, and both the asking host's supervisor and
+the helm refuse a session prompting itself. The asking and target connections are checked again after approval, and a
+trusted host's commands-without-asking setting and "always allow" behave exactly as for the other agent commands.
+
+#### Upgrade
+
+#2257 raises the protocol from 55 to 56 and #2265 to 57; neither has shipped (v0.29.0 carries protocol 51), so the next
+release already requires remote hosts to be updated. The helm database schema is unchanged (57). Two plans still in
+flight will need care when they land: cheaper-cache-clones (now blocked) may also change the protocol and would then
+need the next free number, and both it and host-terminal-colors plan to take helm schema 58, which collides between them
+rather than with this stack.
+
+#### Fixes made during the landing
+
+SPEC.md, in two places. The paragraph on reading the agent's mode from its status line said approvals use the stored
+launch alone, which the new prompt card, showing the observed shield, contradicted; it now says approval decisions do.
+And the prompt paragraph now says that the owning supervisor's "idle or running" check is its latest status sample, so a
+question that appears within about one sampling interval (about two seconds) before delivery can still receive the
+message.
+
+#### Possible follow-ups
+
+- **A question that appears just before delivery.** Because of that sampling gap, a Claude permission or trust question
+  that pops up between samples can receive the pasted message and its Enter, which likely answers the question with its
+  highlighted choice. That undoes the reason waiting agents are refused. The same gap exists right after a launch,
+  before the first sample, when a trust question may be on screen. Taking a fresh screen reading just before pasting, or
+  checking that the agent's input box is on screen before sending the submit key, would close it. Not tested against a
+  real agent.
+- **Approval is not tied to the target's current run.** If the user restarts or replaces the target while the card
+  waits, the approved message goes to the new run, which can have a different permission than the shield the card showed
+  (a Replace into YOLO, say). Delete and Restart already guard against this; prompting could carry the expected launch
+  the same way. That takes another protocol change, which costs users nothing extra if it lands before the next release,
+  since that release already requires updating remote hosts. Otherwise SPEC.md should say the shield, like the "open in
+  a client" notice, is a snapshot.
+- **An empty message submits the user's draft.** SPEC.md allows an empty message, which sends only the submit key and so
+  submits whatever the user has typed in the target's input box, while the card shows an empty block. Refusing empty
+  messages for this command, or labelling them on the card, would make that visible.
+- **Decided in the plan, worth keeping in mind.** A host trusted to run Farhelm commands without asking can now drive an
+  existing YOLO session on any host with no card, since the YOLO launch rule does not apply to a command that starts no
+  agent. Two sessions can still prompt each other back and forth; only prompting oneself is refused.
+- **Wording.** The command's errors say "an initial prompt" because they come from the check shared with launches. The
+  changelog entry says agents waiting on a question "refuse" the message, though Farhelm refuses it, and leaves out that
+  the message can mix with what the user is typing; the release curation can fix both.
+
+#### Checks
+
+- Run now, on the stack with the landing fix (the landed diffs are identical to it): `cargo fmt --all -- --check`,
+  `dprint check SPEC.md`, `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`; then, through the test recorder with pinned nextest and tmux, four
+  slots and no retries, the whole agent command-line test file, the prompt end-to-end and agent-listing selections, and
+  the executor's prompt, agent-instruction and session-permission unit selection: 106 passed, no runtime skips, run
+  `bfbb16fa-4b9a-467b-848b-fb6e9226cfb7`; then fresh `cargo build` and web builds and
+  `npx playwright test approval-layout.spec.ts` on both engines, one worker, no retries: 24 passed, run
+  `e1acdbcf-9565-4dd2-8099-a241ce775788`. These replace the executor's runs that predated the trust settings and the
+  moved approval cards.
+- Reused: the executor's protocol wire-shape run `0b8df2cb-eff1-4c0e-982d-bf58012530ba` on the final code, and its
+  website build, whose pages nothing since has changed.
+- Skipped: everything the report skipped, for the reasons it gives.
+
+Nothing in the executor's report became untrue at landing.
