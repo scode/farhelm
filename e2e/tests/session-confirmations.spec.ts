@@ -3,13 +3,14 @@
  * timing a classifier or reboot; requests, guards and resulting IDs stay real.
  */
 import { expect, test } from "./helpers/evidence";
-import type { APIRequestContext, Page, Route } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 import {
   cleanupSession, createResumableSession, createSession, listSessions,
   openRowMenu, patchPreferences, readPreferences, stopSession,
 } from "./helpers/fleet";
 import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 import { routeGate } from "./helpers/route-gate";
+import { drainedRoute } from "./helpers/drained-route";
 import { attachSession, waitForTermText } from "./helpers/term";
 
 installTerminalSuiteHooks();
@@ -177,31 +178,16 @@ async function showStatus(page: Page, id: string, state: "running" | "interrupte
   // with route.fetch still active can dispose that response mid-fulfilment.
   await page.goto("about:blank");
   const matches = (url: URL) => url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${id}`;
-  // The catch covers one lifecycle race only, as in terminal-reconnect's
-  // build stamp: the page polls the list continuously, so the unroute below
-  // (or teardown after a failure elsewhere) can catch a read mid-handler, and
-  // `route.fulfill` then throws "Route is already handled!" from the
-  // background, failing the test and abandoning its preference restore. Seen
-  // once under a landing run's load in Chromium. Any other error rethrows.
-  const rewrite = async (route: Route) => {
+  return drainedRoute(page, matches, async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
-    try {
-      const reply = await route.fetch();
-      if (!reply.ok()) return await route.fulfill({ response: reply });
-      const body = await reply.json();
-      for (const session of body.sessions ?? [body]) {
-        if (session.id === id) session.status = { state };
-      }
-      await route.fulfill({ response: reply, json: body });
-    } catch (e) {
-      const raced = e instanceof Error
-        && /Route is already handled|Target page, context or browser has been closed|Test ended/.test(e.message);
-      if (!raced) throw e;
+    const reply = await route.fetch();
+    if (!reply.ok()) return await route.fulfill({ response: reply });
+    const body = await reply.json();
+    for (const session of body.sessions ?? [body]) {
+      if (session.id === id) session.status = { state };
     }
-  };
-  await page.route(matches, rewrite);
-  // Unregister and drain together: unroute alone races a pending route.fetch.
-  return () => page.unrouteAll({ behavior: "wait" });
+    await route.fulfill({ response: reply, json: body });
+  });
 }
 
 /** Escape must decline every header question without starting its action.
@@ -213,6 +199,7 @@ async function showStatus(page: Page, id: string, state: "running" | "interrupte
 test("Escape cancels header restart replace and delete questions and restores terminal focus", async ({ page, request }) => {
   const previous = await readPreferences(request);
   const session = await createResumableSession(request, { title: `header-escape-${Date.now()}` });
+  let stopShowingStatus: (() => Promise<void>) | undefined;
   const lifecycleRequests: string[] = [];
   page.on("request", (candidate) => {
     const path = new URL(candidate.url()).pathname;
@@ -224,7 +211,7 @@ test("Escape cancels header restart replace and delete questions and restores te
   });
   try {
     await patchPreferences(request, { skip_session_confirmations: null });
-    await showStatus(page, session.id, "running");
+    stopShowingStatus = await showStatus(page, session.id, "running");
     await page.goto("/");
     await attachSession(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
@@ -265,6 +252,7 @@ test("Escape cancels header restart replace and delete questions and restores te
     }
   } finally {
     try {
+      await stopShowingStatus?.();
       await page.goto("about:blank");
       await page.unrouteAll({ behavior: "wait" });
     } finally {
@@ -285,6 +273,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
   test.setTimeout(120_000);
   const previous = await readPreferences(request);
   const owned = new Set<string>();
+  const statusRoutes: (() => Promise<void>)[] = [];
   const closeGate = routeGate();
   const row = (id: string) => page.locator(`.session-row[data-session-id="${id}"]`);
   try {
@@ -339,6 +328,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
     const resumable = await createResumableSession(request, { title: "skip-restart-tabs" });
     owned.add(resumable.id);
     const stopShowingRunning = await showStatus(page, resumable.id, "running");
+    statusRoutes.push(stopShowingRunning);
     await page.goto("/");
     await row(resumable.id).locator(".session-row-open").click();
     await expect(page.locator(".titlebar .status-badge")).toHaveClass(/\brunning\b/);
@@ -394,6 +384,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
       )
       .toMatch(/^(exited|error)$/);
     const stopShowingInterrupted = await showStatus(page, interrupted.id, "interrupted");
+    statusRoutes.push(stopShowingInterrupted);
     await page.goto("/");
     await row(interrupted.id).locator(".session-row-open").click();
     await expect(page.locator(".interrupted-card")).toBeVisible();
@@ -422,8 +413,12 @@ test("skip session confirmations walks row header interrupted card and tab actio
   } finally {
     closeGate.release();
     try {
-      await page.unrouteAll({ behavior: "wait" });
-      const results = await Promise.allSettled([...owned].map((id) => cleanupSession(request, id)));
+      // Finish every owned cleanup step even if a route stop rejects. The
+      // page may already have failed, but the shared helm must lose all of
+      // this test's sessions before later tests use its preferences.
+      const results = await Promise.allSettled(statusRoutes.map((stop) => stop()));
+      results.push(...await Promise.allSettled([page.unrouteAll({ behavior: "wait" })]));
+      results.push(...await Promise.allSettled([...owned].map((id) => cleanupSession(request, id))));
       const failed = results.filter((result) => result.status === "rejected");
       expect(failed, "all owned sessions must be cleaned up").toEqual([]);
     } finally {
