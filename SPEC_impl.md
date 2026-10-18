@@ -1958,13 +1958,16 @@ helm or an unavailable native Downloads directory refuses this save mode; there 
 The desktop injects a separate file opener alongside its Downloads directory: macOS `open` receives the published path
 as one argument; Linux GIO dispatches its file URI without waiting for the default app to exit. Neither uses a shell or
 hardened `webbrowser`. An `open: true` download request must also request `save_to_downloads` and have that capability,
-otherwise it refuses before routing or transferring. After publication, one pure final-extension predicate admits only
-md and txt, ASCII case-insensitively. The opener sees only that new local save. JSON always reports the saved path after
+otherwise it refuses before routing or transferring. After publication, the helm reads the shared preference row and
+checks the saved file's final extension against its stored list, ASCII case-insensitively. A NULL choice uses md, txt
+and json; an empty choice opens nothing, and malformed stored text fails closed. The saved file must keep the requested
+file's final extension. The helm also reads the list for each stat hint, and re-reads it at open time because the choice
+or file can change after hover. The opener sees only that new local save. JSON always reports the saved path after
 successful publication, with `opened` and, on refusal or dispatch failure, `open_error`; opening cannot turn a
-successful save into a failed download. Stat includes `can_open` only with the native opener, from that same predicate.
-This is an authenticated desktop-helm capability: any signed-in device of that helm can request it, just as it can
-request a native save, rather than an extra origin gate. The ordinary server helm supplies no capability. No quarantine
-flag is added.
+successful save into a failed download. Stat includes `can_open` only with the native opener, from that same list. This
+is an authenticated desktop-helm capability: any signed-in device of that helm can request it, just as it can request a
+native save, rather than an extra origin gate. The ordinary server helm supplies no capability. No quarantine flag is
+added.
 
 The hover splits the disclosed path for presentation into a file-type Nerd Font icon and name, then host:directory,
 without shortening either. All remote fragments still use textContent, peer isolation and visible format-character

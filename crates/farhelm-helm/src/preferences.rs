@@ -3,7 +3,8 @@
 //! last user-selected session, compact-row choice, and the remembered
 //! permissions choice of successful structured launches, per-agent trust-hint dismissals,
 //! host confirmation choices, terminal web-link ownership, quick-launch template,
-//! number-key bindings, welcome dismissal, tunnel consent, and contact reused after successful feedback.
+//! number-key bindings, welcome dismissal, tunnel consent, desktop download-opening
+//! types, and contact reused after successful feedback.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client persists its own copy, so a browser tab and the desktop
@@ -92,18 +93,35 @@ pub(crate) async fn get_preferences(State(state): State<Arc<AppState>>) -> impl 
 /// JSON route here), which is what keeps a typo in a client from being an
 /// accepted no-op; a sort word this helm does not serve, or a
 /// `last_selected` longer than any session id can be
-/// ([`MAX_SESSION_ID_BYTES`]), or a feedback contact beyond its code-point
-/// cap is a 400. 204 on success: there is nothing
+/// ([`MAX_SESSION_ID_BYTES`]), a feedback contact beyond its code-point
+/// cap, or an unmatchable download-opening list is a 400. The list is
+/// normalized before the sparse write, so the next read names exactly the
+/// types the helm checks. 204 on success: there is nothing
 /// to say back that the client did not just send.
 pub(crate) async fn put_preferences(
     State(state): State<Arc<AppState>>,
-    axum::Json(patch): axum::Json<PreferencePatch>,
+    axum::Json(mut patch): axum::Json<PreferencePatch>,
 ) -> impl IntoResponse {
     let trust_hint_changed = patch.claude_trust_hint_dismissed.is_some()
         || patch.codex_trust_hint_dismissed.is_some()
         || patch.muse_trust_hint_dismissed.is_some()
         || patch.pi_trust_hint_dismissed.is_some();
     let tunnel_consent_changed = patch.tunnel_consent.is_some();
+    if let Some(Some(raw)) = &patch.open_extensions {
+        let list = match farhelm_proto::open_extensions::OpenExtensions::parse(raw) {
+            Ok(list) => list,
+            Err(message) => {
+                return http_error(anyhow::Error::new(SupervisorError {
+                    origin: crate::client::ErrorOrigin::Helm,
+                    kind: ErrorKind::InvalidRequest,
+                    message,
+                }));
+            }
+        };
+        // Store one spelling so every client's next read shows what the
+        // helm will actually enforce, including an intentional empty list.
+        patch.open_extensions = Some(Some(list.normalized()));
+    }
     if let Some(Some(bindings)) = &patch.template_shortcuts {
         let mut names = std::collections::BTreeSet::new();
         // A whole-map replacement has ten possible entries, each naming a
@@ -511,6 +529,63 @@ mod tests {
         );
     }
 
+    /// The helm, rather than only the settings page, validates the opening
+    /// policy. A refused list must leave every field in that sparse patch
+    /// unchanged; clearing the list is different from restoring its default.
+    #[farhelm_testtrace::test]
+    async fn open_extensions_normalizes_refuses_and_preserves_empty() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read(&harness).await.open_extensions, None);
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "open_extensions": " .JSON, md, json, HTML, ", "compact": true
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let stored = read(&harness).await;
+        assert_eq!(stored.open_extensions.as_deref(), Some("json, md, html"));
+        assert_eq!(stored.compact, Some(true));
+
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "open_extensions": "tar.gz", "compact": false
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("open_extensions"));
+        let stored = read(&harness).await;
+        assert_eq!(stored.open_extensions.as_deref(), Some("json, md, html"));
+        assert_eq!(stored.compact, Some(true));
+
+        assert_eq!(
+            harness
+                .router()
+                .oneshot(put(serde_json::json!({"open_extensions": ""})))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(read(&harness).await.open_extensions.as_deref(), Some(""));
+        assert_eq!(
+            harness
+                .router()
+                .oneshot(put(serde_json::json!({"open_extensions": null})))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(read(&harness).await.open_extensions, None);
+    }
+
     /// Contact memory uses the feedback cap in code points, never echoes a
     /// refused value, and clears independently of other shared preferences.
     /// Exercise the public routes so null and absence pass through extraction.
@@ -783,6 +858,7 @@ mod tests {
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
                 color_terminal_frames: None,
+                open_extensions: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -898,6 +974,7 @@ mod tests {
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
                 color_terminal_frames: None,
+                open_extensions: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,

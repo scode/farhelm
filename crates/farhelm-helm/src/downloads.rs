@@ -11,6 +11,7 @@ use axum::extract::{Path as AxPath, State};
 use axum::response::IntoResponse;
 use axum::{Json, body::Body};
 use farhelm_proto::DownloadFileInfo;
+use farhelm_proto::open_extensions::OpenExtensions;
 use farhelm_supervisor::files::{RealFs, StagedStream};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -29,17 +30,24 @@ pub struct NativeDownloads {
     pub opener: FileOpener,
 }
 
-/// The final saved extension is the entire opening policy. This intentionally
-/// excludes executable types and double extensions such as `notes.txt.command`;
-/// the same predicate supplies the hover hint and checks the published file.
-fn may_open(path: &Path) -> bool {
+/// Admit only a saved file whose final extension is on the helm's current list.
+///
+/// An earlier hover is never authority to open: the list can change before
+/// the click, and the host can change the file before publication.
+fn may_open(path: &Path, list: &OpenExtensions) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            ["md", "txt"]
-                .iter()
-                .any(|allowed| extension.eq_ignore_ascii_case(allowed))
-        })
+        .is_some_and(|extension| list.contains(extension))
+}
+
+/// Explain an admission refusal using the effective policy, including off.
+fn open_refusal(list: &OpenExtensions) -> String {
+    let allowed = list.normalized();
+    if allowed.is_empty() {
+        "opening downloaded files is turned off in settings".into()
+    } else {
+        format!("only these downloaded file types can be opened: {allowed}")
+    }
 }
 
 /// Whether two paths end in the same extension, ASCII case-insensitively.
@@ -49,9 +57,9 @@ fn may_open(path: &Path) -> bool {
 /// path again when the transfer starts, so an agent can swap the checked file
 /// for a symlink to a file of another type between hover and click. Requiring
 /// the saved file to keep the requested file's type means a click only ever
-/// opens the kind of document the hover described, which keeps that true if
-/// the allowlist ever grows a type with different risks (HTML was dropped for
-/// running in the browser outside the link permissions).
+/// opens the kind of file the hover described. This matters when the list
+/// includes a type whose default app can run code: changing a symlink after
+/// hover must not silently turn a disclosed document into that file type.
 fn same_type(requested: &Path, saved: &Path) -> bool {
     match (
         requested.extension().and_then(|e| e.to_str()),
@@ -109,10 +117,16 @@ pub(crate) async fn stat_file(
                 )
             })
             .unwrap_or_else(|| "host".into());
-        let can_open = state.file_opener.as_ref().map(|_| {
-            info.status == farhelm_proto::DownloadFileStatus::Ready
-                && may_open(Path::new(&info.path))
-        });
+        let can_open = if state.file_opener.is_some() {
+            let preferences = state.store.preferences().await?;
+            let list = OpenExtensions::from_stored(preferences.open_extensions.as_deref());
+            Some(
+                info.status == farhelm_proto::DownloadFileStatus::Ready
+                    && list.is_some_and(|list| may_open(Path::new(&info.path), &list)),
+            )
+        } else {
+            None
+        };
         Ok::<_, anyhow::Error>(FileStatBody {
             host,
             can_open,
@@ -165,15 +179,24 @@ pub(crate) async fn download_file(
                 // error must never tell the user that this saved file was lost.
                 let mut body = serde_json::json!({"path": path.to_string_lossy()});
                 if request.open {
-                    let result = if !may_open(&path) {
-                        Err("only .md and .txt files can be opened".into())
-                    } else if !same_type(Path::new(&request.path), &path) {
-                        Err("the file changed type after it was checked, so it was saved but not opened".into())
-                    } else {
-                        let opener = state.file_opener.clone().unwrap();
-                        tokio::task::spawn_blocking(move || opener(&path))
-                            .await
-                            .unwrap_or_else(|error| Err(format!("file opener failed: {error}")))
+                    // A preference read failure is an opening failure, not a
+                    // download failure: publication has already succeeded.
+                    let policy = state.store.preferences().await.map(|preferences| {
+                        OpenExtensions::from_stored(preferences.open_extensions.as_deref())
+                    });
+                    let result = match policy {
+                        Err(error) => Err(format!("could not read opening settings: {error}")),
+                        Ok(None) => Err("opening settings are invalid; no file types can be opened".into()),
+                        Ok(Some(list)) if !may_open(&path, &list) => Err(open_refusal(&list)),
+                        Ok(Some(_)) if !same_type(Path::new(&request.path), &path) => {
+                            Err("the file changed type after it was checked, so it was saved but not opened".into())
+                        }
+                        Ok(Some(_)) => {
+                            let opener = state.file_opener.clone().unwrap();
+                            tokio::task::spawn_blocking(move || opener(&path))
+                                .await
+                                .unwrap_or_else(|error| Err(format!("file opener failed: {error}")))
+                        }
                     };
                     body["opened"] = serde_json::json!(result.is_ok());
                     if let Err(reason) = result {
@@ -624,13 +647,13 @@ mod tests {
         );
     }
 
-    /// Local app dispatch is deliberately an allowlist of final extensions.
-    /// A suffix elsewhere, executable tail or extensionless name cannot widen
-    /// it; case alone does not change how the saved document is treated.
+    /// Only the final extension controls admission; a user-added type is
+    /// effective immediately, while an empty or invalid stored list opens none.
     #[farhelm_testtrace::test]
-    fn only_final_document_extensions_may_open() {
-        for name in ["notes.md", "notes.TXT", "archive.tar.md"] {
-            assert!(may_open(Path::new(name)), "{name}");
+    fn only_listed_final_extensions_may_open() {
+        let default = OpenExtensions::from_stored(None).unwrap();
+        for name in ["notes.md", "notes.TXT", "archive.tar.md", "data.JSON"] {
+            assert!(may_open(Path::new(name), &default), "{name}");
         }
         for name in [
             "notes",
@@ -644,8 +667,17 @@ mod tests {
             "report.html",
             "report.HtMl",
         ] {
-            assert!(!may_open(Path::new(name)), "{name}");
+            assert!(!may_open(Path::new(name), &default), "{name}");
         }
+        let widened = OpenExtensions::from_stored(Some("json, html, command")).unwrap();
+        assert!(may_open(Path::new("report.HTML"), &widened));
+        assert!(may_open(Path::new("notes.command"), &widened));
+        assert!(!may_open(Path::new("notes.md"), &widened));
+        assert!(!may_open(
+            Path::new("notes.md"),
+            &OpenExtensions::from_stored(Some("")).unwrap()
+        ));
+        assert!(OpenExtensions::from_stored(Some("tar.gz")).is_none());
     }
 
     /// Even a valid device cannot ask a server to open a local path. A missing
@@ -705,14 +737,25 @@ mod tests {
         // The fourth case is a swap between hover and click: the user chose
         // a text file, and the host now resolves it to a Markdown file. Both
         // types are allowed, but it must be saved and not opened, because
-        // the user never saw the type it would open as. The fifth is HTML,
-        // which is saved but never opened.
-        for (requested, name, allowed, fail) in [
-            ("out/notes.TXT", "notes.TXT", true, false),
-            ("out/notes.md", "notes.md", true, true),
-            ("out/notes.txt.command", "notes.txt.command", false, false),
-            ("out/notes.txt", "payload.md", false, false),
-            ("out/report.html", "report.html", false, false),
+        // the user never saw the type it would open as. HTML remains unlisted
+        // in the default policy, while JSON now opens by default.
+        for (requested, name, policy, allowed, fail) in [
+            ("out/notes.TXT", "notes.TXT", None, true, false),
+            ("out/notes.md", "notes.md", None, true, true),
+            ("out/data.json", "data.json", None, true, false),
+            (
+                "out/notes.txt.command",
+                "notes.txt.command",
+                None,
+                false,
+                false,
+            ),
+            ("out/notes.txt", "payload.md", None, false, false),
+            ("out/report.html", "report.html", None, false, false),
+            ("out/report.html", "report.html", Some("html"), true, false),
+            ("out/notes.md", "notes.md", Some("json"), false, false),
+            ("out/notes.md", "notes.md", Some(""), false, false),
+            ("out/notes.md", "notes.md", Some("tar.gz"), false, false),
         ] {
             let downloads = tempfile::tempdir().unwrap();
             std::fs::write(downloads.path().join(name), b"existing").unwrap();
@@ -727,6 +770,16 @@ mod tests {
             let calls = observed.clone();
             let directory = downloads.path().to_path_buf();
             let mut h = spliced_helm_listing(client, vec![session("sess-1", 1)]).await;
+            if let Some(policy) = policy {
+                h.state
+                    .store
+                    .update_preferences(crate::store::PreferencePatch {
+                        open_extensions: Some(Some(policy.into())),
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+            }
             let state = Arc::get_mut(&mut h.state).unwrap();
             state.downloads_dir = Some(directory.clone());
             state.file_opener = Some(Arc::new(move |saved| {
@@ -772,8 +825,14 @@ mod tests {
                 let reason = body["open_error"].as_str().unwrap();
                 if name == "payload.md" {
                     assert!(reason.contains("changed type"), "{reason}");
+                } else if policy == Some("") {
+                    assert!(reason.contains("turned off"), "{reason}");
+                } else if policy == Some("json") {
+                    assert!(reason.contains("json"), "{reason}");
+                } else if policy == Some("tar.gz") {
+                    assert!(reason.contains("invalid"), "{reason}");
                 } else {
-                    assert!(reason.contains("only .md and .txt"), "{reason}");
+                    assert!(reason.contains("md, txt, json"), "{reason}");
                 }
             }
             if fail {
@@ -788,10 +847,14 @@ mod tests {
     /// embedded helm, so a server helm's browsers never see an opening hint.
     #[farhelm_testtrace::test]
     async fn stat_exposes_open_hint_only_with_native_capability() {
-        for (native, name, expected) in [
-            (false, "notes.md", None),
-            (true, "notes.TXT", Some(true)),
-            (true, "notes.txt.command", Some(false)),
+        for (native, name, policy, expected) in [
+            (false, "notes.md", None, None),
+            (true, "notes.TXT", None, Some(true)),
+            (true, "data.JSON", None, Some(true)),
+            (true, "notes.txt.command", None, Some(false)),
+            (true, "notes.md", Some("json"), Some(false)),
+            (true, "notes.md", Some(""), Some(false)),
+            (true, "notes.md", Some("tar.gz"), Some(false)),
         ] {
             let (client, server) = tokio::io::duplex(65536);
             let peer = tokio::spawn(async move {
@@ -808,6 +871,16 @@ mod tests {
                 .await;
             });
             let mut h = spliced_helm_listing(client, vec![session("sess-1", 1)]).await;
+            if let Some(policy) = policy {
+                h.state
+                    .store
+                    .update_preferences(crate::store::PreferencePatch {
+                        open_extensions: Some(Some(policy.into())),
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+            }
             if native {
                 Arc::get_mut(&mut h.state).unwrap().file_opener =
                     Some(Arc::new(|_| panic!("stat never opens")));

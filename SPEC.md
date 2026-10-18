@@ -1263,24 +1263,24 @@ can be ordered independently by most recent activity, by creation time, or by ti
 remembered by the helm as one preference shared by every client, together with the last-selected session and compact-row
 choice, and most recent activity is what a client shows until someone picks otherwise. The same shared preference row
 carries terminal web-link click ownership, the quick-launch template name and number-key bindings, the
-session-confirmation opt-out, the quick-launch naming choice, terminal-frame coloring, and whether host setup or host
-removal confirmation should be skipped after an explicit permanent answer; a client that has already loaded its
-preferences keeps its previous behavior until it reloads, except that template shortcuts read their bindings on each
-invocation. The gear immediately to the right of the sidebar version opens a settings dialog with an off-by-default
-**skip session confirmations** switch under **sessions**. Its help names Delete, Replace, Restart and tab Close and
-excludes YOLO, host and trash questions (see Lifecycle operations). Beside it, **name sessions on quick launch** is on
-by default, including when the helm has never stored a choice. Turning it off disables the naming prompt for quick
-launches. Beside it, **color terminal frames by host** starts off and colors every session's thin terminal frame to
-match its host icon when turned on. The dialog also has the host switches `set up new hosts without asking` and
-`remove hosts without asking`, on when the respective confirmation is skipped. Turning one off restores that
-confirmation; turning one on makes the same choice as the host dialog's permanent answer. Changes take effect
-immediately in the current client. Each switch explains the current behavior, and each host dialog's permanent answer
-points to the gear as the place to undo it. A separate **terminal links** section chooses whether web links open in
-Farhelm without passing the click on (the default), open in Farhelm and also pass the click on, or only pass the click
-on. The latter two choices explain the risk of a second browser tab and that a program without mouse reporting cannot
-act on a click. This choice covers every client of the helm and takes effect in every mounted terminal of the current
-client immediately; other open clients pick it up when they reload, like the host choices. Sounds has three device
-switches (see Status). A separate **ntfy alerts** section has an off-by-default switch, server URL (default
+session-confirmation opt-out, the quick-launch naming choice, terminal-frame coloring, the desktop download-opening
+types, and whether host setup or host removal confirmation should be skipped after an explicit permanent answer; a
+client that has already loaded its preferences keeps its previous behavior until it reloads, except that template
+shortcuts read their bindings on each invocation. The gear immediately to the right of the sidebar version opens a
+settings dialog with an off-by-default **skip session confirmations** switch under **sessions**. Its help names Delete,
+Replace, Restart and tab Close and excludes YOLO, host and trash questions (see Lifecycle operations). Beside it, **name
+sessions on quick launch** is on by default, including when the helm has never stored a choice. Turning it off disables
+the naming prompt for quick launches. Beside it, **color terminal frames by host** starts off and colors every session's
+thin terminal frame to match its host icon when turned on. The dialog also has the host switches
+`set up new hosts without asking` and `remove hosts without asking`, on when the respective confirmation is skipped.
+Turning one off restores that confirmation; turning one on makes the same choice as the host dialog's permanent answer.
+Changes take effect immediately in the current client. Each switch explains the current behavior, and each host dialog's
+permanent answer points to the gear as the place to undo it. A separate **terminal links** section chooses whether web
+links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the click on, or only
+pass the click on. The latter two choices explain the risk of a second browser tab and that a program without mouse
+reporting cannot act on a click. This choice covers every client of the helm and takes effect in every mounted terminal
+of the current client immediately; other open clients pick it up when they reload, like the host choices. Sounds has
+three device switches (see Status). A separate **ntfy alerts** section has an off-by-default switch, server URL (default
 `https://ntfy.sh`), topic, optional access token, and priority (min, low, default, high, urgent; default default). These
 are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
 inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
@@ -1807,15 +1807,16 @@ whatever the agent renders is what you see. There is no composer, no message abs
   saves into Downloads under a unique name and shows where it went, with no partial file after failure or interruption.
   Status appears at the top of that terminal: success fades after a few seconds, while a failure stays until the next
   click or download there. Plain click only downloads. In the desktop app, Cmd-click on macOS (Ctrl-click elsewhere)
-  also opens the completed save with the default app, only when its final extension is .md or .txt, case-insensitively.
-  Other types are saved without opening; an opening failure leaves the save successful and says why it was not opened. A
-  browser modifier-click only downloads. The hover uses a file icon and bright name, the host and full directory on a
-  second line, and decimal size with the action hints on a third. A left stripe and size color show under 1 MB green,
-  1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals are red and checking has a neutral stripe. Only
-  an eligible desktop file has the opening hint. Any file the session's account can read is in reach, within the
-  existing shell authority; hover discloses the agent-provided target before an explicit click. Only the helm can ask
-  the supervisor for file reads. OSC hyperlink schemes are explicitly limited to http, https and file; every other
-  scheme is ignored.
+  also opens the completed save with the default app when the saved file's final extension is in the helm's shared list,
+  case-insensitively. The list defaults to .md, .txt and .json, and the saved file must still have the same final
+  extension as the path disclosed at hover. Other types are saved without opening; an opening failure leaves the save
+  successful and says why it was not opened. A browser modifier-click only downloads. The hover uses a file icon and
+  bright name, the host and full directory on a second line, and decimal size with the action hints on a third. A left
+  stripe and size color show under 1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals are
+  red and checking has a neutral stripe. Only an eligible desktop file has the opening hint. Any file the session's
+  account can read is in reach, within the existing shell authority; hover discloses the agent-provided target before an
+  explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to
+  http, https and file; every other scheme is ignored.
 
 ## Attachments
 
@@ -2952,14 +2953,14 @@ rule; it is the remote program's own display.
 
 Clicking a disclosed file path in a terminal transfers that file from the session's host to the user's machine. Any file
 the session's Unix account can read is in reach; the hover shows the host, resolved path and size before the click can
-download it. Confirmed 2026-10-14: only an explicit Cmd-click in the desktop app (Ctrl-click on non-macOS desktop
-builds) also opens the completed local save with the default app, and only for final .md or .txt extensions, ignoring
-case. No other file type is opened; a plain click or any browser click only downloads. HTML is deliberately excluded:
-opening it in the default browser would let an agent's page run scripts and navigate outside the link permissions
-without the separate localhost-tunnel consent. This file-opening restriction remains even when tunnels are enabled. The
-desktop app deliberately does not set the macOS quarantine flag on downloaded files, so these saves do not carry the
-"downloaded from the internet" prompt a browser save would carry. The click authorizes this transfer across the host
-boundary, including for agent-controlled files.
+download it. Confirmed 2026-10-18: only an explicit Cmd-click in the desktop app (Ctrl-click on non-macOS desktop
+builds) also opens the completed local save with the default app. The helm checks the saved file's final extension,
+ignoring ASCII case, against a shared user-chosen list that defaults to .md, .txt and .json. It also requires the saved
+file to retain the final extension disclosed at hover. An empty list opens nothing; any listed type can open, including
+HTML if the user adds it. A plain click or any browser click only downloads. The desktop app deliberately does not set
+the macOS quarantine flag on downloaded files, so these saves do not carry the "downloaded from the internet" prompt a
+browser save would carry. The click authorizes this transfer across the host boundary, including for agent-controlled
+files.
 
 Opening a link is another bounded effect across the host boundary. Only an admitted HTTP(S) URL may reach the user's
 browser, after an Allow/Open click or under the requesting host's matching link permission. With **Open local-network

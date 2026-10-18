@@ -329,7 +329,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 60;
+const SCHEMA_VERSION: i64 = 61;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -1062,6 +1062,10 @@ pub struct Preferences {
     /// Unset stays off for fresh and upgraded helms.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_terminal_frames: Option<bool>,
+    /// Final extensions the desktop helm may open after saving a download.
+    /// NULL uses the default policy; an empty string disables opening.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_extensions: Option<String>,
     /// One shared template name, independent of any editor's saved fields.
     /// A missing or deleted name is handled as no quick launch by clients.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1201,6 +1205,13 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub color_terminal_frames: Option<Option<bool>>,
+    /// Null restores the default list; an empty string disables opening.
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub open_extensions: Option<Option<String>>,
     /// Null removes the mark; omission preserves another client's choice.
     #[serde(
         default,
@@ -2028,6 +2039,9 @@ pub struct HelmStore {
 ///   the two checked columns are replaced, leaving host references intact.
 /// - 59: nullable shared terminal-frame coloring. Unset keeps every terminal's
 ///   original surface, including on upgraded helms.
+/// - 60: per-agent remembered wrapper prefixes, initially empty.
+/// - 61: nullable desktop download-opening extensions. Unset admits the
+///   default document types even for an upgraded helm; empty admits none.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2254,7 +2268,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  color_terminal_frames INTEGER CHECK (color_terminal_frames IN (0, 1)),
                  -- Appended, like every column added since this table was
                  -- created, so a fresh database matches a migrated one.
-                 remembered_wrapper_prefixes TEXT NOT NULL DEFAULT '{{}}'
+                 remembered_wrapper_prefixes TEXT NOT NULL DEFAULT '{{}}',
+                 open_extensions TEXT
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2346,7 +2361,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 60;",
+              PRAGMA user_version = 61;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3658,6 +3673,21 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 60")?;
         version = 60;
     }
+    if version == 60 {
+        // A rewound fresh fixture may already have the column. NULL is the
+        // only upgrade value: the policy's default belongs to the reader.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('preferences') WHERE name = 'open_extensions'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch("ALTER TABLE preferences ADD COLUMN open_extensions TEXT;")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 61;")
+            .context("migrating helm.db to schema version 61")?;
+        version = 61;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4708,7 +4738,7 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -4719,6 +4749,7 @@ impl HelmStore {
                             pi_trust_hint_dismissed: row.get(17)?,
                             name_session_on_quick_launch: row.get(15)?,
                             color_terminal_frames: row.get(18)?,
+                            open_extensions: row.get(20)?,
                             tunnel_consent: row.get(14)?,
                             claude_trust_hint_dismissed: row.get(13)?,
                             welcome_seen: row.get(12)?,
@@ -4807,6 +4838,8 @@ impl HelmStore {
             let name_session_on_quick_launch = patch.name_session_on_quick_launch.flatten();
             let color_terminal_frames_present = patch.color_terminal_frames.is_some();
             let color_terminal_frames = patch.color_terminal_frames.flatten();
+            let open_extensions_present = patch.open_extensions.is_some();
+            let open_extensions = patch.open_extensions.flatten();
             let quick_launch_template_present = patch.quick_launch_template.is_some();
             let quick_launch_template = patch.quick_launch_template.flatten();
             let template_shortcuts_present = patch.template_shortcuts.is_some();
@@ -4823,8 +4856,8 @@ impl HelmStore {
             conn
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -4849,7 +4882,8 @@ impl HelmStore {
                          name_session_on_quick_launch = CASE WHEN ?32 THEN excluded.name_session_on_quick_launch ELSE name_session_on_quick_launch END, \
                          muse_trust_hint_dismissed = CASE WHEN ?34 THEN excluded.muse_trust_hint_dismissed ELSE muse_trust_hint_dismissed END, \
                          pi_trust_hint_dismissed = CASE WHEN ?36 THEN excluded.pi_trust_hint_dismissed ELSE pi_trust_hint_dismissed END, \
-                         color_terminal_frames = CASE WHEN ?38 THEN excluded.color_terminal_frames ELSE color_terminal_frames END",
+                         color_terminal_frames = CASE WHEN ?38 THEN excluded.color_terminal_frames ELSE color_terminal_frames END, \
+                         open_extensions = CASE WHEN ?40 THEN excluded.open_extensions ELSE open_extensions END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -4888,7 +4922,9 @@ impl HelmStore {
                         pi_trust_hint,
                         pi_trust_hint_present,
                         color_terminal_frames,
-                        color_terminal_frames_present
+                        color_terminal_frames_present,
+                        open_extensions,
+                        open_extensions_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -8348,6 +8384,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN pi_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN color_terminal_frames;
                  ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
+                 ALTER TABLE preferences DROP COLUMN open_extensions;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -10780,6 +10817,7 @@ mod tests {
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
                 color_terminal_frames: None,
+                open_extensions: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -10813,6 +10851,7 @@ mod tests {
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
                 color_terminal_frames: None,
+                open_extensions: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -10845,6 +10884,7 @@ mod tests {
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
                 color_terminal_frames: None,
+                open_extensions: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -10926,6 +10966,7 @@ mod tests {
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
                 color_terminal_frames: None,
+                open_extensions: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -11301,6 +11342,7 @@ mod tests {
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
             "ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
+             ALTER TABLE preferences DROP COLUMN open_extensions;
              PRAGMA user_version = 59;",
         )
         .unwrap();
@@ -11309,6 +11351,53 @@ mod tests {
         let preferences = upgraded.preferences().await.unwrap();
         assert_eq!(preferences.compact, Some(true));
         assert!(preferences.remembered_wrapper_prefixes.is_empty());
+    }
+
+    /// Upgraded helms have no saved opening choice, so the policy reader uses
+    /// its default. A later empty choice must remain distinct from that NULL
+    /// through sparse writes and a database reopen.
+    #[farhelm_testtrace::test]
+    async fn schema_61_adds_nullable_open_extensions_without_losing_preferences() {
+        let (dir, store) = fresh_store().await;
+        store
+            .update_preferences(PreferencePatch {
+                compact: Some(Some(true)),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE preferences DROP COLUMN open_extensions;
+             PRAGMA user_version = 60;",
+        )
+        .unwrap();
+        drop(conn);
+        let upgraded = HelmStore::open(&path).await.unwrap();
+        let preferences = upgraded.preferences().await.unwrap();
+        assert_eq!(preferences.compact, Some(true));
+        assert_eq!(preferences.open_extensions, None);
+        upgraded
+            .update_preferences(PreferencePatch {
+                open_extensions: Some(Some(String::new())),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        upgraded
+            .update_preferences(PreferencePatch {
+                compact: Some(Some(false)),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        drop(upgraded);
+        let reopened = HelmStore::open(&path).await.unwrap();
+        let preferences = reopened.preferences().await.unwrap();
+        assert_eq!(preferences.compact, Some(false));
+        assert_eq!(preferences.open_extensions.as_deref(), Some(""));
     }
 
     /// A fresh database must come up on the current schema with the reserved
@@ -12245,6 +12334,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN pi_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN color_terminal_frames;
                  ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
+                 ALTER TABLE preferences DROP COLUMN open_extensions;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -12421,6 +12511,7 @@ mod tests {
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
                 color_terminal_frames: None,
+                open_extensions: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -12501,6 +12592,7 @@ mod tests {
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
                 color_terminal_frames: None,
+                open_extensions: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
