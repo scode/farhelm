@@ -48,11 +48,14 @@ For each plan, run `scode-build-goal` with the entry's text (and whatever the ma
 with these overrides on top of the skill's own rules:
 
 - No-workhorse mode.
-- When the entry changes the GUI (the web UI or the desktop app), default to mocking up the proposed change as a
-  `scode-snippets` snippet and showing it to the maintainer during the up-front questions, rather than describing a
-  layout in words. Settle the design on the mockup, then write what was agreed into the goal file in words: the executor
-  cannot ask about it later, and the snippet lives outside the repository. Skip the mockup when the maintainer says to,
-  or when the change has no visible design to decide.
+- Ask the up-front questions on a local interactive page (`plans/.agents/planning.md`, "Asking the up-front questions on
+  a local page"), never as a prose batch in conversation, a published snippet, or one question at a time through a
+  question tool.
+- When the entry changes the GUI (the web UI or the desktop app), default to mocking up the proposed change on that
+  page, next to the questions it settles, rather than describing a layout in words. Settle the design on the mockup,
+  then write what was agreed into the goal file in words: the executor cannot ask about it later, and the page lives
+  outside the repository. Skip the mockup when the maintainer says to, or when the change has no visible design to
+  decide.
 - In the review gate menu, add a fresh-context Opus 5.5 agent at high effort with the skill's general review charter, as
   a pinned-model option, and present it first, as the default. The goal file records the choice as a demand for that
   model and effort, like any pinned option.
@@ -104,6 +107,31 @@ violation on a line or report the PR did not touch means main moved under the ch
 delivered): fetch, rebase, and run it again. Ask the maintainer to approve, and merge per `jjstack` once they do. If the
 merge is refused because main moved, rebase, check again, and retry. A plan that only lives in a working copy does not
 exist as far as an executor is concerned, because executors only read plans from main.
+
+## Asking the up-front questions on a local page
+
+Every planning flow in this file asks its up-front questions this way. The maintainer chose it on 2026-10-15, because
+answers given in the terminal cannot be revisited or edited. One page holds every open question for every plan in the
+request, served from this machine on loopback only, the way the todo picker is. Here's what it needs:
+
+- One bordered box per plan, headed by the plan's name in product terms and its slug, with the heading kept in view
+  while scrolling. A bare id prefix on each question does not tell the maintainer which plan it is about.
+- Each question offers its picks, the recommended one first and marked as such but not preselected, plus a free-text
+  comment.
+- Beside every question, a "Copy code" button that copies the answers for the whole page as one block for the maintainer
+  to paste back. A question with neither a pick nor a comment is left out of the block and stays open. Show the block on
+  the page as well, since the clipboard can be refused.
+- Facts that are not questions (the delegation mode, where the plan files go) are stated on the page or in chat, not
+  asked.
+
+Write the page in your scratch directory (`AGENTS.md`, "Agent scratch space") and serve it with any static file server
+bound to `127.0.0.1` on port 14003, the todo picker's port, after stopping the picker; the maintainer keeps that one URL
+open in a browser. For example, `python3 -m http.server 14003 --bind 127.0.0.1 -d <dir>` as a background command. If
+something else holds the port, say so and ask which port to use; never stop a process you did not start. Put the page's
+URL in the last message of the turn, after every tool call.
+
+After acting on a pasted block (research, follow-up questions), update the same page in place: the questions still open,
+any new follow-ups, and the settled answers shown read-only, so the maintainer can see what is still needed.
 
 ## Planning triage outcomes: "use the planning system to schedule these"
 
