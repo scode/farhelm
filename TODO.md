@@ -170,6 +170,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   checkout does not, so such a filter could produce different files or refuse; filter, hook and reflog behavior also
   differ. Revisit only with a checkout shown to match a plain clone, or after deciding to relax that requirement.
 
+- **Repack the repository cache regularly.** Run `git repack -a -d` on each host's repository cache on a schedule (how
+  often, and whether from the launch path or in the background, is TBD; it has to happen under the cache's lock). Every
+  managed-checkout launch fetches into the cache and nothing ever repacks it, so packs and loose objects pile up until
+  git's own auto gc kicks in at 50 packs, and that gc would run in the foreground of some user's launch because the
+  fetch sets `gc.autoDetach=false` (inferred from the defaults and the code, not observed). Measured on 2026-10-18
+  against a copy of the eight-day-old `scode/farhelm` cache (git 2.43, 5 alternating runs per side after a discarded
+  warm-up): 23 packs and 388 loose objects, 111.5 MiB, became one 35.4 MiB pack in 5.0 s, and the launch's exact clone
+  command (`clone --reference <cache> --dissociate`) dropped from a 4.50 s to a 1.70 s median against GitHub, and from
+  3.75 s to 0.81 s against a local copy, so the saving is local work rather than network. Most of the size was blobs
+  stored whole instead of as deltas (95.8 MiB before, 19.7 MiB after), plus 28.8 MiB of repeated copies of 1,629
+  objects, which is what fixing up each fetched thin pack leaves behind when it appends full copies of delta bases the
+  cache already has. Independent of "Cheaper clones from the repository cache" above, which is about the clone itself.
+
 - **Give the Settings dialog more structure.** Settings has grown into one long page that takes endless scrolling to get
   through. Overhaul it with more structure, such as tabs, so related settings are grouped and any one of them is easy to
   find. The grouping and layout are TBD.
