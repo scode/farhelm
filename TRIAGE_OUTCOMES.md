@@ -15678,3 +15678,138 @@
 - Execution: change `lytuzvwpulzxolxvokrvvoqznktpxntq`, bookmark `triage/fix-spec-highest-2026-10-17`, combined at the
   user's request with the other two `fix spec` outcomes of this triage; draft PR
   [#2250](https://github.com/scode/farhelm/pull/2250/changes).
+
+## inherited-spawn-carries-workspace-trust.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading current main (1b06488c); nothing was run. The parent's supervisor copies the parent's
+  stored launch into a `farhelm spawn --inherit-agent` request unchanged (`handlers.rs` around 3258–3307), the helm
+  accepts it with whatever cwd the agent names (`inherited_spawn_resolution`, `agent_requests.rs` around 1712–1778), and
+  the step that recomputes workspace trust for the destination explicitly skips inherited spawns (`!inherit_agent`,
+  `agent_requests.rs` around 1393–1416), while ordinary create, spawn, managed-checkout create and clone all go through
+  it. The supervisor does not re-check trust at create; for Codex it fills the trust marker with the new session's cwd.
+  So a Codex, Muse or Pi session launched trusted in a managed checkout (trust switch on, off by default) can spawn into
+  an ordinary folder that then loads its own settings, hooks and extensions as if approved, and the trust chains to
+  further inherited spawns. The exclusion arrived with #2255 with no recorded reason. By default an approval card
+  appears but shows trust only as a raw flag (the plain-language line is `agent-approval-omits-workspace-trust.md`); on
+  a host that runs farhelm commands without asking there is no card. SPEC.md "Managed checkouts" says ordinary
+  user-selected directories receive no trust override; nothing accepts carrying it into a different folder. Unverified:
+  a live run against the vendor CLIs.
+- Decision: on 2026-10-18 the user picked the recommended fix: recompute trust for an inherited spawn's destination the
+  way clone already does, and say so in the spec.
+- Completion criteria: inherited spawns go through the same destination trust normalization as clone (trust dropped
+  outside a managed checkout, added inside one when the agent's switch is on) before the approval card and dispatch;
+  stored launches whose trust part does not fit the normalization are refused or stripped, with the choice stated in the
+  PR; a regression test modeled on `agent_clone_normalizes_trust_for_the_target_before_dispatch`; SPEC.md "Managed
+  checkouts" states that an inherited spawn's trust follows its destination. Remove the feedback file and its index
+  entry.
+- Execution: `pending`.
+
+## reused-checkout-path-grants-trust.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (1b06488c), not reproduced. Managed-checkout membership for trust
+  (`cwd_is_managed`, `working_copies.rs` around 1098–1120) matches allocated records by path ancestry and never calls
+  the existing `verify_identity` comparison, and nothing at create re-checks identity before trust is baked into the
+  agent's command line. A different folder placed at a recorded checkout's path therefore gets automatic Codex, Muse or
+  Pi trust and the managed-checkout mark. Reaching it needs a trust switch on (off by default), a session still
+  referencing the checkout, the user removing the folder outside Farhelm and different content appearing at the exact
+  path; Farhelm itself never puts other content at a recorded path. It gives an attacker nothing, since anyone able to
+  replace the folder can write hooks into the real checkout. SPEC.md's 2026-10-11 acceptance of out-of-band path
+  manipulation arguably covers it but names only the archive guard. Unrelated in mechanism to
+  `archive-recovery-clears-reused-path-trust.md`.
+- Decision: on 2026-10-18 the user picked the identity check before granting trust, "with complexity gate, otherwise
+  this is mooted because of spec - users modifying the on-disk etc in ways outside of our direct control is not
+  something we add tons of complexity to protect again".
+- Completion criteria: the managed-checkout membership read used for trust counts a recorded checkout only when the
+  folder at its path still matches the recorded identity; a replaced or missing folder counts as ordinary. A unit test
+  replaces an allocated folder at the same path and expects no membership. Complexity gate: if this turns out to need
+  more than the small change sketched (reusing the existing identity comparison in that read), stop and record the item
+  as covered by SPEC.md's 2026-10-11 out-of-band acceptance instead, with no code change. Either way, remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## unusable-directory-launches-in-home.md
+
+- Outcome: `fix spec+code` (the user's pick was `fix code`; their comment asks for the rule in SPEC.md, which makes it
+  spec+code).
+- Assessment: confirmed by reading current main (1b06488c) and a private tmux 3.4 experiment; no end-to-end Farhelm
+  launch was run. `ensure_cwd_usable` (`core.rs` around 3553–3567) checks only that the path is absolute and a
+  directory, and canonicalization also succeeds on a directory that cannot be entered. Create, create retry, Restart,
+  Replace and OpenTab pass the folder only as tmux's start directory, and nothing afterwards enforces it: the launch
+  spec has no cwd, the launch shim never enters a directory, tabs run a bare login shell, and the scope prefix sets
+  none. tmux (pinned 3.7c, `spawn.c`) silently falls back to HOME and then `/` when `chdir` fails; the 3.4 experiment
+  showed new-session, new-window and respawn-pane all landing in HOME. Farhelm reports success and keeps showing the
+  selected folder, so an agent (possibly with an initial prompt, unattended) acts on HOME. Likely triggers: a recursive
+  permission change that strips directories' search bit, a folder owned by someone else, ACLs, network or FUSE mounts
+  that answer stat but refuse entry. SPEC.md requires that "a missing or unusable directory still produces a clear
+  error"; the earlier `tmux-cwd-format-expanded-*` and `restart-cwd-lossy-non-utf8.md` fixes share the symptom but not
+  the trigger. Unverified: macOS privacy protection for Documents and Desktop as a routine trigger.
+- Decision: on 2026-10-18 the user picked entering the folder inside the launch and failing clearly otherwise, and
+  added: "This should be in SPEC.md. This is NOT an acceptable silent failure. Following a symlink is fine, but this is
+  clearly not the intent of the launch and should not fail silently." Principle for the spec: a launch (agent, Restart,
+  Replace, terminal tab) either starts in the session's working directory or fails with a clear error naming it; it
+  never silently starts somewhere else. Resolving a symlink to its target is not "somewhere else".
+- Completion criteria: the launched process itself enters the working directory and reports a launch failure naming the
+  directory if it cannot (agent launches through the launch helper, terminal tabs through a small wrapper), so Create,
+  Restart, Replace and OpenTab fail visibly instead of running in HOME; an optional earlier pre-check is allowed but not
+  in place of the in-launch check. Tests use a folder the user cannot enter (skipped as root). SPEC.md states the
+  principle above. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## template-wrapper-follows-different-agent.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by reading current main (1b06488c). An agent request that names a template and also passes a
+  different `--agent` keeps the template's wrapper prefix (`apply_template`, `launcher.rs` around 565–590, never clears
+  it on an agent change), and the wrapper counts as agent-supplied only when the request's own `--wrapper` set it
+  (`agent_launch.rs` around 254–257), so no wrapper card appears. The launcher instead loads the new agent type's
+  remembered wrapper. Under default host settings the ordinary approval card still shows the full command, wrapper
+  included; only a host that runs farhelm commands without asking but asks before YOLO loses a card entirely. The agent
+  cannot inject words: the wrapper is text the user saved. The likely harm is a misconfigured session.
+  `plans/reports/agent-wrappers.report.md` flagged the gap without a recorded decision.
+- Decision: on 2026-10-18 the user wrote, as a comment naming the outcome: "fix spec: this is as designed. we may later
+  choose to support restricting a warpper to agent types but until we do, this is expected behavior. the user picks the
+  prefix, and picks the agent type (weather through agent or not). their responsibility to make sure they match."
+  Principle for the spec: a wrapper prefix is not tied to an agent type; whoever composes the launch (the user directly
+  or through an agent) chooses both, and keeping a template's wrapper when a later edit changes the agent type is
+  expected and needs no separate wrapper approval.
+- Completion criteria: SPEC.md (wrappers or agent-spawned sessions) states the principle, so the command-line behavior
+  and the absent wrapper card are covered; no code change. If the report's open decision is still presented as
+  unresolved somewhere maintained, point it at this outcome. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## prompt-approval-can-cross-agent-runs.md
+
+- Outcome: `fix spec`.
+- Assessment: partly correct, by reading current main (1b06488c). After Allow on an agent prompt card, the helm checks
+  the requesting connection, target host and host connection and then delivers by session id alone (`agent_requests.rs`
+  around 1942–1954); the supervisor checks the current run's eligibility but nothing compares it with the run or
+  permission shield the card showed. Replace and Replace with cannot trigger this (they make a new session id, so
+  delivery is refused as not found). Only Restart with changes permissions on the same session, a GUI action by the
+  person, plus a YOLO confirmation where the host asks. No agent can raise the target's permissions; the YOLO-to-guarded
+  direction is harmless; and the observed-YOLO reading can flip within one run, which run binding would not catch. The
+  code already calls the shield an informational snapshot, while SPEC.md calls only the open-in-a-client note a
+  snapshot. A card can wait up to 9 minutes, so FILTER.md's sub-second filter does not apply.
+- Decision: on 2026-10-18 the user picked the recommended spec change: the shield on a prompt card is a snapshot.
+- Completion criteria: SPEC.md "Agent-spawned sessions" states that the target's permission shield on a prompt card,
+  like the open-in-a-client note, is a snapshot that may change while the card waits; no code change. Remove the
+  feedback file and its index entry.
+- Execution: `pending`.
+
+## empty-agent-prompt-submits-existing-draft.md
+
+- Outcome: `fix spec+code`.
+- Assessment: partly correct, by reading current main (1b06488c); no vendor agent was run. Every hop accepts an empty
+  agent prompt on purpose (the shared validator, pinned by a CLI test of `--prompt ""`), and the supervisor sends empty
+  bracketed paste followed by the submit key (`core.rs` around 10642–10657), so an empty prompt only submits whatever
+  draft the user left in the target's composer. SPEC.md "Agent-spawned sessions" accepts the parts ("An explicitly empty
+  message is legal"; the message "may mix with or follow text already in the agent's composer"), and a non-empty prompt
+  submits the same unseen draft. The empty case adds a card that suggests approving does nothing, for a message with no
+  legitimate use. Unverified: how Claude Code and Codex handle a zero-byte paste followed by Enter or Tab.
+- Decision: on 2026-10-18 the user picked refusing empty messages.
+- Completion criteria: the agent-to-agent prompt command refuses empty text at the command line, helm and target
+  supervisor through a dedicated check (a new session's initial prompt keeps its current rules); SPEC.md's "An
+  explicitly empty message is legal" is replaced by the refusal; the CLI test that pins `--prompt ""` as legal expects a
+  refusal; a supervisor test covers the refusal. Remove the feedback file and its index entry.
+- Execution: `pending`.
