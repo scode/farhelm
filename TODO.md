@@ -47,9 +47,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
 
-- Follow up on the recent quick launch system so an agent can populate the templates. Plan:
-  `plans/queue/agent-quick-launch-templates.md`.
-
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
   the keyboard quick switcher. The nearest thing today is Stop followed later by Restart, which ends the agent but keeps

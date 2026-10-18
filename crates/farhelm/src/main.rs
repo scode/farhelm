@@ -435,6 +435,12 @@ enum TemplateCmd {
         name: String,
         #[command(flatten)]
         fields: TemplateFieldFlags,
+        /// Mark this template for the ⚡ quick-launch shortcut.
+        #[arg(long)]
+        quick_launch: bool,
+        /// Give this template a physical number key, 1–9 or 0.
+        #[arg(long, value_name = "DIGIT", value_parser = parse_template_key)]
+        key: Option<String>,
     },
     /// Set the given fields on an existing template; others stay as they are.
     #[command(mut_arg("templates", |arg| arg.hide(true)))]
@@ -444,6 +450,18 @@ enum TemplateCmd {
         name: String,
         #[command(flatten)]
         fields: TemplateFieldFlags,
+        /// Move the ⚡ quick-launch mark to this template.
+        #[arg(long, conflicts_with = "no_quick_launch")]
+        quick_launch: bool,
+        /// Remove the ⚡ mark from this template.
+        #[arg(long, conflicts_with = "quick_launch")]
+        no_quick_launch: bool,
+        /// Give this template a physical number key, 1–9 or 0.
+        #[arg(long, value_name = "DIGIT", value_parser = parse_template_key, conflicts_with = "no_key")]
+        key: Option<String>,
+        /// Remove this template's current number key.
+        #[arg(long, conflicts_with = "key")]
+        no_key: bool,
     },
     /// Delete a launch template.
     Delete {
@@ -598,6 +616,16 @@ impl AgentCmd {
             AgentCmd::Instructions | AgentCmd::Help => None,
         }
     }
+}
+
+/// Keep CLI number keys to the ten physical digits the launcher listens for.
+fn parse_template_key(value: &str) -> Result<String, String> {
+    matches!(
+        value,
+        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "0"
+    )
+    .then(|| value.to_string())
+    .ok_or_else(|| "a template key must be one digit, 1–9 or 0".to_string())
 }
 
 /// Validate repository spellings with the launcher's parser while retaining
@@ -1562,21 +1590,46 @@ async fn run_supervisor(
 /// the template, as the lifecycle verbs confirm on stdout.
 fn run_template_write(command: &TemplateCmd) -> anyhow::Result<()> {
     let (verb, done) = match command {
-        TemplateCmd::Create { name, fields } => (
+        TemplateCmd::Create {
+            name,
+            fields,
+            quick_launch,
+            key,
+        } => (
             farhelm_proto::AgentVerb::TemplateCreate {
                 name: name.clone(),
                 fields: fields.fields()?,
                 host: fields.host.clone(),
-                shortcuts: Default::default(),
+                shortcuts: farhelm_proto::TemplateShortcutEdit {
+                    quick_launch: quick_launch.then_some(true),
+                    key: key.clone().map(farhelm_proto::TemplateKeyEdit::Set),
+                },
             },
             "created",
         ),
-        TemplateCmd::Edit { name, fields } => (
+        TemplateCmd::Edit {
+            name,
+            fields,
+            quick_launch,
+            no_quick_launch,
+            key,
+            no_key,
+        } => (
             farhelm_proto::AgentVerb::TemplateEdit {
                 name: name.clone(),
                 fields: fields.fields()?,
                 host: fields.host.clone(),
-                shortcuts: Default::default(),
+                shortcuts: farhelm_proto::TemplateShortcutEdit {
+                    quick_launch: if *quick_launch {
+                        Some(true)
+                    } else {
+                        no_quick_launch.then_some(false)
+                    },
+                    key: key
+                        .clone()
+                        .map(farhelm_proto::TemplateKeyEdit::Set)
+                        .or_else(|| no_key.then_some(farhelm_proto::TemplateKeyEdit::Clear)),
+                },
             },
             "changed",
         ),

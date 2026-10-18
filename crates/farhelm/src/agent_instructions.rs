@@ -178,7 +178,13 @@ fn render(agent: &Command) -> String {
          --cwd or --gh/--github, --title and --host (never --template); edit sets only the fields you give and\n\
          cannot unset one or change a template between agent and command launches, so delete\n\
          and recreate a template to do either. --command always needs --yolo or --no-yolo. The\n\
-         templates listing hides command text, so you cannot copy a template you did not write.\n\
+         --quick-launch flag marks a template that chooses an agent or a nonblank command;\n\
+         --key DIGIT assigns any template a number key (1–9 or 0). Both move an existing\n\
+         mark or key from another template, and the approval card names the move. On edit,\n\
+         --no-quick-launch and --no-key clear this template's own assignments. You can edit\n\
+         only these shortcuts without changing a template field. The templates listing\n\
+         shows each template's quick-launch mark and number key, but hides command text,\n\
+         so you cannot copy a template you did not write.\n\
          Clone requires an exact source session id and destination host; cwd, title, and the\n\
          source's launch inherit. Spawn creates on this host only, from --inherit-agent (this\n\
          session's own launch) or from the same launch flags as create, never both; a template\n\

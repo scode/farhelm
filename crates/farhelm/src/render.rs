@@ -154,7 +154,9 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
 ///
 /// Values are the spellings the CLI flags take (`--agent codex`,
 /// `--effort high`), so a row reads as the flags it stands for; a field the
-/// template resets is shown as `default`. Free text (a model, host name,
+/// template resets is shown as `default`. The quick-launch mark and number
+/// key follow the fields because they select a template rather than set a
+/// launch field. Free text (a model, host name,
 /// folder, repository or title) is quoted, because the parts are joined
 /// with commas and a title such as `x, yolo` would otherwise read as the
 /// template asserting YOLO. Historical trust is omitted because applying the
@@ -235,6 +237,12 @@ pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> Str
     }
     if let Some(name) = &fields.name {
         parts.push(format!("title {}", quoted(name)));
+    }
+    if template.quick_launch {
+        parts.push("quick launch".to_string());
+    }
+    if let Some(key) = &template.key {
+        parts.push(format!("number key {key}"));
     }
     if parts.is_empty() {
         "nothing".to_string()

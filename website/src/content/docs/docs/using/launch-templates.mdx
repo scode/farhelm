@@ -199,6 +199,11 @@ command ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessi
 
 Agents can also create, edit, and delete templates with `farhelm agent template create`, `edit`, and `delete`.
 Create and edit accept `--gh`/`--github` for a managed checkout, or `--cwd` for an existing directory.
+They can assign **⚡** with `--quick-launch` or a number with `--key 1` (using any digit from 1–9 or 0). An edit can
+remove this template's mark or key with `--no-quick-launch` or `--no-key`, even without changing its other choices.
+Assigning a mark or key that belongs to another template moves it; the card tells you which template loses it.
+The **⚡** mark needs a template that chooses an agent or a nonblank command. A number key can select a partial template.
+`farhelm agent templates` shows these assignments alongside each template's choices.
 Each change shows you the whole template on a card first, command line included, and happens only if you allow it,
 unless you have told Farhelm not to ask for that agent's host ([Approve what agents
 do](/docs/using/approve-agent-requests/)). An agent's edit cannot remove a choice from a template, so it never drops a
