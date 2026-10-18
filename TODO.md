@@ -47,33 +47,37 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Show host uninstall refusals in a dialog.** When Uninstall is refused because the host was set up manually or
   Farhelm cannot safely remove it, the reason currently appears as red text in the host sidebar. Show the refusal in a
   proper dialog, consistent with other host actions. Audit similar refusal and error paths for legacy sidebar text and
-  bring any outliers into the current UI convention.
+  bring any outliers into the current UI convention. Plan: `plans/queue/host-uninstall-dialogs.md`.
 
 - **Render host setup and uninstall plans as GUI steps.** The setup and uninstall confirmation dialogs currently show
   the planned actions in a plain text box. Present the actions as distinct items in the dialog so the user can scan what
-  will happen before deciding, while keeping the paths and other details the plans currently show.
+  will happen before deciding, while keeping the paths and other details the plans currently show. Plan:
+  `plans/queue/host-uninstall-dialogs.md`.
 
 - **Improve the post-uninstall host notice.** After uninstall, a large plain-text notice sits above the host rows in the
   sidebar. It says Farhelm was removed, names the host and the path where its data remains, and has a separate Dismiss
   button. The text wraps across several lines and dominates the narrow panel. Find a better way to present this result;
-  the design details are TBD.
+  the design details are TBD. Plan: `plans/queue/host-uninstall-dialogs.md`.
 
 - **Select Guarded by typing in the launcher.** Make bare `guarded` offer and preselect the Guarded permission choice,
   as bare `yolo` does today, while keeping `perms:guarded` available. During planning, audit every choice in the New,
   Clone, and Replace with launcher dialog for whether it can be set through typing alone (in search or a text field),
-  and identify any other choices that need a typed route or an intentional exception.
+  and identify any other choices that need a typed route or an intentional exception. Plan:
+  `plans/queue/launcher-typed-guarded.md`.
 
 - **Open JSON downloads with Cmd-click.** Add `.json` to the desktop app's allowed extensions for opening a completed
   file download with Cmd-click (Ctrl-click on non-macOS desktop builds). Keep the final-extension check
-  case-insensitive. Update SPEC.md and SPEC_impl.md, which currently limit opening to `.md` and `.txt`.
+  case-insensitive. Update SPEC.md and SPEC_impl.md, which currently limit opening to `.md` and `.txt`. Plan:
+  `plans/queue/json-download-open.md`.
 
 - **Apply template hotkeys in the launcher.** While New, Clone, or Replace with is open, pressing a bound template
   hotkey should apply that template to the current launcher draft, exactly as accepting `tl:name` in the launcher's
   search does, instead of starting a session. This should work for the quick-launch bolt and number shortcuts, so
-  pressing several hotkeys can stack their template edits before Launch.
+  pressing several hotkeys can stack their template edits before Launch. Plan: `plans/queue/launcher-template-keys.md`.
 
 - **Open a template-only launcher with Cmd-J.** Make Cmd-J work like Cmd-K, but show only templates. Typing a template
-  name and pressing Enter should launch it, so `Cmd-J, foo, Enter` starts the `foo` template.
+  name and pressing Enter should launch it, so `Cmd-J, foo, Enter` starts the `foo` template. Plan:
+  `plans/queue/launcher-template-keys.md`.
 
 - **Allow repeated quick launches from one setup.** Quick-launching a recent managed-checkout setup while an earlier
   session from it is still running can strand New Session with the repository name prefilled in Name. The checkout
@@ -81,7 +85,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `409 Conflict: a directory with that checkout name already exists; choose another title`, the preview field says
   `checkout preview unavailable`, and Launch is disabled with `wait for a current checkout preview before launching`.
   Typing `name:...` to pick another name works around it. Diagnose the naming and preview path so the same setup can be
-  quick-launched repeatedly without manual renaming; the exact naming behavior is TBD.
+  quick-launched repeatedly without manual renaming; the exact naming behavior is TBD. Plan:
+  `plans/queue/repeat-quick-launch.md`.
 
 - **Fix emoji corruption while terminal output streams.** Emoji in agent output, such as status icons beside changed,
   unchanged, skipped, and failed counts, sometimes render as clipped or partial glyphs. Scrolling redraws them correctly
@@ -180,7 +185,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   row does not already show: hovering the name shows the same name again. The row also disagrees with itself depending
   on where the pointer lands. In compact mode, the space between the row's parts shows the session's directory and
   "click to open", while the name right next to it shows just the name. Make the hover text carry information worth
-  hovering for, and make the row's parts agree. What it should show is TBD.
+  hovering for, and make the row's parts agree. What it should show is TBD. Plan: `plans/queue/session-hover-text.md`.
 
 - **Give the Settings dialog more structure.** Settings has grown into one long page that takes endless scrolling to get
   through. Overhaul it with more structure, such as tabs, so related settings are grouped and any one of them is easy to
