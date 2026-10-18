@@ -1559,9 +1559,16 @@ fn request_directory_browse(
 /// `aria-modal` alone cannot stop native Tab navigation from reaching the
 /// still-mounted page behind it. Keeping the listener on this particular DOM
 /// node makes its lifetime exactly the dialog's lifetime; no global handler
-/// can survive a close and interfere with the next open.
+/// can survive a close and interfere with the next open. The shared focus
+/// listener keeps a gap click on the current control, while container Enter
+/// submits through the same validation path as the Launch button.
 fn install_composer_focus_trap() {
-    document::eval(
+    document::eval(&format!(
+        "{}\n{}",
+        crate::dialog_focus::install_js(
+            ".create-session-form[role=\"dialog\"]",
+            crate::dialog_focus::ContainerEnter::SubmitForm,
+        ),
         r#"(() => {
             const dialog = document.querySelector('.create-session-form[role="dialog"]');
             if (!dialog || dialog.__farhelmComposerFocusTrap) return;
@@ -1587,7 +1594,7 @@ fn install_composer_focus_trap() {
                 }
             });
         })();"#,
-    );
+    ));
 }
 
 /// Give the shared composer search focus at an explicit interaction boundary.

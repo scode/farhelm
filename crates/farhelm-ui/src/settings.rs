@@ -115,6 +115,7 @@ pub(crate) fn SettingsDialog(
                         DIALOG_SELECTOR,
                         trust_focus.as_deref().unwrap_or("input"),
                         Some(".app-settings-close"),
+                        None,
                     );
                     if let Some(selector) = &trust_focus {
                         // The shared dialog focus helper deliberately prevents

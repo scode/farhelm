@@ -9,6 +9,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type Locator, type Page } from "@playwright/test";
+import { clickDialogGap } from "./helpers/dialog-gap";
 import { agentLaunchRow, commandLaunchRow, patchPreferences, readPreferences, SESSION_LISTING } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { attachSession, cleanupSession } from "./helpers/term";
@@ -63,6 +64,33 @@ test("named restart with requires a target when no conversation was captured", a
     conversation: "named-conversation",
   });
   expect((bodies[0] as { with: object }).with).not.toHaveProperty("conversation");
+});
+
+/**
+ * Cancel is the safe opening focus, including after a gap click. Container
+ * Enter must respect the unchanged draft's disabled action, then submit one
+ * edited restart through the same button a pointer would press.
+ */
+test("restart with keeps gap focus and container Enter uses its enabled action", async ({ page }) => {
+  await injectSession(page, BASELINE, "resume");
+  const bodies = await acceptYoloRestart(page);
+  const dialog = await openInjectedDialog(page);
+  const cancel = dialog.locator(".restart-with-cancel");
+  await expect(cancel).toBeFocused();
+  await clickDialogGap(page, dialog);
+  await expect(cancel).toBeFocused();
+  await dialog.focus();
+  await expect(dialog).toBeFocused();
+  await dialog.press("Enter");
+  expect(bodies, "an unchanged draft has no action to perform").toHaveLength(0);
+
+  await dialog.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
+  await expect(dialog.locator(".restart-with-submit")).toBeEnabled();
+  await dialog.focus();
+  await expect(dialog).toBeFocused();
+  await dialog.press("Enter");
+  await expect(dialog).toHaveCount(0);
+  expect(bodies, "one container Enter must request one restart").toHaveLength(1);
 });
 
 /** Restart refusal text can quote a peer's hidden characters. Its display

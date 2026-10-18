@@ -2353,6 +2353,7 @@ pub(crate) fn SessionView(
                             // above so assistive technology can identify the
                             // panel represented by `aria-expanded`.
                             div { id: "restart-confirm-panel", class: "header-confirm",
+                                onmounted: move |_| { document::eval(&crate::dialog_focus::install_js("#restart-confirm-panel", crate::dialog_focus::ContainerEnter::None)); },
                                 span { class: "confirm-consequence",
                                     "{crate::status::restart_consequence(&shown.status)}"
                                 }
@@ -2453,6 +2454,7 @@ pub(crate) fn SessionView(
                         }
                         if confirming_header_replace.is_open() {
                             div { class: "header-confirm header-replace-confirm",
+                                onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".header-replace-confirm", crate::dialog_focus::ContainerEnter::None)); },
                                 // The same status-derived consequence the row's
                                 // and the interrupted card's replace prompts
                                 // show: replacing deletes this session, so a
@@ -2557,6 +2559,7 @@ pub(crate) fn SessionView(
                         }
                         if confirming_header_delete.is_open() {
                             div { class: "header-confirm header-delete-confirm",
+                                onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".header-delete-confirm", crate::dialog_focus::ContainerEnter::None)); },
                                 // The row prompt's own consequence text, so
                                 // the two entry points warn about exactly the
                                 // same things (a live agent, open tabs).

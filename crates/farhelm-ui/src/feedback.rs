@@ -255,6 +255,7 @@ pub(crate) fn FeedbackDialog(
                     DIALOG_SELECTOR,
                     "textarea",
                     Some(".feedback-cancel"),
+                    Some(".feedback-send"),
                 ),
                 // Closing while a send is in flight would cancel it with no
                 // word on whether it arrived and lose the text, so Escape

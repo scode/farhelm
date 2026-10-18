@@ -143,6 +143,10 @@ pub(crate) const RESTART_WITH_DIALOG_SELECTOR: &str = r#".restart-with-dialog[ro
 /// are `tabindex="-1"` buttons (they are reached through the input's active
 /// descendant, and blur unmounts them), so listing them would give the trap
 /// boundaries that native Tab never visits.
+///
+/// Empty space preserves the focused control. If another route parks focus
+/// on the container, Enter presses the displayed action; its native disabled
+/// state still protects an unchanged draft.
 fn install_focus_trap() {
     let trap = r#"(() => {
             const dialog = document.querySelector(__DIALOG__);
@@ -177,7 +181,11 @@ fn install_focus_trap() {
         );
     let isolate =
         modal_isolation::install_js(RESTART_WITH_DIALOG_SELECTOR, Some(".restart-with-cancel"));
-    document::eval(&format!("{trap}\n{isolate}"));
+    let focus = crate::dialog_focus::install_js(
+        RESTART_WITH_DIALOG_SELECTOR,
+        crate::dialog_focus::ContainerEnter::Click(".restart-with-submit"),
+    );
+    document::eval(&format!("{trap}\n{focus}\n{isolate}"));
 }
 
 /// Keep focus inside the modal before a primary action makes its controls busy.
