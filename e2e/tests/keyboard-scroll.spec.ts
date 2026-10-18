@@ -5,9 +5,10 @@
  */
 import { type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
-import { hostRowByName, openHostMenu, resetPreferences, SESSION_LISTING } from "./helpers/fleet";
+import { hostRowByName, openHostMenu, pinAutoSelect, resetPreferences, SESSION_LISTING } from "./helpers/fleet";
 import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
-import { fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
+import { replayRecord, waitForReplayReveal, waitForSessionMounted } from "./helpers/terminal-readiness";
+import { findSessionIdByTitle, fulfillAsHelm, installTerminalSuiteHooks } from "./helpers/terminal-suite";
 
 installTerminalSuiteHooks();
 
@@ -31,6 +32,37 @@ async function openHelpDialog(page: Page, item: "ssh needs 2FA?" | "send feedbac
   await expect(dialog).toBeVisible();
   return dialog;
 }
+
+/**
+ * A menu that already owns keyboard focus must keep it when the selected
+ * terminal's initial replay ends. Otherwise the next menu key can reach the
+ * agent, and WebKit can scroll the narrow shell and close the menu outright.
+ */
+test("help menu keeps keyboard focus through a late terminal reveal", async ({ page, request }) => {
+  const id = await findSessionIdByTitle(request, "e2e-session");
+  expect(id, "the stack supplies the selected terminal").toBeTruthy();
+  await pinAutoSelect(page, id!);
+  await page.addInitScript(() => {
+    (window as any).__farhelmTestReplay = { holdMarker: true, idleMs: 60_000 };
+  });
+  await page.setViewportSize({ width: 360, height: 320 });
+  await page.goto("/");
+  await waitForSessionMounted(page, id!);
+  await expect.poll(() => replayRecord(page, "terminal"), {
+    message: "the selected terminal must hold replay while the menu opens",
+  }).toMatchObject({ heldReason: "marker", revealed: false });
+
+  await page.getByRole("button", { name: "help", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "help", exact: true });
+  const first = menu.getByRole("menuitem").first();
+  await expect(first).toBeFocused();
+  await page.evaluate(() => (window as any).__farhelmIslands.terminal.test.releaseCatchUp());
+  await waitForReplayReveal(page, "terminal");
+  await expect(first, "terminal reveal must leave the open menu's focus intact").toBeFocused();
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem").nth(1)).toBeFocused();
+});
 
 /**
  * Preserve the real local host while adding one connected display fixture.

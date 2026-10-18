@@ -1107,12 +1107,16 @@
    * taking it would dismiss the list and mark its entries read before the
    * user finished inspecting them. Cover the opening bell too, before the
    * list's mount has transferred focus into its panel.
+   * Menus have the same boundary: a reveal can land after the toggle opens
+   * but before focus reaches an item. Keep both the expanded toggle and an
+   * item inside a menu from losing the next arrow or Enter to the terminal.
    */
   function keyboardHeldElsewhere() {
     if (document.querySelector(OPEN_MODAL_SELECTOR)) return true;
     const active = document.activeElement;
     return !!(active && active.closest && active.closest(
-      '.approval-cards, .sidebar-resize-handle, .session-bell-flyout, .session-row-bell[aria-expanded="true"]',
+      '.approval-cards, .sidebar-resize-handle, .session-bell-flyout, .session-row-bell[aria-expanded="true"], ' +
+      '[role="menu"], [aria-haspopup="menu"][aria-expanded="true"]',
     ));
   }
 
@@ -4490,8 +4494,10 @@
          * Other focused buttons do not hold the reveal back. The tab-strip
          * selector is the concrete case: selecting a tab leaves focus on its
          * button, and the point of that selection is to type into the tab once
-         * it is ready. Treating every button like a typing target would strand
-         * that select-then-type flow.
+         * it is ready. Open menus are different: their toggle and items are
+         * active keyboard destinations, covered by `keyboardHeldElsewhere()`.
+         * Treating every button like a typing target would strand the
+         * select-then-type flow.
          */
         function takesFocus() {
           if (!focusOnReveal || focusedEl !== spec.el) return false;
