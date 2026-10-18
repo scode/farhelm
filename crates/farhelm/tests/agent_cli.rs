@@ -1825,6 +1825,256 @@ fn initial_prompt_flags_refuse_controls_conflicts_and_oversized_files() {
     );
 }
 
+// Running-agent prompts use the same bounded literal-message parser as create,
+// but their command surface must not grow any of create's launch choices.
+
+/// Each source must send its literal contents to the exact selected target.
+/// Empty text is legal under the shared validator; source presence, rather
+/// than nonempty contents, is the requirement. Success reports delivery only.
+#[farhelm_testtrace::test]
+fn prompt_sends_literal_file_stdin_and_empty_text() {
+    const TEXT: &str = "--help\n\t{farhelm_args}";
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let file = temp.path().join("message.txt");
+    std::fs::write(&file, TEXT).unwrap();
+    for (case, (flag, value, expected)) in [
+        ("--prompt", TEXT, TEXT),
+        ("--prompt-file", file.to_str().unwrap(), TEXT),
+        ("--prompt-file", "-", TEXT),
+        ("--prompt", "", ""),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let socket = temp.path().join(format!("supervisor-{case}.sock"));
+        let (done, owner) = mock_supervisor(&socket, move |request| {
+            let ControlMsg::AgentRequest {
+                req_id,
+                session_id,
+                request,
+            } = request
+            else {
+                panic!("expected agent request, got {request:?}");
+            };
+            assert_eq!(session_id, SESSION);
+            assert_eq!(
+                request,
+                AgentVerb::Prompt {
+                    session_id: Some("target-session".into()),
+                    prompt: expected.into(),
+                }
+            );
+            Some(ControlMsg::AgentResponse {
+                req_id,
+                outcome: AgentOutcome::Ok {
+                    reply: AgentReply::Prompted {},
+                },
+            })
+        });
+        let command = agent_command_with_args(
+            &socket,
+            &["prompt", "--session", "target-session", flag, value],
+        );
+        // The bounded runner closes stdin itself. As in the initial-prompt
+        // fixture, redirect this owned file before exec without changing the
+        // runner or exposing the test process to environment mutations.
+        let command = if value == "-" {
+            let mut redirected = Command::new("/bin/sh");
+            redirected
+                .args(["-c", "exec \"$@\" < \"$0\""])
+                .arg(&file)
+                .arg(command.get_program())
+                .args(command.get_args());
+            for (name, value) in command.get_envs() {
+                match value {
+                    Some(value) => {
+                        redirected.env(name, value);
+                    }
+                    None => {
+                        redirected.env_remove(name);
+                    }
+                }
+            }
+            redirected
+        } else {
+            command
+        };
+        let output = output_with_timeout(command);
+        finish_server(done, owner);
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        assert_eq!(output.stdout, b"prompt sent to target-session\n");
+        assert!(output.stderr.is_empty(), "{output:?}");
+    }
+}
+
+/// A prompt requires a target and exactly one source, and cannot relaunch or
+/// configure its target. Usage errors must happen before any supervisor dial.
+#[farhelm_testtrace::test]
+fn prompt_requires_target_and_one_source_and_refuses_launch_flags() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("not-listening.sock");
+    let file = temp.path().join("message.txt");
+    std::fs::write(&file, "message").unwrap();
+    for (args, diagnostic) in [
+        (vec!["prompt", "--prompt", "message"], "--session"),
+        (vec!["prompt", "--session", "target"], "--prompt"),
+        (
+            vec![
+                "prompt",
+                "--session",
+                "target",
+                "--prompt",
+                "message",
+                "--prompt-file",
+                file.to_str().unwrap(),
+            ],
+            "cannot be used",
+        ),
+    ] {
+        let output = output_with_timeout(agent_command_with_args(&socket, &args));
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(diagnostic),
+            "{output:?}"
+        );
+    }
+    for flag in ["--agent", "--template", "--command", "--idempotency-key"] {
+        let output = output_with_timeout(agent_command_with_args(
+            &socket,
+            &[
+                "prompt",
+                "--session",
+                "target",
+                "--prompt",
+                "message",
+                flag,
+                "value",
+            ],
+        ));
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("unexpected argument"), "{stderr}");
+        assert!(stderr.contains(flag), "{stderr}");
+    }
+}
+
+/// The running-agent command must keep the launch parser's byte and control
+/// limits. File cases cover NUL (which cannot occur in argv), invalid UTF-8,
+/// and cap-plus-one reads without relying on a live relay for validation.
+#[farhelm_testtrace::test]
+fn prompt_refuses_invalid_literal_and_file_contents_before_dialing() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("not-listening.sock");
+    for text in ["escape\u{1b}", "carriage\rreturn"] {
+        let output = output_with_timeout(agent_command_with_args(
+            &socket,
+            &["prompt", "--session", "target", "--prompt", text],
+        ));
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("control characters"),
+            "{output:?}"
+        );
+    }
+    let file = temp.path().join("invalid.txt");
+    for (contents, diagnostic) in [
+        (b"contains\0nul".to_vec(), "control characters"),
+        (vec![0xff], "UTF-8"),
+        (vec![b'x'; 64 * 1024 + 1], "64 KiB"),
+    ] {
+        std::fs::write(&file, contents).unwrap();
+        let output = output_with_timeout(agent_command_with_args(
+            &socket,
+            &[
+                "prompt",
+                "--session",
+                "target",
+                "--prompt-file",
+                file.to_str().unwrap(),
+            ],
+        ));
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(diagnostic),
+            "{output:?}"
+        );
+    }
+}
+
+/// Empty success replies still need an action-specific tag. A stop reply
+/// cannot confirm prompt delivery; after dispatch, such an answer leaves an
+/// unknown outcome rather than permission to resend the message blindly.
+#[farhelm_testtrace::test]
+fn prompt_refuses_a_wrong_reply_and_reports_unknown_delivery() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, owner) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id,
+            request: AgentVerb::Prompt { .. },
+            ..
+        } = request
+        else {
+            panic!("expected prompt, got {request:?}");
+        };
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Stopped {},
+            },
+        })
+    });
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["prompt", "--session", "target", "--prompt", "message"],
+    ));
+    finish_server(done, owner);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("prompt delivery confirmation"), "{stderr}");
+    assert!(stderr.contains("stop confirmation"), "{stderr}");
+    assert!(stderr.contains("outcome is unknown"), "{stderr}");
+}
+
+/// The confirmation must stay one printable line even if target validation
+/// changes later. A real relay rejects this hostile id; this mock isolates the
+/// output layer's own obligation to escape it without printing prompt text.
+#[farhelm_testtrace::test]
+fn prompt_confirmation_escapes_the_target() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, owner) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest { req_id, .. } = request else {
+            panic!("expected agent request, got {request:?}");
+        };
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Prompted {},
+            },
+        })
+    });
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &[
+            "prompt",
+            "--session",
+            "line one\nline two\u{1b}",
+            "--prompt",
+            "private message",
+        ],
+    ));
+    finish_server(done, owner);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"prompt sent to line one\\nline two\\x1b\n");
+    assert!(output.stderr.is_empty(), "{output:?}");
+}
+
 /// Spec: clone refuses omitted source and destination selectors before it
 /// opens the supervisor socket.
 ///

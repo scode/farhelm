@@ -4911,6 +4911,27 @@ first resolves exactly what it would do (the launch, the target session, the who
 (`approvals::ask`), then rechecks that the request's connection is still the one serving its host before acting, so an
 approval never carries over to whatever replaced that connection during the wait.
 
+Running-agent prompts use their own `AgentVerb::Prompt`, `AgentReply::Prompted` and approval kind. The helm resolves the
+target before asking, then reads `PromptTargetInfo` from that routed supervisor. Its `PromptTarget` reply carries the
+current `SessionInfo` and an attachment snapshot across every terminal belonging to that session, including views on
+another helm connection. The helm's channel registry cannot answer that question. The card renders the full message
+through the same escaped, scrollable peer block as an initial prompt and reuses the session list's permission-shield
+classification. The requesting and target connections are revalidated after approval; this path never composes a launch
+or applies the launch-only YOLO guard.
+
+`PromptSession` is an accepted supervisor-owned mutation, so losing the requesting connection does not cancel a paste
+between its opening marker and submit. It takes the target lifecycle claim through the final confirmed send, reads its
+stored activity synchronously, and requires a live owned agent pane reading Running or Idle. No activity leaf lock or
+attachment lock survives an await, and it never takes the target's agent-request fence: crossing prompt requests must
+not wait for each other's relay fences. The existing input client opens on the exact session and pane, without taking
+over a viewer, and sends one bracketed paste then the per-kind submit bytes as two confirmed sends. Its internal bounded
+chunking preserves one opening and one closing paste marker around the whole message. A one-shot session-paired tmux
+query requires `bracket_paste_flag` to be exactly on; a missing, off or malformed flag refuses delivery. Claude uses CR
+and Codex Tab, at both accepted statuses. A later native delivery route belongs behind that same per-kind strategy seam.
+There is no Farhelm prompt queue, receipt store or idempotency key. A lost or failed reply may follow partial or
+complete input, so retries are new sends. Ordinary attached-client typing stays ungated; the status check is specific to
+this agent-requested operation.
+
 Pending approvals are an in-memory table in the helm (`approvals::Approvals`). Nothing is persisted: a helm restart
 drops the table and the parked requests with it, and the asking CLI gets the relay's ordinary "helm went away" ending.
 The GUI reads the table through `GET /api/approvals` and learns of changes from the fleet invalidation feed, which every

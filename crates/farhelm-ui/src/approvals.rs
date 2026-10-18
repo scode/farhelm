@@ -40,6 +40,8 @@ use farhelm_proto::launcher::{TemplateDestination, TemplateFields};
 use crate::ApiBase;
 use crate::api::AnswerOutcome;
 use crate::feed::{fallback_polls_now, fallback_sleep};
+use crate::icons::{PermissionGlyph, PermissionIcon};
+use crate::list::{permission_description, session_permission};
 use crate::peer::{PeerBlock, display_identity, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 
@@ -513,8 +515,8 @@ fn CardDetail(row: CardRow) -> Element {
             div { class: "approval-card-row approval-card-full approval-card-command",
                 dt { "{label}" }
                 dd { PeerBlock {
-                    class: if label == "initial prompt" { "approval-card-block approval-card-prompt" } else { "approval-card-block" },
-                    scroll_label: (label == "initial prompt").then(|| "initial prompt".to_string()),
+                    class: if matches!(label, "initial prompt" | "prompt") { "approval-card-block approval-card-prompt" } else { "approval-card-block" },
+                    scroll_label: matches!(label, "initial prompt" | "prompt").then(|| label.to_string()),
                     text
                 } }
             }
@@ -529,6 +531,15 @@ fn CardDetail(row: CardRow) -> Element {
             div { class,
                 dt { "{label}" }
                 dd { span { class: "peer-value", dir: "ltr", "{display_identity(&identity)}" } }
+            }
+        },
+        CardRow::Permission(glyph) => rsx! {
+            div { class,
+                dt { "permissions" }
+                dd {
+                    PermissionIcon { glyph }
+                    "{permission_description(glyph)}"
+                }
             }
         },
     }
@@ -569,13 +580,15 @@ fn compact_label(label: &'static str) -> &'static str {
 enum CardRow {
     /// A labelled peer fact, allowed to wrap to fit the available width.
     Value(&'static str, String),
-    /// A peer value that may span lines (command text), kept in its shape.
+    /// A peer value that may span lines (commands or prompts), kept in its shape.
     Block(&'static str, String),
     /// This UI's own words (yes, no, a default), not peer text.
     Note(&'static str, &'static str),
     /// An install identity, shown the way the hosts panel shows identities
     /// (`peer::display_identity`), which is stricter than ordinary peer text.
     Identity(&'static str, String),
+    /// The same classified shield as the session list, with audible wording.
+    Permission(PermissionGlyph),
 }
 
 /// The action's kind, for the card's data attribute (tests and styling).
@@ -586,6 +599,7 @@ fn action_kind(action: &ApprovalAction) -> &'static str {
         ApprovalAction::LaunchWithPrompt { .. } => "launch_with_prompt",
         ApprovalAction::Rename { .. } => "rename",
         ApprovalAction::Stop { .. } => "stop",
+        ApprovalAction::Prompt { .. } => "prompt",
         ApprovalAction::Delete { .. } => "delete",
         ApprovalAction::Restart { .. } => "restart",
         ApprovalAction::TemplateWrite { .. } => "template_write",
@@ -623,6 +637,7 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
         } => "start a copy of a session",
         ApprovalAction::Rename { .. } => "rename a session",
         ApprovalAction::Stop { .. } => "stop a session's agent",
+        ApprovalAction::Prompt { .. } => "send a prompt to a session's agent",
         ApprovalAction::Delete { .. } => "delete a session and its stored state",
         ApprovalAction::Restart { .. } => "restart a session, resuming its conversation",
         ApprovalAction::TemplateWrite {
@@ -736,6 +751,33 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
                 target,
                 &mut rows,
             );
+        }
+        ApprovalAction::Prompt {
+            target,
+            launch,
+            screen_yolo,
+            attached,
+            prompt,
+        } => {
+            session_rows(
+                "session",
+                "session id",
+                Some("session's host"),
+                target,
+                &mut rows,
+            );
+            rows.push(CardRow::Permission(session_permission(
+                Some(launch),
+                *screen_yolo,
+            )));
+            if *attached {
+                rows.push(CardRow::Note("client", "this session is open in a client"));
+            }
+            rows.push(CardRow::Note(
+                "delivery",
+                "the prompt may interleave with user typing or follow text already in the composer",
+            ));
+            rows.push(CardRow::Block("prompt", prompt.clone()));
         }
         ApprovalAction::Delete { target, guard } => {
             session_rows(
@@ -1026,6 +1068,90 @@ fn word<T: serde::Serialize>(value: &T) -> String {
 mod tests {
     use super::*;
     use farhelm_proto::CommandLaunch;
+
+    /// A running-agent card must show the whole message as isolated data,
+    /// retain line breaks and explain concurrent input without trusting the
+    /// peer's message as Farhelm-authored approval wording.
+    #[test]
+    fn running_prompt_card_preserves_escaped_multiline_data_and_target_shield() {
+        const PROMPT: &str = "<script>first</script>\nsecond\t\u{202e}third";
+        fn app() -> Element {
+            rsx! { CardDetail { row: CardRow::Block("prompt", PROMPT.into()) } }
+        }
+        let action = ApprovalAction::Prompt {
+            target: ApprovalSession {
+                id: "target".into(),
+                title: Some("title".into()),
+                host_name: Some("host".into()),
+            },
+            launch: SessionLaunch::Command(CommandLaunch {
+                command: "secret command".into(),
+                yolo: false,
+                agent: Some(farhelm_proto::LaunchHarness::Claude),
+                resume: None,
+            }),
+            screen_yolo: false,
+            attached: true,
+            prompt: PROMPT.into(),
+        };
+        let rows = action_rows(&action);
+        assert_eq!(action_kind(&action), "prompt");
+        assert_eq!(
+            action_summary(&action),
+            "send a prompt to a session's agent"
+        );
+        assert!(rows.contains(&CardRow::Block("prompt", PROMPT.into())));
+        assert!(rows.contains(&CardRow::Permission(PermissionGlyph::AssertedNotYolo)));
+        assert!(rows.contains(&CardRow::Note("client", "this session is open in a client")));
+        assert!(rows.iter().any(
+            |row| matches!(row, CardRow::Note("delivery", words) if words.contains("interleave"))
+        ));
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row, CardRow::Block("command", _))),
+            "a target permission is not a relaunch command"
+        );
+        // Claude has a recognized bypass footer. The shared sidebar rule
+        // ignores this flag for harnesses without one, including Codex.
+        let mut observed = action;
+        if let ApprovalAction::Prompt { screen_yolo, .. } = &mut observed {
+            *screen_yolo = true;
+        }
+        assert!(action_rows(&observed).contains(&CardRow::Permission(PermissionGlyph::Yolo)));
+
+        let mut dom = VirtualDom::new(app);
+        let edits = dom.rebuild_to_vec().edits;
+        let texts = edits
+            .iter()
+            .filter_map(|edit| match edit {
+                dioxus::core::Mutation::CreateTextNode { value, .. }
+                | dioxus::core::Mutation::SetText { value, .. } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            texts.contains(&"<script>first</script>"),
+            "markup is text, not an element: {texts:?}"
+        );
+        assert!(
+            texts.contains(&display_peer("second\t\u{202e}third").as_str()),
+            "presentation controls must be visibly escaped: {texts:?}"
+        );
+        // Literal newlines and line direction are static template content,
+        // absent from these dynamic edits. The browser case checks exact
+        // full text and each peer line's direction in the rendered DOM.
+        let attribute = |name, wanted: &str| {
+            edits.iter().any(|edit| matches!(edit,
+            dioxus::core::Mutation::SetAttribute { name: attr, value: dioxus::core::AttributeValue::Text(value), .. }
+                if *attr == name && value == wanted))
+        };
+        assert!(attribute(
+            "class",
+            "approval-card-block approval-card-prompt"
+        ));
+        assert!(attribute("aria-label", "prompt"));
+    }
 
     /// Delete cards must spell out the scope their guard actually permits.
     /// A tabs-only warning cannot silently authorize stopping a restarted agent.

@@ -8,6 +8,8 @@
 //! modal the sidebar's rename contract lives in (the edit survives the
 //! menu, the row, and listing churn, which the popup's geometry could
 //! never guarantee), and the list view submodule is what mounts it.
+//! The sidebar's pure permission classification is also shared with approval
+//! cards so the same existing session always gets the same shield.
 //!
 //! ## The list is multi-host (PLAN_M6.md item 6)
 //!
@@ -54,7 +56,7 @@ mod trash;
 mod view;
 
 pub(crate) use create_form::submitted_field;
-pub(crate) use row::{PeerTitle, abbreviate_home};
+pub(crate) use row::{PeerTitle, abbreviate_home, permission_description, session_permission};
 pub(crate) use shared::{
     OpenDestination, SessionHostIcon, SessionHostName, session_locality, with_source_host,
 };

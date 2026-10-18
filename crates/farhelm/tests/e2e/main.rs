@@ -102,6 +102,8 @@ mod agent_listing_real_stack;
 mod agent_relay;
 #[cfg(target_os = "linux")]
 mod change_hints;
+#[cfg(target_os = "linux")]
+mod prompt_running_agent;
 
 /// Report the unsupported substrate instead of certifying unobserved behavior.
 ///

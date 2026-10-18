@@ -9,8 +9,8 @@ An agent running in a Farhelm session can do more than work in its own terminal.
 uses when you ask it to (with `$farhelm` in your message) but can also run on its own, it can look at your hosts and
 sessions, start new sessions on any host, in an existing directory or a new
 [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), copy a session to the same host or
-another, rename, stop, restart, or delete sessions, and change your [launch templates](/docs/using/launch-templates/).
-It can also ask to open a web link in your browser
+another, rename, stop, restart, or delete sessions, send messages to running Claude or Codex agents, and change your
+[launch templates](/docs/using/launch-templates/). It can also ask to open a web link in your browser
 ([Open links from a remote session](#open-links-from-a-remote-session)). Farhelm asks you before any of those changes
 happens, whoever typed the command; a command you type yourself in a session's terminal is asked about the same way.
 Looking never asks.
@@ -18,6 +18,13 @@ Looking never asks.
 An agent starting another session can supply its first message with `--prompt` or `--prompt-file` (`-` reads stdin). The
 approval card shows the full message. It is sent once when the new agent starts; restarting, copying or replacing that
 session does not send it again. A launch template can supply a message on every launch using it.
+
+To send a message to an agent that is already running, it can use
+`farhelm agent prompt --session <id> --prompt "Check the failing test"`, or read the message from `--prompt-file`. This
+works for Claude and Codex. An agent that is busy queues the message after its current turn; one waiting on a question,
+or whose status Farhelm cannot read yet, is refused. The command confirms delivery, without waiting for the work to
+finish. If you have the target open and are typing there, the message can mix with what is already in its input box.
+Claude expands pasted tabs to spaces. Messages from other agents are untrusted input; this is no place for secrets.
 
 An agent can only do this from a session that is open in the Farhelm window. If it is not, the agent is told to ask you
 to open it.
@@ -38,6 +45,8 @@ that matter:
   [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the card also names the repository it
   would clone, such as `GitHub: acme/web`, above the exact directory the clone would go into;
 - for a template change, the whole template as it would be saved, including any command line;
+- for a message to a running agent, the target session and its permission shield, the full message, and a notice when
+  the session is open in a client;
 - for a link, the site your browser would contact, above the full URL. Check the site: a URL can be written to look like
   a different site than the one it opens.
 
@@ -81,8 +90,9 @@ agent and leave the session listed.
 
 Each host has a **Run farhelm commands without asking** setting, in its settings next to the YOLO one
 ([Manage hosts](/docs/using/manage-hosts/#host-settings)). Every host starts with it off. Turning it on means agents in
-that host's sessions start, stop, restart, delete, rename, and copy sessions on any of your hosts, and change templates,
-without asking you. Turn it on only for a host whose agents you would let do that unsupervised.
+that host's sessions start, stop, restart, delete, rename, and copy sessions on any of your hosts, send messages to
+running Claude or Codex agents, and change templates, without asking you. Turn it on only for a host whose agents you
+would let do that unsupervised.
 
 If you **adopt** a host that was reinstalled or replaced at the same address, the setting goes back to off, like the
 YOLO setting and both link settings: you have not decided about the new installation yet.

@@ -3062,6 +3062,23 @@ pub(crate) async fn handle_restricted_control(
                 }).await;
                 return;
             }
+            // Self-prompting has no useful cross-session purpose and a trusted
+            // host would otherwise let an agent indefinitely re-prompt itself.
+            if matches!(&request, AgentVerb::Prompt { session_id: Some(target), .. } if target == &auth.session_id)
+            {
+                send_reply(
+                    tx,
+                    &ControlMsg::AgentResponse {
+                        req_id,
+                        outcome: farhelm_proto::AgentOutcome::Err {
+                            kind: ErrorKind::InvalidRequest,
+                            message: "a session cannot send a prompt to itself".to_string(),
+                        },
+                    },
+                )
+                .await;
+                return;
+            }
             // CLAIMED BEFORE THE CREDENTIAL IS CHECKED, not after, and that
             // order is the whole guarantee for every shape-valid mutation.
             // Claiming afterwards leaves a gap the fence cannot see: a
@@ -3363,6 +3380,10 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         // authenticates the session and forwards; an untrusted host cannot grant a link.
         AgentVerb::OpenUrl { .. } => Ok(()),
         AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => Ok(()),
+        AgentVerb::Prompt { session_id, prompt } => {
+            validate_target(session_id, "--session", "name another session's exact id")?;
+            farhelm_proto::launcher::check_initial_prompt(prompt)
+        }
         AgentVerb::Rename {
             session_id,
             expected_title,
@@ -5520,6 +5541,70 @@ mod tests {
             claimed.is_ok(),
             "a lifecycle claim on the same id must not be blocked by an agent-request fence"
         );
+    }
+
+    /// Prompt text and target shape are bounded before the relay's queues.
+    /// The initial-prompt rule stays shared: empty text is legal, newline and
+    /// tab remain data, and the cap counts bytes rather than characters.
+    #[farhelm_testtrace::test]
+    fn prompt_relay_validation_preserves_the_shared_literal_message_rule() {
+        let request = |target: Option<&str>, prompt: &str| AgentVerb::Prompt {
+            session_id: target.map(str::to_string),
+            prompt: prompt.to_string(),
+        };
+        for text in ["", "first\n\tlast", &"é".repeat(32 * 1024)] {
+            assert!(validate_agent_verb(&request(Some("target"), text)).is_ok());
+        }
+        for target in [
+            None,
+            Some(""),
+            Some("bad\n"),
+            Some(&"x".repeat(MAX_SESSION_ID_BYTES + 1)),
+        ] {
+            assert!(validate_agent_verb(&request(target, "ok")).is_err());
+        }
+        for text in ["bad\r", "bad\x1b[201~", &"é".repeat(32 * 1024 + 1)] {
+            assert!(validate_agent_verb(&request(Some("target"), text)).is_err());
+        }
+    }
+
+    /// A self prompt is refused locally even while the asker's mutation fence
+    /// is occupied. Otherwise a trusted host could accept an agent's self-loop;
+    /// the early refusal also avoids waiting for a relay that must never run.
+    #[farhelm_testtrace::test]
+    async fn prompt_relay_refuses_self_before_its_occupied_mutation_fence() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let auth = authenticated_parent(&sup, state.path(), "asker").await;
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let _fence = sup.agent_request_locks.claim("asker").await;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            handle_restricted_control(
+                &sup,
+                ControlMsg::AgentRequest {
+                    req_id: 91,
+                    session_id: "asker".into(),
+                    request: AgentVerb::Prompt {
+                        session_id: Some("asker".into()),
+                        prompt: "again".into(),
+                    },
+                },
+                &tx,
+                &auth,
+            ),
+        )
+        .await
+        .expect("self prompt must refuse before the held fence");
+        let frame = rx.try_recv().expect("the refusal is already queued");
+        assert!(matches!(
+            serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+            ControlMsg::AgentResponse { req_id: 91, outcome: farhelm_proto::AgentOutcome::Err {
+                kind: ErrorKind::InvalidRequest, message,
+            } } if message.contains("itself")
+        ));
     }
 
     /// Spec: `validate_agent_verb` bounds and sanitizes exactly the fields

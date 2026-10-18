@@ -62,13 +62,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Follow up on the recent quick launch system so an agent can populate the templates. Plan:
   `plans/queue/agent-quick-launch-templates.md`.
 
-- **Send a prompt to a running agent from the `farhelm` command.** Let an agent (or a script) send a prompt into another
-  session's agent that is already running, through the `farhelm` CLI, and document it in the agent instructions. This is
-  the CLI and agent part of "Inject commands into agents" (Maybe later), which also covers a UI button. The
-  initial-prompt plan (`agent-delete-and-prompt`) only covers a prompt given at creation, on the agent's command line; a
-  running agent can only be reached through its terminal, which SPEC.md says needs reliable detection that the agent is
-  ready for input. Plan: `plans/queue/prompt-running-agent.md`.
-
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
   the keyboard quick switcher. The nearest thing today is Stop followed later by Restart, which ends the agent but keeps
@@ -790,11 +783,10 @@ are large mostly because of their tests.
   the panic. When this is fixed, also correct SPEC_impl.md's "no bundle-directory fallback at all", which holds only
   under `/assets/`. Came up in review-feedback triage (`desktop-protocol-filesystem-fallback.md`) on 2026-10-02.
 
-- **Inject commands into agents.** Let something other than a person typing in the terminal send commands into a running
-  agent session. Two motivating uses: a UI button such as "stop all work and restart", and automation, scripts, or an
-  orchestrating agent driving workhorse agents that run as Farhelm sessions. The second overlaps with the cross-host
-  orchestration authority question that asking the user before agent actions answered for the `farhelm` command; see
-  SPEC.md, Agent-spawned sessions.
+- **Inject commands into agents from the UI.** A button such as "stop all work and restart" could send a message to a
+  running agent. Agents and scripts can already send a prompt to a running Claude or Codex session with
+  `farhelm agent prompt`; a UI button and delivery to other agents remain separate work. See SPEC.md, Agent-spawned
+  sessions.
 
 - **Make copying work out of the box with Codex.** Since Codex 0.157 its fullscreen interface captures the mouse, so a
   plain drag in its prompt box highlights text without copying it; the drag-copy hint plan only explains this to the
