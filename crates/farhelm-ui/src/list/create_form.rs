@@ -25,6 +25,18 @@ use super::shared::{
     HostOption, OpenHost, effective_create_host, enrich_created_session, matching_host_option,
 };
 
+/// One launcher shortcut press, resolved from a single fresh read before handoff.
+/// A completed sequence is one refusal unit; its definitions must not be mixed
+/// with the next press when a template cannot apply to the current draft.
+#[derive(Clone)]
+pub(super) struct ShortcutApplyRequest {
+    pub(super) opening: u64,
+    /// Revokes replay if another modal opened after the physical press.
+    pub(super) context: crate::launch_sequence::ShortcutContextSnapshot,
+    pub(super) templates: std::collections::VecDeque<farhelm_proto::launcher::LaunchTemplate>,
+    pub(super) refusal: Option<String>,
+}
+
 /// How many times one submit will mint a key before giving up.
 ///
 /// The retry exists for a queued keystroke landing during the mint, which
@@ -579,15 +591,78 @@ fn launcher_snapshot(
     }
 }
 
+/// Validate a shortcut batch against one draft before any of its edits land.
+/// The shared fold checks ordered applicability, while the launcher also has
+/// to parse GitHub destinations before replay can safely choose one. Ordinary
+/// `tl:` acceptance uses this same check for its single template.
+fn validated_template_batch(
+    templates: &[farhelm_proto::launcher::LaunchTemplate],
+    hosts: &[HostOption],
+    catalog: &[crate::api::LaunchCatalogModel],
+    host_fixed: bool,
+    t: TemplateTargets,
+) -> Result<
+    (
+        farhelm_proto::launcher::LauncherState,
+        Vec<Option<crate::github_checkout::GithubRepo>>,
+    ),
+    String,
+> {
+    use farhelm_proto::launcher::TemplateDestination;
+    let mut state = launcher_snapshot(t, hosts, *t.chosen_host.peek());
+    // A partial template may fill an agent later in this same batch. Preserve
+    // its dormant prompt while checking the projected sequence.
+    state.prompt = t.prompt.peek().clone();
+    let known_hosts: Vec<String> = hosts
+        .iter()
+        .filter(|host| !host.identity_mismatch)
+        .filter_map(|host| host.identity.clone())
+        .collect();
+    let context = farhelm_proto::launcher::TemplateContext {
+        catalog,
+        known_hosts: &known_hosts,
+        host_fixed,
+    };
+    let normalized = templates
+        .iter()
+        .cloned()
+        .map(|mut template| {
+            // Historical trust values are inert, even on an agent that did
+            // not support them when the template was saved.
+            template.fields.workspace_trust = None;
+            template
+        })
+        .collect::<Vec<_>>();
+    let mut repositories = Vec::with_capacity(normalized.len());
+    for template in &normalized {
+        state = farhelm_proto::launcher::apply_template(&state, template, &context)
+            .map_err(|refusal| refusal.to_string())?;
+        // Check this before the next template, so the first refusal in the
+        // sequence is the one the launcher reports.
+        repositories.push(match &template.fields.destination {
+            Some(TemplateDestination::Github(repo)) => Some(
+                crate::github_checkout::GithubRepo::parse(repo).map_err(|error| {
+                    format!(
+                        "template {:?} was not applied: its destination {repo:?} is not a GitHub repository ({error})",
+                        template.name
+                    )
+                })?,
+            ),
+            _ => None,
+        });
+    }
+    Ok((state, repositories))
+}
+
 /// Turn an accepted search result into the edits it makes: itself, unless it
 /// is a template (`tl:name`), which becomes the edits that template contains.
 ///
 /// SPEC.md: "Applying a template makes the edits it contains, in the same
 /// way and with the same effects as making them by hand, in a fixed order",
 /// all or nothing. So the template is first applied to a snapshot of the
-/// launcher with the shared rule (`farhelm_proto::launcher::apply_template`),
-/// which is also what the helm uses for `--template`; a refusal sets
-/// `template_error` and makes no edit at all. Only then is it replayed as
+/// launcher with `validated_template_batch`, which uses the same
+/// `farhelm_proto::launcher::apply_template` rule as the helm's `--template`.
+/// A refusal sets `template_error` and makes no edit at all. Only then is it replayed as
 /// the launcher's own actions, so remembered defaults, recent setups and a
 /// pending checkout preview react exactly as they would to the same clicks.
 /// `host_fixed` is Replace with, which keeps the source's host.
@@ -606,7 +681,7 @@ fn template_edits(
         template_error.set(None);
         return vec![TemplateEdit::Search(result)];
     };
-    let Some(mut template) = templates
+    let Some(template) = templates
         .iter()
         .find(|template| template.name == name)
         .cloned()
@@ -616,47 +691,20 @@ fn template_edits(
         )));
         return Vec::new();
     };
-    // Compatibility values in old templates are inert even on a harness
-    // that never supported trust. Strip them before shared applicability checks.
-    template.fields.workspace_trust = None;
-    let mut state = launcher_snapshot(t, hosts, *t.chosen_host.peek());
-    // Saving projects only active choices. Applying a partial template must
-    // instead retain dormant drafts: a name-only edit on the command tab or
-    // an unsupported agent cannot erase the first message waiting on return.
-    state.prompt = t.prompt.peek().clone();
-    let known_hosts: Vec<String> = hosts
-        .iter()
-        .filter(|host| !host.identity_mismatch)
-        .filter_map(|host| host.identity.clone())
-        .collect();
-    let context = farhelm_proto::launcher::TemplateContext {
+    let (applied, repositories) = match validated_template_batch(
+        std::slice::from_ref(&template),
+        hosts,
         catalog,
-        known_hosts: &known_hosts,
         host_fixed,
-    };
-    let applied = match farhelm_proto::launcher::apply_template(&state, &template, &context) {
-        Ok(applied) => applied,
+        t,
+    ) {
+        Ok(result) => result,
         Err(refusal) => {
-            template_error.set(Some(refusal.to_string()));
+            template_error.set(Some(refusal));
             return Vec::new();
         }
     };
-    // A repository the launcher cannot even parse is refused here, before
-    // any edit, to keep the template all or nothing.
-    let repository = match &template.fields.destination {
-        Some(TemplateDestination::Github(repo)) => {
-            match crate::github_checkout::GithubRepo::parse(repo) {
-                Ok(repo) => Some(repo),
-                Err(error) => {
-                    template_error.set(Some(format!(
-                        "template {name:?} was not applied: its destination {repo:?} is not a GitHub repository ({error})"
-                    )));
-                    return Vec::new();
-                }
-            }
-        }
-        _ => None,
-    };
+    let repository = repositories.into_iter().next().flatten();
     template_error.set(None);
     let fields = template.fields;
     let kind = applied.kind.unwrap_or(LauncherKind::Agent);
@@ -1697,6 +1745,27 @@ fn focus_composer_surface(defer_for_reveal: bool) {
     });
 }
 
+/// Restore a launcher focus target only when a shortcut removed its control.
+/// A surviving field keeps its caret and selection; a later dialog opening or
+/// launcher replacement must not receive focus from this deferred check.
+fn restore_shortcut_focus_if_lost() {
+    document::eval(
+        r#"(() => {
+            const dialog = document.querySelector('.create-session-form[role="dialog"]');
+            requestAnimationFrame(() => {
+                if (!dialog?.isConnected || !dialog.getClientRects().length ||
+                    window.farhelmTemplateShortcutContext?.() !== 'launcher') return;
+                const active = document.activeElement;
+                if (active && active !== document.body && active !== document.documentElement) return;
+                const target = dialog.querySelector('.launch-composer-search input:not([disabled])')
+                    || dialog.querySelector('.launch-composer-loading-cancel:not([disabled])')
+                    || dialog;
+                target.focus({ preventScroll: true });
+            });
+        })()"#,
+    );
+}
+
 /// Keep keyboard selection visible while a long combobox result list scrolls.
 ///
 /// The input retains browser focus for combobox semantics, so this explicitly
@@ -2478,6 +2547,10 @@ pub(super) fn CreateSessionForm(
     /// each preceding edit before the next template is validated against it.
     #[props(default)]
     initial_templates: Vec<farhelm_proto::launcher::LaunchTemplate>,
+    /// Visible-launcher shortcut presses arrive as separate ordered batches.
+    /// The parent resolves names once; this form alone decides whether each
+    /// captured definition fits and applies it through ordinary search edits.
+    shortcut_requests: Signal<std::collections::VecDeque<ShortcutApplyRequest>>,
     /// Explain why a single partial-template key opened a visible draft.
     /// The notice belongs to this opening, never to a later Clone/Replace seed.
     #[props(default)]
@@ -4235,13 +4308,16 @@ pub(super) fn CreateSessionForm(
     let host_label_for_template_save = selected_host_label.clone();
     let action_hosts = hosts.clone();
     let action_catalog = catalog_answer.clone();
+    let shortcut_hosts = hosts.clone();
+    let shortcut_catalog = catalog_answer.clone();
     let action_history_target = current_history_target.clone();
     let action_browse_base = browse_base.clone();
     let action_browse_hosts = browse_hosts.clone();
     let accept_search = use_callback(
-        move |(result, captured): (
+        move |(result, captured, from_shortcut): (
             crate::launch_composer::ComposerSearchResult,
             Option<farhelm_proto::launcher::LaunchTemplate>,
+            bool,
         )| {
             if !draft_transition_allowed(ops) {
                 return false;
@@ -4253,7 +4329,7 @@ pub(super) fn CreateSessionForm(
                 .as_ref()
                 .map(std::slice::from_ref)
                 .unwrap_or(&templates_now);
-            if captured.is_none() {
+            if captured.is_none() || from_shortcut {
                 partial_template_hint.set(false);
             }
             let automatic_permission = match &result {
@@ -4340,9 +4416,11 @@ pub(super) fn CreateSessionForm(
                 );
             }
             note_permission_switch.call((switch_before, automatic_permission));
-            composer_search.set(String::new());
-            composer_search_open.set(false);
-            focus_composer_surface(false);
+            if !from_shortcut {
+                composer_search.set(String::new());
+                composer_search_open.set(false);
+                focus_composer_surface(false);
+            }
             true
         },
     );
@@ -4410,7 +4488,7 @@ pub(super) fn CreateSessionForm(
             pending_initial_action.set(None);
             return;
         }
-        if accept_search.call((action, captured.clone())) {
+        if accept_search.call((action, captured.clone(), false)) {
             if captured.is_some() {
                 if template_error.peek().is_some() {
                     // A refused template owns the fallback. Later templates
@@ -4423,6 +4501,96 @@ pub(super) fn CreateSessionForm(
                 pending_initial_action.set(None);
             }
         }
+    }));
+    // Shortcut batches use the same captured-template acceptance as an
+    // opening, but never join its loading or auto-submit lifetime. Validate
+    // a whole press before replay, then apply it without a render boundary
+    // where a later refusal could strand earlier edits from that press.
+    let mut shortcut_replay_checking = use_signal(|| false);
+    use_effect(use_reactive((&hosts_loaded,), move |(hosts_loaded,)| {
+        if shortcut_replay_checking() {
+            return;
+        }
+        let Some(request) = shortcut_requests.read().front().cloned() else {
+            return;
+        };
+        if request.opening != *opening_generation.peek()
+            || ops.busy_now()
+            || template_panel.peek().is_some()
+            || template_saving()
+        {
+            shortcut_requests.write().pop_front();
+            return;
+        }
+        if !mount_seeded()
+            || pending_initial_action().is_some()
+            || !pending_initial_templates.read().is_empty()
+        {
+            return;
+        }
+        if request.refusal.is_none()
+            && (!hosts_loaded
+                || launch_catalog.read().is_none()
+                || launch_templates.read().is_none())
+        {
+            return;
+        }
+        // A batch can wait for host/catalog readiness or for earlier edits.
+        // Check modal ownership after that wait; validated replay has no
+        // await or render boundary where a later dialog could take over.
+        shortcut_replay_checking.set(true);
+        let shortcut_hosts = shortcut_hosts.clone();
+        let shortcut_catalog = shortcut_catalog.clone();
+        spawn(async move {
+            let current = crate::launch_sequence::shortcut_context_snapshot().await;
+            if request.opening != *opening_generation.peek()
+                || ops.busy_now()
+                || template_panel.peek().is_some()
+                || template_saving()
+                || !current.is_some_and(|snapshot| {
+                    snapshot.context == "launcher"
+                        && snapshot.modal_opening == request.context.modal_opening
+                })
+            {
+                shortcut_requests.write().pop_front();
+                shortcut_replay_checking.set(false);
+                return;
+            }
+            if let Some(message) = request.refusal {
+                template_error.set(Some(message));
+                shortcut_requests.write().pop_front();
+            } else if !request.templates.is_empty() {
+                let templates = request.templates.into_iter().collect::<Vec<_>>();
+                match validated_template_batch(
+                    &templates,
+                    &shortcut_hosts,
+                    shortcut_catalog.as_deref().unwrap_or_default(),
+                    is_replace_with,
+                    template_targets,
+                ) {
+                    Err(refusal) => template_error.set(Some(refusal)),
+                    Ok(_) => {
+                        // Each acceptance still makes the same form edits as
+                        // `tl:`. No await or render splits this press in two.
+                        for template in templates {
+                            let action = crate::launch_composer::ComposerSearchResult::Template(
+                                template.name.clone(),
+                            );
+                            if !accept_search.call((action, Some(template), true))
+                                || template_error.peek().is_some()
+                            {
+                                break;
+                            }
+                        }
+                        restore_shortcut_focus_if_lost();
+                    }
+                }
+                shortcut_requests.write().pop_front();
+            } else {
+                shortcut_requests.write().pop_front();
+            }
+            shortcut_replay_checking.set(false);
+        });
     }));
     // Pointer and keyboard choices share their transition callbacks. Enter
     // runs these synchronously before form resubmission reads the live draft.
@@ -5973,7 +6141,7 @@ pub(super) fn CreateSessionForm(
                                     if composer_search_open() && let Some(result) =
                                         search_results_for_keys.get(composer_active_index).cloned()
                                     {
-                                        accept_search.call((result, None));
+                                        accept_search.call((result, None, false));
                                     }
                                 }
                                 _ => {}
@@ -6031,7 +6199,7 @@ pub(super) fn CreateSessionForm(
                                                     onclick: {
                                                         let result = result.clone();
                                                         move |_| {
-                                                            accept_search.call((result.clone(), None));
+                                                            accept_search.call((result.clone(), None, false));
                                                         }
                                                     },
                                                     match &result {

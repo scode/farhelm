@@ -1012,18 +1012,19 @@ Template shortcuts use one capture listener with a pure classifier fed by a Rust
 modifier masks. Rust also derives the visible chords from those masks. The build's Mac-desktop condition selects Meta
 alone for number keys and the sequence prefix; every other build selects Ctrl+Shift alone for those, regardless of
 `navigator.platform`. The bolt's chord follows the operating system instead. The listener's one context rule
-distinguishes the page, a hidden launcher preparing quick launch, the visible launcher and unrelated visible modals;
-until the launcher route is enabled, both visible modal contexts yield. Ten hidden `.template-number-trigger` buttons
-hand the digit to the same list callback that handles quick launch; the existing `.quick-launch-trigger` remains unique.
-Both callbacks read fresh shortcut preferences and template definitions, resolve a name and use the same New-open,
-template application and submission path. The row's key popup uses `menu_panel` keyboard/focus/placement helpers inside
-modal isolation; Escape closes it without closing Templates. The open toggle owns pointerdown until click. Dialog
-scroll/resize, backdrop resize and the app's layout epoch dismiss the popup when its fixed coordinates become stale; the
-popup's own scrolling does not dismiss it. Focus returns only while still owned by a closing menu, with `preventScroll`,
-so a delayed dismissal cannot steal another popup's focus or undo the dialog's scroll. Re-delivery to an already closed
-popup does nothing. The two shortcut preference fields share acknowledgment, deletion retirement and fresh-read overlay
-helpers. A rename repoints both before deleting the old name, and removes a stale new-name key when retaining the old
-name's key would otherwise violate one-key-per-template. Failed repoints keep both names and dirty intent for recovery.
+distinguishes the page, a hidden launcher preparing quick launch, the visible launcher and unrelated visible modals; the
+launcher alone accepts template actions while unrelated visible modals yield. Ten hidden `.template-number-trigger`
+buttons hand the digit to the same list callback that handles quick launch; the existing `.quick-launch-trigger` remains
+unique. Both callbacks read fresh shortcut preferences and template definitions, resolve a name and use the same
+New-open, template application and submission path. The row's key popup uses `menu_panel` keyboard/focus/placement
+helpers inside modal isolation; Escape closes it without closing Templates. The open toggle owns pointerdown until
+click. Dialog scroll/resize, backdrop resize and the app's layout epoch dismiss the popup when its fixed coordinates
+become stale; the popup's own scrolling does not dismiss it. Focus returns only while still owned by a closing menu,
+with `preventScroll`, so a delayed dismissal cannot steal another popup's focus or undo the dialog's scroll. Re-delivery
+to an already closed popup does nothing. The two shortcut preference fields share acknowledgment, deletion retirement
+and fresh-read overlay helpers. A rename repoints both before deleting the old name, and removes a stale new-name key
+when retaining the old name's key would otherwise violate one-key-per-template. Failed repoints keep both names and
+dirty intent for recovery.
 
 Quick launch uses that shared capture listener and the same list-owned New-open callback, followed by the ordinary
 template search action and form requestSubmit. The mark is one nullable shared preference rather than template data, so
@@ -4790,13 +4791,24 @@ refusal stops the remaining replay. Automatic submission waits for a render afte
 readiness and refusal describe the resulting draft. A coarse fold over launch kind, agent and command decides whether to
 attempt direct launch; the mounted form retains full validation, catalog, host and admission authority.
 
+The same dispatch serializes fresh reads when shortcuts arrive in a visible New, Clone or Replace with launcher. Each
+press or completed sequence becomes its own captured batch in a form-owned FIFO, fenced by the opening generation and
+the shared modal context and epoch. The form validates the whole batch against one draft snapshot, then replays its
+templates synchronously through the same search acceptance and `template_edits` path. A refusal drops only that batch
+before it changes the draft, leaving later presses queued. Shortcut batches do not enter the opening replay's loading or
+auto-submit predicates, and their acceptance keeps the query and focus in place. If a template unmounts the focused
+control, a deferred check restores the launcher's normal search target only while that same launcher is still the sole
+visible modal. Busy launch and template-save states consume and drop a press.
+
 The shared template-shortcut asset owns the synchronous armed flag, a pure key classifier and the context rule. Rust
 holds the ordered references in app-owned transient context; the sidebar's hidden relays mutate that signal
-synchronously, and the main area renders its non-modal status pill. No storage or general keymap is involved. Prefix and
-number modifiers follow the build's Mac-desktop choice; the bolt keeps its existing operating-system chord, including
-Cmd+P in a Mac browser. The shared listener installs after the composition guard and before other command listeners,
-consuming with stopImmediatePropagation because same-window capture listeners otherwise still run. Pointer/click, blur,
-visibility, modal focus and the existing modal-opening hook cancel both state owners. The relays stay mounted and
+synchronously, and the main area renders its non-modal status pill, using "apply" while the launcher is open. No storage
+or general keymap is involved. Prefix and number modifiers follow the build's Mac-desktop choice; the bolt keeps its
+existing operating-system chord, including Cmd+P in a Mac browser. The shared listener installs after the composition
+guard and before other command listeners, consuming with stopImmediatePropagation because same-window capture listeners
+otherwise still run. Pointer/click, blur, visibility, modal focus and the existing modal-opening hook cancel both state
+owners. A launcher-owned text field admits the prefix only without selected text; other editors keep their usual key
+action. Hidden quick-launch preparation consumes recognized keys without enqueuing a relay. The relays stay mounted and
 enabled across render-delayed armed state; Enter takes the queue before starting the existing generation-fenced
 quick-launch read.
 

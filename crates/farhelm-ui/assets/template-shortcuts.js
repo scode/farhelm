@@ -97,26 +97,39 @@
     const form = doc.querySelector(".create-session-form");
     const visible = [...doc.querySelectorAll('[role="dialog"][aria-modal="true"]')]
       .filter(node => node.getClientRects().length);
-    if (visible.length) return visible.length === 1 && visible[0] === form ? "launcher" : "yield";
+    if (visible.length) {
+      if (visible.length !== 1 || visible[0] !== form) return "yield";
+      // Saving a template owns this draft. Reserve the chord now, before an
+      // awaited preference read could outlive a quick cancel of the panel.
+      return form.querySelector(".save-template-panel") ? "preparing" : "launcher";
+    }
     return form ? "preparing" : "page";
   }
 
-  /** Keep the PR1 admission policy in one place for key and focus events.
-   * Later launcher support can admit that context without leaving a second
-   * visible-modal test behind in the focus cancellation path.
+  /** Admit template actions in the page, hidden preparation and open launcher.
+   * The list chord remains inert in this installer; when installed, it may
+   * open only from the page context.
    */
   function templateShortcutAdmitted(context) {
-    return context === "page" || context === "preparing";
+    return context === "page" || context === "preparing" || context === "launcher";
   }
 
-  /** Distinguish ordinary editors from xterm's implementation textarea.
-   * Editable ancestors count, except across contenteditable=false. The
-   * decision uses the event target rather than remembered focus ownership.
+  /** Decide when an editor keeps the sequence prefix's normal meaning.
+   * Outside the launcher, text editing always wins. Its own fields yield the
+   * prefix only when they hold a selection, so Cmd-X still cuts selected text.
+   * xterm's implementation textarea is not an ordinary editor.
    */
-  function ordinaryTextEditorTarget(target) {
+  function prefixReservedForTextEditing(target, context, doc) {
     if (!(target instanceof Element)) return false;
     if (target.matches(".xterm-helper-textarea")) return false;
-    return !!target.closest("input, textarea") || target.isContentEditable;
+    const input = target.closest("input, textarea");
+    if (!input && !target.isContentEditable) return false;
+    if (context !== "launcher") return true;
+    const form = doc.querySelector(".create-session-form");
+    if (!form?.contains(target)) return true;
+    if (input) return typeof input.selectionStart === "number" &&
+      typeof input.selectionEnd === "number" && input.selectionStart !== input.selectionEnd;
+    return root.getSelection?.()?.isCollapsed === false;
   }
 
   /** Install one capture listener before command listeners and terminal input.
@@ -142,28 +155,46 @@
      * cancel relay must remain usable when new launch admission is disabled.
      */
     let armed = false;
+    let armedHasEntry = false;
+    const presses = [];
+    // Rust drains one snapshot for each relay that dispatches a batch. Keep
+    // the physical press's modal epoch even while an earlier read is pending.
+    root.farhelmTakeTemplateShortcutPress = () => presses.shift();
+    const capturePress = context => presses.push({
+      context, modal_opening: root.__farhelmModalOpening || 0,
+    });
     function cancel() {
       if (!armed) return;
       armed = false;
+      armedHasEntry = false;
       sequenceRelay("cancel")?.click();
     }
     root.cancelFarhelmLaunchSequence = cancel;
     root.farhelmTemplateShortcutContext = () => templateShortcutContext(document);
 
     root.addEventListener("keydown", event => {
-      // PR1 preserves modal ownership. Later launcher support uses this same
-      // context result to admit a shortcut without another modal query.
       const context = root.farhelmTemplateShortcutContext();
       if (!templateShortcutAdmitted(context)) {
         cancel();
         return;
       }
       const result = classifyTemplateShortcutKey(
-        event, armed, keys, ordinaryTextEditorTarget(event.target),
+        event, armed, keys, prefixReservedForTextEditing(event.target, context, document),
       );
       if (result.action === "pass" || result.action === "template-list") return;
       if (result.action === "cancel" && !result.consume) {
         cancel();
+        return;
+      }
+
+      // A hidden quick launch or open save panel reserves recognized keys
+      // without queueing work that could apply after either state ends.
+      if (context === "preparing") {
+        cancel();
+        if (result.consume) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
         return;
       }
 
@@ -183,13 +214,23 @@
       if (result.action === "begin") {
         if (begin.disabled) return;
         armed = true;
+        armedHasEntry = false;
         begin.click();
       } else if (direct) {
-        if (!direct.disabled) direct.click();
+        if (!direct.disabled) {
+          capturePress(context);
+          direct.click();
+        }
       } else if (result.action === "cancel") {
         cancel();
       } else {
-        if (result.action === "launch") armed = false;
+        if (result.action === "launch") {
+          armed = false;
+          if (armedHasEntry) capturePress(context);
+          armedHasEntry = false;
+        } else if (result.action === "digit" || result.action === "bolt") {
+          armedHasEntry = true;
+        }
         sequenceRelay(result.action, result.digit)?.click();
       }
     }, true);
@@ -213,6 +254,6 @@
 
   root.installTemplateShortcuts = installTemplateShortcuts;
   if (typeof module === "object") module.exports = {
-    classifyTemplateShortcutKey, templateShortcutContext, ordinaryTextEditorTarget,
+    classifyTemplateShortcutKey, templateShortcutContext, prefixReservedForTextEditing,
   };
 })(typeof window === "object" ? window : globalThis);
