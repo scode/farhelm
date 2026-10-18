@@ -7692,20 +7692,31 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   overflow-wrap: anywhere;
 }
 
-/* The notice an uninstall leaves above the host list once its host is gone,
-   laid out like the delete notice above: the text, then a dismiss button on
-   the same line. */
+/* The post-uninstall result must stay one line in the narrow host sidebar.
+   Only its summary can give up width; the path and full sentence remain in
+   the tooltip and accessible text, and the two controls stay reachable. */
 .uninstall-notice {
   display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   padding: 2px 12px 0;
 }
-.uninstall-notice .uninstall-notice-text {
+.uninstall-notice-summary {
   flex: 1;
   min-width: 0;
-  overflow-wrap: anywhere;
+}
+.uninstall-notice .uninstall-notice-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.uninstall-notice-copy,
+.uninstall-notice-dismiss {
+  flex: none;
+  padding: 1px 3px;
+  border-color: var(--border-dim);
+  line-height: 1.2;
 }
 
 /* Every animation on the page stands still while the window is inactive:

@@ -4038,8 +4038,10 @@ test.describe("multi-host", () => {
   /**
    * Uninstall from the host's menu: the confirmation names what goes and
    * the data directory that stays, confirming removes the host from the
-   * list, and the window that confirmed says where the data remains, even
-   * when the reply to the confirmation arrives only after the host is gone.
+   * list, and the window that confirmed keeps the data location in a compact
+   * notice with hover, path copy and dismissal, even when the reply arrives
+   * after the host is gone. The line and its controls must fit a
+   * phone-width panel.
    *
    * Why it matters: this is the only supported way to remove Farhelm from
    * a remote host (SPEC.md, Topology), and its promises are what the user
@@ -4144,6 +4146,7 @@ test.describe("multi-host", () => {
       // assertions inside say so the page is never left hanging.
       let heldReply = false;
       let noticeWhileHeld = false;
+      const notice = page.locator(".uninstall-notice");
       await page.route(`**/api/hosts/${remote.id}/uninstall`, async (route) => {
         if (route.request().method() !== "POST" || !route.request().postData()) {
           await route.continue();
@@ -4158,9 +4161,8 @@ test.describe("multi-host", () => {
             })
             .toBeUndefined();
           await expect(hostRowByName(page, info.remote_ssh)).toHaveCount(0, { timeout: 30_000 });
-          await expect(page.locator(".uninstall-notice")).toContainText(
-            `Farhelm was removed from ${info.remote_ssh}; its data remains in ${kept}`,
-          );
+          await expect(notice.locator(".uninstall-notice-text"))
+            .toHaveText(`removed from ${info.remote_ssh} · data kept`);
           noticeWhileHeld = true;
         } finally {
           heldReply = true;
@@ -4170,9 +4172,41 @@ test.describe("multi-host", () => {
 
       await dialog.locator(".uninstall-confirm").click();
       await expect(hostRowByName(page, info.remote_ssh)).toHaveCount(0, { timeout: 30_000 });
-      await expect(page.locator(".uninstall-notice")).toContainText(
-        `Farhelm was removed from ${info.remote_ssh}; its data remains in ${kept}`,
-      );
+      await expect(notice.locator(".uninstall-notice-text"))
+        .toHaveText(`removed from ${info.remote_ssh} · data kept`);
+      // The text-only tooltip keeps host and path as separate LTR runs even
+      // though it cannot use the PeerLine elements of the visible notice.
+      const isolatedNotice = `Farhelm was removed from \u2066${info.remote_ssh}\u2069; its data remains in \u2066${kept}\u2069 on that host.`;
+      const summary = notice.locator(".uninstall-notice-summary");
+      await expect(summary).toHaveAttribute("data-tooltip", isolatedNotice);
+      await summary.hover();
+      await expect(page.locator("body > .farhelm-tooltip")).toHaveText(isolatedNotice);
+      await page.setViewportSize({ width: 390, height: 850 });
+      const noticeLayout = await notice.evaluate((node) => {
+        const text = node.querySelector(".uninstall-notice-text") as HTMLElement;
+        const copy = node.querySelector(".uninstall-notice-copy") as HTMLElement;
+        const dismiss = node.querySelector(".uninstall-notice-dismiss") as HTMLElement;
+        const line = node.getBoundingClientRect();
+        return {
+          wraps: getComputedStyle(text).whiteSpace !== "nowrap",
+          copyInside: copy.getBoundingClientRect().right <= line.right,
+          dismissInside: dismiss.getBoundingClientRect().right <= line.right,
+        };
+      });
+      expect(noticeLayout).toEqual({ wraps: false, copyInside: true, dismissInside: true });
+      await testInfo.attach("host-uninstall-notice-phone", {
+        body: await notice.screenshot(),
+        contentType: "image/png",
+      });
+      await page.evaluate(() => {
+        (window as any).__uninstallCopies = [];
+        (window as any).__farhelmNativeClipboardWrite = (value: string) => {
+          (window as any).__uninstallCopies.push(value);
+        };
+      });
+      await notice.locator(".uninstall-notice-copy").click();
+      await expect.poll(() => page.evaluate(() => (window as any).__uninstallCopies))
+        .toEqual([kept]);
       expect(await apiRemoteHost(request)).toBeUndefined();
       await expect.poll(() => heldReply, { timeout: 60_000 }).toBe(true);
       expect(noticeWhileHeld, "the notice showed before the reply was released").toBe(true);
@@ -4187,8 +4221,8 @@ test.describe("multi-host", () => {
         "stop-supervisor",
         "remove-directory",
       ]);
-      await page.locator(".uninstall-notice-dismiss").click();
-      await expect(page.locator(".uninstall-notice")).toHaveCount(0);
+      await notice.locator(".uninstall-notice-dismiss").click();
+      await expect(notice).toHaveCount(0);
     } finally {
       writeProbeTarget(info.remote_ssh, previousProbe);
       await restoreFleetRow(request);
