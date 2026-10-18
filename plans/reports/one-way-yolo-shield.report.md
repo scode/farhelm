@@ -52,3 +52,45 @@ A fresh-context gpt-6.1-sol reviewer at high effort found no behavioral, design,
 It found one comment that omitted supervisor restart as a reset condition; that sentence was corrected. The supplied
 review included the full test-authoring checklist. The commit and PR wording passed a separate cold read after its
 capitalization was corrected. No findings remain unresolved.
+
+### Landing
+
+Landed on its own in round 87, as #2251, unchanged from what the report describes.
+
+#### What landed since the PR was based, and whether it interacted
+
+Only plan-queue bookkeeping reached main between this PR's base and its landing, and no other plan landed in this round.
+The landing rebase was clean and the PR's diff is identical to the one the executor delivered. The landing monitor read
+the change against main, and a fresh-context reviewer did the same independently. Neither found an interaction:
+
+- The supervisor uses the new rule in one place only: to tell connected helms when to refresh the session list. It now
+  tells them once, the first time it sees YOLO, and that is all the shield display needs.
+- Restart, Restart with, Replace and the resume of an interrupted session all start a new run with no observed reading,
+  and a supervisor restart starts fresh too, as the updated SPEC.md says. Rename keeps the reading, as SPEC_impl.md says
+  it should.
+- The hover still reads that YOLO was observed on the agent's status line. That wording stays true while the shield
+  stays YOLO after the agent switches back to asking first, so it needed no change.
+- SPEC.md has one paragraph about the observed shield, which this PR rewrites; the Claude and Muse docs pages remain
+  accurate.
+
+The observed shield first shipped in v0.29.0, so the changelog fragment is a new "changed" entry rather than an edit of
+the original one.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-up
+
+Minor, with no effect on behavior: a code comment about Claude's plan mode could be reworded, since plan mode and the
+asking-first modes now have the same effect on the shield.
+
+#### Checks
+
+- Run now: none. The landing rebase changed no code.
+- Reused: everything the report lists, at the revision it names, including recorder run
+  `290ccec7-fc6c-4ef5-99be-6474c37b0943` (90 passed), the formatting and Clippy checks, and the website build. Nothing
+  that reached main since then touches the code this PR changes.
+- Skipped: everything the report skipped, for the reasons it gives.
+
+Nothing in the executor's report became untrue at landing.
