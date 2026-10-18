@@ -83,3 +83,57 @@ None identified.
 Each PR received the plan-required single fresh-context gpt-6.1-sol high review. PR #2297 had no findings. PR #2301's
 identity finding and test-teardown finding were fixed and verified by follow-up review, with no remaining findings. Both
 commit and PR messages passed a separate cold read.
+
+### Landing
+
+Landed in round 97, as #2297 and #2301, merged bottom-up, first of the round's two plans, and unchanged from what the
+report describes.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since this stack's base, main gained the desktop file-types setting (json-download-open, #2296 and #2299), the fixes
+that close the launcher's host list on an outside click (#2294) and fit a filled-in launcher in a 900-pixel window
+(#2295), and TODO.md and plan bookkeeping. The round's other plan, the sidebar session summary card
+(session-hover-text), lands after this one. The landing monitor read the stack against all of them, and a fresh-context
+reviewer did the same independently. Neither found an interaction: the new search words leave the launcher's wrapper
+field and its per-agent memory, the removed trust choice, the dialog focus rules and the 900-pixel layout alone, and the
+scoped words (`perms:chat`, `perms:approve`, `perms:smart approve`, `effort:default`) collide with nothing, since
+templates and hosts appear only under their own prefixes. The only conflict was in TODO.md, where each side had removed
+its own entry; both removals stay.
+
+#### Fixes made during the landing
+
+None.
+
+#### Things to keep in mind
+
+- **Typing an unchanged permission can still start a second session after a lost reply.** #2301 made choosing an
+  unchanged default effort through search keep the launch's retry identity, so that a launch whose reply was lost cannot
+  start a second session when Launch is pressed again. The permission search results did not get the same rule: if the
+  reply was lost and you type `guarded` while Guarded is already selected, the next Launch can create a second session.
+  The permission, effort and agent buttons already keep the identity when nothing changes. `perms:guarded` and
+  `perms:yolo` behaved this way before this plan, so it is not a regression, but bare `guarded` and the new words make
+  it easier to reach. Recommended follow-up: give typed permission choices the same rule as effort (an unchanged choice
+  keeps the retry identity), with a matching lost-reply browser test.
+- A short query that is part of `guarded`, such as `ar`, not only shows Guarded but makes it the result Enter applies
+  whenever no agent, model or effort matches and the selected agent offers Guarded, ahead of a folder you may have been
+  typing towards. This follows the accepted rule for bare `yolo`, and Guarded is the safer choice.
+
+#### Checks
+
+- Run now, on main with this stack and the round's other plan merged together locally (this stack's landed diffs are
+  identical to that tree's): `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, the isolated test-sleep check (304 delays, none without a reason);
+  `cargo nextest run -p farhelm-ui --lib` through the test recorder, four slots and no retries: 534 passed, run
+  `5ed60b24-5901-40ee-89e2-0b8ce2eb8ade`; the UI JavaScript harness, run directly: 294 passed; `bun run build` for the
+  docs site; then fresh `cargo build` and web builds and `npx playwright test` on `composer-word-search.spec.ts`,
+  `guarded-permissions.spec.ts`, `custom-permissions.spec.ts`, `goose-pi-composer.spec.ts`, `omp-composer.spec.ts`,
+  `tooltip-coverage.spec.ts`, `terminal-create-idempotency.spec.ts`, `tooltip.spec.ts`, `launcher-enter.spec.ts` and
+  `sidebar.spec.ts` through the recorder on both engines, one worker, no retries: 340 passed, run
+  `62f8f0a1-3047-4fa1-8851-31f0a2431993`.
+- Reused: the executor's static checks (dprint, the changelog format check).
+- Skipped: everything else the report skipped, for the reasons it gives.
+
+Nothing in the executor's report changed at landing, but the cross-plan review sharpened two of its statements: the
+report listed no follow-ups, and the typed-permission retry gap above is one; and a short part of `guarded` does not
+just show Guarded, it makes Guarded what Enter applies.
