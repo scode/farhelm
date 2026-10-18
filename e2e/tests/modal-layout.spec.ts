@@ -73,8 +73,13 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
     return page.locator(".host-settings-refreshed");
   }
   if (family === "trash") {
-    await page.locator(".checkout-trash-button").click();
+    // The count proves both host fixtures have reached the view before this
+    // layout test opens a dialog that must contain all their rows.
+    const button = page.locator(".checkout-trash-button");
+    await expect(button).toHaveAttribute("data-count", "24");
+    await button.click();
     const dialog = page.locator(".checkout-trash-dialog");
+    await expect(dialog).toBeVisible();
     await expect(dialog.locator(".checkout-trash-entry")).toHaveCount(24);
     return dialog;
   }
