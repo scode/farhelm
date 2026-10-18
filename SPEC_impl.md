@@ -5093,31 +5093,33 @@ same-account isolation out of scope. Reaching another host, or the helm's own st
 
 ## Host identity appearance
 
-The helm stores a remote host's decorative identity beside its alias: nullable `hosts.icon` and `hosts.color` text
-columns added in schema 44. Null means `cloud` and `default`; resetting to those choices restores null. Stable lowercase
-words are shared by the helm and UI through `farhelm-proto::host_appearance`, so picker reordering never reinterprets
-saved values, and unknown words are refused at the HTTP boundary. The local host's columns stay null and its fixed red
-laptop cannot be changed through this route.
+The helm stores each host's decorative identity beside its alias: nullable `hosts.icon` and `hosts.color` text columns
+added in schema 44. Schema 58 removes their SSH-only checks. Null means `laptop` and `red` for the local host, `cloud`
+and `default` for an SSH host; resetting to that kind's defaults restores null. Stable lowercase words are shared by the
+helm and UI through `farhelm-proto::host_appearance`, so picker reordering never reinterprets saved values, and unknown
+words are refused at the HTTP boundary. An untouched local row keeps the red laptop without a backfill.
 
-`POST /api/hosts/{id}/appearance` requires both words and refuses extra fields, the local row and an unknown host. A
-helm-owned task serializes the atomic write on the ordinary host write lock and bumps the existing feed only when the
-stored choice changes. No actor reconcile is needed: connection actors do not consume decorative identity. The hosts
-listing carries both choices; the existing UI hosts read supplies session-row state as well as the hosts panel, so a
-feed refresh redraws memoized rows without adding another fetch.
+`POST /api/hosts/{id}/appearance` requires both words and refuses extra fields and an unknown host. A helm-owned task
+serializes the atomic write on the ordinary host write lock and bumps the existing feed only when the stored choice
+changes. No actor reconcile is needed: connection actors do not consume decorative identity. The hosts listing carries
+both choices; the existing UI hosts read supplies session-row state as well as the hosts panel, so a feed refresh
+redraws memoized rows without adding another fetch.
 
-`HostMark` draws the fifteen Farhelm-owned paths in the existing 16-unit box at stroke weight 1.3; `data-glyph` carries
-the icon word (`cloud` for the unset mark). The six `--host-icon-*` CSS tokens are identity colors with no state
-meaning, and the contrast harness binds them to the chrome, selected, dialog and picker surfaces. Only the SVG receives
-the tint. The local laptop and unknown-locality blank slot retain their existing meanings.
+`HostMark` draws the sixteen Farhelm-owned paths in the existing 16-unit box at stroke weight 1.3; `data-glyph` carries
+the icon word (`laptop` for an untouched local host, `cloud` for an untouched SSH host). The eight `--host-icon-*` CSS
+tokens are identity colors with no state meaning, and the contrast harness binds them to the chrome, selected, dialog
+and picker surfaces. Red has its own identity token with the same value as `--danger`. Only the SVG receives the tint;
+its hover text still describes the host's locality even when a remote host chooses a red laptop. The unknown-locality
+slot stays blank.
 
-Appearance controls live only in the host settings dialog's own refresh classes, between Connection and Permissions.
-Each choice is a named button with `aria-pressed`, in a labelled icon or color group, and saves through the panel's
-existing operation token and per-section outcome. They are disabled while a field editor or any write holds that token.
-Buttons keep arrow navigation from triggering intermediate saves, as a radio group would; the existing focus recovery
-returns to the chosen control after its save. The panel submits only the explicitly changed word from an event and reads
-the other word from the live hosts snapshot at handler entry. A successful appearance write installs its known pair
-behind the existing read-generation barrier before releasing the write token; an older in-flight GET cannot restore the
-preceding pair, and the next explicit choice cannot undo it while the refresh is pending. The ordinary refresh still
+Appearance controls live for both known host kinds in the host settings dialog's own refresh classes, between Connection
+and Permissions. Each choice is a named button with `aria-pressed`, in a labelled icon or color group, and saves through
+the panel's existing operation token and per-section outcome. They are disabled while a field editor or any write holds
+that token. Buttons keep arrow navigation from triggering intermediate saves, as a radio group would; the existing focus
+recovery returns to the chosen control after its save. The panel submits only the explicitly changed word from an event
+and reads the other word from the live hosts snapshot at handler entry. A successful appearance write installs its known
+pair behind the existing read-generation barrier before releasing the write token; an older in-flight GET cannot restore
+the preceding pair, and the next explicit choice cannot undo it while the refresh is pending. The ordinary refresh still
 supplies connection facts and subsequent changes from other clients. A sidebar-surface preview shows the icon without
 changing a session.
 

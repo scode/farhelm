@@ -562,7 +562,7 @@ pub(crate) struct AppearanceSpec {
     pub(crate) color: farhelm_proto::host_appearance::HostColor,
 }
 
-/// Save a remote host's chosen mark and announce it to every open client.
+/// Save a host's chosen mark and announce it to every open client.
 ///
 /// This is a helm-owned operation: a client leaving after the durable write
 /// must not cancel the feed bump and strand other clients on the old mark.
@@ -3140,8 +3140,9 @@ mod tests {
 
     /// A chosen identity must be durable and announced exactly once per
     /// change, so another client can redraw without reconnecting the host.
-    /// Unknown words, missing/extra keys, local and absent hosts are refused
-    /// and never change the stored mark or the event revision.
+    /// Unknown words, malformed input and absent hosts are refused without
+    /// changing the mark or event revision. Local and remote rows share the
+    /// route, while retaining different defaults.
     #[farhelm_testtrace::test]
     async fn appearance_route_validates_stores_and_announces_only_changes() {
         let harness = lone_local_helm().await;
@@ -3193,7 +3194,7 @@ mod tests {
         assert_eq!(events.revision(), after, "a repeat must stay silent");
         for invalid in [
             serde_json::json!({"icon": "spaceship", "color": "teal"}),
-            serde_json::json!({"icon": "rocket", "color": "red"}),
+            serde_json::json!({"icon": "rocket", "color": "infrared"}),
             serde_json::json!({"icon": "rocket"}),
             serde_json::json!({"icon": "rocket", "color": "teal", "colour": "sand"}),
         ] {
@@ -3209,22 +3210,39 @@ mod tests {
             .find(|row| row.kind == crate::store::HostKind::Local)
             .unwrap()
             .id;
-        for (id, expected) in [
-            (local, StatusCode::CONFLICT),
-            (99_999, StatusCode::NOT_FOUND),
-        ] {
-            let (status, _, text) = call(
-                &harness,
-                "POST",
-                &format!("/api/hosts/{id}/appearance"),
-                Some(serde_json::json!({"icon": "cloud", "color": "default"})),
-            )
-            .await;
-            assert_eq!(status, expected, "{text}");
-        }
+        let local_route = format!("/api/hosts/{local}/appearance");
+        let (_, listing, _) = call(&harness, "GET", "/api/hosts", None).await;
+        let local_view = listing["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == local)
+            .unwrap();
+        assert_eq!(local_view["icon"], "laptop");
+        assert_eq!(local_view["color"], "red");
+        let (status, view, text) = call(
+            &harness,
+            "POST",
+            &local_route,
+            Some(serde_json::json!({"icon": "cloud", "color": "teal"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(view["icon"], "cloud");
+        assert_eq!(view["color"], "teal");
+        let local_after = events.revision();
+        assert!(local_after > after, "local changes wake other clients too");
+        let (status, _, text) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{}/appearance", 99_999),
+            Some(serde_json::json!({"icon": "cloud", "color": "default"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{text}");
         assert_eq!(
             events.revision(),
-            after,
+            local_after,
             "refusals cannot announce a change"
         );
         let (_, listing, _) = call(&harness, "GET", "/api/hosts", None).await;

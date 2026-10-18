@@ -43,7 +43,7 @@ test("host picker supports mouse, navigation, typeahead, cancellation, and focus
   await expect(options).toHaveCount(2);
   await expect(options.nth(0)).toHaveAttribute("data-host-id", String(local.id));
   await expect(options.nth(1)).toHaveAttribute("data-host-id", String(remote.id));
-  await expect(options.nth(0).locator(".host-kind-icon")).toHaveAttribute("data-glyph", "local");
+  await expect(options.nth(0).locator(".host-kind-icon")).toHaveAttribute("data-glyph", "laptop");
   await expect(options.nth(0).locator(".host-kind-icon")).toHaveCSS("color", "rgb(224, 128, 128)");
   await expect(options.nth(1).locator(".host-kind-icon")).toHaveAttribute("data-glyph", "rocket");
   await expect(options.nth(1).locator(".host-kind-icon")).toHaveCSS("color", "rgb(79, 200, 192)");

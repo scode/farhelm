@@ -7,7 +7,7 @@ use web_time::Instant;
 
 use super::shared::HostOption;
 use crate::HostId;
-use crate::icons::{HostMark, LocalHostIcon};
+use crate::icons::HostMark;
 use crate::launch_controls::enter_choice;
 use crate::peer::display_peer;
 
@@ -155,7 +155,7 @@ pub(super) fn HostPicker(
                     }
                 },
                 if let Some(host) = chosen {
-                    if host.local { LocalHostIcon {} } else { HostMark { icon: host.icon, color: host.color } }
+                    HostMark { icon: host.icon, color: host.color, local: host.local }
                     bdi { "{display_peer(&host.label())}" }
                 }
                 span { class: "launcher-host-chevron", aria_hidden: "true", "▾" }
@@ -175,7 +175,7 @@ pub(super) fn HostPicker(
                                 if Some(id) != selected { on_pick.call(id); }
                                 open.set(false);
                             } },
-                            if host.local { LocalHostIcon {} } else { HostMark { icon: host.icon, color: host.color } }
+                            HostMark { icon: host.icon, color: host.color, local: host.local }
                             bdi { "{display_peer(&host.label())}" }
                         }
                     }

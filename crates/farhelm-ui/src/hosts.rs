@@ -64,7 +64,7 @@ use crate::api::{
     set_yolo_without_asking, store_preference,
 };
 use crate::app_updater::use_app_updater;
-use crate::icons::{HostMark, LocalHostIcon};
+use crate::icons::HostMark;
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
     closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
@@ -3054,7 +3054,7 @@ fn HostRow(
                 // to make for a session row.
                 match host.kind {
                     HostKind::Local => rsx! {
-                        LocalHostIcon {}
+                        HostMark { icon: host.icon, color: host.color, local: true }
                         span { class: "visually-hidden", "local" }
                     },
                     HostKind::Ssh => rsx! {

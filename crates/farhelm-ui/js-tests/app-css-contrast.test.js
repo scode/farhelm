@@ -129,7 +129,7 @@ const REQUIRED_BINDINGS = [
   // Decorative host colors must stay legible on the sidebar, selections,
   // settings/header and picker rows. Binding each tint to every actual
   // surface catches a later palette retune that screenshots cannot reveal.
-  ...["lavender", "orchid", "teal", "steel", "sand", "copper"].flatMap((name) =>
+  ...["lavender", "orchid", "teal", "steel", "sand", "copper", "red"].flatMap((name) =>
     [...ROW_SURFACES, "--control-hover-bg", "--well"].map((bg) => [`--host-icon-${name}`, bg, 4.5])
   ),
   ...["--bg-0", ...ROW_SURFACES].map((bg) => ["--fg-0", bg, 4.5]),

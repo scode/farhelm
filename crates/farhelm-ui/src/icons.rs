@@ -34,9 +34,9 @@
 //! reuses this same title-line slot) would extend what appears beside these
 //! icons, not this file's shape.
 //!
-//! Host roots carry `data-glyph="local"` or the chosen icon word (`"cloud"`
-//! by default). The shared
-//! `host-kind-icon` class sizes and positions either glyph identically, so
+//! Host roots carry the chosen icon word (`"laptop"` for an untouched local
+//! host, `"cloud"` for an untouched remote one). The shared
+//! `host-kind-icon` class sizes and positions every glyph identically, so
 //! nothing in the DOM otherwise distinguishes which SHAPE actually
 //! rendered. Without a per-glyph marker, a bug that swapped the two
 //! components (or matched a locality to the wrong one) would render the
@@ -413,51 +413,18 @@ pub(crate) fn QualifierIcon(glyph: QualifierGlyph) -> Element {
     }
 }
 
-/// The local-session mark: a laptop silhouette.
-///
-/// An open screen over a wider base reads as a different OBJECT from the
-/// remote cloud at a glance, not just a different arrangement of the same
-/// lines — legibility at 12px depends on silhouette, not on a reader
-/// parsing detail. The outline stays quiet beside the status dot, permission mark,
-/// and title, and it carries the red local caution color without becoming
-/// a solid red patch the way a filled screen would.
-///
-/// The hover text is part of the mark rather than of each caller: the
-/// session rows and the host rows both draw it, and the maintainer asked for
-/// both to explain themselves on hover. It is the same sentence in both
-/// places because the mark means the same thing in both, and the SVG itself
-/// is the hover target, which keeps the rows' flex layout untouched.
-#[component]
-pub(crate) fn LocalHostIcon() -> Element {
-    rsx! {
-        svg {
-            class: "host-kind-icon",
-            "data-glyph": "local",
-            style: "color: var(--danger)",
-            "data-tooltip": "local: on this machine, where the helm runs",
-            view_box: "0 0 16 16",
-            fill: "none",
-            stroke: "currentColor",
-            stroke_width: "1.3",
-            stroke_linecap: "round",
-            stroke_linejoin: "round",
-            "aria-hidden": "true",
-            rect { x: "3", y: "3", width: "10", height: "6.5", rx: "1" }
-            line { x1: "1.8", y1: "12", x2: "14.2", y2: "12", stroke_width: "2" }
-        }
-    }
-}
-
-/// Draw the helm's chosen remote identity in the shared host-mark box.
+/// Draw the helm's chosen host identity in the shared host-mark box.
 ///
 /// The tint identifies a host and never a status. Geometry is Farhelm's own
-/// fifteen-icon set, kept at the original 16-unit box and 1.3 stroke so small
-/// marks have the same visual weight. The caller retains the accessible
-/// locality word; the SVG is decorative and its tooltip still explains SSH.
+/// sixteen-icon set, kept at the original 16-unit box and 1.3 stroke so small
+/// marks have the same visual weight. `local` changes only the hover explanation;
+/// a remote host may choose the same red laptop without becoming local. The
+/// caller retains the accessible locality word because the SVG is decorative.
 #[component]
 pub(crate) fn HostMark(
     #[props(default)] icon: farhelm_proto::host_appearance::HostIcon,
     #[props(default)] color: farhelm_proto::host_appearance::HostColor,
+    #[props(default)] local: bool,
 ) -> Element {
     use farhelm_proto::host_appearance::{HostColor, HostIcon};
     let tint = if color == HostColor::Default {
@@ -469,7 +436,7 @@ pub(crate) fn HostMark(
         svg {
             class: "host-kind-icon", "data-glyph": icon.as_str(),
             "data-host-color": color.as_str(), style: "{tint}",
-            "data-tooltip": "remote: on another machine, reached over ssh",
+            "data-tooltip": if local { "local: on this machine, where the helm runs" } else { "remote: on another machine, reached over ssh" },
             view_box: "0 0 16 16", fill: "none", stroke: "currentColor",
             stroke_width: "1.3", stroke_linecap: "round", stroke_linejoin: "round",
             "aria-hidden": "true",
@@ -534,6 +501,10 @@ pub(crate) fn HostMark(
                 HostIcon::Castle => rsx! {
                     path { d: "M2.5 14V3.5h2v2h2v-2h3v2h2v-2h2V14Z" }
                     path { d: "M6.6 14v-3a1.4 1.4 0 0 1 2.8 0v3" }
+                },
+                HostIcon::Laptop => rsx! {
+                    rect { x: "3", y: "3", width: "10", height: "6.5", rx: "1" }
+                    line { x1: "1.8", y1: "12", x2: "14.2", y2: "12", stroke_width: "2" }
                 },
             }
         }

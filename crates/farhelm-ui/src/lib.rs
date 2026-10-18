@@ -802,6 +802,15 @@ impl HostKind {
         }
     }
 
+    /// Both known host kinds offer decorative identity choices; future kinds
+    /// stay closed until this client understands their defaults and routes.
+    pub(crate) fn supports_appearance(self) -> bool {
+        match self {
+            HostKind::Local | HostKind::Ssh => true,
+            HostKind::Unrecognized => false,
+        }
+    }
+
     /// Whether an Update of this row runs without a confirmation step: only
     /// a remote ssh update. Local setup and anything unrecognized confirm.
     pub(crate) fn updates_automatically(self) -> bool {

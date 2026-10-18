@@ -6,7 +6,7 @@
 
 use crate::activity::ActivityStamp;
 use crate::hosts::{gui_host_name, host_incarnation, is_connected, phase_display_label};
-use crate::icons::{HostMark, LocalHostIcon};
+use crate::icons::HostMark;
 use crate::{Host, HostId, Session, SessionStatus};
 use dioxus::prelude::*;
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
@@ -174,8 +174,8 @@ pub(super) struct RowState {
 ///
 /// A third state alongside `Local`/`Remote` is not an implementation detail
 /// of the boolean this type replaced — it is load-bearing for the sidebar's
-/// icon (`icons::LocalHostIcon`/`HostMark`). The old boolean could
-/// already draw a LOCAL glyph safely whenever it answered true — a
+/// icon (`icons::HostMark`). The old boolean could
+/// already draw a local host mark safely whenever it answered true — a
 /// confirmed match against the registry's local row is exactly the
 /// evidence that claim needs. What it could not do was draw a REMOTE
 /// glyph: its `false` answer covered both a session the registry has
@@ -254,7 +254,7 @@ pub(crate) fn session_locality(
 pub(crate) fn SessionHostIcon(locality: HostLocality, icon: HostIcon, color: HostColor) -> Element {
     match locality {
         HostLocality::Local => rsx! {
-            LocalHostIcon {}
+            HostMark { icon, color, local: true }
             span { class: "visually-hidden", "local" }
         },
         HostLocality::Remote => rsx! {

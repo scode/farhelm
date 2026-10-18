@@ -136,8 +136,8 @@
      units follow browser chrome; the minimum keeps short windows visibly
      separated from their dialogs rather than shrinking the gap to nothing. */
   --dialog-vertical-margin: max(24px, 5dvh);
-  /* Host identity colors carry no state. They tint only a remote host's
-     mark, away from status and accent hues, on chrome, menus and dialogs.
+  /* Host identity colors carry no state. They tint a host's chosen mark,
+     away from status and accent hues, on chrome, menus and dialogs.
      Each clears 4.5:1 on the surfaces bound by the contrast harness. */
   --host-icon-lavender: #b8a4f0;
   --host-icon-orchid: #e090d8;
@@ -145,6 +145,7 @@
   --host-icon-steel: #93aec4;
   --host-icon-sand: #c8b48e;
   --host-icon-copper: #d0906a;
+  --host-icon-red: #e08080;
   /* Surfaces. THREE levels are in use, and which level a thing sits on
      is a decision recorded here rather than something each rule picks
      for itself: ground for content, one step up for the chrome around
@@ -3255,7 +3256,6 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   color: var(--fg-0);
 }
 .host-settings-mark .host-kind-icon { width: 24px; height: 24px; }
-.host-settings-mark .host-kind-icon[data-glyph="local"] { color: var(--danger); }
 .host-settings-heading { flex: 1; min-width: 0; }
 /* Destinations and peer-reported versions are unbounded. The pinned heading
    must not grow with them; the full destination remains in Connection and
@@ -3929,7 +3929,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 /* The locality glyph (2026-09-03):
-   `icons::LocalHostIcon`/`RemoteHostIcon`, sized to the title's cap height
+   `icons::HostMark`, sized to the title's cap height
    rather than its own em so the glyph reads as part of the same line of
    text instead of a bigger decoration dropped onto it. `flex: 0 0 auto`
    keeps it a fixed-size claimant that never shrinks and never grows — a
@@ -4057,16 +4057,6 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   white-space: normal;
   overflow-wrap: anywhere;
   padding: 0;
-}
-
-/* Local sessions need a persistent caution cue, including selected rows.
-   This rule once scoped the red to the session locality slot. The laptop mark
-   (`LocalHostIcon`) now carries the red inline, so it is red wherever it is
-   drawn, the hosts panel included, and this rule and the host-settings one
-   only restate it. Classification still comes from confirmed host identity,
-   never the host's displayed name. */
-.session-locality-slot .host-kind-icon[data-glyph="local"] {
-  color: var(--danger);
 }
 
 /* The rendered host name leads the optional second line beside the cwd.
@@ -7539,6 +7529,7 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .host-color-choice[data-host-color="steel"] span { background: var(--host-icon-steel); }
 .host-color-choice[data-host-color="sand"] span { background: var(--host-icon-sand); }
 .host-color-choice[data-host-color="copper"] span { background: var(--host-icon-copper); }
+.host-color-choice[data-host-color="red"] span { background: var(--host-icon-red); }
 .host-color-name { color: var(--fg-1); font-size: 12px; }
 .host-appearance-preview { display: grid; gap: 10px; padding: 12px; background: var(--bg-1); border: 1px solid var(--border-dim); border-radius: var(--radius-sm); }
 .host-appearance-preview-row { display: flex; align-items: center; gap: 8px; }

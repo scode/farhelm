@@ -2206,7 +2206,6 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             store::HostStoreError::DuplicateDestination(_)
             | store::HostStoreError::AliasTaken(_)
             | store::HostStoreError::LocalHostImmutable
-            | store::HostStoreError::LocalHostAppearanceFixed
             | store::HostStoreError::IdentityMismatch { .. }
             | store::HostStoreError::IdentityClaimed { .. }
             | store::HostStoreError::IdentityClaimedBeforeRegistration { .. }

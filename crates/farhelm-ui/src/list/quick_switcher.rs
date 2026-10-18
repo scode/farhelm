@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use crate::api::{ListSort, SessionFilter, fetch_sessions, fetch_templates};
 use crate::hosts::HostsRead;
 use crate::hosts::settings_dialog::install_dialog_with_selector;
-use crate::icons::{HostMark, LocalHostIcon};
+use crate::icons::HostMark;
 use crate::launch_composer::{
     ComposerSearchResult, SearchScope, harness_label, scoped_query, template_search_results,
 };
@@ -368,8 +368,7 @@ pub(super) fn QuickSwitcher(
                                         span { class: "quick-switcher-agent", "{agent_label(&listing.sessions[matched.index])}" }
                                         span { class: "quick-switcher-host",
                                             if let Some(host) = host {
-                                                if host.kind.is_this_machine() { LocalHostIcon {} }
-                                                else { HostMark { icon: host.icon, color: host.color } }
+                                                HostMark { icon: host.icon, color: host.color, local: host.kind.is_this_machine() }
                                             }
                                             MatchedText { text: host_name(&listing.sessions[matched.index]).to_string(), positions: matched.host.clone() }
                                         }
