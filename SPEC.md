@@ -708,57 +708,69 @@ agent choice is independent of that destination:
   taken. For a stored template that fails current save rules, the control says "delete permanently" before deletion and
   no undo is offered. Closing the dialog ends its undo notice.
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Cmd+P on macOS or Ctrl+Shift+P elsewhere
-  starts it directly in the browser and desktop app, without showing the launcher on success. Applying it uses exactly
-  New's defaults and ordinary launch path: the open session's host and directory, else this machine's home, with the
-  template overriding only its own fields. Success selects the created session. When New was never shown, the rename
-  dialog opens over it while its agent is already starting, unless Settings' on-by-default **name sessions on quick
-  launch** choice is off. This applies to the bolt shortcut, number shortcuts, composed sequences and the quick-switcher
-  row, even when a template supplied the name. The actual created name is focused and fully selected. Enter with the
-  name unchanged or Escape keeps it without sending a rename; a changed name uses ordinary rename. Closing returns to
-  the new terminal, which takes no input while the dialog is open. A launch that revealed New gets no naming dialog,
-  even if a later submission succeeds. A held chord starts only once; the chord never reaches the terminal and visible
-  modals keep the keyboard. With no usable mark it opens Templates with an explanation. An edited marked template that
-  no longer supplies an agent or command opens New with it applied. A launch refusal or YOLO question reveals New with
-  the same draft, error or confirmation; nothing bypasses host admission, and the shortcut never retries itself. The
-  mark is a nullable template name on the helm's shared preferences, independent of the template fields. Clicking
-  another bolt moves it; clicking the lit bolt clears it. A template that chooses neither an agent nor a nonblank
-  command cannot be marked in the interface. Renaming repoints the mark before deleting the old name; deleting that name
-  clears its mark through the shared delete path, and Undo never restores the mark. The editor says whether its saved
-  template is marked. The shortcut reads the mark and templates fresh on each use, so another window's change takes
-  effect without reloading. Templates' hover and a separate quick-switcher row advertise the chord and marked name. A
-  browser that reserves the chord keeps its behavior; the quick-switcher row remains available. An agent may set or
-  clear the mark through `farhelm agent template create` or `edit`, behind a template approval card. The helm applies
-  the same eligibility rule to an agent's write as the Templates editor does.
+  starts it directly in the browser and desktop app when no dialog is open, without showing the launcher on success.
+  While New, Clone or Replace with is the only visible dialog, the same chord applies its template to that draft and
+  leaves Launch to the user. Consecutive presses apply in order; a refusal changes nothing from that press and does not
+  discard a later press. A missing mark or failed read shows its refusal where `tl:` does, without opening Templates.
+  During a launch or while saving a template, the chord is consumed without changing the draft. Applying by shortcut
+  leaves focus and search text alone, unless its edits remove the focused control, when focus returns to the launcher's
+  search. Other visible dialogs keep the keyboard. A hidden quick-launch launcher still consumes the chord without
+  applying it. Applying it on the page uses exactly New's defaults and ordinary launch path: the open session's host and
+  directory, else this machine's home, with the template overriding only its own fields. Success selects the created
+  session. When New was never shown, the rename dialog opens over it while its agent is already starting, unless
+  Settings' on-by-default **name sessions on quick launch** choice is off. This applies to the bolt shortcut, number
+  shortcuts, composed sequences and the quick-switcher row, even when a template supplied the name. The actual created
+  name is focused and fully selected. Enter with the name unchanged or Escape keeps it without sending a rename; a
+  changed name uses ordinary rename. Closing returns to the new terminal, which takes no input while the dialog is open.
+  A launch that revealed New gets no naming dialog, even if a later submission succeeds. A held chord starts only once;
+  the chord never reaches the terminal and visible modals other than the launcher keep the keyboard. With no usable mark
+  on the page it opens Templates with an explanation. An edited marked template that no longer supplies an agent or
+  command opens New with it applied. A launch refusal or YOLO question reveals New with the same draft, error or
+  confirmation; nothing bypasses host admission, and the shortcut never retries itself. The mark is a nullable template
+  name on the helm's shared preferences, independent of the template fields. Clicking another bolt moves it; clicking
+  the lit bolt clears it. A template that chooses neither an agent nor a nonblank command cannot be marked in the
+  interface. Renaming repoints the mark before deleting the old name; deleting that name clears its mark through the
+  shared delete path, and Undo never restores the mark. The editor says whether its saved template is marked. The
+  shortcut reads the mark and templates fresh on each use, so another window's change takes effect without reloading.
+  Templates' hover and a separate quick-switcher row advertise the chord and marked name. A browser that reserves the
+  chord keeps its behavior; the quick-switcher row remains available. An agent may set or clear the mark through
+  `farhelm agent template create` or `edit`, behind a template approval card. The helm applies the same eligibility rule
+  to an agent's write as the Templates editor does.
 - Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit in
   the Mac desktop app, or Ctrl+Shift+digit everywhere else (including a Mac browser), starts its template through the
-  same direct launch path as quick launch. It reads bindings and templates fresh each time. Unbound keys open Templates
-  with a binding hint; an incomplete template, refusal or YOLO question uses quick launch's ordinary New fallback.
-  Visible modals retain the keyboard, held keys launch once, and the chord never reaches the terminal. Matching uses the
-  physical digit key, independent of the printed character; the numeric keypad is excluded. Each row's key button opens
-  a menu with no shortcut, then 1–9 and 0; occupied keys name their template, and choosing one moves it. A template has
-  at most one key and each key has at most one template. Any template can hold a number key, including one that cannot
-  launch alone; only the combined setup must be launchable. Pressing such a key alone opens New with the template
-  applied and a prominent alert banner at the top explaining that it cannot launch on its own and how to combine it with
-  the sequence prefix. The banner expires about six seconds after application finishes, or when the user starts editing.
-  Both key and bolt hover explain launching, their uniqueness and the current choice; partial-template key hover
-  explains composition. The bolt retains its existing eligibility rule. Bindings are a whole-map shared preference,
-  replaced on write; concurrent windows may lose one map edit. Names must be syntactically valid but need not exist at
-  write time. Rename keeps a key, delete frees it through both delete paths, and Undo never restores it. A browser that
-  reserves a chord keeps its behavior. An agent may assign or clear a number key through the same template verbs and
-  approval card. Assigning an occupied key moves it from its previous template, as the Templates editor does; a key can
-  still belong to a partial template.
+  same direct launch path as quick launch on the page, and applies it to an open New, Clone or Replace with draft under
+  the same focus, ordering and refusal rules as the ⚡ chord. It reads bindings and templates fresh each time. Unbound
+  keys open Templates with a binding hint; an incomplete template, refusal or YOLO question uses quick launch's ordinary
+  New fallback. Other visible modals retain the keyboard, held keys act once, and the chord never reaches the terminal.
+  Matching uses the physical digit key, independent of the printed character; the numeric keypad is excluded. Each row's
+  key button opens a menu with no shortcut, then 1–9 and 0; occupied keys name their template, and choosing one moves
+  it. A template has at most one key and each key has at most one template. Any template can hold a number key,
+  including one that cannot launch alone; only the combined setup must be launchable. Pressing such a key alone opens
+  New with the template applied and a prominent alert banner at the top explaining that it cannot launch on its own and
+  how to combine it with the sequence prefix. The banner expires about six seconds after application finishes, or when
+  the user starts editing. Both key and bolt hover explain launching, their uniqueness and the current choice;
+  partial-template key hover explains composition. The bolt retains its existing eligibility rule. Bindings are a
+  whole-map shared preference, replaced on write; concurrent windows may lose one map edit. Names must be syntactically
+  valid but need not exist at write time. Rename keeps a key, delete frees it through both delete paths, and Undo never
+  restores it. A browser that reserves a chord keeps its behavior. An agent may assign or clear a number key through the
+  same template verbs and approval card. Assigning an occupied key moves it from its previous template, as the Templates
+  editor does; a key can still belong to a partial template.
 - Quick-launch sequences compose templates without changing the single-chord shortcuts. Cmd+X in the Mac desktop app, or
-  Ctrl+Shift+X in browsers, starts a sequence, except in a text field where it retains its normal meaning; the
-  terminal's input textarea counts as the terminal. Bare physical number keys or their usual template chord queue
-  templates in order; the ordinary ⚡ chord queues the marked template. Enter applies them in that order, later edits
-  winning, and directly launches through the same defaults, validation and admission as quick launch. An unbound key
-  opens Templates at Enter with the binding hint. A refusal names its template and reveals New with the draft; an
-  incomplete result or YOLO question uses the same fallback. Enter with nothing queued cancels without opening anything.
-  A non-modal status pill floats over the bottom of the terminal area, or the main area with no session open, naming
-  queued templates and saying "Enter launch · Esc cancel". Before any key it says "Launch sequence: press number keys to
-  queue templates, Enter to launch, Esc to cancel." There is no timeout. Escape cancels and is consumed; a click,
-  switching windows or opening a dialog cancels. Any other key cancels and reaches its normal target; Meta, Control and
-  Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
+  Ctrl+Shift+X in browsers, starts a sequence, except in a text field outside the launcher where it retains its normal
+  meaning. In the launcher's own text fields it starts a sequence only when no text is selected; with a selection it
+  keeps Cut or the browser's normal action. The terminal's input textarea counts as the terminal. Bare physical number
+  keys or their usual template chord queue templates in order; the ordinary ⚡ chord queues the marked template. Enter
+  applies them in that order, later edits winning, and directly launches through the same defaults, validation and
+  admission as quick launch on the page. In New, Clone or Replace with, Enter instead applies the queued templates to
+  the current draft without launching; each completed sequence is one refusal unit, and the pill says "apply" instead of
+  "launch". An unbound key opens Templates at Enter with the binding hint on the page; inside the launcher it shows a
+  refusal beneath the search box without changing the draft. A refusal names its template and reveals New with the draft
+  on the page; an incomplete result or YOLO question uses the same fallback. Enter with nothing queued cancels without
+  opening anything. A non-modal status pill floats over the bottom of the terminal area, or the main area with no
+  session open, naming queued templates and saying "Enter launch · Esc cancel". Before any key it says "Launch sequence:
+  press number keys to queue templates, Enter to launch, Esc to cancel." There is no timeout. Escape cancels and is
+  consumed; a click, switching windows or opening a dialog cancels. Any other key cancels and reaches its normal target;
+  Meta, Control and Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the
@@ -1895,7 +1907,8 @@ Cmd+0–9 in the Mac desktop app, or Ctrl+Shift+0–9 in every other client, dir
 (see Creation). Browsers on a Mac use Ctrl+Shift as well, leaving their Cmd+digits free for tabs and zoom.
 
 Cmd+X in the Mac desktop app, or Ctrl+Shift+X in browsers, begins a quick-launch template sequence (see Creation). Text
-fields keep their normal Cut or text-direction key; the terminal accepts the sequence prefix.
+fields outside the session launcher keep their normal Cut or text-direction key; the terminal accepts the sequence
+prefix. In the launcher's own fields, selected text keeps that normal action and an unselected field accepts the prefix.
 
 Cmd+K on macOS, Ctrl+Shift+K elsewhere, opens a quick switcher in the web UI and desktop app, including from a focused
 terminal. It does nothing while another modal is open or before sign-in and preferences loading finish. Type a

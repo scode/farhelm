@@ -125,8 +125,9 @@ test("only plain Enter launches; Escape consumes and three modifier keys preserv
  */
 class Element {
   constructor({ tag = "div", parent = null, terminal = false, editable, modal = false,
-    visible = true, action, digit, disabled = false } = {}) {
-    Object.assign(this, { tag, parent, terminal, editable, modal, visible, action, digit, disabled });
+    visible = true, action, digit, disabled = false, selectionStart, selectionEnd, savePanel = false } = {}) {
+    Object.assign(this, { tag, parent, terminal, editable, modal, visible, action, digit, disabled,
+      selectionStart, selectionEnd, savePanel });
   }
   get isContentEditable() {
     return this.editable === undefined ? !!this.parent?.isContentEditable : this.editable;
@@ -140,6 +141,14 @@ class Element {
   }
   closest(selector) {
     return this.matches(selector) ? this : this.parent?.closest(selector) || null;
+  }
+  contains(target) {
+    for (let node = target; node; node = node.parent) if (node === this) return true;
+    return false;
+  }
+  querySelector(selector) {
+    assert.equal(selector, ".save-template-panel");
+    return this.savePanel ? new Element() : null;
   }
   getClientRects() { return this.visible ? [{}] : []; }
 }
@@ -183,6 +192,8 @@ function page(client = clients[2], definition = defaultDefinition) {
   const modals = [];
   document.form = null;
   document.hidden = false;
+  document.selection = { isCollapsed: true };
+  window.getSelection = () => document.selection;
   document.querySelectorAll = selector => {
     assert.equal(selector, '[role="dialog"][aria-modal="true"]');
     return modals;
@@ -303,6 +314,81 @@ test("text fields keep their prefix while xterm's textarea can begin", () => {
   }
 });
 
+/** A selection keeps Cut available in New, Clone and Replace with. Without a
+ * selection, the same physical Mac-desktop chord starts a sequence; a field
+ * outside the launcher still keeps the key even while New is visible.
+ */
+test("Mac desktop launcher fields reserve selected text for Cut", () => {
+  const p = page(clients[0]);
+  const form = new Element({ modal: true });
+  p.document.form = form;
+  p.modals.push(form);
+  const input = new Element({ tag: "input", parent: form, selectionStart: 1, selectionEnd: 4 });
+  const prefix = () => p.press({ code: "KeyX", metaKey: true, target: input });
+  assert.equal(p.window.farhelmTemplateShortcutContext(), "launcher");
+  assert.equal(prefix().defaultPrevented, false);
+  assert.deepEqual(p.clicks, [], "a selected range must remain available to Cut");
+  input.selectionEnd = 1;
+  assert.equal(prefix().defaultPrevented, true);
+  assert.deepEqual(p.clicks, ["begin"]);
+  assert.equal(p.press({ code: "Digit2", target: input }).defaultPrevented, true);
+  assert.equal(p.press({ code: "Enter", key: "Enter", target: input }).defaultPrevented, true);
+  assert.deepEqual(p.clicks, ["begin", "digit2", "launch"]);
+
+  const outside = new Element({ tag: "input" });
+  assert.equal(p.press({ code: "KeyX", metaKey: true, target: outside }).defaultPrevented, false);
+  assert.deepEqual(p.clicks, ["begin", "digit2", "launch"]);
+});
+
+/** Input selection offsets and contenteditable selection state come from
+ * different DOM APIs. Both must preserve selected text and admit an empty
+ * selection inside the open launcher.
+ */
+test("launcher selection rule covers browser fields and contenteditable descendants", () => {
+  const p = page();
+  const form = new Element({ modal: true });
+  p.document.form = form;
+  p.modals.push(form);
+  const field = new Element({ tag: "textarea", parent: form, selectionStart: 0, selectionEnd: 3 });
+  const chord = { code: "KeyX", ctrlKey: true, shiftKey: true };
+  assert.equal(p.press({ ...chord, target: field }).defaultPrevented, false);
+  field.selectionEnd = 0;
+  assert.equal(p.press({ ...chord, target: field }).defaultPrevented, true);
+  p.press({ code: "Escape", key: "Escape" });
+
+  const editable = new Element({ parent: form, editable: true });
+  const child = new Element({ parent: editable });
+  p.document.selection = { isCollapsed: false };
+  assert.equal(p.press({ ...chord, target: child }).defaultPrevented, false);
+  p.document.selection.isCollapsed = true;
+  assert.equal(p.press({ ...chord, target: child }).defaultPrevented, true);
+  assert.deepEqual(p.clicks, ["begin", "cancel", "begin"]);
+});
+
+/** The launcher exception changes neither modal isolation nor preparation:
+ * a dialog over New yields, and a hidden form still reserves recognized keys.
+ */
+test("launcher shortcuts consume keys only while it owns the visible modal", () => {
+  const p = page();
+  const form = new Element({ modal: true, visible: false });
+  p.document.form = form;
+  p.modals.push(form);
+  const bolt = { code: "KeyP", ctrlKey: true, shiftKey: true };
+  assert.equal(p.press(bolt).defaultPrevented, true);
+  assert.deepEqual(p.clicks, []);
+  form.visible = true;
+  assert.equal(p.press(bolt).defaultPrevented, true);
+  assert.equal(p.prefix().defaultPrevented, true);
+  assert.equal(p.press({ code: "Digit1", isComposing: true }).defaultPrevented, false);
+  assert.deepEqual(p.clicks, ["quick-bolt", "begin", "cancel"]);
+  assert.equal(p.press({ code: "KeyJ", ctrlKey: true, shiftKey: true }).defaultPrevented, false);
+  const other = new Element({ modal: true });
+  p.modals.push(other);
+  assert.equal(p.press(bolt).defaultPrevented, false);
+  assert.equal(p.prefix().defaultPrevented, false);
+  assert.deepEqual(p.clicks, ["quick-bolt", "begin", "cancel"]);
+});
+
 test("cancellation paths retire both owners once and allow the next terminal key", () => {
   const cancellation = [
     p => p.press({ code: "Escape", key: "Escape" }),
@@ -343,9 +429,8 @@ test("visible dialogs own keys immediately; hidden dialogs and ordinary focus do
   assert.equal(p.prefix().defaultPrevented, false);
 });
 
-/** Focus cancellation follows context admission, including future contexts
- * that may admit a visible dialog, instead of inspecting the focus target's
- * modal ancestry independently of the keydown policy.
+/** Focus cancellation follows the shared launcher context rather than the
+ * focus target's modal ancestry. Moving among its controls keeps the queue.
  */
 test("focus into a dialog admitted by the context rule keeps an armed sequence", () => {
   const p = page();
@@ -353,7 +438,7 @@ test("focus into a dialog admitted by the context rule keeps an armed sequence",
   const modal = new Element({ modal: true });
   p.modals.push(modal);
   assert.equal(templateShortcutContext(p.document), "yield");
-  p.window.farhelmTemplateShortcutContext = () => "preparing";
+  p.window.farhelmTemplateShortcutContext = () => "launcher";
   p.window.dispatch("focusin", { target: new Element({ parent: modal }) });
   assert.deepEqual(p.clicks, ["begin"]);
   assert.equal(p.press({ code: "Digit1" }).defaultPrevented, true);
@@ -424,6 +509,9 @@ test("one context rule separates page, hidden preparation, launcher and other mo
   assert.equal(templateShortcutContext(p.document), "preparing");
   p.document.form.visible = true;
   assert.equal(templateShortcutContext(p.document), "launcher");
+  p.document.form.savePanel = true;
+  assert.equal(templateShortcutContext(p.document), "preparing");
+  p.document.form.savePanel = false;
   const other = new Element({ modal: true });
   p.modals.push(other);
   assert.equal(templateShortcutContext(p.document), "yield");
@@ -431,6 +519,40 @@ test("one context rule separates page, hidden preparation, launcher and other mo
   assert.equal(templateShortcutContext(p.document), "yield");
   p.document.form = null;
   assert.equal(templateShortcutContext(p.document), "yield");
+});
+
+/** A cancelled save panel cannot authorize a chord that was pressed while it
+ * owned the draft. The listener consumes it before Rust starts any read.
+ */
+test("save-as-template panel reserves template chords", () => {
+  const p = page();
+  const form = new Element({ modal: true, savePanel: true });
+  p.document.form = form;
+  p.modals.push(form);
+  assert.equal(p.press({ code: "KeyP", ctrlKey: true, shiftKey: true }).defaultPrevented, true);
+  assert.deepEqual(p.clicks, []);
+  assert.equal(p.window.farhelmTakeTemplateShortcutPress(), undefined);
+});
+
+/** A later modal must revoke the exact physical press even when the worker
+ * does not reach its relay until that modal has closed again.
+ */
+test("dispatch snapshots retain each press's opening epoch in order", () => {
+  const p = page();
+  const form = new Element({ modal: true });
+  p.document.form = form;
+  p.modals.push(form);
+  p.window.__farhelmModalOpening = 4;
+  p.press({ code: "KeyP", ctrlKey: true, shiftKey: true });
+  p.window.__farhelmModalOpening = 5;
+  p.press({ code: "Digit1", ctrlKey: true, shiftKey: true });
+  const first = p.window.farhelmTakeTemplateShortcutPress();
+  const second = p.window.farhelmTakeTemplateShortcutPress();
+  assert.equal(first.context, "launcher");
+  assert.equal(first.modal_opening, 4);
+  assert.equal(second.context, "launcher");
+  assert.equal(second.modal_opening, 5);
+  assert.equal(p.window.farhelmTakeTemplateShortcutPress(), undefined);
 });
 
 /** Move all physical keys and give numbers a Ctrl+Alt chord to test modifier
@@ -451,8 +573,7 @@ function changedDefinition() {
 }
 
 /** Changing key codes in this fixture must move every action without editing
- * the matcher. Both contexts use the same definition; PR1 still yields to a
- * visible launcher, which PR3 changes through the shared context decision.
+ * the matcher. Both admitted contexts use the same definition and relays.
  */
 test("a non-default definition moves all shortcuts in page and launcher contexts", () => {
   const changed = changedDefinition();
@@ -464,7 +585,6 @@ test("a non-default definition moves all shortcuts in page and launcher contexts
       p.modals.push(p.document.form);
     }
     assert.equal(p.window.farhelmTemplateShortcutContext(), context);
-    const expectConsumed = context === "page";
     const bolt = { code: "KeyB", ...client.bolt };
     const numbers = changed.number.keys.map(({ code, value }) =>
       ({ code, value, ctrlKey: true, altKey: true }));
@@ -499,21 +619,19 @@ test("a non-default definition moves all shortcuts in page and launcher contexts
     assert.equal(p.press({ code: "KeyC", ...client.number }).defaultPrevented, false,
       "the installer must also reject the old Ctrl+Shift mask on the moved number key");
     for (const event of [bolt, ...numbers, prefix]) {
-      assert.equal(p.press(event).defaultPrevented, expectConsumed);
+      assert.equal(p.press(event).defaultPrevented, true);
     }
     assert.equal(p.press(list).defaultPrevented, false);
-    if (expectConsumed) {
-      p.press({ code: "KeyZ" });
-      p.press(prefix);
-      assert.deepEqual(classify(client, { code: "KeyC" }, true, false, changed),
-        { action: "digit", consume: true, digit: "1" });
-      assert.equal(p.press({ code: "KeyC" }).defaultPrevented, true);
-      assert.equal(p.press(bolt).defaultPrevented, true);
-      assert.equal(p.press({ code: "Enter", key: "Enter" }).defaultPrevented, true);
-      assert.deepEqual(p.clicks,
-        ["quick-bolt", ...changed.number.keys.map(key => `quick-digit${key.value}`),
-          "begin", "cancel", "begin", "digit1", "bolt", "launch"]);
-    } else assert.deepEqual(p.clicks, []);
+    p.press({ code: "KeyZ" });
+    p.press(prefix);
+    assert.deepEqual(classify(client, { code: "KeyC" }, true, false, changed),
+      { action: "digit", consume: true, digit: "1" });
+    assert.equal(p.press({ code: "KeyC" }).defaultPrevented, true);
+    assert.equal(p.press(bolt).defaultPrevented, true);
+    assert.equal(p.press({ code: "Enter", key: "Enter" }).defaultPrevented, true);
+    assert.deepEqual(p.clicks,
+      ["quick-bolt", ...changed.number.keys.map(key => `quick-digit${key.value}`),
+        "begin", "cancel", "begin", "digit1", "bolt", "launch"]);
   }
 });
 

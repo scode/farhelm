@@ -241,10 +241,20 @@ pub(crate) enum TemplateReference {
 /// A modal can appear between separate awaited evaluations, including a
 /// programmatic dialog that does not increment Farhelm's epoch. Keep the
 /// context and epoch together while Rust crosses the JS boundary.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub(crate) struct ShortcutContextSnapshot {
     pub(crate) context: String,
     pub(crate) modal_opening: u64,
+}
+
+/// Take the listener's snapshot from the physical shortcut press.
+/// The serialized worker may reach a later press only after an earlier fetch;
+/// observing the DOM then would miss a dialog that opened between them.
+pub(crate) async fn take_shortcut_press_snapshot() -> Option<ShortcutContextSnapshot> {
+    document::eval("return window.farhelmTakeTemplateShortcutPress?.()")
+        .join::<ShortcutContextSnapshot>()
+        .await
+        .ok()
 }
 
 /// Ask the installed listener's one DOM rule before and after a fresh read.
@@ -287,12 +297,19 @@ pub(crate) fn resolve_template_references(
 #[derive(Clone, Copy)]
 pub(crate) struct LaunchSequence(pub Signal<Option<Vec<TemplateReference>>>);
 
+/// The context where the prefix was accepted, for the sequence pill's verb.
+/// A sequence is cancelled when dialog ownership changes, so this remains
+/// stable through the digit presses it describes.
+#[derive(Clone, Copy)]
+pub(crate) struct LaunchSequenceInLauncher(pub Signal<bool>);
+
 /// Explain a pending sequence without taking focus or changing pane layout.
 /// This lives above the selected session so navigation and an empty fleet do
 /// not strand its display in an unmounted terminal.
 #[component]
 pub(crate) fn LaunchSequenceIndicator() -> Element {
     let sequence = use_context::<LaunchSequence>().0;
+    let in_launcher = use_context::<LaunchSequenceInLauncher>().0;
     let preferences = use_context::<SharedPreferences>();
     let Some(references) = sequence() else {
         return rsx! {};
@@ -318,7 +335,11 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
     rsx! {
         div { class: "launch-sequence-indicator", role: "status",
             if references.is_empty() {
-                "Launch sequence: press number keys to queue templates, Enter to launch, Esc to cancel."
+                if in_launcher() {
+                    "Apply sequence: press number keys to queue templates, Enter to apply, Esc to cancel."
+                } else {
+                    "Launch sequence: press number keys to queue templates, Enter to launch, Esc to cancel."
+                }
             } else {
                 span { class: "launch-sequence-names",
                     for (index, name) in names.into_iter().enumerate() {
@@ -326,7 +347,9 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
                         bdi { dir: "auto", "{name}" }
                     }
                 }
-                span { class: "launch-sequence-hint", "Enter launch · Esc cancel" }
+                span { class: "launch-sequence-hint",
+                    if in_launcher() { "Enter apply · Esc cancel" } else { "Enter launch · Esc cancel" }
+                }
             }
         }
     }

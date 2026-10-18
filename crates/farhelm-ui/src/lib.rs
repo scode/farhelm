@@ -1596,6 +1596,7 @@ fn AppBody() -> Element {
     let hosts = use_signal(hosts::HostsRead::default);
     use_context_provider(|| hosts);
     use_context_provider(|| launch_sequence::LaunchSequence(Signal::new(None)));
+    use_context_provider(|| launch_sequence::LaunchSequenceInLauncher(Signal::new(false)));
     // Selection is a navigation snapshot; detail reads live in SessionView.
     // Keep Rename's raw seed separate so refreshed titles do not masquerade
     // as navigation writes and fence the detail read that supplied them.
