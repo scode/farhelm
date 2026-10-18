@@ -182,6 +182,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   "click to open", while the name right next to it shows just the name. Make the hover text carry information worth
   hovering for, and make the row's parts agree. What it should show is TBD.
 
+- **Give the Settings dialog more structure.** Settings has grown into one long page that takes endless scrolling to get
+  through. Overhaul it with more structure, such as tabs, so related settings are grouped and any one of them is easy to
+  find. The grouping and layout are TBD.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
