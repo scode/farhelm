@@ -234,14 +234,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `323bb0bc-b176-494a-93a3-edb39f93e4c6`). Inspect the retained supervisor/test trace to determine whether this is a
   product status transition or an environment failure before changing the test's expected state (FLAKES.md, 2026-10-18).
 
-- **Held tab detail read sometimes returns plaintext for a missing session.**
-  `a tab opened and closed before any poll observes it does not come back` in `e2e/tests/terminal-tabs.spec.ts` tried to
-  parse `no such session` as JSON in the WebKit browser run `3727b704-5894-4a20-9fb6-1967d56fabb8`. The first isolated
-  rerun failed, then two passed (`72d1143f-d4bc-4085-9916-ef46949249c0`, `3ea7dcc1-4f72-4a1f-a487-18f6521e2f32`,
-  `3b1939c9-7c9c-4d55-a4fb-754b5ce89a82`). The held detail route parses the response without checking its status;
-  establish why the session was missing in the retained run before deciding how the fixture should handle that response
-  (FLAKES.md, 2026-10-18).
-
 - **WebKit trash layout test sometimes sees no archive rows.** `overflowing trash keeps vertical margins at width 1000`
   in `e2e/tests/modal-layout.spec.ts` expected 24 checkout trash entries but saw none for five seconds in WebKit browser
   run `3727b704-5894-4a20-9fb6-1967d56fabb8`. Three isolated classification reruns passed
