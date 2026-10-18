@@ -48,6 +48,12 @@ chosen with the same **folder** and **managed checkout** control as the launcher
 gets its own checkout and that its directory moves to the trash when its last session is deleted. A model or a
 destination can stand on its own: another template can supply the agent or host.
 
+A **session name** can be a **base name** or a **fixed name**. When you apply a base name in the session launcher or a
+quick launch, a managed checkout uses it as-is when free, then adds `-2`, `-3`, and so on up to `-50` when taken. The
+session and its checkout directory get the same number, so you can launch the same setup repeatedly. A fixed name
+reports a clash instead. Names in existing templates are base names; a launch into an ordinary directory uses either
+kind as-is.
+
 Workspace trust comes from [managed-checkout settings](/docs/using/start-a-session/#trust-in-managed-checkouts). A trust
 choice saved in an older template is ignored and is removed when you save that template again.
 
@@ -138,9 +144,14 @@ When you have set up a launch in **new** or **clone**, choose **save as template
 />
 
 Agent, model and effort choices are checked when set, as are command choices. Approvals and a wrapper prefix
-are checked when you chose them; a host, directory and session name only when you picked or typed them.
+are checked when you chose them; a host and directory only when you picked or typed them. A session name is checked
+after you type it or apply a template that sets it.
 A selected managed checkout's repository is checked too; unselected repository text is left out. Remembered defaults and
 a cloned session's host and directory stay available, but unchecked.
+
+The session-name row offers **base name** and **fixed name** too. A name you typed starts on base; a name supplied by
+a template keeps that template's choice. Saving a numbered base keeps the original name: `app-review-2` is saved as
+`app-review`, ready to find the next free checkout when you use it again.
 
 The template keeps the current **agent** or **command** tab and only the choices you check. Saving closes the launcher.
 **cancel** or Escape returns to the setup without saving. This action is not offered in **replace with**.

@@ -3101,6 +3101,16 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .templates-editor-heading h3 { font-size: 15px; }
 .templates-unsaved { color: var(--warn); font-size: 12px; }
 .templates-sets-heading { font-size: 13px; color: var(--fg-1); }
+/* The policy belongs to the name's label row. Wrap the pair together on
+   narrow layouts so neither the editor nor launcher save clips its choices. */
+.template-name-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.template-name-label .template-name-kind { flex-shrink: 0; }
+.save-template-field { min-width: 0; }
 .templates-field,
 .templates-field label {
   display: grid;

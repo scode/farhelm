@@ -4,12 +4,14 @@
 //! may be offered without being checked. The snapshot stays fixed while this
 //! inline panel is open, even if the surrounding launcher changes.
 
-use super::templates::{Field, new_name_refusal, saved_fields_refusal, word};
+use super::templates::{
+    Field, NAME_KIND_HELP, NameKindControl, new_name_refusal, saved_fields_refusal, word,
+};
 use crate::{ApiBase, api, peer::display_peer};
 use dioxus::prelude::*;
 use farhelm_proto::launcher::{
     LaunchCatalogModel, LaunchTemplate, LauncherKind, LauncherState, TemplateDestination,
-    TemplateFields, check_template_shape,
+    TemplateFields, TemplateNameKind, check_template_shape,
 };
 
 /// Provenance needed only for the launcher's pre-checked save choices.
@@ -38,11 +40,20 @@ impl Candidate {
     /// An explicit default approval choice is a present null reset. Trust
     /// from old snapshots is never offered: Settings owns the next launch.
     pub(super) fn from_state(state: &LauncherState, explicit: ExplicitChoices) -> Self {
+        // A template source carries its original base through the launcher
+        // snapshot. A typed name has no policy and starts as Base here.
+        let name = state.name.clone().filter(|s| !s.is_empty());
+        let name_kind = name.as_ref().and(
+            state
+                .name_kind
+                .filter(|kind| *kind == TemplateNameKind::Fixed),
+        );
         let mut fields = TemplateFields {
             kind: state.kind,
             host: state.host.clone(),
             destination: state.destination.clone(),
-            name: state.name.clone().filter(|s| !s.is_empty()),
+            name,
+            name_kind,
             ..Default::default()
         };
         match state.kind {
@@ -176,15 +187,20 @@ pub(super) fn SaveTemplatePanel(
     let base = use_context::<ApiBase>().0;
     let mut name = use_signal(String::new);
     let mut checked = use_signal(|| candidate.checked.clone());
+    let mut name_kind = use_signal(|| candidate.fields.name_kind);
     let mut error = use_signal(|| None::<String>);
     let save_candidate = candidate.clone();
     let save = use_callback(move |()| {
         if saving() {
             return;
         }
+        let mut fields = save_candidate.selected(&checked());
+        // Unchecking the name excludes its policy too, even if Fixed was
+        // chosen before the checkbox was cleared.
+        fields.name_kind = fields.name.as_ref().and(name_kind());
         let template = LaunchTemplate {
             name: name(),
-            fields: save_candidate.selected(&checked()),
+            fields,
         };
         let refusal = check_template_shape(&template)
             .err()
@@ -253,18 +269,28 @@ pub(super) fn SaveTemplatePanel(
             }
             p { "choose which parts of this setup the template keeps" }
             for field in Field::ALL.into_iter().filter(|f| f.is_set(&candidate.fields)) {
-                label { class: "save-template-choice", "data-tooltip": "keep this {field.label()} in the template",
-                    input { r#type: "checkbox", "data-field": field.key(), checked: checked().contains(&field),
-                        disabled: saving(), onchange: move |event| {
-                            checked.with_mut(|fields| {
-                                fields.retain(|f| *f != field);
-                                if event.checked() { fields.push(field); }
-                            });
-                        },
+                div { class: "save-template-field",
+                    div { class: "template-name-label",
+                        label { class: "save-template-choice", "data-tooltip": "keep this {field.label()} in the template",
+                            input { r#type: "checkbox", "data-field": field.key(), checked: checked().contains(&field),
+                                disabled: saving(), onchange: move |event| {
+                                    checked.with_mut(|fields| {
+                                        fields.retain(|f| *f != field);
+                                        if event.checked() { fields.push(field); }
+                                    });
+                                },
+                            }
+                            span { "{field.label()}: "
+                                span { class: "peer-value", dir: "ltr", "{choice_text(field, &candidate.fields, &host_label)}" }
+                            }
+                        }
+                        if field == Field::Name {
+                            NameKindControl { kind: name_kind(), disabled: saving() || !checked().contains(&Field::Name),
+                                on_change: move |kind| name_kind.set(kind)
+                            }
+                        }
                     }
-                    span { "{field.label()}: "
-                        span { class: "peer-value", dir: "ltr", "{choice_text(field, &candidate.fields, &host_label)}" }
-                    }
+                    if field == Field::Name { p { class: "templates-hint", "{NAME_KIND_HELP}" } }
                 }
             }
             if candidate.fields.host.is_none() {
@@ -288,6 +314,39 @@ pub(super) fn SaveTemplatePanel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Saving a typed name defaults to Base. A template's source policy and
+    /// original base survive the snapshot, while unchecked names omit both.
+    /// Normalizing Base before saving keeps the editor's baseline clean.
+    #[test]
+    fn name_policy_follows_the_saved_name() {
+        for kind in [
+            None,
+            Some(TemplateNameKind::Base),
+            Some(TemplateNameKind::Fixed),
+        ] {
+            let state = LauncherState {
+                name: Some("app-review".into()),
+                name_kind: kind,
+                ..Default::default()
+            };
+            let candidate = Candidate::from_state(
+                &state,
+                ExplicitChoices {
+                    name: true,
+                    ..Default::default()
+                },
+            );
+            let expected = kind.filter(|kind| *kind == TemplateNameKind::Fixed);
+            assert_eq!(candidate.fields.name.as_deref(), Some("app-review"));
+            assert_eq!(candidate.fields.name_kind, expected);
+            assert!(candidate.checked.contains(&Field::Name));
+            assert_eq!(candidate.selected(&[Field::Name]).name_kind, expected);
+            let omitted = candidate.selected(&[]);
+            assert_eq!(omitted.name, None);
+            assert_eq!(omitted.name_kind, None);
+        }
+    }
     use farhelm_proto::launcher::{TemplateContext, apply_template};
     use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
 

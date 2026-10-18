@@ -697,15 +697,20 @@ agent choice is independent of that destination:
   whenever set, including Clone's launch choices; a nonempty initial prompt is checked too, shown by its escaped first
   line with an ellipsis when more lines follow. Command, YOLO and opted-in resume are checked when set. Permissions and
   a wrapper prefix are checked only after an explicit choice; host only after a hand pick; a folder only after typing or
-  picking it; session name only after typing it. A GitHub repository is always checked. Remembered defaults and Clone's
-  inherited host and folder are offered unchecked. The saved template contains exactly the checked fields and always the
-  active launch kind. A host without a usable recorded install identity is omitted with an explanation. A taken template
-  name is refused without overwriting. Enter in the name field saves without launching; Escape returns to the launcher.
-  Successful saving closes the launcher and opens the new template in the Templates editor; errors preserve the launcher
-  draft. Replace with does not offer this action. Templates are created, edited, duplicated, and deleted in the
-  Templates dialog beside New. A list of names and summaries sits beside the selected template's editor; at phone width,
-  opening a template shows the editor with a back link. The editor shows only fields the template sets, with labeled
-  controls and explicit add/remove actions. Its "switches launcher to" choice is agent, command, or don't switch; don't
+  picking it; session name after typing it or applying a template that sets it. The session-name row offers base or
+  fixed name, defaulting to base for a typed name and retaining a template-supplied kind. A template base is saved as
+  its original text, never the numbered name displayed by the launcher. Base is absent from the saved definition and
+  reply. A GitHub repository is always checked. Remembered defaults and Clone's inherited host and folder are offered
+  unchecked. The saved template contains exactly the checked fields and always the active launch kind. A host without a
+  usable recorded install identity is omitted with an explanation. A taken template name is refused without overwriting.
+  Enter in the name field saves without launching; Escape returns to the launcher. Successful saving closes the launcher
+  and opens the new template in the Templates editor; errors preserve the launcher draft. Replace with does not offer
+  this action. Templates are created, edited, duplicated, and deleted in the Templates dialog beside New. A list of
+  names and summaries sits beside the selected template's editor; at phone width, opening a template shows the editor
+  with a back link. The editor shows only fields the template sets, with labeled controls and explicit add/remove
+  actions. The session-name label row offers "base name | fixed name" with help explaining numbering and conflicts.
+  Adding the name starts on base; removing it removes its kind. Duplicate and delete undo retain the kind, and saving a
+  base name leaves no unsaved changes. Its "switches launcher to" choice is agent, command, or don't switch; don't
   switch offers only host, destination and session name. Agent and command choices store their matching launch kind, so
   applying the template switches tabs. Existing kindless templates keep applying as stored; opening one infers its
   switch in an unsaved draft, and saving stores that switch. Choices follow the agent type when one is set, while model

@@ -1106,6 +1106,13 @@ fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Ve
     }
     if let Some(name) = &fields.name {
         rows.push(CardRow::Value("session title", name.clone()));
+        rows.push(CardRow::Note(
+            "session name kind",
+            match fields.name_kind {
+                Some(farhelm_proto::launcher::TemplateNameKind::Fixed) => "fixed name",
+                None | Some(farhelm_proto::launcher::TemplateNameKind::Base) => "base name",
+            },
+        ));
     }
 }
 
@@ -1531,6 +1538,28 @@ mod tests {
             host_name: None,
         });
         assert!(unnamed.contains(&CardRow::Identity("host install", "install-1".to_string())));
+    }
+
+    /// The same name can allocate another checkout or refuse a clash. An
+    /// approval must expose that choice, including Base in older templates.
+    #[test]
+    fn a_template_card_names_its_name_policy() {
+        use farhelm_proto::launcher::TemplateNameKind;
+        for (kind, text) in [
+            (None, "base name"),
+            (Some(TemplateNameKind::Base), "base name"),
+            (Some(TemplateNameKind::Fixed), "fixed name"),
+        ] {
+            let fields = TemplateFields {
+                name: Some("review".into()),
+                name_kind: kind,
+                ..Default::default()
+            };
+            let mut rows = Vec::new();
+            template_rows(&fields, None, &mut rows);
+            assert!(rows.contains(&CardRow::Value("session title", "review".into())));
+            assert!(rows.contains(&CardRow::Note("session name kind", text)));
+        }
     }
 
     /// Spec: a template write's card lists every field the template will set,
