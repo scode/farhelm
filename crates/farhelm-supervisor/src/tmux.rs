@@ -1538,6 +1538,42 @@ pub enum PaneProbe {
     ForeignOwner { owner: String },
 }
 
+/// Only tmux's exact boolean expansion authorizes a paste. Older versions
+/// may leave the flag empty or unexpanded; neither is a safe enabled value.
+fn parse_bracketed_paste_flag(output: &str) -> anyhow::Result<bool> {
+    match output.strip_suffix('\n').unwrap_or(output) {
+        "1" => Ok(true),
+        "0" => Ok(false),
+        _ => anyhow::bail!(
+            "cannot send a prompt: tmux did not report a valid bracketed paste flag (tmux 3.7 or newer is required)"
+        ),
+    }
+}
+
+#[cfg(test)]
+mod prompt_mode_tests {
+    /// Missing expansion on older tmux must refuse rather than silently
+    /// enabling a paste whose tabs/newlines could become terminal commands.
+    #[test]
+    fn prompt_paste_mode_requires_an_exact_boolean_expansion() {
+        assert!(super::parse_bracketed_paste_flag("1\n").unwrap());
+        assert!(!super::parse_bracketed_paste_flag("0\n").unwrap());
+        for invalid in [
+            "",
+            "\n",
+            "#{bracket_paste_flag}\n",
+            "true\n",
+            "1\n0\n",
+            " 1\n",
+        ] {
+            assert!(
+                super::parse_bracketed_paste_flag(invalid).is_err(),
+                "{invalid:?}"
+            );
+        }
+    }
+}
+
 /// One read-buffer's worth of bytes pulled per `read` call while
 /// streaming a bounded capture. 64 KiB balances syscall count against
 /// wasted allocation for the common case (a capture far under the cap).
@@ -3410,6 +3446,25 @@ impl TmuxDriver {
             .await
             .context("reading a pane's title")?;
         Ok(out.strip_suffix('\n').unwrap_or(&out).to_string())
+    }
+
+    /// Read the pane's current paste mode rather than an attachment's replay
+    /// snapshot. A session-paired target cannot accidentally query a recycled
+    /// pane belonging to another session. Missing or malformed format output
+    /// is not evidence that literal prompt input is safe.
+    pub async fn bracketed_paste_enabled(&self, session: &str, pane: &str) -> anyhow::Result<bool> {
+        let target = pane_in_session(session, pane);
+        let out = self
+            .run(&[
+                "display-message",
+                "-p",
+                "-t",
+                &target,
+                "#{bracket_paste_flag}",
+            ])
+            .await
+            .context("reading the agent pane's bracketed paste mode")?;
+        parse_bracketed_paste_flag(&out)
     }
 
     /// The shared body of the two plain-text captures above:

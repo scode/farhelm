@@ -87,6 +87,8 @@
 //!   and `resume_arguments`, the per-harness resume selector the resume
 //!   command adds (none for Muse, Cursor and OpenCode).
 //! - **Pure per-kind decisions in the supervisor.** This module: one
+//!   [`prompt_delivery`] strategy for supported running-agent prompts (today
+//!   bracketed paste plus a kind-specific submit key),
 //!   [`AgentIntegration`] impl per kind (record parsing, hook argv,
 //!   [`AgentIntegration::farhelm_args`] for what a new launch's
 //!   `{farhelm_args}` expands to on start and on resume, and the legacy
@@ -143,12 +145,15 @@
 //! Capture's uncertainty is unrecoverable (resuming the wrong conversation
 //! is silent and permanent), so it accepts only explicit reports. A screen reader's uncertainty is a badge in a
 //! list: SPEC.md fixes the waiting/idle boundary as heuristic BY CONTRACT
-//! and forbids anything about interaction from waiting on a status, so a
+//! and keeps the user's terminal input independent of status, so a
 //! reader that misses a prompt costs a session that reads idle while it
-//! waits, and one that fires early costs the reverse. Both are cosmetic.
+//! waits, and one that fires early costs the reverse. Agent-requested prompt
+//! delivery is the narrow exception: it refuses waiting or unknown readings
+//! so injected text is not knowingly sent into a question or approval dialog.
 //!
-//! What neither is allowed to do is cost anything else, and the properties
-//! that guarantee it are worth stating exactly rather than loosely. A
+//! The reader itself must remain independent of request I/O and admission;
+//! delivery consumes its stored observation. The properties that guarantee
+//! that separation are worth stating exactly rather than loosely. A
 //! [`screen_reader::ScreenReader`] takes plain strings and returns a
 //! reading: it performs no I/O, awaits nothing, acquires no admission
 //! permit, and cannot block on anything a request needs. The sampler calls
@@ -170,6 +175,59 @@ use std::path::Path;
 /// must the helm's YOLO guard, which is why the one copy of the rule lives in
 /// `farhelm-proto` beside the YOLO classifier.
 pub(crate) use farhelm_proto::yolo::effective_program_index;
+
+/// How a supported running agent accepts a complete follow-up prompt.
+/// Keeping the route per kind allows a future native transport to replace
+/// typing for one integration without changing the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PromptDelivery {
+    /// One bracketed paste followed by this key, correct at idle and while busy.
+    Typed { submit: &'static [u8] },
+}
+
+/// The experimentally verified submit route, including busy-turn queueing.
+/// Codex Enter steers the current turn; Tab queues it and also submits at idle.
+/// Claude Enter submits at idle and queues while working. Unsupported kinds
+/// must stay explicit so adding a kind requires deciding its delivery contract.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub(crate) fn prompt_delivery(kind: AgentKind) -> Option<PromptDelivery> {
+    match kind {
+        AgentKind::Claude => Some(PromptDelivery::Typed { submit: b"\r" }),
+        AgentKind::Codex => Some(PromptDelivery::Typed { submit: b"\t" }),
+        AgentKind::Goose
+        | AgentKind::Pi
+        | AgentKind::Omp
+        | AgentKind::Grok
+        | AgentKind::Generic => None,
+    }
+}
+
+#[cfg(test)]
+mod prompt_delivery_tests {
+    /// A single submit key per kind must cover idle and busy composers;
+    /// selecting Enter for busy Codex would steer its current turn instead.
+    #[test]
+    fn prompt_strategies_pin_the_verified_submit_keys_and_supported_kinds() {
+        use super::{AgentKind, PromptDelivery, prompt_delivery};
+        assert_eq!(
+            prompt_delivery(AgentKind::Claude),
+            Some(PromptDelivery::Typed { submit: b"\r" })
+        );
+        assert_eq!(
+            prompt_delivery(AgentKind::Codex),
+            Some(PromptDelivery::Typed { submit: b"\t" })
+        );
+        for kind in [
+            AgentKind::Goose,
+            AgentKind::Pi,
+            AgentKind::Omp,
+            AgentKind::Grok,
+            AgentKind::Generic,
+        ] {
+            assert_eq!(prompt_delivery(kind), None, "{kind:?}");
+        }
+    }
+}
 
 pub(crate) mod claude;
 pub(crate) mod codex;

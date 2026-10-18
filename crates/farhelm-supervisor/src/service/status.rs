@@ -339,6 +339,9 @@ pub(crate) fn session_status(
 /// unreachable on every tick — stays `Running`. A reloaded one stays
 /// provisional instead. Both answers can remain stale while capture fails;
 /// neither changes whether the terminal can be used.
+/// Agent-requested prompt delivery is the narrow admission exception: after
+/// probing its own live pane, it refuses a Waiting or Unknown reading to avoid
+/// knowingly typing into a dialog. The user's own terminal input stays ungated.
 ///
 /// Only called for a live pane ([`session_status`] decides liveness first),
 /// which is what keeps a stale prompt on a dead pane from reading waiting.

@@ -205,7 +205,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_55` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_56` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -216,7 +216,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 55;
+pub const PROTOCOL_VERSION: u32 = 56;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -655,15 +655,16 @@ impl Frame {
 ///
 /// Two consequences a reader must hold onto:
 ///
-/// - **Wrong is cosmetic, always.** SPEC.md fixes this: the waiting/idle
-///   boundary is heuristic by contract, and nothing about interaction may
-///   ever wait on a status. Typing into a mis-classified session works
-///   untouched. Consumers may render a status and may filter by one; the
-///   only lifecycle decision allowed to depend on the difference between
+/// - **The user's typing stays independent of status.** The waiting/idle
+///   boundary is heuristic by contract. Typing into a misclassified session
+///   works untouched. Agent-requested prompt delivery is a narrow exception:
+///   the owning supervisor refuses waiting or unknown readings rather than
+///   knowingly typing into a question or approval dialog. Consumers may render
+///   a status and may filter by one; the lifecycle decision that depends on
 ///   these three is whether Restart asks before stopping a live agent
 ///   (asked only for `Running`; SPEC.md, Lifecycle operations), where a
-///   wrong reading costs at most a skipped or extra confirmation. Otherwise
-///   the one question anybody is entitled to branch on is live-versus-
+///   wrong reading costs at most a skipped or extra confirmation. Beyond
+///   those named exceptions, the question consumers may branch on is live-versus-
 ///   ended, which is what every consumer's own liveness predicate answers.
 /// - **Replacement, not addition.** `Alive` is gone from the wire, so this
 ///   is a removal alongside three new tagged variants — the two cases
@@ -683,8 +684,8 @@ impl Frame {
 /// transition ORDER from it — "idle is always preceded by running", "a
 /// waiting session must have been running within N seconds" — would be
 /// building on something no version of this protocol guarantees. The
-/// guarantees are the ones above: all three mean alive, and which one it is
-/// is cosmetic.
+/// guarantees are the ones above: all three mean alive, and their distinction
+/// controls only the named admission/confirmation rules and presentation.
 ///
 /// No longer `Copy` as of `Error { detail: String }`: an owned `String`
 /// cannot be duplicated bit-for-bit, so `Copy` and `String` are mutually
@@ -3118,6 +3119,28 @@ pub enum ControlMsg {
     /// freshly recomputed `restart_offer`) so a caller does not have to
     /// re-list to see it.
     SessionRestarted { req_id: u64, session: SessionInfo },
+    /// Snapshot the target's display facts and whether any client has one of
+    /// its terminals open. Full-authority only: session credentials must use
+    /// the approved agent-request relay rather than inspecting targets directly.
+    PromptTargetInfo { req_id: u64, session_id: String },
+    /// Approval-time information, allowed to go stale while the user decides.
+    /// `attached` includes terminal tabs, not just the agent's pane.
+    PromptTarget {
+        req_id: u64,
+        session: SessionInfo,
+        attached: bool,
+    },
+    /// Deliver a validated prompt to a live supported agent through its TUI.
+    /// The owning supervisor rechecks status and paste mode at handling time.
+    /// This full-authority operation has no idempotency key: retrying sends again.
+    PromptSession {
+        req_id: u64,
+        session_id: String,
+        prompt: String,
+    },
+    /// Both paste and submit were confirmed by tmux; this says nothing about
+    /// whether the agent has started or completed the requested work.
+    SessionPrompted { req_id: u64 },
     /// Rename a session (PLAN_M5.md item 1) — SPEC.md's v1 client-surface
     /// rename verb. The supervisor is the authority on accepted title text;
     /// clients carry it verbatim and render any refusal.
@@ -3716,6 +3739,8 @@ impl ControlMsg {
             | ControlMsg::SessionStopped { req_id, .. }
             | ControlMsg::SessionDeleted { req_id, .. }
             | ControlMsg::SessionRestarted { req_id, .. }
+            | ControlMsg::PromptTarget { req_id, .. }
+            | ControlMsg::SessionPrompted { req_id }
             | ControlMsg::SessionRenamed { req_id, .. }
             | ControlMsg::Attached { req_id, .. }
             | ControlMsg::TabOpened { req_id, .. }
@@ -3748,6 +3773,8 @@ impl ControlMsg {
             | ControlMsg::StopSession { .. }
             | ControlMsg::DeleteSession { .. }
             | ControlMsg::RestartSession { .. }
+            | ControlMsg::PromptTargetInfo { .. }
+            | ControlMsg::PromptSession { .. }
             | ControlMsg::RenameSession { .. }
             | ControlMsg::OpenTab { .. }
             | ControlMsg::CloseTab { .. }
@@ -3803,6 +3830,8 @@ impl ControlMsg {
             | ControlMsg::StopSession { req_id, .. }
             | ControlMsg::DeleteSession { req_id, .. }
             | ControlMsg::RestartSession { req_id, .. }
+            | ControlMsg::PromptTargetInfo { req_id, .. }
+            | ControlMsg::PromptSession { req_id, .. }
             | ControlMsg::RenameSession { req_id, .. }
             | ControlMsg::OpenTab { req_id, .. }
             | ControlMsg::CloseTab { req_id, .. }
@@ -3835,6 +3864,8 @@ impl ControlMsg {
             | ControlMsg::SessionStopped { .. }
             | ControlMsg::SessionDeleted { .. }
             | ControlMsg::SessionRestarted { .. }
+            | ControlMsg::PromptTarget { .. }
+            | ControlMsg::SessionPrompted { .. }
             | ControlMsg::SessionRenamed { .. }
             | ControlMsg::Attached { .. }
             | ControlMsg::TabOpened { .. }
@@ -3914,6 +3945,10 @@ impl ControlMsg {
             ControlMsg::SessionDeleted { .. } => "SessionDeleted",
             ControlMsg::RestartSession { .. } => "RestartSession",
             ControlMsg::SessionRestarted { .. } => "SessionRestarted",
+            ControlMsg::PromptTargetInfo { .. } => "PromptTargetInfo",
+            ControlMsg::PromptTarget { .. } => "PromptTarget",
+            ControlMsg::PromptSession { .. } => "PromptSession",
+            ControlMsg::SessionPrompted { .. } => "SessionPrompted",
             ControlMsg::RenameSession { .. } => "RenameSession",
             ControlMsg::SessionRenamed { .. } => "SessionRenamed",
             ControlMsg::OpenTab { .. } => "OpenTab",
@@ -4937,8 +4972,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_55() {
-        assert_eq!(PROTOCOL_VERSION, 55);
+    fn protocol_version_is_pinned_at_56() {
+        assert_eq!(PROTOCOL_VERSION, 56);
     }
 
     /// The relay's open fixes the binary channel's bidirectional meaning.
@@ -6963,6 +6998,79 @@ mod tests {
             serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
             reply
         );
+    }
+
+    /// Typed prompt requests must remain distinct from their acknowledgments:
+    /// echoed requests cannot settle a pending delivery, and prompt whitespace
+    /// must survive both JSON and the real frame codec unchanged.
+    #[farhelm_testtrace::test]
+    fn prompt_delivery_wire_shapes_and_directions_are_pinned() {
+        let cases = [
+            (
+                ControlMsg::PromptTargetInfo {
+                    req_id: 8,
+                    session_id: "s1".into(),
+                },
+                serde_json::json!({"type":"prompt_target_info","req_id":8,"session_id":"s1"}),
+                true,
+            ),
+            (
+                ControlMsg::PromptSession {
+                    req_id: 8,
+                    session_id: "s1".into(),
+                    prompt: "first\n\tlast".into(),
+                },
+                serde_json::json!({"type":"prompt_session","req_id":8,"session_id":"s1","prompt":"first\n\tlast"}),
+                true,
+            ),
+            (
+                ControlMsg::SessionPrompted { req_id: 8 },
+                serde_json::json!({"type":"session_prompted","req_id":8}),
+                false,
+            ),
+        ];
+        for (message, golden, request) in cases {
+            assert_eq!(serde_json::to_value(&message).unwrap(), golden);
+            assert_eq!(
+                serde_json::from_value::<ControlMsg>(golden).unwrap(),
+                message
+            );
+            assert_eq!(message.request_req_id(), request.then_some(8));
+            assert_eq!(message.reply_req_id(), (!request).then_some(8));
+            let mut wire = Vec::new();
+            Frame::control(&message).encode(&mut wire).unwrap();
+            let (frame, used) = Frame::decode(&wire).unwrap().unwrap();
+            assert_eq!(used, wire.len());
+            assert_eq!(
+                serde_json::from_slice::<ControlMsg>(&frame.body).unwrap(),
+                message
+            );
+        }
+    }
+
+    /// Approval metadata is a separate reply, not a new broad SessionInfo
+    /// field. Its attachment notice is required even when false, and its
+    /// session facts retain the existing full SessionInfo wire vocabulary.
+    #[farhelm_testtrace::test]
+    fn prompt_target_reply_json_shape_is_pinned() {
+        let golden = serde_json::json!({
+            "type": "prompt_target", "req_id": 8, "attached": false,
+            "session": {
+                "id": "s1", "parent": null, "title": "demo",
+                "created_at": 1_700_000_000, "last_activity_at": 1_700_000_000,
+                "last_work_started_at": 0, "creation_seq": null,
+                "cwd": "/tmp", "invocation": "claude", "status": {"state": "running"},
+                "annotation": null, "restart_offer": "resume", "tabs": [],
+                "github_repo": null, "working_copy": null,
+                "launch": {"kind":"command","command":"claude","yolo":false,"agent":null,"resume":null},
+                "agent_kind": "generic"
+            }
+        });
+        let message: ControlMsg = serde_json::from_value(golden.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&message).unwrap(), golden);
+        assert_eq!(message.reply_req_id(), Some(8));
+        assert_eq!(message.request_req_id(), None);
+        assert_eq!(message.variant_name(), "PromptTarget");
     }
 
     /// Golden JSON for `RestartSession`, pinned the same way as
