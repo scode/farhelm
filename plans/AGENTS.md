@@ -175,18 +175,18 @@ Before the clean-main boundary's starting check, read these in full:
 - `plans/.agents/queue.md`
 - `plans/.agents/outside-files.md`
 - `plans/.agents/executing.md` (the goal file must match how an executor sets up, blocks and closes)
-- `AGENTS.md`, "Talking to the user", "TODO.md and FLAKES.md" and "Tests and validation" (root)
-- the `scode-build-goal`, `scode-snippets` and `jjstack` skills, as `plans/.agents/planning.md` uses them
+- `AGENTS.md`, "Talking to the user", "Agent scratch space", "TODO.md and FLAKES.md" and "Tests and validation" (root)
+- the `scode-build-goal` and `jjstack` skills, as `plans/.agents/planning.md` uses them
 
-Fence: never reuse a slug that has ever existed under `plans/` (`queue check-slug` refuses one); the planning PR merges
-only once the maintainer approves it.
+Fence: the up-front questions go on a local interactive page (`plans/.agents/planning.md`, "Asking the up-front
+questions on a local page"), never in conversation. Never reuse a slug that has ever existed under `plans/`
+(`queue check-slug` refuses one); the planning PR merges only once the maintainer approves it.
 
 ### Todo planning flow ("todo planning flow", "todo planning flow for <bucket>")
 
 Before the clean-main boundary's starting check, read the planner's list in full, plus:
 
 - `scripts/todo-picker.py` (its header)
-- `AGENTS.md`, "Agent scratch space" (root)
 
 Fence: if something else holds the picker's port, say so and ask which port to use; never stop a process you did not
 start.
