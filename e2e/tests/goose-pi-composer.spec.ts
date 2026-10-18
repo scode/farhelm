@@ -6,6 +6,8 @@ import { patchPreferences } from "./helpers/fleet";
  * drives the real signal handlers because a pure reconciliation test cannot
  * catch the original failure where handlers discarded the returned
  * permission while applying the returned model and effort.
+ * Goose's scoped smart-approve word must reach the same pressed mode and
+ * explain it on hover; the button alone would not cover the search path.
  * Only pressed-state buttons are modes; the permission help button remains
  * available without changing Pi's single-choice contract.
  */
@@ -36,7 +38,13 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
   await expect(status, "normalizing a passive remembered mode must stay silent").toHaveCount(0);
 
   await harnesses.getByRole("button", { name: "Goose", exact: true }).click();
-  await permissions.getByRole("button", { name: "smart approve", exact: true }).click();
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await search.fill("perms:smart approve");
+  const smartApprove = form.getByRole("option", { name: "Permissions: smart approve", exact: true });
+  await expect(smartApprove).toHaveAttribute("aria-selected", "true");
+  await expect(smartApprove).toHaveAttribute("data-tooltip", "smart approve: the agent asks only before actions it judges risky");
+  await search.press("Enter");
+  await expect(permissions.getByRole("button", { name: "smart approve", exact: true })).toHaveAttribute("aria-pressed", "true");
   await harnesses.getByRole("button", { name: "Pi", exact: true }).click();
   await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
     "aria-pressed",
@@ -50,7 +58,6 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
   // reconciled permission must land in the same signal.
   await harnesses.getByRole("button", { name: "Goose", exact: true }).click();
   await permissions.getByRole("button", { name: "chat", exact: true }).click();
-  const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill("Pi");
   await form.getByRole("option", { name: "Harness: Pi", exact: true }).click();
   await expect(permissions.locator("button[aria-pressed]")).toHaveText(["yolo"]);

@@ -1066,6 +1066,15 @@ fn apply_composer_search_result(
                 crate::launch_composer::ComposerPermission::Yolo => {
                     structured_permissions.set(Some(LaunchPermission::Yolo));
                 }
+                crate::launch_composer::ComposerPermission::Approve => {
+                    structured_permissions.set(Some(LaunchPermission::Approve));
+                }
+                crate::launch_composer::ComposerPermission::SmartApprove => {
+                    structured_permissions.set(Some(LaunchPermission::SmartApprove));
+                }
+                crate::launch_composer::ComposerPermission::Chat => {
+                    structured_permissions.set(Some(LaunchPermission::Chat));
+                }
             }
             structured_permissions_is_explicit.set(true);
         }
@@ -2195,6 +2204,15 @@ fn search_result_tooltip(
         }
         ComposerSearchResult::Permissions(ComposerPermission::Yolo) => {
             crate::launch_composer::permission_tooltip(LaunchPermission::Yolo).to_string()
+        }
+        ComposerSearchResult::Permissions(ComposerPermission::Approve) => {
+            crate::launch_composer::permission_tooltip(LaunchPermission::Approve).to_string()
+        }
+        ComposerSearchResult::Permissions(ComposerPermission::SmartApprove) => {
+            crate::launch_composer::permission_tooltip(LaunchPermission::SmartApprove).to_string()
+        }
+        ComposerSearchResult::Permissions(ComposerPermission::Chat) => {
+            crate::launch_composer::permission_tooltip(LaunchPermission::Chat).to_string()
         }
     }
 }
@@ -6029,6 +6047,9 @@ pub(super) fn CreateSessionForm(
                                                                 crate::launch_composer::ComposerPermission::OwnSetting => "agent's own setting",
                                                                 crate::launch_composer::ComposerPermission::Yolo => "yolo",
                                                                 crate::launch_composer::ComposerPermission::Custom => "custom",
+                                                                crate::launch_composer::ComposerPermission::Approve => crate::launch_composer::permission_value(LaunchPermission::Approve),
+                                                                crate::launch_composer::ComposerPermission::SmartApprove => crate::launch_composer::permission_value(LaunchPermission::SmartApprove),
+                                                                crate::launch_composer::ComposerPermission::Chat => crate::launch_composer::permission_value(LaunchPermission::Chat),
                                                             }}
                                                         },
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => rsx! {
