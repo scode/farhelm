@@ -147,6 +147,23 @@ main() {
   [ -x "$dir/scripts/devbuild-mac.sh" ] \
     || die "$label has no scripts/devbuild-mac.sh, so it predates the dev build; a PR or branch based on an older main needs a rebase"
 
+  # A target branched before devbuilds had their own state carries a
+  # devbuild-mac.sh whose default is the installed app's state, so building
+  # it as is would run the target on the real databases. This script is
+  # always fetched from main, so it names the devbuild state itself: every
+  # devbuild-mac.sh honors FARHELM_DESKTOP_STATE_DIR, records it with the
+  # build, and the start command it prints starts on it. The path repeats
+  # devbuild-mac.sh's own default ("Which state the app uses" there), including
+  # its rule that an empty or relative XDG_STATE_HOME is ignored; keep the two
+  # in step. An explicit FARHELM_DESKTOP_STATE_DIR, a per-PR one say, wins.
+  if [ -z "${FARHELM_DESKTOP_STATE_DIR:-}" ]; then
+    local state_home=$HOME/.local/state
+    if [ -n "${XDG_STATE_HOME:-}" ] && [ "${XDG_STATE_HOME#/}" != "$XDG_STATE_HOME" ]; then
+      state_home=$XDG_STATE_HOME
+    fi
+    export FARHELM_DESKTOP_STATE_DIR="$state_home/farhelm-devbuild"
+  fi
+
   # devbuild-mac.sh prints the start command last; `exec` keeps that the last
   # thing on the terminal.
   exec "$dir/scripts/devbuild-mac.sh" --build-only "$@"
