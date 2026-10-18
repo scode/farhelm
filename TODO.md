@@ -61,6 +61,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Open a template-only launcher with Cmd-J.** Make Cmd-J work like Cmd-K, but show only templates. Typing a template
   name and pressing Enter should launch it, so `Cmd-J, foo, Enter` starts the `foo` template.
 
+- **Allow repeated quick launches from one setup.** Quick-launching a recent managed-checkout setup while an earlier
+  session from it is still running can strand New Session with the repository name prefilled in Name. The checkout
+  preview request (`POST /api/github-checkout-preview`) returns
+  `409 Conflict: a directory with that checkout name already exists; choose another title`, the preview field says
+  `checkout preview unavailable`, and Launch is disabled with `wait for a current checkout preview before launching`.
+  Typing `name:...` to pick another name works around it. Diagnose the naming and preview path so the same setup can be
+  quick-launched repeatedly without manual renaming; the exact naming behavior is TBD.
+
 - **Fix emoji corruption while terminal output streams.** Emoji in agent output, such as status icons beside changed,
   unchanged, skipped, and failed counts, sometimes render as clipped or partial glyphs. Scrolling redraws them correctly
   until the agent emits more output, when they can break again. Diagnose the rendering or redraw path and keep the
