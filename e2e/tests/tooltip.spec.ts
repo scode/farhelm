@@ -253,6 +253,45 @@ async function injectTargets(page: Page) {
   });
 }
 
+/**
+ * A card source stays outside the target, as a row's hidden summary will.
+ * This proves the shared tooltip can follow Rust-rendered content without
+ * interpreting peer text as markup or copying the source's identity.
+ */
+test("a card target clones its hidden source into the shared tooltip", async ({ page }) => {
+  await loadRow(page);
+  await parkPointer(page);
+  await page.evaluate(() => {
+    const source = document.createElement("div");
+    source.id = "tooltip-card-source";
+    source.hidden = true;
+    const line = document.createElement("p");
+    line.textContent = "A <peer> title";
+    source.appendChild(line);
+    document.body.appendChild(source);
+
+    const target = document.createElement("button");
+    target.id = "tooltip-card-target";
+    target.dataset.tooltipCard = source.id;
+    target.textContent = "Card target";
+    target.setAttribute("style", "position:fixed;z-index:45;left:200px;top:300px;width:120px;height:40px;");
+    document.body.appendChild(target);
+  });
+
+  await page.locator("#tooltip-card-target").hover();
+  await expect(tooltip(page)).toBeVisible();
+  await expect(tooltip(page)).toHaveAttribute("data-kind", "card");
+  await expect(tooltip(page)).toHaveAttribute("aria-hidden", "true");
+  await expect(tooltip(page).locator("p")).toHaveText("A <peer> title");
+  expect(await page.locator("#tooltip-card-source").count(), "the source id is never cloned").toBe(1);
+  expect(await tooltip(page).locator("peer").count(), "peer text must stay text").toBe(0);
+
+  await page.locator("#tooltip-card-source p").evaluate((line) => line.textContent = "Updated card");
+  await expect(tooltip(page).locator("p")).toHaveText("Updated card");
+  await page.locator("#tooltip-card-source").evaluate((source) => source.remove());
+  await expect(tooltip(page), "a removed source leaves no stale card").toBeHidden();
+});
+
 /** Dispatch a mouse `pointerover` on an element, the event a dismissal exists to ignore. */
 async function pointerOver(page: Page, selector: string) {
   await page.locator(selector).evaluate((element) => {
