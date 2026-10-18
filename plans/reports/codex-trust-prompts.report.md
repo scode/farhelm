@@ -136,3 +136,102 @@ original retry-key assertions preserved.
 Commit and PR wording passed separate fresh native cold readers using the executing session's own model and effort. One
 second-unit reader invalidated its contaminated blind read; its fresh replacement provided the accepted report. No PR
 was marked ready or merged by the executor.
+
+### Landing
+
+Landed on its own in round 90, as #2255 and #2256, merged bottom-up, with two conflicts resolved during the landing
+(below) and no other change to what the report describes.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since this stack's base, main gained the move of the open session's details to a bar below the terminal (#2253), a batch
+of recorded review findings (#2258, documentation only), and test and flake-log fixes (#2259 to #2264). The landing
+monitor read the stack against them, and a fresh-context reviewer did the same independently. Neither found a functional
+conflict:
+
+- The Codex and Muse trust hints sit beside Claude's, between the top row of tabs and actions and the terminal, ahead of
+  the tunnel strip, which is where #2253 keeps every conditional notice. A visible hint shrinks the terminal area, so
+  the approval cards, which #2253 now anchors to the terminal's top edge, move below it, as they do for Claude's hint.
+- Nothing in the stack targets the old session header, the old tab row or the moved copy buttons, and every selector its
+  browser tests use exists in the new layout. Main's new test helpers share no files with the stack.
+- SPEC.md and SPEC_impl.md, which both sides edited, agree on where the hints sit, and nothing in them still offers
+  trust in the launcher.
+
+One change on main does conflict with the stack, without a textual conflict: #2264's flake record for the Replace tests,
+which landed shortly before this stack merged and which the landing caught only afterwards. See "A decision for the
+maintainer" below.
+
+Two textual conflicts came from #2253. In the session view, the stack's new trust-question marker on the page and
+#2253's renamed top row both stay. In TODO.md, both sides had removed an entry (the session-details one and this plan's
+own), and both removals stay.
+
+#### Upgrade
+
+#2255 raises the protocol from 54 to 55 and the helm database from schema 56 to 57, adding the new Settings switches.
+Neither 54 nor 55 has shipped (v0.29.0 carries protocol 51), so the next release already requires remote hosts to be
+updated, and no other change claims 55 or 57. An older helm refuses the newer database. #2256 is marked as a breaking
+change because per-launch trust and the command line's `--trust` option are in v0.29.0 (and earlier stable releases) and
+are now gone; the two PRs end with one changelog entry that says so. Two caveats the release curation may want to keep:
+launches into folders Farhelm does not manage can no longer get trust from Farhelm at all, and a trust choice remembered
+in an old template or launch is dropped without notice.
+
+#### Fixes made during the landing
+
+None besides the two conflict resolutions above.
+
+#### A decision for the maintainer
+
+The Replace test change in #2256 hides a recorded product bug. To get the Replace tests to pass, the stack closes the
+other session's menu with Escape before opening the source session's menu. Main's flake log, in an entry that landed
+shortly before this stack (#2264), traces this test's WebKit failures to a real pointer race: dismissing the other row's
+open menu moves its error into that row and shifts the source row's menu button between press and release, so the click
+misses. That entry and the TODO.md Deflake entry rejected exactly this test-side close because it would hide the defect,
+and left the choice between reserving space for the error and changing how dismissal is ordered to you. The stack's
+change covers both the header variant (recorded) and the sidebar variant, which failed two of six WebKit runs on main
+during the previous round (run `18a485cb-d9da-40a4-9152-6e419dc34b65`) and is not recorded. Both passed in this
+landing's browser run, which is what the change makes them do. The executor wrote its report before #2264 landed, which
+is why it calls the cause a hypothesis. The landing monitor and its reviewer missed the conflict before merging, because
+#2264 reached main after the round's review.
+
+The landing left the flake-log entry, the Deflake entry and the sweep exclusion in place. The options:
+
+- (a) revert the test change, so both variants keep showing the race; add the sidebar variant to the Deflake entry and
+  the sweep exclusion beside the header variant, and keep them until the product race is fixed;
+- (b) keep it, reword the Deflake entry as the product-fix item (reserve space for the error or reorder dismissal), and
+  drop the header variant's sweep exclusion, accepting that these tests no longer catch the race.
+
+The landing monitor recommends (a), since the record's author chose to keep the bug visible. Until you choose, a passing
+run of these tests says nothing about the race.
+
+#### Possible follow-ups
+
+- The new trust browser test rewrites the session list and detail replies and tears them down the way the confirmation
+  test did before #2259, which is the pattern that made that test hang. Switching it to #2259's new helper would avoid
+  the same hang there; about twenty other test files still use the old pattern.
+- The map of per-agent behavior at the top of the supervisor's agent module does not name the two new places that answer
+  per agent: the helm's stored per-agent trust switches and the per-agent text of the trust hints. Each of these is
+  written so that adding a new agent fails to build until it is filled in, but the map should still name them.
+- The new Muse screen captures are named as hand-made ("derived") screens, while SPEC_impl.md and a code comment call
+  them captured, and the screen-capture guide still describes only Claude and Codex.
+- Approval cards for agent-requested launches no longer have a separate "workspace trust" line. When a Settings switch
+  grants trust to such a launch, the card shows it only inside the start command. This may be intended; it is worth a
+  look.
+- Two style-sheet comments still mention the launcher's trust choices.
+
+#### Checks
+
+- Run now, on the stack rebased onto main (the tree that merged; both PRs' landed diffs are identical to it):
+  `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings` and `cargo check -p farhelm-ui --features desktop`;
+  `cargo nextest run -p farhelm-ui --lib` through the test recorder, four slots, no retries: 525 passed, run
+  `7d0f5f42-c433-4b76-809a-361a197aa98c`; then fresh `cargo build` and web builds and `npx playwright test` on the
+  executor's twelve browser files plus `header.spec.ts` and `session-confirmations.spec.ts` (the moved session view and
+  #2259's new helper), through the recorder with pinned tmux, one worker, no retries: 340 passed, none skipped, run
+  `9f01fe8a-0009-4564-9fcd-327be67b3a06`.
+- Reused: the executor's helm, supervisor, protocol and command-line tests, at the revisions the report gives. Nothing
+  that reached main since the stack's base changes Rust code outside the UI, so they still apply.
+- Skipped: everything the report skipped, for the reasons it gives.
+
+One thing in the executor's report no longer holds: it treats the Replace failure's cause as a hypothesis and its test
+change as a setup correction, while main's flake record (#2264) now establishes a product race that the change hides.
+Nothing else in it became untrue at landing.
