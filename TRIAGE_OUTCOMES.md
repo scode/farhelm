@@ -13689,8 +13689,9 @@
 - Completion criteria: the file-link hover and its outcome messages show every character Farhelm's shared list marks
   unsafe, escape literal `<U+…>` text, and keep repeated spaces, so distinct paths never look alike; covered by tests.
   Remove this feedback file and its index entry.
-- Execution: jj change `orzruuwyqunxporkxxnlxypoxtuqoswo`, bookmark `plan/terminal-link-safety/04-visible-paths`,
-  [PR #2095](https://github.com/scode/farhelm/pull/2095/changes).
+- Execution: complete in change `orzruuwyqunxporkxxnlxypoxtuqoswo`, bookmark
+  `plan/terminal-link-safety/04-visible-paths`, [PR #2095](https://github.com/scode/farhelm/pull/2095/changes), landed
+  on main as d824dafa (status confirmed during triage on 2026-10-17).
 
 ## template-editor-conceals-peer-model-and-folder.md
 
@@ -15544,3 +15545,125 @@
   starts the supervisor and checks both; run it through the recorder. Remove the feedback file and its index entry.
 - Execution: change `tnwnrnxxtwwszuxuuwtmlvztvwtttwuk`, bookmark `plan/claude-trust-startup-no-wait/01-no-wait`; draft
   PR [#2201](https://github.com/scode/farhelm/pull/2201/changes).
+
+## approval-cards-can-obscure-file-disclosure.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading current main (63439c2f); nothing was rendered or run. Before a file link's download
+  or Ctrl/⌘-click open, the UI checks only that the hover disclosure is shown, has size, does not overflow and sits
+  inside the window (`disclosureFits` in `crates/farhelm-ui/assets/terminal-files.js`); it does not check whether
+  anything covers it. The disclosure is drawn at layer 40 and approval cards at layer 45 (`app.css`), and no ancestor of
+  the terminal creates a stacking context that reverses that. Cards are centered over the terminal and leave text on
+  either side usable, while the disclosure opens to the right of and below the pointer, so a link just left of a card
+  can be clicked while the card hides the end of the file name, the deeper directories, or the whole disclosure. The
+  consequence is a copy of some other file the session's account can read (up to 100 MB) landing in the user's own
+  download folder; native opening stays limited to `.md` and `.txt`, so a covered disclosure cannot make a dangerous
+  file type open. Unverified: actual rendering and event delivery in WebKit and the desktop webview. The reviewer also
+  noted an adjacent gap outside this finding: web-link hovers share layer 40 and can be covered the same way, and
+  web-link clicks have no fits-in-window check at all.
+- Decision: on 2026-10-17 the user picked "Refuse when covered, and say so in the spec", with no comment. Principle for
+  the spec: a file link's hover counts as disclosing its target only when it is fully visible, inside the window and not
+  covered by another Farhelm surface such as an approval card; a click (or modifier-click) whose disclosure is covered
+  is refused with the existing refusal explanation, which must itself be visible above the covering surface. Scope: file
+  links only; the web-link hover gap was raised with the user and is undecided, so it is not part of this outcome.
+  Complexity gate: an intersection test between the disclosure and the visible approval cards in the existing admission
+  check, plus layering the refusal message above the cards. If the fix needs general occlusion detection, relayering the
+  disclosure above the cards, or changes outside the file-link path, stop and return the item to the maintainer. Revised
+  the same day, superseding the file-links-only scope: when asked about the adjacent web-link gap, the user answered
+  "same fix for web links". Web-link hovers get the same admission rule: a web-link click is admitted only while its
+  hover (with any destination-mismatch warning) is fully visible, inside the window and not covered by an approval card,
+  and is otherwise refused with a visible explanation. Web-link clicks have no fits-in-window check today, so the
+  web-link part adds that check as well as the covered check. The complexity gate extends to the web-link admission path
+  in the same shape; anything beyond that still returns the item to the maintainer.
+- Completion criteria: SPEC.md states the principle for both file-link and web-link hovers, beside the existing rule
+  that the file disclosure must fit in the window and the rule that the web-link hover is the safeguard against a
+  mismatched label. With an approval card shown and a file link whose disclosure overlaps the card, a click and a
+  modifier-click are refused with a visible explanation and no transfer starts, while a link whose disclosure is fully
+  visible still downloads. A web link whose hover overlaps an approval card or does not fit in the window is refused
+  with a visible explanation and opens nothing, while one whose hover is fully visible still opens. Browser regressions
+  cover these cases; run them through the recorder on Chromium and WebKit. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## file-disclosure-trailing-space-distinction-unverified.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by reading current main (63439c2f), but harmless; nothing was rendered. The file-link hover
+  escapes control characters, Unicode format characters and the shared known-bad list, and preserves repeated spaces,
+  but leaves ordinary and other Unicode spaces as they are, and its `pre-wrap` styling lets a trailing space hang
+  invisibly. An OSC file target `report.txt%20` therefore shows the same name as `report.txt`, and the directory and
+  size lines can match. The trailing space only makes a file less openable: its extension no longer matches `.txt`, so
+  the desktop app drops the open hint and refuses to open it. The party that could exploit this is a program on the
+  session's host running as the user, which can already write anything into `report.txt` itself; the only constructed
+  gain is a decoy beside another account's file in a shared directory such as `/tmp`. SPEC.md's escaping rules do not
+  promise that distinct names always look distinct; the "never look alike" rule covers identity labels and excludes
+  terminal output. The phrase "so distinct paths never look alike" appears only in the completion criteria of
+  `file-disclosure-misses-invisible-path-characters.md` above, whose execution line did not say `complete` although
+  #2095 had landed (corrected alongside this entry). Unverified: actual rendering, and whether browsers strip the
+  trailing space from the saved name.
+- Decision: on 2026-10-17 the user picked "State the limit in SPEC.md", with no comment. Principle for the spec: the
+  file-link disclosure escapes unsafe and invisible characters and preserves repeated spaces, but does not guarantee
+  that names differing only by leading or trailing spaces, other Unicode spaces, or lookalike letters render
+  differently. No code change.
+- Completion criteria: SPEC.md states that limit beside the file-link disclosure's escaping rules. Remove the feedback
+  file and its index entry.
+- Execution: pending.
+
+## pending-menu-arrows-can-ignore-independent-focus.md
+
+- Outcome: `fix spec`.
+- Assessment: mostly already fixed on current main (63439c2f) by #2232 ("honor menu focus during arrow bursts", plan
+  `menu-focus-source`): when an item gains focus by pointer or screen reader, the session menu clears its remembered
+  arrow request and cancels unsent moves, so the next arrow steps from actual focus. The finding's second case (Home on
+  the already-focused first item leaving a request outstanding) is harmless now, because that request names the item
+  that has focus. What remains is desktop-only: a focus move already sent across the webview cannot be recalled, so
+  within a few milliseconds it can pull focus back to its own target, and the next arrow steps from there. Enter and
+  Space activate only the visibly focused button, so nothing runs without the user activating it. This residual was
+  accepted in the `menu-arrows-follow-focus` decision "(1)" and again under the `menu-focus-source` complexity gate, and
+  is described in its changelog fragment, report and code comments, but not in SPEC.md or SPEC_impl.md. The entry for
+  `menu-request-overrides-independent-focus.md` above still states the broader completion criteria. Unverified: the
+  desktop timing was not exercised.
+- Decision: on 2026-10-17 the user asked for a general spec rule: "if there are tight timing races that occurr whent he
+  user simultaneously navigates controls (menu items, switching buttons) within tens of milliseconds of each other,
+  unintended behavior on race conditions are acceptable but if it's reasonably simple to fix we should fix it", and to
+  fix this item in code too if that is really easy. The session answered that the remaining fix is the focus-source
+  design the `menu-focus-source` complexity gate ruled out, so it is not easy, and proposed bounding the rule; the user
+  agreed. Principle for the spec: when the user moves between controls (menu items, buttons, switches) by different
+  means within tens of milliseconds, a race may leave focus or selection somewhere unexpected, and that is accepted,
+  though a reasonably simple fix should still be made; such a race must never run a command or apply a destructive
+  action that the user did not activate on a visibly focused control. No code change for this item.
+- Completion criteria: SPEC.md (or SPEC_impl.md, wherever the GUI's general interaction rules live) states the
+  principle, bound included, so the row menu's desktop residual is covered by it. Remove the feedback file and its index
+  entry.
+- Execution: pending.
+
+## settled-refusal-proof-can-follow-incomplete-cleanup.md
+
+- Outcome: `fix spec`.
+- Assessment: the code premises are confirmed by reading current main (63439c2f); no fault injection was run. The
+  supervisor's proof that a failed create was definitely not accepted requires only a matching request and key lifetime,
+  a `Failed` reservation and no session row (`core.rs` around 7387–7406), not confirmed cleanup. Two rollback routes can
+  produce it without confirming every process stopped: a tmux creation failure whose rollback sweeps with
+  `ScopeKillFailure::Warn`, which accepts a systemd scope kill that could not be confirmed when the portable sweep finds
+  nothing; and a failed database confirmation after which a sweep error only enriches the returned error while a
+  successful tmux kill still abandons the record. The proof then lets a later plain Replace retire its key and start
+  fresh. Both routes need at least two independent rare faults (the first, four rare conditions together), and none
+  needs only one. Survivors come from a launch lasting a moment with no prompt; the fresh Replace gets its own session
+  and conversation and shares only the folder, and New, Clone or a page reload already allowed starting fresh beside the
+  same survivors. The underlying orphaning was triaged in `create-rollback-orphans-unconfirmed-scope.md` and
+  `failed-confirmation-discard-session-despite-failed-process.md` and deferred to a Maybe later TODO entry. SPEC.md's
+  2026-10-10 two-fault rule accepts a process "keeps running beside a relaunch" on a "remote host", which almost but not
+  literally covers a new Replace or the helm machine's own host. SPEC_impl.md says the ordinary rollback paths settle
+  "only after confirming nothing is running", and the `abandon_launching_record` docstring repeats it; both are false
+  for these routes. In answer to the user's question, the scope case arises only where the launch ran in a systemd
+  scope: non-systemd hosts remain supported and get no scope, and "not confirmed" means the scope was still present
+  after the kill or `systemctl` failed or errored, for example because the user manager broke after the launch.
+  Unverified: what makes the process sweep fail in practice.
+- Decision: on 2026-10-17 the user asked what "systemd does not confirm" means and whether non-systemd support was
+  dropped; after the answer above they agreed with the recommended spec change. Principle for the spec: the two-fault
+  acceptance covers any new launch (Replace, New or Clone as well as a relaunch) on any host, including the helm
+  machine's own, and the implementation spec states what rollback actually confirms (that the terminal is gone) rather
+  than claiming nothing is running. No behavior change.
+- Completion criteria: SPEC.md's 2026-10-10 two-fault rule is widened as above; SPEC_impl.md's "only after confirming
+  nothing is running" sentence and the `abandon_launching_record` docstring are corrected to match what rollback
+  confirms, pointing at the deferred cleanup work. Remove the feedback file and its index entry.
+- Execution: pending.
