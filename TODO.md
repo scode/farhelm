@@ -244,6 +244,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Stopped test session sometimes reports error instead of exited.** `stop and delete a session through the HTTP API`
+  in `e2e/tests/terminal.spec.ts` received `error` for ten seconds after a successful stop request, instead of the
+  expected `exited`, in WebKit browser run `3727b704-5894-4a20-9fb6-1967d56fabb8`. Three isolated classification reruns
+  passed (`ec751e51-7a3c-4d7d-b91d-6d18724e409b`, `e1cb3e55-5bcf-46b8-b201-c10f27071dd8`,
+  `323bb0bc-b176-494a-93a3-edb39f93e4c6`). Inspect the retained supervisor/test trace to determine whether this is a
+  product status transition or an environment failure before changing the test's expected state (FLAKES.md, 2026-10-18).
+
 - **Held tab detail read sometimes returns plaintext for a missing session.**
   `a tab opened and closed before any poll observes it does not come back` in `e2e/tests/terminal-tabs.spec.ts` tried to
   parse `no such session` as JSON in the WebKit browser run `3727b704-5894-4a20-9fb6-1967d56fabb8`. The first isolated
