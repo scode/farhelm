@@ -57,6 +57,36 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-10-18 — overflowing trash layout (e2e/tests/modal-layout.spec.ts)
+
+`overflowing trash keeps vertical margins at width 1000` found zero archive rows for five seconds in WebKit during the
+full browser run `3727b704-5894-4a20-9fb6-1967d56fabb8`, though its fixture supplies 24. Three isolated classification
+reruns passed (`10fab11f-7891-459e-97e2-b1dac4713e2c`, `0bdfd389-b8ce-458f-a3d2-7c13038001ba`,
+`d6719411-4c1d-42b7-b82d-04578ae8196c`); Chromium passed in all four runs. The failure preceded the vertical margin
+assertions, and the reason the listing was empty is unknown. Open in TODO.md and excluded from future sweeps.
+
+The tested tree was clean commit `c7d0058e9937fa897e388e606883637193e8689a` on Linux x86_64, kernel 6.8.0-146-generic.
+The full selection was `browser suite, both engines`; reruns selected this test in both engines. Each used one browser
+worker, zero retries, locale `C.UTF-8`, and recorded pinned tmux 3.7c executable SHA256
+`ee8c7d45ca8b15992f76871eba303c6921d2ad825f53f9aca2e1aa66725a6663`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. The full battery also failed the host
+picker, SSH help tests, tab lifecycle, launcher geometry, and HTTP session lifecycle tests. Machine load and slot peers
+at this test's start were not recorded. The test was last changed in #2226; no earlier entry for it was found. Retained
+runs and the Playwright trace are under the local test-runs directory; their lifetime is the machine's temporary-file
+cleanup.
+
+```
+Locator:  locator('.checkout-trash-dialog').locator('.checkout-trash-entry')
+Expected: 24
+Received: 0
+Timeout:  5000ms
+```
+
+Class: unknown
+
+Cause: unknown
+
 ## 2026-10-18 — long SSH command Copy (e2e/tests/keyboard-scroll.spec.ts)
 
 `long SSH commands wrap while Copy preserves their exact bytes` timed out at 60 seconds in WebKit in browser run
