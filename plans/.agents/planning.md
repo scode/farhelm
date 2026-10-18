@@ -131,7 +131,9 @@ something else holds the port, say so and ask which port to use; never stop a pr
 URL in the last message of the turn, after every tool call.
 
 After acting on a pasted block (research, follow-up questions), update the same page in place: the questions still open,
-any new follow-ups, and the settled answers shown read-only, so the maintainer can see what is still needed.
+any new follow-ups, and the settled answers shown read-only, so the maintainer can see what is still needed. A plan
+whose questions are all settled leaves the page entirely, its settled answers included; only plans with something still
+open stay on it.
 
 ## Planning triage outcomes: "use the planning system to schedule these"
 
