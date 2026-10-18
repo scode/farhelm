@@ -111,20 +111,22 @@ completed-step count, and client-measured elapsed time inline in the status spot
 the elapsed time, and every step of the run with its status and the current one highlighted (in a window too short for
 the whole list, the list keeps the current step in view), since the sidebar is too narrow to show a long step name, let
 alone the rest of the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary
-upload appears as a separate step before installation, so the user can tell when network transfer is still underway.
-Success returns the status spot to its normal label and leaves the row folded unless global details are on. Failure or
-an uncertain outcome still expands the row so its step list and diagnostic remain visible. The Hosts header's
-`update all` action makes the same authorized Update request for each remote host whose individual Update action is
-available at the click. A host already busy with setup or another run is skipped rather than queued for a later update;
-the local host is excluded. Each remote host keeps its own validation, progress, and result, so one failure does not
-hide or delay the others. V1 provisioning targets any Linux host with a usable systemd user manager, on the two
-architectures cross-compiled supervisor binaries exist for. The distribution is not a requirement — nothing provisioning
-does is distribution-specific — so the plan names whichever one it found rather than refusing; CI exercises Ubuntu.
-Hosts whose basic command-line tools come from BusyBox rather than GNU coreutils or its usual replacements are not a
-supported target: Farhelm accommodates them only where that takes a trivial change, and spends no further complexity on
-them. Everything else — no usable systemd user manager, or an architecture with no payload — falls back to the manual
-path (run the binary yourself), which always remains available, on the best-effort basis described in
-[Supported host setup](#supported-host-setup).
+upload appears as a separate step before installation, so the user can tell when network transfer is still underway. The
+row and its hover use the helm's readable names for the same steps in the plan, with completed work checked green, the
+running step pulsing amber (static under reduced motion), pending work grey, unchanged work grey, degraded work as an
+amber warning, and failure red with the helm's reason. Success returns the status spot to its normal label and leaves
+the row folded unless global details are on. Failure or an uncertain outcome still expands the row so its step list and
+diagnostic remain visible. The Hosts header's `update all` action makes the same authorized Update request for each
+remote host whose individual Update action is available at the click. A host already busy with setup or another run is
+skipped rather than queued for a later update; the local host is excluded. Each remote host keeps its own validation,
+progress, and result, so one failure does not hide or delay the others. V1 provisioning targets any Linux host with a
+usable systemd user manager, on the two architectures cross-compiled supervisor binaries exist for. The distribution is
+not a requirement — nothing provisioning does is distribution-specific — so the plan names whichever one it found rather
+than refusing; CI exercises Ubuntu. Hosts whose basic command-line tools come from BusyBox rather than GNU coreutils or
+its usual replacements are not a supported target: Farhelm accommodates them only where that takes a trivial change, and
+spends no further complexity on them. Everything else — no usable systemd user manager, or an architecture with no
+payload — falls back to the manual path (run the binary yourself), which always remains available, on the best-effort
+basis described in [Supported host setup](#supported-host-setup).
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions
@@ -135,22 +137,25 @@ counterpart. The helm plans the removal over SSH and shows it before touching th
 and its unit file go, the host's private tmux server is ended, and Farhelm's private lib directory with the binary and
 any private tmux in it is removed, each named by its path on the host (the private tmux server is named without its
 socket path); the host's Farhelm data directory stays, named by its path, with a note that deleting it by hand removes
-the data too. Nothing changes until the user confirms, and while the removal runs the host row shows its progress the
-way an update's does, worded as uninstalling. It refuses, naming them, while the host has any session that has not ended
-(an unknown status counts) or any open terminal tab, and checks again at confirmation. A session or tab started on the
-host while removal runs may be ended with it: the confirmation-time check is sufficient, though an implementation may
-check more strictly. It also refuses a host it cannot check because it is not connected, a host whose supervisor unit
-`farhelm helm setup` manages there (that host's own `farhelm uninstall` removes it), a supervisor running from anywhere
-other than Farhelm's lib directory, and a lib directory that is itself a symbolic link (removing it would remove only
-the link), naming where the link points; a link further up the path, such as a linked home directory, is not refused.
-Removing the host from the list, which never touches the host, stays available whatever its layout, and the refusal
-points to it as the way to stop using the host without uninstalling. Success removes the host from the list, cached
-sessions included, as removing it does, and the window that confirmed says Farhelm was removed and where the data
-remains. A run that fails partway keeps the host listed with its steps showing what is left, and choosing uninstall
-again continues from there. Such a retry may go ahead without a connection only once the unit file is gone, since
-nothing can start the supervisor again after that. Linger is left as it is. The helm's own machine has no uninstall in
-the panel: Farhelm there is removed with `farhelm uninstall` (see
-[Uninstall scope and interaction](#uninstall-scope-and-interaction)).
+the data too. Nothing changes until the user confirms. Setup and uninstall planning show their action in the folded row
+while the helm prepares a dialog; neither action changes the global details checkbox. Confirming closes the dialog, and
+the running row expands once to show the helm's steps on the same rail as the plan. The user may fold that run, and it
+stays folded until another run begins; the inline status still says setting up or uninstalling and shows the step count,
+current step and elapsed time. Success folds the row, while failure opens it for the step and its reason. It refuses,
+naming them, while the host has any session that has not ended (an unknown status counts) or any open terminal tab, and
+checks again at confirmation. A session or tab started on the host while removal runs may be ended with it: the
+confirmation-time check is sufficient, though an implementation may check more strictly. It also refuses a host it
+cannot check because it is not connected, a host whose supervisor unit `farhelm helm setup` manages there (that host's
+own `farhelm uninstall` removes it), a supervisor running from anywhere other than Farhelm's lib directory, and a lib
+directory that is itself a symbolic link (removing it would remove only the link), naming where the link points; a link
+further up the path, such as a linked home directory, is not refused. Removing the host from the list, which never
+touches the host, stays available whatever its layout, and the refusal points to it as the way to stop using the host
+without uninstalling. Success removes the host from the list, cached sessions included, as removing it does, and the
+window that confirmed says Farhelm was removed and where the data remains. A run that fails partway keeps the host
+listed with its steps showing what is left, and choosing uninstall again continues from there. Such a retry may go ahead
+without a connection only once the unit file is gone, since nothing can start the supervisor again after that. Linger is
+left as it is. The helm's own machine has no uninstall in the panel: Farhelm there is removed with `farhelm uninstall`
+(see [Uninstall scope and interaction](#uninstall-scope-and-interaction)).
 
 Connections are direct: the helm connects straight to each registered supervisor, over the user's own SSH access —
 passwordless SSH from the helm's machine to the host is the requirement, and the helm handles connectivity itself,
