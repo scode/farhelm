@@ -2279,3 +2279,18 @@ Route is already handled!
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-10-17 — staged rollback window (e2e/tests/terminal-reconnect.spec.ts)
+
+The 2026-10-10 failure of `a-rolled-back-helm-gets-no-automatic-attach` showed a synthetic rollback header on an
+approvals reply before the first retry, correctly revoking permission before the fixture had exercised an attempt. The
+rewrite is now installed only after the test witnesses an unattended socket construction. Both ordinary and
+non-displacing socket constructions remain counted from before the original socket closes, through the mismatch and the
+final observation window. The response rewrite drains before removal during cleanup. Original substrate and failure
+evidence remain in the 2026-10-10 entry. A current-source WebKit reproduction on main with the unrelated skew fixture
+fix, run `b0cf298c-32ad-49b5-8ae8-acd4a2c98ef4`, passed five of five attempts; that non-reproduction does not erase the
+established premature-mismatch mechanism. The TODO entry and sweep exclusion are removed with this correction.
+
+Class: fixture-premise
+
+Cause: established

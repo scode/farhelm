@@ -2178,6 +2178,7 @@ await reconnectTimingsFromNextLoad(page, {
 });
 const feed = await stubFeed(page);
 let ownId: string | undefined;
+let stopStamping: (() => Promise<void>) | undefined;
 try {
   const own = await openOwnTerminal(page, request, `a-rolled-back-helm-gets-no-automatic-att-${Date.now()}`);
   ownId = own.id;
@@ -2209,14 +2210,6 @@ try {
     }
     (window as any).WebSocket = OldHelm;
   });
-  await page.route("**/api/**", async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({
-      response,
-      headers: { ...response.headers(), "x-farhelm-build": "0.0.0-rolled-back" },
-    });
-  });
-
   await page.evaluate(() => (window as any).__farhelmIslands["terminal"].ws.close());
   // The rollback window itself: the ladder is genuinely climbing against a
   // helm whose stamp this page has not read yet.
@@ -2226,6 +2219,18 @@ try {
       message: "a ladder that never attempted proves nothing about what it attempted with",
     })
     .toBeGreaterThan(0);
+
+  // Install the mismatch only after a witnessed unattended attempt. An
+  // unrelated approvals read can otherwise latch it before the first rung,
+  // correctly revoke retry permission, and invalidate the rollback premise.
+  // Socket construction stays counted throughout the whole window above.
+  stopStamping = await drainedRoute(page, "**/api/**", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      headers: { ...response.headers(), "x-farhelm-build": "0.0.0-rolled-back" },
+    });
+  });
 
   // And now the stamp catches up, because the page reads a reply: several
   // rungs' worth of time then passes in the manual-only state.
@@ -2248,7 +2253,11 @@ try {
     "manual-only",
   );
 } finally {
-  if (ownId) await cleanupSession(request, ownId);
+  try {
+    await stopStamping?.();
+  } finally {
+    if (ownId) await cleanupSession(request, ownId);
+  }
 }
 });
 
