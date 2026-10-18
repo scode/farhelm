@@ -1528,40 +1528,16 @@ fn install_quick_switcher_shortcut() {
     );
 }
 
-/// Capture quick launch before terminal input, using the live list-owned trigger.
+/// Install one template-key listener from the definition used for every hint.
 ///
-/// A hidden pending composer reserves this chord without pretending its fields
-/// are visible. Visible modals keep keyboard ownership, while repeat and a
-/// disabled trigger are consumed without starting another request.
-fn install_quick_launch_shortcut() {
-    document::eval(
-        r#"if (!window.__farhelmQuickLaunchShortcut) {
-        window.__farhelmQuickLaunchShortcut = true;
-        window.addEventListener('keydown', (event) => {
-            const mac = /Mac/.test(navigator.platform || '');
-            const chord = mac
-                ? event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
-                : event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey;
-            if (!chord || event.code !== 'KeyP' || event.isComposing) return;
-            if ([...document.querySelectorAll('[role="dialog"][aria-modal="true"]')]
-                .some(node => node.getClientRects().length)) return;
-            const trigger = document.querySelector('.quick-launch-trigger');
-            if (!trigger) return;
-            event.preventDefault(); event.stopPropagation();
-            if (event.repeat || trigger.disabled) return;
-            trigger.click();
-        }, true);
-    }"#,
-    );
-}
-
-/// Bind physical number keys according to the build, including Mac web clients.
-/// The shared asset also exposes its pure matcher to the JS unit harness, which
-/// can exercise Mac-desktop input unavailable to the web-only browser suite.
-fn install_template_number_shortcuts() {
+/// The asset owns sequence state and modal isolation; Rust supplies physical
+/// keys and exact modifier masks so displayed chords follow matching.
+fn install_template_shortcuts() {
+    let definition = serde_json::to_string(&launch_sequence::TEMPLATE_SHORTCUTS)
+        .expect("fixed template shortcut definition must serialize");
     document::eval(&format!(
-        "{}\nwindow.installTemplateNumberShortcuts({HAS_NEW_SESSION_SHORTCUT});",
-        include_str!("../assets/template-number-shortcuts.js")
+        "{}\nwindow.installTemplateShortcuts({definition});",
+        include_str!("../assets/template-shortcuts.js")
     ));
 }
 
@@ -1600,17 +1576,10 @@ fn AppBody() -> Element {
     // embedded asset handler to be its first hook, and this is the one
     // component both builds mount, with every animation underneath it.
     use_hook(install_window_activity_tracking);
-    // The sequence owns consumed keys before the ordinary command listeners;
-    // its asset stops same-window listeners as well as terminal propagation.
-    use_hook(|| {
-        document::eval(&format!(
-            "{}\nwindow.installLaunchSequence({HAS_NEW_SESSION_SHORTCUT});",
-            include_str!("../assets/launch-sequence.js")
-        ));
-    });
+    // The shared listener owns consumed template keys before other command
+    // listeners and before xterm can pass a key to the terminal program.
+    use_hook(install_template_shortcuts);
     use_hook(install_quick_switcher_shortcut);
-    use_hook(install_quick_launch_shortcut);
-    use_hook(install_template_number_shortcuts);
     use_hook(install_session_action_shortcuts);
     #[cfg(native_desktop)]
     use_hook(|| {

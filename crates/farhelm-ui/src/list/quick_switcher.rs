@@ -396,7 +396,7 @@ pub(super) fn QuickSwitcher(
                             onclick: move |_| on_pick.call(SwitcherPick::QuickLaunch),
                             span { "⚡" }
                             span { "Quick launch: " bdi { {display_peer(preferences.0.read().quick_launch_template.as_deref().unwrap_or("mark a template"))} } }
-                            span { class: "templates-quick-chord", "{super::templates::QUICK_LAUNCH_CHORD}" }
+                            span { class: "templates-quick-chord", "{crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)}" }
                         }
                     }
                 }
