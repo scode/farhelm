@@ -756,11 +756,11 @@ agent choice is independent of that destination:
   same template verbs and approval card. Assigning an occupied key moves it from its previous template, as the Templates
   editor does; a key can still belong to a partial template.
 - Quick-launch sequences compose templates without changing the single-chord shortcuts. Cmd+X in the Mac desktop app, or
-  Ctrl+Shift+X in browsers, starts a sequence, except in a text field outside the launcher where it retains its normal
-  meaning. In the launcher's own text fields it starts a sequence only when no text is selected; with a selection it
-  keeps Cut or the browser's normal action. The terminal's input textarea counts as the terminal. Bare physical number
-  keys or their usual template chord queue templates in order; the ordinary ⚡ chord queues the marked template. Enter
-  applies them in that order, later edits winning, and directly launches through the same defaults, validation and
+  Ctrl+Shift+X everywhere else, starts a sequence, except in a text field outside the launcher where it retains its
+  normal meaning. In the launcher's own text fields it starts a sequence only when no text is selected; with a selection
+  it keeps Cut or the browser's normal action. The terminal's input textarea counts as the terminal. Bare physical
+  number keys or their usual template chord queue templates in order; the ordinary ⚡ chord queues the marked template.
+  Enter applies them in that order, later edits winning, and directly launches through the same defaults, validation and
   admission as quick launch on the page. In New, Clone or Replace with, Enter instead applies the queued templates to
   the current draft without launching; each completed sequence is one refusal unit, and the pill says "apply" instead of
   "launch". An unbound key opens Templates at Enter with the binding hint on the page; inside the launcher it shows a
@@ -1906,8 +1906,8 @@ relevant tooltips: Delete on the header button, Rename only on the open session'
 Cmd+0–9 in the Mac desktop app, or Ctrl+Shift+0–9 in every other client, directly launches templates with number keys
 (see Creation). Browsers on a Mac use Ctrl+Shift as well, leaving their Cmd+digits free for tabs and zoom.
 
-Cmd+X in the Mac desktop app, or Ctrl+Shift+X in browsers, begins a quick-launch template sequence (see Creation). Text
-fields outside the session launcher keep their normal Cut or text-direction key; the terminal accepts the sequence
+Cmd+X in the Mac desktop app, or Ctrl+Shift+X everywhere else, begins a quick-launch template sequence (see Creation).
+Text fields outside the session launcher keep their normal Cut or text-direction key; the terminal accepts the sequence
 prefix. In the launcher's own fields, selected text keeps that normal action and an unselected field accepts the prefix.
 
 Cmd+K on macOS, Ctrl+Shift+K elsewhere, opens a quick switcher in the web UI and desktop app, including from a focused
