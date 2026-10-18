@@ -354,6 +354,16 @@ for (const surface of ["sidebar", "header"] as const) {
       await expect(question).toHaveCount(1);
       await confirmSidebarReplace(row(page, other.id));
       await expect(row(page, other.id).locator(".action-error").first()).toContainText("replace:");
+      // Closing this errored menu moves its error back into the row and can
+      // shift the source below it. Settle that layout before the next pointer
+      // gesture; the older YOLO question and replacement intents must survive.
+      const otherRow = row(page, other.id);
+      const otherToggle = otherRow.locator(".session-row-menu");
+      await expect(otherToggle).toHaveAttribute("aria-haspopup", "menu");
+      await otherToggle.press("Escape");
+      await expect(otherRow.locator(".session-row-menu-flyout")).toHaveCount(0);
+      await expect(otherToggle).toHaveAttribute("aria-expanded", "false");
+      await expect(question).toHaveCount(1);
       await confirmSidebarReplace(sourceRow);
       await expect(sourceRow.locator(".action-error").first()).toContainText("replace:");
       expect(keys).toHaveLength(2);

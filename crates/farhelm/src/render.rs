@@ -157,7 +157,8 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
 /// template resets is shown as `default`. Free text (a model, host name,
 /// folder, repository or title) is quoted, because the parts are joined
 /// with commas and a title such as `x, yolo` would otherwise read as the
-/// template asserting YOLO.
+/// template asserting YOLO. Historical trust is omitted because applying the
+/// template ignores it; showing it would claim a choice the template cannot set.
 pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> String {
     use farhelm_proto::launcher::{LauncherKind, TemplateDestination};
     /// The protocol word a value serializes to (`open_code`).
@@ -199,9 +200,6 @@ pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> Str
             "permissions {}",
             reset(permissions, |permission| permission.wire_word().to_string())
         ));
-    }
-    if let Some(trust) = &fields.workspace_trust {
-        parts.push(format!("trust {}", reset(trust, bool::to_string)));
     }
     if template.sets_command {
         parts.push("command (set)".to_string());
@@ -554,6 +552,20 @@ mod tests {
              managed checkout \"o/r\""
         );
         assert_eq!(cell(TemplateFields::default(), None), "nothing");
+        // Old catalog reads can still carry trust even though saves drop it.
+        // The listing must describe what applying that raw definition does.
+        for trust in [Some(true), Some(false), None] {
+            assert_eq!(
+                cell(
+                    TemplateFields {
+                        workspace_trust: Some(trust),
+                        ..Default::default()
+                    },
+                    None,
+                ),
+                "nothing"
+            );
+        }
     }
 
     // ---------------------------------------------------------------

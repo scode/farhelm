@@ -21,7 +21,6 @@ pub(super) struct ExplicitChoices {
     pub folder: bool,
     pub name: bool,
     pub permissions: bool,
-    pub trust: bool,
 }
 
 /// All values offered when the panel opens, plus the default selection.
@@ -35,7 +34,8 @@ pub(super) struct Candidate {
 
 impl Candidate {
     /// Read only the active tab; dormant drafts must never become saved edits.
-    /// An explicit default approval/trust choice is a present null reset.
+    /// An explicit default approval choice is a present null reset. Trust
+    /// from old snapshots is never offered: Settings owns the next launch.
     pub(super) fn from_state(state: &LauncherState, explicit: ExplicitChoices) -> Self {
         let mut fields = TemplateFields {
             kind: state.kind,
@@ -55,12 +55,10 @@ impl Candidate {
                 fields.permissions = (state.permissions.is_some() || explicit.permissions)
                     .then_some(state.permissions);
                 fields.permission_flags = state.permission_flags.clone();
-                fields.workspace_trust = (state.workspace_trust.is_some() || explicit.trust)
-                    .then_some(state.workspace_trust);
                 // Clone and recents mark their launch choices explicit even
                 // when this agent has no corresponding control. A forced mode
                 // or unsupported reset is not a choice the launcher can save.
-                for field in [Field::Permissions, Field::Trust, Field::Prompt] {
+                for field in [Field::Permissions, Field::Prompt] {
                     if !field.offered(&fields) {
                         field.remove(&mut fields);
                     }
@@ -80,7 +78,6 @@ impl Candidate {
                 field.is_set(&fields)
                     && match field {
                         Field::Permissions => explicit.permissions,
-                        Field::Trust => explicit.trust,
                         Field::Host => explicit.host,
                         Field::Destination => {
                             explicit.folder
@@ -134,10 +131,6 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
                 .map(|words| format!(" · {}", shell_words::join(words)))
                 .unwrap_or_default(),
         )),
-        Field::Trust => fields
-            .workspace_trust
-            .flatten()
-            .map(|v| if v { "trust" } else { "ask" }.into()),
         Field::Command => fields.command.clone(),
         Field::Yolo => fields
             .yolo
@@ -342,31 +335,28 @@ mod tests {
     /// without requiring the user to uncheck unsupported or forced modes.
     #[test]
     fn unsupported_controls_are_absent_despite_explicit_provenance() {
-        for (harness, permissions, trust) in [
-            (LaunchHarness::Claude, Some(None), None),
-            (LaunchHarness::Pi, None, Some(None)),
-            (LaunchHarness::OpenCode, None, None),
-            (LaunchHarness::Codex, Some(None), Some(None)),
+        for (harness, permissions) in [
+            (LaunchHarness::Claude, Some(None)),
+            (LaunchHarness::Pi, None),
+            (LaunchHarness::OpenCode, None),
+            (LaunchHarness::Codex, Some(None)),
         ] {
             let state = LauncherState {
                 kind: Some(LauncherKind::Agent),
                 harness: Some(harness),
                 permissions: harness.offers_only_yolo().then_some(LaunchPermission::Yolo),
-                // Both Clone seeding and a Codex-to-Claude transition can
-                // leave explicit trust provenance after its value is cleared.
-                workspace_trust: None,
+                // A historical clone can carry trust, but templates no longer do.
+                workspace_trust: Some(true),
                 ..Default::default()
             };
             let candidate = Candidate::from_state(
                 &state,
                 ExplicitChoices {
                     permissions: true,
-                    trust: true,
                     ..Default::default()
                 },
             );
-            assert_eq!(candidate.fields.workspace_trust, trust, "{harness:?}");
-            assert_eq!(candidate.checked.contains(&Field::Trust), trust.is_some());
+            assert_eq!(candidate.fields.workspace_trust, None, "{harness:?}");
             assert_eq!(candidate.fields.permissions, permissions, "{harness:?}");
             assert_eq!(
                 candidate.checked.contains(&Field::Permissions),
@@ -381,7 +371,7 @@ mod tests {
     }
 
     /// Passive defaults and Clone's placement stay offered but unchecked;
-    /// deliberate edits, including a false trust answer, must be retained.
+    /// deliberate edits must be retained. A retired trust value is never offered.
     #[test]
     fn prechecks_follow_explicitness_without_hiding_available_values() {
         let state = LauncherState {
@@ -406,7 +396,6 @@ mod tests {
             Field::Destination,
             Field::Name,
             Field::Permissions,
-            Field::Trust,
         ] {
             assert!(
                 field.is_set(&passive.fields),
@@ -421,13 +410,12 @@ mod tests {
                 folder: true,
                 name: true,
                 permissions: true,
-                trust: true,
             },
         );
-        assert_eq!(deliberate.checked.len(), 8);
+        assert_eq!(deliberate.checked.len(), 7);
         assert_eq!(
             deliberate.selected(&deliberate.checked).workspace_trust,
-            Some(Some(false))
+            None
         );
         let reset = Candidate::from_state(
             &LauncherState {
@@ -514,7 +502,6 @@ mod tests {
                 &state,
                 ExplicitChoices {
                     permissions: true,
-                    trust: true,
                     ..Default::default()
                 },
             );
@@ -531,7 +518,7 @@ mod tests {
                 assert_eq!(applied.model, state.model);
                 assert_eq!(applied.effort, state.effort);
                 assert_eq!(applied.permissions, state.permissions);
-                assert_eq!(applied.workspace_trust, state.workspace_trust);
+                assert_eq!(applied.workspace_trust, None);
                 assert_eq!(applied.destination, None);
             } else {
                 assert_eq!(applied.command, state.command);

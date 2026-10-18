@@ -305,7 +305,7 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await expectCovered(page, "templates add-field menu", ".templates-add-menu", 3);
   await templates.locator(".templates-add-menu").getByRole("button", { name: "agent type", exact: true }).click();
   await templates.getByLabel("agent type", { exact: true }).selectOption("codex");
-  for (const name of ["model", "effort", "approvals", "workspace trust"]) {
+  for (const name of ["model", "effort", "approvals"]) {
     await templates.locator(".templates-add").click();
     await templates.locator(".templates-add-menu").getByRole("button", { name, exact: true }).click();
   }
@@ -348,11 +348,10 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await expect(form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true })).toBeVisible();
   await expectTextFieldsCovered(page, "new session form, agent tab", ".create-session-form", 3);
   // Picking an agent reveals the agent-dependent choices (model, effort,
-  // permissions, workspace trust), and the search box offers results; both
-  // carry hover text of their own. Codex is picked because it offers every
-  // one of those choices.
+  // permissions), and the search box offers results; both carry hover text.
+  // Trust belongs to Settings and must not reappear in this control inventory.
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  await expect(form.locator(".launch-composer-trust-choice")).toBeVisible();
+  await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
   await expectCovered(page, "new session form, Codex picked", ".create-session-form", 15);
   await expect(form.getByRole("combobox", { name: "model", exact: true })).toBeVisible();
   await expectTextFieldsCovered(page, "new session form, Codex picked", ".create-session-form", 4);
@@ -363,7 +362,7 @@ test("sidebar surfaces give every control hover text", async ({ page, request })
   await form.locator(".save-template-cancel").click();
   await expect(form.locator(".save-template-panel")).toHaveCount(0);
   const search = form.locator('.launch-composer-search input[role="combobox"]');
-  for (const query of ["perms:", "trust:", "effort:"]) {
+  for (const query of ["perms:", "effort:"]) {
     await search.fill(query);
     await expect(page.locator("#launch-composer-search-results [role=option]").first()).toBeVisible();
     await expectCovered(page, `new session form, search "${query}"`, "#launch-composer-search-results", 2);

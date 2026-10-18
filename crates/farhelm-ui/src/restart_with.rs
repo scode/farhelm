@@ -5,7 +5,7 @@
 //! refusal can leave that draft visible without changing the session's
 //! authoritative state. It edits
 //! whichever launch kind the session has (SPEC.md, Restart with): an agent
-//! launch's model, effort, permissions and workspace trust, or a command
+//! launch's model, effort and permissions, or a command
 //! launch's command, resume command and YOLO answer. The launch kind and the
 //! agent type stay fixed in both.
 //!
@@ -100,6 +100,9 @@ fn restart_baseline(session: &Session) -> Option<RestartEdit> {
             // Preserve a no-flag omission so choosing guarded is a real edit;
             // historical YOLO omissions still compare equal to explicit YOLO.
             selection.permissions = selection.harness.stored_permission(selection.permissions);
+            // Restart with composes a new launch under current Settings.
+            // Plain Restart bypasses this editor and keeps its stored launch.
+            selection.workspace_trust = None;
             Some(RestartEdit::Agent(selection))
         }
         Some(crate::SessionLaunch::Command(command))
@@ -588,7 +591,6 @@ pub(crate) fn RestartWithDialog(
                         permission_flags_text.set(text);
                         selection.set(after);
                     },
-                    workspace_trust: current.workspace_trust,
                     catalog: catalog.clone(),
                     busy,
                     model_draft: model_draft(),
@@ -665,11 +667,6 @@ pub(crate) fn RestartWithDialog(
                         after.permissions = permissions;
                         after.permission_flags = crate::launch_composer::permission_words(permissions, &permission_flags_text());
                         if permissions != Some(LaunchPermission::Custom) { permission_flags_text.set(String::new()); }
-                        selection.set(after);
-                    },
-                    on_workspace_trust: move |workspace_trust| {
-                        let mut after = selection();
-                        after.workspace_trust = workspace_trust;
                         selection.set(after);
                     },
                 }

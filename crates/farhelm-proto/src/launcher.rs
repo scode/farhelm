@@ -209,7 +209,7 @@ where
 ///
 /// A field left out keeps whatever the launcher already holds, which is what
 /// lets templates stack. The agent-launch choices that have a default
-/// (model, effort, permissions, workspace trust) and the resume command
+/// (model, effort, permissions) and the resume command
 /// distinguish absent from `null`: `null` explicitly resets the choice, the
 /// way choosing "harness default" by hand does. The host is named by its
 /// recorded install identity, never by registry id, so a row retargeted to
@@ -249,6 +249,8 @@ pub struct TemplateFields {
     /// independently of it. Later permission edits clear the older words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_flags: Option<Vec<String>>,
+    /// Retained to decode stored templates and older clients. This field
+    /// neither applies a choice nor implies an agent launch; new saves drop it.
     #[serde(
         default,
         deserialize_with = "present",
@@ -284,7 +286,8 @@ impl TemplateFields {
     }
 
     /// Whether the template sets a choice available only to agent launches.
-    /// Explicit null resets still count as choices.
+    /// Explicit null resets still count as choices, except for retired
+    /// workspace trust, whose old wire value is accepted and ignored.
     ///
     /// This deliberately excludes the agent type, which a command launch may
     /// declare too. Including it would reject valid agent-plus-command templates
@@ -294,7 +297,6 @@ impl TemplateFields {
             || self.effort.is_some()
             || self.permissions.is_some()
             || self.permission_flags.is_some()
-            || self.workspace_trust.is_some()
             || self.prompt.is_some()
     }
 
@@ -438,6 +440,8 @@ pub struct LauncherState {
     /// Words stay paired with Custom through template application. Replacing
     /// the permission or changing agents must clear this source-agent intent.
     pub permission_flags: Option<Vec<String>>,
+    /// Compatibility state for callers carrying old stored selections. New
+    /// GUI/CLI drafts leave this unset, and templates cannot modify it.
     pub workspace_trust: Option<bool>,
     pub command: String,
     pub yolo: Option<bool>,
@@ -498,10 +502,11 @@ fn harness_word(harness: LaunchHarness) -> String {
 /// ([`reconcile_harness_selection`]). Agent-launch fields and
 /// command-launch fields apply to the launch kind active once the template's
 /// own kind, if any, is set; one that does not apply is refused, as is a
-/// model, effort, permission or trust choice the agent type does not offer,
+/// model, effort or permission choice the agent type does not offer,
 /// a host the dialog holds fixed, and a host no known install has. The
 /// result is a launcher state, not a launch: a field the launch needs and no
-/// template set is still the user's (or the CLI flags') to fill.
+/// template set is still the user's (or the CLI flags') to fill. Historical
+/// workspace-trust values decode but have no effect: trust comes from Settings.
 pub fn apply_template(
     state: &LauncherState,
     template: &LaunchTemplate,
@@ -582,12 +587,11 @@ pub fn apply_template(
     }
 
     // 3. The agent launch's choices.
-    let agent_fields: [(&'static str, bool); 5] = [
+    let agent_fields: [(&'static str, bool); 4] = [
         ("model", fields.model.is_some()),
         ("effort", fields.effort.is_some()),
         ("permissions", fields.permissions.is_some()),
         ("permission flags", fields.permission_flags.is_some()),
-        ("workspace trust", fields.workspace_trust.is_some()),
     ];
     if let Some((field, _)) = agent_fields.iter().find(|(_, set)| *set) {
         if kind == LauncherKind::Command {
@@ -699,15 +703,6 @@ pub fn apply_template(
             }
             next.permissions = permissions;
             next.permission_flags = fields.permission_flags.clone();
-        }
-        if let Some(trust) = fields.workspace_trust {
-            if trust.is_some() && !harness.offers_workspace_trust() {
-                return Err(refuse(
-                    "workspace trust",
-                    format!("is not offered by {label}"),
-                ));
-            }
-            next.workspace_trust = trust;
         }
     }
 
@@ -941,9 +936,9 @@ mod tests {
                 Some(LauncherKind::Agent),
             ),
             (json!({"permissions": null}), Some(LauncherKind::Agent)),
-            (json!({"workspace_trust": true}), Some(LauncherKind::Agent)),
-            (json!({"workspace_trust": false}), Some(LauncherKind::Agent)),
-            (json!({"workspace_trust": null}), Some(LauncherKind::Agent)),
+            (json!({"workspace_trust": true}), None),
+            (json!({"workspace_trust": false}), None),
+            (json!({"workspace_trust": null}), None),
             (json!({"host": "installation"}), None),
             (json!({"destination": {"folder": "project"}}), None),
             (json!({"destination": {"github": "owner/repo"}}), None),
@@ -1115,6 +1110,69 @@ mod tests {
         assert_eq!(applied.effort, Some(LaunchEffort::Low), "left out, kept");
     }
 
+    /// Historical trust values remain decodable without becoming edits or
+    /// agent-kind constraints. In particular, an old trust-only template
+    /// must apply on the command tab and before an agent has been chosen.
+    #[test]
+    fn historical_template_trust_is_ignored_on_application() {
+        let catalog = catalog();
+        let ctx = context(&catalog, &[], false);
+        let states = [
+            LauncherState::default(),
+            LauncherState {
+                kind: Some(LauncherKind::Command),
+                command: "echo existing".into(),
+                ..Default::default()
+            },
+            LauncherState {
+                harness: Some(LaunchHarness::Claude),
+                ..Default::default()
+            },
+            LauncherState {
+                harness: Some(LaunchHarness::Codex),
+                workspace_trust: Some(true),
+                ..Default::default()
+            },
+        ];
+        for trust in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::Value::Null,
+        ] {
+            let fields: TemplateFields = serde_json::from_value(
+                serde_json::json!({"workspace_trust":trust,"name":"review"}),
+            )
+            .unwrap();
+            assert_eq!(
+                fields.workspace_trust,
+                Some(trust.as_bool()),
+                "premise: legacy true, false and null stay distinct on decode"
+            );
+            assert_eq!(
+                serde_json::to_value(&fields).unwrap()["workspace_trust"],
+                trust
+            );
+            assert!(!fields.sets_agent_only_fields());
+            assert_eq!(fields.implied_kind(), None);
+            let old = template("old", fields);
+            let current = template(
+                "current",
+                TemplateFields {
+                    name: Some("review".into()),
+                    ..Default::default()
+                },
+            );
+            for state in &states {
+                let expected = apply_template(state, &current, &ctx).unwrap();
+                assert_eq!(
+                    apply_template(state, &old, &ctx).unwrap(),
+                    expected,
+                    "old trust has exactly the effect of an absent field"
+                );
+            }
+        }
+    }
+
     /// Stacking a Grok choice after a trusted harness must clear unsupported
     /// trust, model and effort choices. The shared launcher also serves CLI
     /// templates, whose retained trust used to make the resulting launch fail.
@@ -1139,13 +1197,19 @@ mod tests {
                     ..TemplateFields::default()
                 },
             );
-            let seeded = apply_template(
+            let mut seeded = apply_template(
                 &LauncherState::default(),
                 &trusted,
                 &context(&catalog, &[], false),
             )
             .unwrap();
-            assert_eq!(seeded.workspace_trust, Some(trust));
+            assert_eq!(
+                seeded.workspace_trust, None,
+                "old template trust is ignored"
+            );
+            // A retained historical launch selection can still carry trust;
+            // choosing an unsupported harness must reconcile that state too.
+            seeded.workspace_trust = Some(trust);
             let applied = apply_template(&seeded, &grok, &context(&catalog, &[], false)).unwrap();
             assert_eq!(applied.harness, Some(LaunchHarness::Grok));
             assert_eq!(applied.workspace_trust, None);

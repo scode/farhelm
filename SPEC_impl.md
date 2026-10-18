@@ -161,29 +161,28 @@ confirmations writes an explicit boolean through the ordinary sparse preference 
 and omission preserves the stored choice. Older helms refuse this schema.
 
 The session list's chosen ORDER, last-selected session, compact-row choice, and the launch composer's remembered
-permissions and workspace-trust choices, host confirmation choices, and remembered feedback contact are one preference
-the HELM keeps, in a singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`,
-`remembered_permissions`, `remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`,
-`feedback_contact`, `terminal_link_click`, `skip_session_confirmations`, `name_session_on_quick_launch`,
-`quick_launch_template`, `template_shortcuts`, `welcome_seen`) behind `GET`/`PUT /api/preferences`, device-authenticated
-like every other route. The two remembered launch fields are written by the helm after a successful user structured
-launch; no shipped client PUTs them. Workspace trust changes only after an explicit Codex, Muse, or Pi choice. An
-agent-originated create and an unsupported harness leave it alone. This makes the remembered values facts of accepted
-launches rather than claims from one client. Both clients read the row once after authentication — `PreferencesGate`
-holds the authenticated tree, rendering nothing, until the read lands, so the sort control and the auto-select effect
-see the remembered values on their first run and no frame shows a default that is then corrected. On desktop the IPC
-authentication gate already holds the tree and the read is one loopback hop, so nothing is visible; in the browser the
-first paint deliberately waits on that one round trip to the helm — a page with a valid credential used to paint its
-sidebar synchronously from localStorage — so the list never appears in an order that then changes. A write is a sparse
-patch naming only the field the user changed, merged per-field by the helm (an absent field is untouched, an explicit
-`null` clears one), so two clients changing different fields at nearly the same time cannot clobber each other; the
-signal in the page is updated before the request leaves, which is what keeps the choice in force when the write fails.
-Same-field writes are serialized latest-wins in the client, so a burst of changes cannot land on the helm in reverse
-order; the write queue is process state outside the remounted tree, and after the browser's credential recovery the gate
-overlays and replays any local choice whose write never got through, so reauthentication cannot roll the current client
-back to the helm's older row. The desktop app never signs in again, so nothing remounts its tree. The seed read runs
-under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a stalled preference endpoint
-cannot blank the page for the funnel's full sixty seconds.
+permissions, host confirmation choices, and remembered feedback contact are one preference the HELM keeps, in a
+singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`, `remembered_permissions`,
+`remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`, `feedback_contact`,
+`terminal_link_click`, `skip_session_confirmations`, `name_session_on_quick_launch`, `quick_launch_template`,
+`template_shortcuts`, `welcome_seen`) behind `GET`/`PUT /api/preferences`, device-authenticated like every other route.
+The remembered permission field is written by the helm after a successful user structured launch; no shipped client PUTs
+it. The `remembered_workspace_trust` column remains for upgrade compatibility but is neither read nor written.
+Remembered permissions describe accepted launches rather than one client's claim. Both clients read the row once after
+authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the sort
+control and the auto-select effect see the remembered values on their first run and no frame shows a default that is
+then corrected. On desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so
+nothing is visible; in the browser the first paint deliberately waits on that one round trip to the helm — a page with a
+valid credential used to paint its sidebar synchronously from localStorage — so the list never appears in an order that
+then changes. A write is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent
+field is untouched, an explicit `null` clears one), so two clients changing different fields at nearly the same time
+cannot clobber each other; the signal in the page is updated before the request leaves, which is what keeps the choice
+in force when the write fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot
+land on the helm in reverse order; the write queue is process state outside the remounted tree, and after the browser's
+credential recovery the gate overlays and replays any local choice whose write never got through, so reauthentication
+cannot roll the current client back to the helm's older row. The desktop app never signs in again, so nothing remounts
+its tree. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a
+stalled preference endpoint cannot blank the page for the funnel's full sixty seconds.
 
 The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
 number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
@@ -2544,24 +2543,24 @@ file is introduced.
   deliberately, and both are scoped to the launches that actually carry the injected flags rather than to Codex launches
   in general: on those, Codex prints a hook-trust warning line above its composer, and with trust bypassed any hook the
   user has in that same configuration home but has not trusted runs too. The same bypass covers a trusted project's own
-  `.codex/` hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's workspace-trust option,
-  including for managed checkouts, or the user's own answer to Codex's trust prompt), and on an injected launch they
-  then run without Codex's per-hook review. That is accepted because trusting a workspace already hands its Codex
-  configuration, MCP servers included, the ability to run commands, and because skipping injection there would drop
-  conversation identity, and so resume, for trusted checkouts. It is accepted only until hook installation becomes an
-  explicit step surfaced to the user, where the user is told what is being installed and accepts specific hooks; after
-  that, launches no longer pass the per-launch bypass. Codex fires `SessionStart` at the first prompt rather than at
-  process start, so a Codex session's identity arrives only once the user has typed something, where Claude's arrives at
-  startup. The flags go where the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved launch"); nothing
-  reads the rest of the command. Only a legacy session, from before launch kinds, still gets the previous release's
-  injection, appended after its argv, and for it three invocation shapes disqualify a launch, which is skipped with a
-  logged reason rather than made to work: an argv that already carries `--settings` (Claude honors only the last one, so
-  injecting ours would silently drop the user's), an argv already steering Codex's own hook configuration (a second
-  bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they touch
-  them), and — for either vendor — an argv containing a bare `--` (our flags would become prompt text).
-  `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off
-  wholesale or per kind, read once at supervisor start and carried as a seam value. Without an accepted report, a new
-  session cannot be restarted; no nearby record can supply a substitute identity.
+  `.codex/` hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's managed-checkout Codex trust
+  setting or the user's own answer to Codex's trust prompt), and on an injected launch they then run without Codex's
+  per-hook review. That is accepted because trusting a workspace already hands its Codex configuration, MCP servers
+  included, the ability to run commands, and because skipping injection there would drop conversation identity, and so
+  resume, for trusted checkouts. It is accepted only until hook installation becomes an explicit step surfaced to the
+  user, where the user is told what is being installed and accepts specific hooks; after that, launches no longer pass
+  the per-launch bypass. Codex fires `SessionStart` at the first prompt rather than at process start, so a Codex
+  session's identity arrives only once the user has typed something, where Claude's arrives at startup. The flags go
+  where the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved launch"); nothing reads the rest of the
+  command. Only a legacy session, from before launch kinds, still gets the previous release's injection, appended after
+  its argv, and for it three invocation shapes disqualify a launch, which is skipped with a logged reason rather than
+  made to work: an argv that already carries `--settings` (Claude honors only the last one, so injecting ours would
+  silently drop the user's), an argv already steering Codex's own hook configuration (a second bypass flag risks a
+  rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and — for either
+  vendor — an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the
+  supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read
+  once at supervisor start and carried as a seam value. Without an accepted report, a new session cannot be restarted;
+  no nearby record can supply a substitute identity.
   `website/src/content/docs/docs/how-it-works/agent-hook-injection.md` is the user-facing account of the same mechanism.
   The injected command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see
   "What running sessions hold across versions").
@@ -2992,18 +2991,22 @@ destination also offers Custom, because words belong to the source CLI. The reme
 and successful-create projection exclude Custom while recent setups retain the whole selection. Editable UI text is
 separate from words so malformed quotes remain repairable without submitting a different command.
 
-Schema 30 adds nullable `remembered_workspace_trust` to the preference row. The helm updates it in the same admitted
-create transaction as structured launch history, only for an explicit Codex, Muse, or Pi choice from a user-originated
-create. Both are written from the selection the user submitted (`CreateAcceptance::explicit_selection`), never from the
-supervisor's reply, per SPEC.md's rule that only explicit GUI selections shape GUI defaults and suggestions; a create
-without one (an agent's, a plain Replace, a command launch) writes neither. Codex true and false compile to a whole-argv
-config marker. The supervisor fills it at the shared spawn seam, after any GitHub checkout has fixed the final cwd, with
-one `projects.<cwd>.trust_level` override set to `trusted` or `untrusted`. The cwd is quoted as a TOML key and resolved
-on the target host; omitted trust adds no Codex override. Muse true adds `--trust-workspace`; Muse false adds no trust
-flag and cannot undo trust from `--yolo` or vendor settings. Pi true adds `--approve` and Pi false adds `--no-approve`,
-independent of Pi's YOLO tool mode. Unsupported harnesses reject an explicit trust value. The composer clears that value
-on a switch to an unsupported harness and restores it from the preference row on a fresh open or reset. Older selection
-JSON decodes without a trust choice.
+Schema 30's nullable `remembered_workspace_trust` column stays in the preference row, but no read or write uses it.
+Permission memory and structured launch history still come from the selection the user submitted
+(`CreateAcceptance::explicit_selection`), never from the supervisor's reply, per SPEC.md's rule that only explicit GUI
+selections shape GUI defaults and suggestions. The launcher has no trust state, segment or search action. Recent setup
+grouping ignores historical trust, summaries omit it, and activating a recent clears it before composing a new launch.
+
+`LaunchSelection.workspace_trust` remains on the wire and in stored selections: supervisors persist selections, and
+their strict decoding must still accept older fields. The helm overwrites the field from managed-checkout Settings when
+composing a launch. Compilation remains a function of the selection alone so the YOLO guard can reproduce stored
+commands exactly. Codex true and false still compile to whole-argv config markers; the supervisor fills one at the
+shared spawn seam, after any GitHub checkout has fixed the final cwd, with a trusted or untrusted project override. The
+cwd is quoted as a TOML key and resolved on the target host; omitted trust adds no Codex override. Muse true adds
+`--trust-workspace`; Muse false adds no trust flag and cannot undo trust from `--yolo` or vendor settings. Pi true adds
+`--approve` and Pi false adds `--no-approve`, independent of Pi's YOLO tool mode. The false branches remain for old
+stored launches, including plain Restart and Replace; new composition uses true or omission. Older selection JSON
+without the field continues to decode.
 
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order
@@ -3803,10 +3806,10 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   `--source-session` and `--host` are required on clone. The removed `--profile` and `--profile-id` selectors are still
   parsed, hidden, only so they can be refused naming the launch flags and `--template`, and the retired `--invocation`
   is parsed, hidden, only to be refused naming `--command` and the YOLO flags. Every free-text value option on both
-  verbs carries `allow_hyphen_values` (`--agent`, `--effort`, `--permissions` and `--trust` do not: each takes a word
-  from a closed set, and an unknown one is refused listing them all), because every one of these values is judged
-  downstream — by the registry, by the target filesystem — and every one of them may legally begin with `-`; refusing
-  such a value locally would be this CLI declining to carry a name the far end would have explained.
+  verbs carries `allow_hyphen_values` (`--agent`, `--effort` and `--permissions` do not: each takes a word from a closed
+  set, and an unknown one is refused listing them all), because every one of these values is judged downstream — by the
+  registry, by the target filesystem — and every one of them may legally begin with `-`; refusing such a value locally
+  would be this CLI declining to carry a name the far end would have explained.
 - `farhelm agent template create <name> [--cwd <dir>] [--title ...] [--host <name>] <launch flags>`,
   `farhelm agent template edit <name> ...` with the same flags, and `farhelm agent template delete <name>` — an agent's
   template writes (SPEC.md, Agent-spawned sessions). The launch flags are `farhelm agent create`'s; `--template` is
@@ -4759,16 +4762,18 @@ A template is stored by the helm in `helm.db` (schema 38, table `launch_template
 the JSON of `farhelm_proto::launcher::TemplateFields`. The fields stay one JSON value rather than a column each because
 a template is applied whole and never queried by field, and because the set of launcher fields is the wire crate's to
 grow. A field a template leaves out is absent from the JSON; for the agent-launch choices that have a default (model,
-effort, permissions, workspace trust) and for the resume command, an explicit `null` means "reset to the default", which
-is how a template can clear a choice rather than only set one. The agent type, host, destination and session name have
-no reset: a template sets them or leaves them alone. A host is named by its recorded install identity. Unknown fields
-are refused on decode, so a misspelled field is an error rather than a silently ignored edit. The GUI's writes go
-through `PUT /api/templates/{name}` (create or replace, last write wins, no version check, as SPEC.md wants) and
-`DELETE /api/templates/{name}`; `GET /api/templates` lists them by name. The helm checks only the shape of a template
-the GUI writes (a non-empty name of at most 128 bytes with no surrounding spaces or control characters, and fields
-within the 64 KiB a create is held to); whether its fields apply is decided only when it is applied. An agent's template
-writes share the same store path but carry a precondition and a few refusals of their own (see "Permission prompts for
-agent actions").
+effort, permissions) and for the resume command, an explicit `null` means "reset to the default", which is how a
+template can clear a choice rather than only set one. The agent type, host, destination and session name have no reset:
+a template sets them or leaves them alone. A host is named by its recorded install identity. Unknown fields are refused
+on decode, so a misspelled field is an error rather than a silently ignored edit. The retired `workspace_trust` field
+remains readable in `TemplateFields`, but application ignores it and every save drops it. The editor clears it in its
+draft and on delete undo; Save as template never offers it. This keeps old records usable without letting their trust
+choices bypass managed-checkout Settings. The GUI's writes go through `PUT /api/templates/{name}` (create or replace,
+last write wins, no version check, as SPEC.md wants) and `DELETE /api/templates/{name}`; `GET /api/templates` lists them
+by name. The helm checks only the shape of a template the GUI writes (a non-empty name of at most 128 bytes with no
+surrounding spaces or control characters, and fields within the 64 KiB a create is held to); whether its fields apply is
+decided only when it is applied. An agent's template writes share the same store path but carry a precondition and a few
+refusals of their own (see "Permission prompts for agent actions").
 
 Application is one pure function, `farhelm_proto::launcher::apply_template`, compiled into both the UI and the helm: a
 launcher state plus a template gives a new launcher state or a refusal naming the field, in SPEC.md's order (launch
@@ -4802,19 +4807,19 @@ or recent history. Restart controls omit the prompt callback.
 
 In the launcher, `tl:name` offers templates (the only search scope that does). Accepting one first runs `apply_template`
 on a snapshot of the launcher, so a refusal applies nothing; then it replays the template as the launcher's own search
-actions (agent type, model, effort, permissions, trust, host, folder, repository, name) and sets directly only what has
-no such action (the launch kind, the command fields and the command launch's declared agent type, the approve, smart
-approve and chat permissions, and a choice reset to its default). That replay is what makes remembered defaults, recent
-setups and a pending checkout preview react exactly as they do to the same edits by hand, with no provenance tracking
-for templates. The Templates dialog beside New has a bounded list column and a selected-template editor; at phone width
-only the list or editor is shown, with a back link. A draft holds the wire fields directly, so absence means no visible
-field, while explicit null resets and false approval assertions survive editing. Add/remove actions change presence;
-defaults are values inside the controls. The editor's agent/command/don't-switch selector writes the kind, with
-don't-switch offering only placement and name. A kindless stored template is inferred in the draft only, marked unsaved
-against its original baseline; saving explicitly stores that switch. Per-harness choices use the shared capability
-answers and release catalog, not another agent table. Model text is unrestricted and suggestions use the existing
-catalog filter; other incompatible choices stay visible and refuse save until corrected or removed. Fields need not form
-a complete launch, because another stacked template can supply what they omit.
+actions (agent type, model, effort, permissions, host, folder, repository, name) and sets directly only what has no such
+action (the launch kind, the command fields and the command launch's declared agent type, the approve, smart approve and
+chat permissions, and a choice reset to its default). That replay is what makes remembered defaults, recent setups and a
+pending checkout preview react exactly as they do to the same edits by hand, with no provenance tracking for templates.
+The Templates dialog beside New has a bounded list column and a selected-template editor; at phone width only the list
+or editor is shown, with a back link. A draft holds the wire fields directly, so absence means no visible field, while
+explicit null resets and false approval assertions survive editing. Add/remove actions change presence; defaults are
+values inside the controls. The editor's agent/command/don't-switch selector writes the kind, with don't-switch offering
+only placement and name. A kindless stored template is inferred in the draft only, marked unsaved against its original
+baseline; saving explicitly stores that switch. Per-harness choices use the shared capability answers and release
+catalog, not another agent table. Model text is unrestricted and suggestions use the existing catalog filter; other
+incompatible choices stay visible and refuse save until corrected or removed. Fields need not form a complete launch,
+because another stacked template can supply what they omit.
 
 Opening another row, new, duplicate, mobile back, close and Escape share a pending departure and the same inline
 save/discard/keep-editing prompt. Save keeps the selected editor and refreshes its baseline; duplicate opens an unsaved
@@ -4842,11 +4847,11 @@ sets `TemplateDestination::Github` and conflicts with `--cwd`). Spawn still refu
 requires an agent type or a command and a YOLO answer; the launch is then validated by the same
 `sessions::resolve_launch_request` a REST create goes through. Only `--command` sets the launch kind: the agent-launch
 flags leave it alone, so on a command template they are refused naming the flag, as the same edit is refused in the
-launcher. `--model`, `--effort`, `--permissions` and `--trust` accept `default`, sent as `null`, which resets a choice a
-template made, and `--no-resume-command` resets the resume command; an omitted flag sends nothing. The CLI has no way to
-clear a command launch's declared agent type that a template set. clap refuses a repeated flag (other than `--template`)
-and `--yolo` with `--no-yolo`. The supervisor's relay only bounds the request (host name, at most 64 template names of
-at most 128 bytes without control characters, the flags' JSON within the 64 KiB create cap); whether it says enough to
+launcher. `--model`, `--effort` and `--permissions` accept `default`, sent as `null`, which resets a choice a template
+made, and `--no-resume-command` resets the resume command; an omitted flag sends nothing. The CLI has no way to clear a
+command launch's declared agent type that a template set. clap refuses a repeated flag (other than `--template`) and
+`--yolo` with `--no-yolo`. The supervisor's relay only bounds the request (host name, at most 64 template names of at
+most 128 bytes without control characters, the flags' JSON within the 64 KiB create cap); whether it says enough to
 launch is the helm's to decide.
 
 The host is the asking session's own for a spawn (which also makes a template that sets a host a refusal, through the

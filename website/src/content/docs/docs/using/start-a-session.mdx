@@ -25,7 +25,7 @@ terminal opens. You can type your first prompt there, or supply it in the launch
 />
 
 **cancel**, Escape, or a click outside the launcher closes it and forgets your choices. **reset choices** clears the
-agent, model, and effort, and puts permissions and trust back to the ones the launcher remembers (see the note below);
+agent, model, and effort, and puts permissions back to the mode the launcher remembers (see the note below);
 it keeps the host, directory, and name.
 
 ## Choose where it runs
@@ -60,11 +60,12 @@ session list; leave it empty and Farhelm picks a name.
 Not every agent has every choice, and some offer more permission modes than these two. Switching to another agent
 clears any choice it cannot take, and the launcher tells you when it does. If that leaves a riskier permission mode
 than you had, a red banner says so and offers **Undo**. [Supported agents](/docs/agents/) lists what
-each agent offers; workspace trust is explained on the [Codex](/docs/agents/codex/), [Muse](/docs/agents/muse/), and
-[Pi](/docs/agents/pi/) pages. To run something that is not one of these agents, switch the launcher to its **command**
+each agent offers. To answer directory-trust questions automatically for directories Farhelm manages, use the
+[managed-checkout settings](/docs/using/start-a-session/#trust-in-managed-checkouts). To run something that is not one
+of these agents, switch the launcher to its **command**
 tab, covered in [Custom commands](/docs/agents/custom-commands/).
 
-NOTE: The launcher remembers the permissions and trust of your last launch from its **agent** tab, in any Farhelm
+NOTE: The launcher remembers the permissions of your last launch from its **agent** tab, in any Farhelm
 window. After one YOLO launch, the next launcher opens on **yolo** too. Launches your agents start, custom commands, and
 plain **replace** do not change what it remembers.
 
@@ -125,7 +126,7 @@ them.
   alt="The recent setups list under the launcher's search box, showing three setups for the chosen directory."
 />
 
-A setup is the agent, model, effort, permissions, trust, and directory of a launch you made on the launcher's **agent**
+A setup is the agent, model, effort, permissions, and directory of a launch you made on the launcher's **agent**
 tab, however you filled it in.
 Farhelm keeps them separately for each host, and shows up to three; type `recent:` in the search box to find older ones.
 
@@ -155,8 +156,7 @@ With nothing highlighted, Enter in the directory field launches the path you typ
 
 A few other prefixes do something no plain search does: `gh:` starts a [managed
 checkout](#start-from-a-managed-checkout), `tl:` applies one of your [launch
-templates](/docs/using/launch-templates/), saved sets of launcher choices, `trust:` is the only way to set workspace
-trust from the search box, and `perms:` the way to pick **guarded** permissions or Cursor's **agent's own setting**
+templates](/docs/using/launch-templates/), saved sets of launcher choices, and `perms:` picks **guarded** permissions or Cursor's **agent's own setting**
 there ([Permission modes](/docs/agents/#permission-modes)). The rest only narrow a
 search to one kind of thing: `host:`, `harness:`, `model:`, `effort:`, `folder:`, and `recent:`. `host:local` picks the
 machine you are using.
@@ -226,6 +226,24 @@ Settings also has a **post-clone command** field for a shell command to run in e
 agent starts (installing dependencies, say). Save it explicitly; empty the field and save to remove it. Changes affect
 future checkouts only.
 
+### Trust in managed checkouts
+
+Settings has separate trust switches for Codex, Muse and Pi, all off by default. Each applies on every host to
+directories Farhelm manages, including checkouts an agent requests. Enabling one lets the repository's own hooks,
+settings and commands run as if you had approved them. Farhelm passes an argument when starting the agent; it leaves
+the agent's saved configuration alone. Directories outside managed checkouts keep the agent's own trust behavior.
+These switches apply to the launcher's **agent** tab; [custom commands](/docs/agents/custom-commands/) keep their own
+arguments.
+
+The current setting applies when you start a session, use **clone**, **restart with** or **replace with** in a managed
+checkout. Plain **restart** and **replace** reuse the trust carried by the saved launch. See
+[Stop, restart, and resume](/docs/using/stop-restart-resume/) for those actions. Muse's YOLO mode grants trust regardless
+of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
+
+When Codex or Muse asks about trust in a managed checkout while its switch is off, a hint above the terminal links to
+**settings**. **Don't show again** hides that agent's hint across windows, and Settings can restore it. × hides the hint
+for the current question.
+
 For Claude, Settings can also **answer Claude's "trust this folder?" for new checkouts**. This is off by default and
 applies to future managed checkouts on every host, including ones an agent requests or that start with another agent.
 Directories you choose yourself still get Claude's question. A hint above that question opens the setting and its
@@ -237,15 +255,7 @@ a Claude session exiting at the same instant can lose either program's update, a
 how the file works without notice. Read the caution in Settings before turning it on. As with answering Yes yourself,
 trust allows the repository's own Claude hooks and commands to run.
 
-Beside Claude's setting are separate switches for Codex, Muse and Pi, all off by default. They apply when you start or
-change an agent launch in a managed checkout, including one an agent requests. Farhelm passes the agent's trust option
-for that launch without editing its saved settings. Directories outside managed checkouts keep the agent's own trust
-behavior; **restart** and **replace** keep the trust choice the session already had.
-
-Trust lets a repository's own hooks, settings and commands run as if you had approved them yourself. Pi's switch
-approves project settings and extensions; it does not add approval prompts for the agent's actions. Codex and Muse show
-a hint above a recognized trust question, with **Settings** and **Don't show again**. You can restore each hint beside
-its switch in Settings.
+### Checkout management
 
 The directory and the command apply to every host. To give one host a directory or command of its own, run
 `farhelm helm checkout-config` on the machine that runs the helm (the program that serves the Farhelm app; see

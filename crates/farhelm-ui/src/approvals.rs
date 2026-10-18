@@ -856,12 +856,6 @@ fn launch_rows(launch: &SessionLaunch, runs: Runs, rows: &mut Vec<CardRow>) {
             if let Some(words) = &selection.permission_flags {
                 rows.push(CardRow::Value("permission flags", shell_words::join(words)));
             }
-            if let Some(trust) = selection.workspace_trust {
-                rows.push(CardRow::Note(
-                    "workspace trust",
-                    if trust { "trusted" } else { "not trusted" },
-                ));
-            }
             if runs == Runs::Start {
                 rows.push(CardRow::Block(start_label, launch.display_command()));
             }
@@ -932,16 +926,6 @@ fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Ve
     // would approve flags the user never saw.
     if let Some(words) = &fields.permission_flags {
         rows.push(CardRow::Value("permission flags", shell_words::join(words)));
-    }
-    if let Some(trust) = &fields.workspace_trust {
-        rows.push(CardRow::Note(
-            "workspace trust",
-            match trust {
-                Some(true) => "trusted",
-                Some(false) => "not trusted",
-                None => "agent's default",
-            },
-        ));
     }
     if let Some(command) = &fields.command {
         rows.push(CardRow::Block("command", command.clone()));

@@ -1,13 +1,14 @@
-//! Explicit, user-selected launch intent shared by the helm and supervisor.
+//! Structured launch intent shared by the helm and supervisor.
 //!
 //! This module intentionally records choices, not inferred runtime facts. A
 //! missing model, effort, permission, or workspace-trust choice means that the
 //! selected harness receives no corresponding argument and decides its own
 //! default. Even OpenCode may use its configured default; an explicit
 //! OpenCode model still has to use its supported Zen provider. The supervisor
-//! later stores the same value beside the resolved argv so clone
-//! and history can describe what the user chose without attempting to parse a
-//! command line back into a structured launch.
+//! later stores the same value beside the resolved argv so clone and history
+//! can preserve the launch without parsing a command line back into intent.
+//! Workspace trust is supplied by the helm from Settings and destination
+//! ownership for new compositions; old stored values remain reproducible.
 
 use std::borrow::Cow;
 
@@ -152,10 +153,10 @@ impl LaunchHarness {
         }
     }
 
-    /// Whether this harness accepts a per-run workspace-trust choice
-    /// ([`LaunchSelection::workspace_trust`]). The helm refuses the choice
-    /// for any other harness and remembers it only for these, and the browser
-    /// offers it only for these.
+    /// Whether this harness has a per-run workspace-trust argv mapping
+    /// ([`LaunchSelection::workspace_trust`]). Settings supplies this value
+    /// for new managed-checkout compositions. The mapping also remains
+    /// available when reproducing an older stored launch exactly.
     ///
     /// Exhaustive, like every per-harness capability here, so a new harness
     /// is a compile error until it answers.
@@ -570,10 +571,13 @@ pub struct LaunchSelection {
     /// quoting style and shell expansion have no part in the persisted intent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_flags: Option<Vec<String>>,
-    /// An explicit per-run choice about project-local settings and extensions.
+    /// The launch's resolved trust for project-local settings and extensions.
     ///
     /// This is separate from tool approval and from Farhelm's hook-trust
-    /// bypass. Older saved selections lack the field and retain the vendor's
+    /// bypass. New requests carry no authority in this field: the helm
+    /// overwrites it from Settings and managed-checkout ownership. Stored
+    /// values, including false, remain meaningful for exact Restart/Replace
+    /// and compiler reproduction. Older selections lack the field and retain the vendor's
     /// ordinary startup behavior. An unset value stays absent in serialized
     /// JSON because that encoding also serves as a durable launch fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]

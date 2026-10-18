@@ -4,7 +4,7 @@
 //! the selected harness, model draft, and every consequential state transition;
 //! these controls do not choose a harness, promote history, or manage create
 //! idempotency. Keeping that boundary lets a fixed-harness restart dialog use
-//! the same model, effort, permission, and trust controls as the launcher.
+//! the same model, effort, and permission controls as the launcher.
 
 use dioxus::prelude::*;
 
@@ -70,7 +70,7 @@ pub(crate) fn enter_choice(
 /// the person visited other options while editing.
 ///
 /// `old_label` arrives as a [`DetailPart`] because the fields differ in who
-/// wrote it. Effort, permissions, trust, and the `default` placeholder are
+/// wrote it. Effort, permissions, and the `default` placeholder are
 /// this UI's own vocabulary, but a stored model id is a relayed string that
 /// may carry invisible or directional characters. That run must be escaped
 /// and direction-isolated (see `peer.rs`); interpolated raw, it could look
@@ -119,7 +119,6 @@ pub(crate) fn LaunchControls(
     effort: Option<LaunchEffort>,
     permissions: Option<LaunchPermission>,
     permission_flags: String,
-    workspace_trust: Option<bool>,
     catalog: Vec<LaunchCatalogModel>,
     busy: bool,
     model_draft: String,
@@ -144,7 +143,6 @@ pub(crate) fn LaunchControls(
     on_effort: EventHandler<Option<LaunchEffort>>,
     on_permissions: EventHandler<Option<LaunchPermission>>,
     on_permission_flags: EventHandler<String>,
-    on_workspace_trust: EventHandler<Option<bool>>,
 ) -> Element {
     let omitted_permission = harness.and_then(LaunchHarness::omitted_permission);
     let efforts = harness
@@ -223,17 +221,6 @@ pub(crate) fn LaunchControls(
                 old.permissions
                     .map(launch_composer::permission_value)
                     .unwrap_or("agent's own setting"),
-            ),
-        )
-    });
-    let trust_change = baseline.as_ref().and_then(|old| {
-        changed_marker(
-            &workspace_trust,
-            &old.workspace_trust,
-            DetailPart::text(
-                old.workspace_trust
-                    .map(|value| if value { "true" } else { "false" })
-                    .unwrap_or("default"),
             ),
         )
     });
@@ -566,30 +553,6 @@ pub(crate) fn LaunchControls(
             if permissions == Some(LaunchPermission::Custom) {
                 CustomPermissionFlags { text: permission_flags, busy, harness, on_change: on_permission_flags }
             }
-            if harness.is_some_and(LaunchHarness::offers_workspace_trust) {
-            div { class: "launch-composer-choice launch-composer-trust-choice",
-                span { class: "launch-composer-section-label", "workspace trust" }
-                if let Some(parts) = trust_change { PeerLine { class: "launch-composer-changed-marker", parts } }
-                if let Some(help) = harness.and_then(launch_composer::workspace_trust_help) {
-                    p { class: "launch-composer-choice-help", "{help}" }
-                }
-                div { class: "launch-composer-segmented",
-                    for (choice, label) in [(None, "default"), (Some(true), "true"), (Some(false), "false")] {
-                        button {
-                            key: "{label}",
-                            r#type: "button",
-                            class: if workspace_trust == choice { "selected" } else { "" },
-                            "data-tooltip": launch_composer::workspace_trust_tooltip(harness, choice),
-                            aria_pressed: workspace_trust == choice,
-                            disabled: busy,
-                            onkeydown: move |event| enter_choice(event, busy, || on_workspace_trust.call(choice), on_choice_enter),
-                            onclick: move |_| on_workspace_trust.call(choice),
-                            "{label}"
-                        }
-                    }
-                }
-            }
-        }
         if let Some(reason) = choice_error {
             div { class: "launch-composer-choice-error", "{reason}" }
         }

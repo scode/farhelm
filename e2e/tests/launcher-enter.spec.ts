@@ -147,13 +147,8 @@ async function enterCreateChoice(form: Locator, control: Locator, bodies: Record
 test("launcher choice retries preserve keys only for unchanged values", async ({ page, request }) => {
   const { form, bodies } = await observeChoiceCreates(page, request);
   const codex = form.getByRole("button", { name: "Codex", exact: true });
-  // Trust is remembered by the shared helm. Set and observe the starting
-  // value before minting a key, so choosing true below is always a real edit.
   await codex.click();
-  const trust = form.locator(".launch-composer-trust-choice");
-  await trust.getByRole("button", { name: "false", exact: true }).click();
-  await expect(trust.getByRole("button", { name: "false", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(trust.getByRole("button", { name: "true", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
   let previous = await enterCreateChoice(form, codex, bodies);
   expect(previous.intent_key).toBeTruthy();
   const unchanged = [
@@ -168,7 +163,6 @@ test("launcher choice retries preserve keys only for unchanged values", async ({
   }
   for (const control of [
     form.locator(".launch-composer-effort-choice").getByRole("button", { name: "low", exact: true }),
-    form.locator(".launch-composer-trust-choice").getByRole("button", { name: "true", exact: true }),
     form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }),
   ]) {
     const changed = await enterCreateChoice(form, control, bodies);
@@ -189,8 +183,7 @@ test("launcher choice-button Enter applies then launches", async ({ page, reques
     .toMatchObject({ launch: { harness: "codex", effort: "low" } });
   expect(await enterCreateChoice(form, form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }), bodies))
     .toMatchObject({ launch: { permissions: "yolo" } });
-  expect(await enterCreateChoice(form, form.locator(".launch-composer-trust-choice").getByRole("button", { name: "true", exact: true }), bodies))
-    .toMatchObject({ launch: { workspace_trust: true } });
+  await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
   const commandTab = form.getByRole("tab", { name: "command", exact: true });
   const agentTab = form.getByRole("tab", { name: "agent", exact: true });
   await commandTab.click();
@@ -199,7 +192,8 @@ test("launcher choice-button Enter applies then launches", async ({ page, reques
   await agentTab.click();
   expect(await enterCreateChoice(form, commandTab, bodies)).toMatchObject({ command: { command: "printf hello", yolo: false } });
   expect(bodies.at(-1)).not.toHaveProperty("launch");
-  expect(await enterCreateChoice(form, agentTab, bodies)).toMatchObject({ launch: { harness: "codex", effort: "low", permissions: "yolo", workspace_trust: true } });
+  expect(await enterCreateChoice(form, agentTab, bodies)).toMatchObject({ launch: { harness: "codex", effort: "low", permissions: "yolo" } });
+  expect(bodies.at(-1)?.launch).not.toHaveProperty("workspace_trust");
   expect(bodies.at(-1)).not.toHaveProperty("command");
 });
 

@@ -44,10 +44,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Stop Codex's folder-trust questions from returning.** Codex appears to be asking "trust this folder" again in
-  Farhelm sessions. The maintainer recalls an earlier fix; investigate what changed and restore the intended behavior.
-  Plan: `plans/queue/codex-trust-prompts.md`.
-
 - **Per-host terminal background color.** Allow setting a terminal background color for each host. Plan:
   `plans/queue/host-terminal-colors.md`.
 

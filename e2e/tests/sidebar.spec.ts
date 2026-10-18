@@ -4977,15 +4977,12 @@ test("composer keeps arbitrary model-first choices reviewable", async ({ page, r
   await form.locator("#launch-composer-model-results").getByRole("option", { name: "reviewable-codex (Codex)", exact: true }).click();
   await expect(model).toHaveValue("reviewable-codex");
   await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
-  // The summary's "permissions: guarded" and "trust: default" are this
-  // test's own choices: a fresh dialog preselects the helm-wide remembered
-  // permissions mode and workspace trust, and an earlier launch in this
-  // invocation may have set them to yolo and true. The trust choice only
-  // appears once the model has made the harness known.
+  // An earlier launch may have remembered YOLO. Pin this test's permission
+  // explicitly so the summary assertion measures the model-first selection.
   await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true }).click();
-  await form.locator(".launch-composer-trust-choice").getByRole("button", { name: "default", exact: true }).click();
+  await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
   await expect(form.locator(".launch-composer-summary")).toHaveText(
-    "model: reviewable-codex · effort: default · permissions: guarded · trust: default",
+    "model: reviewable-codex · effort: default · permissions: guarded",
   );
 });
 
@@ -6314,7 +6311,7 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     // click that silently did nothing.
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form, "an admitted recent names the active structured launch, not the dormant command").toHaveAttribute("data-composer-mode", "structured");
-    await expect(form.locator(".launch-composer-summary")).toHaveText("model: enter-model · effort: high · permissions: yolo · trust: default");
+    await expect(form.locator(".launch-composer-summary")).toHaveText("model: enter-model · effort: high · permissions: yolo");
     expect(posts, "clicking a recent only fills the draft").toHaveLength(0);
     // Re-enter command mode so keyboard activation proves the same whole-draft
     // transition independently of the pointer path above.
@@ -6655,7 +6652,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(status).toContainText("not in Farhelm's offering for that model or harness");
   await expect(custom).toHaveValue("harness default");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: default · permissions: yolo · trust: default");
+  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: default · permissions: yolo");
 
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();

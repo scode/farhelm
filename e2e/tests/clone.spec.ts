@@ -135,7 +135,7 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
       // The chip strip that used to echo every choice is gone; the harness
       // shows on its pressed chip and the rest on the summary line.
       await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
-      await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo · trust: default");
+      await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo");
       expect(createPosts, "opening and inspecting a clone must not launch it").toBe(0);
 
       const [response] = await Promise.all([

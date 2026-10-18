@@ -134,7 +134,7 @@ fn render(agent: &Command) -> String {
          a title Farhelm picks the next free web-N. A taken or over-long name is refused,\n\
          never suffixed. The checkout folder and post-clone command come from helm settings.\n\
          An agent launch is --agent TYPE with optional\n\
-         --model, --effort, --permissions and --trust; Farhelm composes its command. Guarded\n\
+         --model, --effort and --permissions; Farhelm composes its command. Guarded\n\
          permissions select the agent's automatic safety mode with explicit flags, not a\n\
          promise to ask before every action: Claude uses auto mode, Grok auto-review, Codex uses\n\
          workspace-write with on-request approval, Muse uses its auto-review profile, and\n\
@@ -742,7 +742,7 @@ mod tests {
             "farhelm agent create [--cwd <DIR>] [--gh <REPO>] [--host <NAME>] \
              [--prompt <TEXT>] [--prompt-file <PATH>] [--template <NAME>] \
              [--agent <TYPE>] [--model <ID>] [--effort <LEVEL>] [--permissions <MODE>] \
-             [--trust <BOOL>] [--command <CMD>] [--yolo] [--no-yolo] [--resume-command <CMD>] \
+             [--command <CMD>] [--yolo] [--no-yolo] [--resume-command <CMD>] \
              [--no-resume-command] [--title <TITLE>] [--idempotency-key <KEY>]  \
              Create a session on any host; prints its id",
             "farhelm agent clone --source-session <SOURCE_SESSION> --host <NAME> [--cwd <DIR>] \
