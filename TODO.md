@@ -1029,3 +1029,28 @@ are large mostly because of their tests.
   tell which session a process belongs to. Start by checking, on the installed Codex, whether a command run by a Codex
   session that Farhelm launched sees the session's environment and runs under the session's processes, with and without
   `--no-daemon`; then decide whether Farhelm should pass `--no-daemon` or otherwise adapt.
+
+- **Rewrite the "host changed while its update was being followed" warning.** Seen 2026-10-18 on a dev build whose host
+  (running `farhelm 0.0.0-unreleased`, 0 sessions) had also been added by accident to the maintainer's 0.29.0 helm,
+  which ran setup on it too. The dev build's host row showed an update that completed every step (create-directories,
+  upload-farhelm, install-farhelm, write-unit skipped because the unit already had the requested content, daemon-reload,
+  enable-supervisor, enable-linger, restart-supervisor, attach-supervisor), with the host green, and under it a yellow
+  warning: "the host changed while its update was being followed, so that run's outcome is unknown; this row claims
+  nothing from it". To the user that reads as nonsense: every step says completed, nothing says what "the host changed"
+  means or what to do, and "this row claims nothing from it" is internal bookkeeping language. The warning fires when
+  the row's host, connection kind, destination or install identity changes while an update is in flight (the update's
+  own reconnect does not count); which one changed here was not investigated. Say in product terms what changed and what
+  it means for the user (the update may or may not be what is running now; check the host's version), and consider
+  whether the warning should stay sticky once the host is connected and healthy.
+
+- **Rewrite the uninstall refusal for a host with a version mismatch.** Seen 2026-10-18 on the maintainer's 0.29.0 helm
+  for a test host that a dev build had updated: the row read "too new", "the host speaks protocol 60 (farhelm
+  0.0.0-unreleased); this helm speaks 51 (farhelm 0.29.0)" and "<host> runs a newer farhelm than this helm; update this
+  helm so the two speak the same protocol version". Choosing uninstall then printed, in red: "uninstall is refused while
+  this host is version-skew: a supervisor answers there that Farhelm cannot use, so it cannot check that none of its
+  sessions are running. Resolve that first, then choose uninstall again". The state's internal name ("version-skew") is
+  pasted into the sentence, "a supervisor answers there that Farhelm cannot use" is vague, and "resolve that first"
+  gives no way to resolve it. The same wording covers identity-mismatch, identity-unverified and duplicate hosts. Name
+  the problem in user terms (this host runs a newer or older Farhelm than this helm) and the concrete way out for each
+  case. Related to "Show host uninstall refusals in a dialog", which changes where the refusal appears but not its
+  words.
