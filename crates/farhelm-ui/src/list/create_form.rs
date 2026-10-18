@@ -5508,7 +5508,7 @@ pub(super) fn CreateSessionForm(
                         }
                     },
                     strong { "{partial_template_label} cannot launch on its own." }
-                    span { " Use {crate::launch_sequence::PREFIX_CHORD} to combine template keys, then Enter to launch, or complete this setup below." }
+                    span { " Use {crate::launch_sequence::TEMPLATE_SHORTCUTS.prefix.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)} to combine template keys, then Enter to launch, or complete this setup below." }
                 }
             }
             if let Some(notice) = permission_escalation() {

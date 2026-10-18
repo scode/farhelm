@@ -3575,7 +3575,7 @@ pub(crate) fn ListView(
                 }
             },
         }
-        for key in super::templates::NUMBER_KEYS {
+        for key in crate::launch_sequence::TEMPLATE_SHORTCUTS.number.keys.iter().map(|key| key.value) {
             button {
                 key: "sequence-{key}", class: "launch-sequence-trigger",
                 "data-sequence-action": "digit", "data-number-key": "{key}",
@@ -3627,7 +3627,7 @@ pub(crate) fn ListView(
             disabled: quick_launch_pending() || show_create() || templates_open() || busy,
             onclick: move |_| quick_launch.call(vec![None]),
         }
-        for key in super::templates::NUMBER_KEYS {
+        for key in crate::launch_sequence::TEMPLATE_SHORTCUTS.number.keys.iter().map(|key| key.value) {
             button {
                 key: "number-{key}", class: "template-number-trigger", r#type: "button",
                 hidden: true, tabindex: "-1", "data-number-key": "{key}",
@@ -3854,7 +3854,7 @@ pub(crate) fn ListView(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral templates-button",
-                        "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("templates: mark one with ⚡ for quick launch ({})", super::templates::QUICK_LAUNCH_CHORD), |name| format!("templates: quick launch {} ({})", crate::peer::display_peer(name), super::templates::QUICK_LAUNCH_CHORD)),
+                        "data-tooltip": preferences.0.read().quick_launch_template.as_ref().map_or_else(|| format!("templates: mark one with ⚡ for quick launch ({})", crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)), |name| format!("templates: quick launch {} ({})", crate::peer::display_peer(name), crate::launch_sequence::TEMPLATE_SHORTCUTS.bolt.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop))),
                         aria_haspopup: "dialog",
                         disabled: busy,
                         onclick: move |_| { opening_generation += 1; quick_launch_pending.set(false); auto_launch.set(false); initial_template.set(None); quick_launch_hint.set(false); number_shortcut_hint.set(false); templates_open.set(true); },
