@@ -8,19 +8,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`pending-menu-arrows-can-ignore-independent-focus.md`](pending-menu-arrows-can-ignore-independent-focus.md) — Pending
-  arrow moves can still override independent focus before activation; historical acceptance is absent from the
-  specification and triage ledger.
-
-- [`settled-refusal-proof-can-follow-incomplete-cleanup.md`](settled-refusal-proof-can-follow-incomplete-cleanup.md) —
-  Failed cleanup can precede a definitive-refusal signal; existing fault acceptances may cover it, but the retry
-  boundary remains unresolved.
-
 - [`approval-cards-can-obscure-file-disclosure.md`](approval-cards-can-obscure-file-disclosure.md) — A terminal file
   link can remain clickable while an approval card hides its destination disclosure.
-
-- [`file-disclosure-trailing-space-distinction-unverified.md`](file-disclosure-trailing-space-distinction-unverified.md)
-  — Supported OSC filenames may remain visually ambiguous; no concrete misleading transfer was established.
 
 ## High priority: material UX degradation
 

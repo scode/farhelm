@@ -14081,14 +14081,25 @@ impl Supervisor {
     /// about to report as failed, and — in the SAME transaction — record
     /// that failure against the create's intent key.
     ///
-    /// Reached only from the paths that CONFIRMED nothing is running (the
-    /// spec never landed; tmux said the session does not exist; the
-    /// terminal was killed successfully), which is what makes settling
+    /// Reached only from the paths that CONFIRMED the session's terminal is
+    /// gone (the spec never landed; tmux said the session does not exist;
+    /// the terminal was killed successfully), which is what makes settling
     /// `Failed` honest here and nowhere else: every retry of this intent
     /// now replays this exact error rather than re-deriving one from a
     /// world that has since changed. Paths that had to retain the row take
     /// the other branch entirely: they return without calling this at all,
     /// which is what leaves their reservation pending.
+    ///
+    /// A gone terminal is not proof that every descendant stopped. The
+    /// tmux-creation rollback sweeps with `ScopeKillFailure::Warn`, so an
+    /// unconfirmed scope kill passes once the portable sweep finds
+    /// nothing, and after a failed database confirmation a sweep error only
+    /// enriches the returned error. A survivor of either can outlive the
+    /// row this drops and run beside the fresh attempt the `Failed`
+    /// settlement lets a plain Replace start. SPEC.md accepts that only as
+    /// two coinciding faults; keeping the row when cleanup is unconfirmed is
+    /// deferred in TODO.md's entry on requiring a systemd user manager on
+    /// Linux.
     ///
     /// The two writes are one transaction because a settlement that did not
     /// commit alongside the removal would leave a reservation pointing at a
