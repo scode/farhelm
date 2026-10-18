@@ -19,6 +19,7 @@ use crate::{LaunchHarness, Session, SessionStatus};
 
 use super::bell::{BellSlot, NotificationBell};
 use super::shared::{DeleteTarget, HostLocality, RowState, SessionHostIcon, SessionHostName};
+use super::summary_card::SessionSummarySource;
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
     closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
@@ -218,7 +219,7 @@ fn menu_label(title: &str) -> String {
 /// until `PeerLine` applies escaping and direction isolation at render time.
 /// Separators and the concise state word are this UI's own wording and remain
 /// ordinary text runs, which prevents a relayed value from reordering them.
-fn menu_header_summary_parts(session: &Session, state: Option<&str>) -> Vec<DetailPart> {
+pub(super) fn menu_header_summary_parts(session: &Session, state: Option<&str>) -> Vec<DetailPart> {
     let values = if let Some(launch) = session.agent_selection() {
         let mut values =
             vec![crate::launch_composer::harness_label(launch.harness).to_ascii_lowercase()];
@@ -342,8 +343,8 @@ fn MenuActionIcon(action: MenuAction) -> Element {
 /// SHAPE of the path — hence a pattern match rather than a lookup. That
 /// makes the `~` a claim about the path's SHAPE, not a verified claim
 /// about whose home it is: a session running as `bob` with a cwd under
-/// `/home/alice` still renders `~`, and the `title` attribute — always the
-/// untouched original — is where the truth stays one hover away. A future
+/// `/home/alice` still renders `~`, and the hover summary's directory is
+/// where the untouched path stays one hover away. A future
 /// wire change that put a per-host home directory on `SessionInfo` would
 /// let this become an exact lookup instead of a shape guess; nothing about
 /// today's rendering depends on that never happening.
@@ -649,20 +650,15 @@ fn command_basename(invocation: &str) -> String {
 /// A session title as the sidebar shows it: escaped with `display_peer` and
 /// direction-isolated in a `.peer-value` span with `dir="ltr"`.
 ///
-/// Titles are peer text (agents may rename any session). The row,
-/// confirmations and rename dialog show them the same safe way: escaping keeps
+/// Titles are peer text (agents may rename any session). The row, its summary
+/// card and confirmations show them the same safe way: escaping keeps
 /// invisible and override characters from making two titles look alike,
 /// and isolation keeps a title's own strong-RTL text from reordering the
 /// sentence around it (see `peer.rs`). One component for these surfaces
 /// means none can drift. The attributes are formatted values on purpose, so
 /// they reach the DOM as dynamic attributes a headless test can observe.
 #[component]
-pub(crate) fn PeerTitle(
-    class: &'static str,
-    title: String,
-    quoted: bool,
-    tooltip: bool,
-) -> Element {
+pub(crate) fn PeerTitle(class: &'static str, title: String, quoted: bool) -> Element {
     let shown = display_peer(&title);
     let text = if quoted {
         format!("\"{shown}\"")
@@ -674,7 +670,6 @@ pub(crate) fn PeerTitle(
         span {
             class: "{class} peer-value",
             dir: "{isolated}",
-            "data-tooltip": tooltip.then(|| shown.clone()),
             "{text}"
         }
     }
@@ -718,8 +713,9 @@ std::thread_local! {
 /// then carries title, glyph-only agent identity, and activity age. Compact
 /// ended states use the status slot for an icon, while their complete wording
 /// stays accessible; an unknown locality leaves its reserved slot blank rather
-/// than claiming an identity. The host line retains its full values in
-/// tooltips.
+/// than claiming an identity. A hidden summary card source retains the full
+/// host and directory for either density; meaningful marks keep their own
+/// hover explanations.
 ///
 /// The second line restores the host/directory pairing so rows from several
 /// machines can be scanned without mixing identity into the already dense
@@ -728,7 +724,7 @@ std::thread_local! {
 /// from the launch: an agent launch's type and permission, a command
 /// launch's declared type and YOLO answer, and a legacy session's stored
 /// kind with an unclassified mark, never from reading the command. The
-/// full cwd remains available on the open button in compact mode, and the
+/// full cwd remains available from the open button's card in compact mode, and the
 /// agent tooltip retains the full invocation and permission meaning. See
 /// `abbreviate_home` and `command_basename` for the display constraints.
 ///
@@ -997,6 +993,9 @@ pub(super) fn SessionRow(
     // convention two call sites have to maintain by hand.
     let unseen = session.has_unseen_output();
     let badge = status_badge(&session.status, session.annotation.as_deref(), unseen);
+    let card_badge = badge.clone();
+    let card_id = format!("session-summary-{}", session.id);
+    let card_session = session.clone();
     let menu_state = badge
         .as_ref()
         .map(|badge| badge.class.split_whitespace().next().unwrap_or(badge.class));
@@ -1527,21 +1526,10 @@ pub(super) fn SessionRow(
                 button {
                     r#type: "button",
                     class: "session-row-open",
-                    // Keep the full directory discoverable when compact mode
-                    // removes the metadata line and its own tooltip.
-                    // A tooltip is one attribute string and cannot carry
-                    // DOM direction isolation, so every peer-derived hover
-                    // text goes through `display_peer`, like the title's own
-                    // tooltip.
-                    // Outside compact mode the row's own parts (title,
-                    // marks, age, directory) each carry hover text, and the
-                    // button's tooltip only names what a click does for the
-                    // space between them.
-                    "data-tooltip": if compact {
-                        format!("{} — click to open", display_peer(&session.cwd))
-                    } else {
-                        "click to open this session".to_string()
-                    },
+                    // One source covers the title and every unmarked part of
+                    // the open button, in either sidebar density. The marks
+                    // keep their own nearer hover targets.
+                    "data-tooltip-card": "{card_id}",
                     // The accessible counterpart of the visual highlight:
                     // the sidebar is a navigation-shaped list of open
                     // buttons, and `aria-current` is the native way to say
@@ -1601,9 +1589,8 @@ pub(super) fn SessionRow(
                         } else if compact {
                             if let Some(glyph) = ended_glyph {
                                 if let Some(badge) = &ended_badge {
-                                    // The compact row button's tooltip names
-                                    // its cwd, so this wrapper keeps ended
-                                    // detail available to pointer users too.
+                                    // The summary names the directory, while
+                                    // this mark keeps the full ended detail.
                                     span { class: "compact-ended-status", "data-tooltip": "{display_peer(&badge.text)}",
                                         EndedStatusIcon { glyph }
                                         span { class: "visually-hidden", "{badge.text}" }
@@ -1638,13 +1625,9 @@ pub(super) fn SessionRow(
                         // the full-width detail line so they stay readable
                         // without competing with the agent and activity.
                         span { class: if compact { "session-identity-copy compact" } else { "session-identity-copy" },
-                            // A tooltip is one attribute string and cannot
-                            // carry DOM direction isolation. Escape invisible
-                            // directional controls in this display surface
-                            // like other peer text.
                             // Titles are peer text (agents may rename any
-                            // session), so the row shows them escaped and
-                            // direction-isolated, not just in the tooltip.
+                            // session), so the row and summary both show
+                            // them escaped and direction-isolated.
                             // A committed delete takes over the title line
                             // until its reply lands: the one thing worth
                             // saying about a row on its way out is that it
@@ -1666,7 +1649,6 @@ pub(super) fn SessionRow(
                                 class: title_class,
                                 title: session.title.clone(),
                                 quoted: false,
-                                tooltip: true,
                             }
                             if compact {
                                 // Compact rows omit the directory line. Keep
@@ -1756,7 +1738,7 @@ pub(super) fn SessionRow(
                     // an invented machine name.
                     span { class: "session-row-line session-row-meta",
                         if let Some(host_name) = &session.host_name {
-                            SessionHostName { name: host_name.clone(), locality }
+                            SessionHostName { name: host_name.clone(), locality, tooltip: false }
                             span {
                                 class: "session-host-separator",
                                 "data-separator": if session.working_copy.is_some() { "dot" } else { "colon" },
@@ -1776,17 +1758,17 @@ pub(super) fn SessionRow(
                             // logical order under it — rtl applied directly to
                             // the text would move a leading "/" to the visual
                             // right (see `.session-cwd` in app.css). The
-                            // tooltip carries the UNABBREVIATED path, which is
-                            // what makes the `~` safe: see `abbreviate_home`
-                            // for whose home it does and does not know about.
-                            span { class: "session-cwd", "data-tooltip": "{display_peer(&session.cwd)}",
+                            // summary carries the UNABBREVIATED path, which
+                            // makes the `~` safe: see `abbreviate_home` for
+                            // whose home it does and does not know about.
+                            span { class: "session-cwd",
                                 span { class: "session-cwd-text", dir: "ltr", "{cwd_shown}" }
                             }
                         }
                     }
                     }
                     // Compact mode drops the metadata line, so the directory
-                    // reaches the pointer through the open button's tooltip
+                    // reaches the pointer through the summary card
                     // and assistive technology through this clipped copy,
                     // which joins the button's accessible name. The native
                     // `title` the tooltip replaced was the button's
@@ -2023,7 +2005,6 @@ pub(super) fn SessionRow(
                                 class: "confirm-title",
                                 title: session.title.clone(),
                                 quoted: true,
-                                tooltip: false,
                             }
                             if session.working_copy.is_some() {
                                 // Membership includes ordinary borrowers. Do not
@@ -2093,7 +2074,6 @@ pub(super) fn SessionRow(
                                 class: "confirm-title",
                                 title: session.title.clone(),
                                 quoted: true,
-                                tooltip: false,
                             }
                             button {
                                 r#type: "button",
@@ -2571,6 +2551,14 @@ pub(super) fn SessionRow(
         if pin_separator {
             div { class: "session-pin-separator", role: "separator", aria_label: "pinned sessions" }
         }
+        SessionSummarySource {
+            session: card_session,
+            locality,
+            host_icon,
+            host_color,
+            activity: activity.clone(),
+            badge: card_badge,
+        }
     }
 }
 
@@ -2754,7 +2742,7 @@ mod tests {
     /// invisible character or a direction override could render identically
     /// to another session's, or make the delete and replace confirmations
     /// quote a different title than the one they act on. Spec: the row's
-    /// visible title, its hover tooltip, and both confirmation quotes show
+    /// visible title, its hover card, and both confirmation quotes show
     /// the escaped form (`display_peer`) and never the raw control
     /// characters. The folder line follows the same rule after home
     /// abbreviation; an absent folder stays blank rather than gaining a
@@ -2922,13 +2910,30 @@ mod tests {
                 texts.iter().any(|text| text == &escaped),
                 "{prompt:?}: the row shows the escaped title: {texts:?}"
             );
-            // The title's hover text is the one copy of it that cannot be
-            // direction-isolated (a tooltip is a single attribute string),
-            // so escaping is its whole defense: the row's tooltip carries
-            // the escaped title, and no tooltip carries the raw one.
-            assert!(
-                attribute("data-tooltip", &|value: &str| value == escaped) >= 1,
-                "{prompt:?}: the row title's tooltip is the escaped title"
+            // The card's second title is a DOM peer span, so it gets the
+            // same escaping and isolation as the visible title. Neither
+            // title puts peer text into a tooltip attribute anymore.
+            assert_eq!(
+                attribute("class", &|value: &str| value
+                    .contains("session-summary-title")),
+                1,
+                "{prompt:?}: the summary holds one isolated title"
+            );
+            assert_eq!(
+                attribute("data-tooltip-card", &|value: &str| value
+                    == "session-summary-spoofed"),
+                1,
+                "{prompt:?}: the open button names its own card source"
+            );
+            assert_eq!(
+                attribute("id", &|value: &str| value == "session-summary-spoofed"),
+                1,
+                "{prompt:?}: the source id remains unique"
+            );
+            assert_eq!(
+                attribute("data-tooltip", &|value: &str| value == escaped),
+                0,
+                "{prompt:?}: the title no longer has redundant hover text"
             );
             assert_eq!(
                 attribute("data-tooltip", &|value: &str| value.contains('\u{202E}')

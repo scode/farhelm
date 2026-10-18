@@ -170,12 +170,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   checkout does not, so such a filter could produce different files or refuse; filter, hook and reflog behavior also
   differ. Revisit only with a checkout shown to match a plain clone, or after deciding to relax that requirement.
 
-- **Make the sidebar's session hover text useful.** Hovering a session in the sidebar tells the user almost nothing the
-  row does not already show: hovering the name shows the same name again. The row also disagrees with itself depending
-  on where the pointer lands. In compact mode, the space between the row's parts shows the session's directory and
-  "click to open", while the name right next to it shows just the name. Make the hover text carry information worth
-  hovering for, and make the row's parts agree. What it should show is TBD. Plan: `plans/queue/session-hover-text.md`.
-
 - **Give the Settings dialog more structure.** Settings has grown into one long page that takes endless scrolling to get
   through. Overhaul it with more structure, such as tabs, so related settings are grouped and any one of them is easy to
   find. The grouping and layout are TBD.

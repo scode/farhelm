@@ -1467,6 +1467,86 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 .farhelm-tooltip[data-kind="card"][hidden] { display: none; }
 
+/* The source lives outside the row and contributes no layout. The body-level
+   tooltip clones only its child card, so these rules describe the visible
+   copy without giving the source a second floating surface. */
+.session-summary { min-width: 0; }
+.session-summary-header {
+  padding: 9px 12px 8px;
+  border-bottom: 1px solid var(--border-dim);
+}
+.session-summary-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+}
+.session-summary-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--fg-0);
+  font-size: 12px;
+  font-weight: 700;
+}
+.session-summary .session-summary-status {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  gap: 5px;
+  max-width: 45%;
+  padding: 0;
+  white-space: normal;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.session-summary-status .status-dot { flex: 0 0 8px; }
+.session-summary-agent {
+  margin-top: 3px;
+  color: var(--fg-1);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.session-summary-body {
+  display: grid;
+  gap: 6px;
+  padding: 9px 12px;
+}
+.session-summary-row {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+}
+.session-summary-label { color: var(--fg-1); }
+.session-summary-value { min-width: 0; color: var(--fg-0); overflow-wrap: anywhere; }
+.session-summary-path { color: var(--fg-dim); }
+.session-summary-host { display: flex; align-items: center; gap: 5px; }
+/* The row caps the host at 40% to leave room for the directory beside it.
+   The card has a separate value cell, where the full name should wrap. */
+.session-summary-host .session-host {
+  min-width: 0;
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.session-summary-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px 8px;
+  border-top: 1px solid var(--border-dim);
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
 /* The hidden-characters warning opens above the bottom bar, keeping it
    inside the window. It lives outside the copy button, whose text shrinks
    and ellipsizes in crowded details: the
@@ -4361,18 +4441,22 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
    fabricated liveness SPEC.md's no-guessing rule forbids, and it is worse
    than a wrong word because motion reads as evidence.
 
-   Both surfaces are named because the same badge renders in both (see
-   `status_badge_destination`), and neither is a descendant of the other. */
+   The row, detail band and summary source have separate status badges; none
+   inherits the stale selector through another surface. */
 .session-row.stale .status-badge.running .status-dot,
-.stale-metadata .status-badge.running .status-dot {
+.stale-metadata .status-badge.running .status-dot,
+.session-summary.stale .status-badge.running .status-dot {
   animation: none;
 }
 
 /* A cached status is no longer evidence for any live status color. */
 .session-row.stale .status-badge .status-dot,
-.stale-metadata .status-badge .status-dot {
+.stale-metadata .status-badge .status-dot,
+.session-summary.stale .status-badge .status-dot {
   color: var(--fg-2);
 }
+
+.session-summary.stale .session-summary-status { color: var(--fg-2); }
 
 /* Someone who asked their system for less motion gets a steady dot. The
    status is still fully readable — the color says running and the hidden

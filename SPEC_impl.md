@@ -295,8 +295,13 @@ legacy session has no verdict and carries the unclassified mark; nothing that ca
 guard never asks about it. An omitted Pi, OpenCode, OMP or Goose permission is rendered as YOLO for compatibility with
 older snapshots. The full invocation remains in its accessible text and tooltip. The working directory is tilde-folded
 against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold against properly.
-Every one of those abbreviations is lossy, so the untouched string rides along in the row's tooltip — the row is a
-summary, and the full truth stays one hover away.
+The full invocation stays on the agent mark; the untouched directory and other row facts ride in a hidden summary card
+source beside the row. The open button names that source with `data-tooltip-card`; the shared tooltip clones its DOM
+children on hover or keyboard focus. The source is a sibling, not a row descendant, so row-scoped controls and locators
+cannot match a second, hidden copy. Rust renders the host's own mark, status classes and isolated peer text. The card
+gives the full title, host, managed checkout, directory and timestamps without changing the open button's accessible
+name; marks keep their nearer hover targets and the complete ended-status detail stays on the row. The source and cloned
+tooltip remain outside the accessibility tree.
 
 Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
 Permission marks use hand-drawn stroke silhouettes in the 12-unit viewBox: a slashed shield (`data-glyph="yolo"`) and a
@@ -829,18 +834,19 @@ target with a 6 px gap and, only without room there, below with a 28 px gap: a p
 standard cursors extend downward from their hot spot, so space above a control is never under the cursor while a box
 just below a small icon would be. It is `position: fixed` from the target's measured rectangle so no scroll container
 clips it, wears the row menu panels' background, border and shadow, wraps at about 280 px and clamps to eight lines.
-Peer text still goes through `display_peer` before it becomes tooltip text, which the script sets with `textContent`.
-The tooltip element is a visual aid kept out of the accessibility tree (`aria-hidden`); icon-only controls and status
-marks keep accessible text of their own (an `aria-label` or a `.visually-hidden` copy), and the hover texts that carry
-information a screen-reader user needs (the header copy buttons' full values, a host's update urgency, a too-new host's
-remedy) are also exposed as accessible descriptions. Plain timestamps and the client build string are hover-only. Two
-hover displays keep their own shape and carry no `data-tooltip`, so two popups never stack: a host's update-progress
-popup and the terminal's link-target display. Coverage is guarded by a browser sweep
-(`e2e/tests/tooltip-coverage.spec.ts`) that visits the states the suite's fixtures reach and fails on any visible
-`button`, `[role=button]`, `[role=tab]`, `[role=menuitem]`, `a[href]`, `select`, `summary`, checkbox or radio button
-without hover text (for the last two, on the `label` that wraps them), exempting only described items in the session and
-host rows' menus. The local and remote host marks carry their hover text inside the icon component itself, so the
-session rows and the host rows both get it without either row's layout changing.
+Peer text still goes through `display_peer` before it becomes tooltip text, which the script sets with `textContent`;
+the card copies nodes already rendered by Rust and never parses its serialized change signature as markup. The tooltip
+element is a visual aid kept out of the accessibility tree (`aria-hidden`); icon-only controls and status marks keep
+accessible text of their own (an `aria-label` or a `.visually-hidden` copy), and the hover texts that carry information
+a screen-reader user needs (the header copy buttons' full values, a host's update urgency, a too-new host's remedy) are
+also exposed as accessible descriptions. Plain timestamps and the client build string are hover-only. Two hover displays
+keep their own shape and carry no `data-tooltip`, so two popups never stack: a host's update-progress popup and the
+terminal's link-target display. Coverage is guarded by a browser sweep (`e2e/tests/tooltip-coverage.spec.ts`) that
+visits the states the suite's fixtures reach and fails on any visible `button`, `[role=button]`, `[role=tab]`,
+`[role=menuitem]`, `a[href]`, `select`, `summary`, checkbox or radio button without hover text (for the last two, on the
+`label` that wraps them), exempting only described items in the session and host rows' menus. The local and remote host
+marks carry their hover text inside the icon component itself, so the session rows and the host rows both get it without
+either row's layout changing.
 
 Known risks, accepted deliberately:
 

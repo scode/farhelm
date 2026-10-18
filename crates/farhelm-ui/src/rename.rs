@@ -288,7 +288,7 @@ pub(crate) fn RenameDialog(
                     on_cancel.call(generation);
                 }
             },
-            PeerTitle { class: "rename-current-title", title: current_title, quoted: false, tooltip: false }
+            PeerTitle { class: "rename-current-title", title: current_title, quoted: false }
             if unavailable {
                 p {
                     class: "rename-unavailable",

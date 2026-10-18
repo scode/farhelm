@@ -193,7 +193,7 @@ impl ActivityStamp {
         }
         Some(ActivityStamp {
             age: relative_age(now_secs, activity_secs),
-            absolute: absolute_stamp(activity_secs),
+            absolute: format!("last activity {}", utc_stamp(activity_secs)),
         })
     }
 }
@@ -237,15 +237,15 @@ fn relative_age(now_secs: i64, activity_secs: i64) -> String {
     }
 }
 
-/// The same instant as an unambiguous absolute stamp, for the tooltip.
+/// Format an absolute UTC instant for the activity tooltip and summary card.
 ///
 /// UTC, and it says so, rather than the viewer's local time. Local rendering
 /// would mean either a `cfg` pair (the browser's `toLocaleString` on one
 /// side, a date crate on the other) or a timezone database this crate does
-/// not carry — and the tooltip's job is to be the unambiguous record behind
+/// not carry. The tooltip and card use this as the unambiguous record behind
 /// an abbreviation, which a zone-qualified UTC stamp does better than a
 /// local time whose offset is not printed.
-fn absolute_stamp(secs: i64) -> String {
+pub(crate) fn utc_stamp(secs: i64) -> String {
     const SECS_PER_DAY: i64 = 86_400;
     // Euclidean rather than truncating division so a pre-1970 stamp still
     // lands on the right day. Nothing should produce one — `ActivityStamp`
@@ -258,7 +258,7 @@ fn absolute_stamp(secs: i64) -> String {
         (seconds_of_day % 3_600) / 60,
         seconds_of_day % 60,
     );
-    format!("last activity {year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
 }
 
 #[cfg(test)]
@@ -375,43 +375,40 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_absolute_stamp_names_the_instant_and_its_zone() {
         assert_eq!(
-            absolute_stamp(0),
-            "last activity 1970-01-01 00:00:00 UTC",
+            utc_stamp(0),
+            "1970-01-01 00:00:00 UTC",
             "the epoch itself, which is what every off-by-one in the day count moves"
         );
+        assert_eq!(utc_stamp(1_700_000_000), "2023-11-14 22:13:20 UTC");
         assert_eq!(
-            absolute_stamp(1_700_000_000),
-            "last activity 2023-11-14 22:13:20 UTC"
-        );
-        assert_eq!(
-            absolute_stamp(1_709_164_800),
-            "last activity 2024-02-29 00:00:00 UTC",
+            utc_stamp(1_709_164_800),
+            "2024-02-29 00:00:00 UTC",
             "a leap day the March-first year numbering has to place correctly"
         );
         assert_eq!(
-            absolute_stamp(1_709_251_199),
-            "last activity 2024-02-29 23:59:59 UTC",
+            utc_stamp(1_709_251_199),
+            "2024-02-29 23:59:59 UTC",
             "the last second before a month rolls over"
         );
         assert_eq!(
-            absolute_stamp(1_709_251_200),
-            "last activity 2024-03-01 00:00:00 UTC",
+            utc_stamp(1_709_251_200),
+            "2024-03-01 00:00:00 UTC",
             "and the first second of the hinge month the whole algorithm counts from"
         );
         assert_eq!(
-            absolute_stamp(951_782_400),
-            "last activity 2000-02-29 00:00:00 UTC",
+            utc_stamp(951_782_400),
+            "2000-02-29 00:00:00 UTC",
             "the divisible-by-400 exception: 2000 IS a leap year, and a formula \
              that only implemented the century rule would land a day off here"
         );
         assert_eq!(
-            absolute_stamp(4_107_542_399),
-            "last activity 2100-02-28 23:59:59 UTC",
+            utc_stamp(4_107_542_399),
+            "2100-02-28 23:59:59 UTC",
             "the century rule proper: 2100 is NOT a leap year, so February ends here"
         );
         assert_eq!(
-            absolute_stamp(4_107_542_400),
-            "last activity 2100-03-01 00:00:00 UTC",
+            utc_stamp(4_107_542_400),
+            "2100-03-01 00:00:00 UTC",
             "and March follows it directly, with no 29th in between"
         );
     }
@@ -420,7 +417,7 @@ mod tests {
     /// reflecting around 1970 into some day in January.
     ///
     /// Nothing in the product reaches this — `ActivityStamp::new` refuses
-    /// every stamp at or below zero — but `absolute_stamp` is a total
+    /// every stamp at or below zero — but `utc_stamp` is a total
     /// function over `i64` and its Euclidean division exists precisely to
     /// hold here. A truncating `/` and `%` would put this second on
     /// 1970-01-01 at a negative time-of-day, which is the trap the next
@@ -428,8 +425,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_pre_epoch_second_stays_before_the_epoch() {
         assert_eq!(
-            absolute_stamp(-1),
-            "last activity 1969-12-31 23:59:59 UTC",
+            utc_stamp(-1),
+            "1969-12-31 23:59:59 UTC",
             "one second before the epoch is the last second of 1969"
         );
     }

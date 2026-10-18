@@ -2821,7 +2821,10 @@ test("compact hides the second line and persists across client seeds", async ({
     await expect(compact).toBeChecked();
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-meta")).toHaveCount(0);
-    await expect(target.locator(".session-row-open")).toHaveAttribute("data-tooltip", `${session.cwd} — click to open`);
+    const cardId = await target.locator(".session-row-open").getAttribute("data-tooltip-card");
+    expect(cardId, "compact rows point to their summary card").toBeTruthy();
+    await expect(page.locator(`#${cardId} .session-summary-path`)).toHaveText(session.cwd);
+    await expect(target.locator(".session-row-open")).not.toHaveAttribute("data-tooltip", /./);
     // Compact mode keeps the first-line local-execution cue visible.
     await expect(target.locator(".host-kind-icon[data-glyph='laptop']")).toBeVisible();
     await expect(target.locator(".host-kind-icon[data-glyph='laptop']")).toHaveCSS("color", "rgb(224, 128, 128)");
@@ -3366,10 +3369,10 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
     title: `width-contention-${rlo}${"t".repeat(150)}`,
     host_name: rawLongHost,
   });
-  // The title's tooltip is a separate display surface: directional controls
-  // must be legible there instead of rearranging the tooltip text.
-  await expect(hostDominant.locator(".session-title")).toHaveAttribute(
-    "data-tooltip",
+  // The card's title is a separate DOM text surface: directional controls
+  // must be legible there instead of rearranging adjacent card content.
+  const cardSource = page.locator("#session-summary-width-contention-session");
+  await expect(cardSource.locator(".session-summary-title")).toHaveText(
     `width-contention-<U+202E>${"t".repeat(150)}`,
   );
   const underdog = await measure(hostDominant);
@@ -3382,12 +3385,13 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
     underdog.host.width,
     "the host must never grow past its cap",
   ).toBeLessThanOrEqual(underdog.lineContentWidth * 0.4 + TOL);
-  // F11: the tooltip carries the SAME escaped value the visible text does
+  // F11: the card carries the SAME escaped value the visible text does
   // (`display_peer`, not the raw peer-controlled string) — reusing the
   // existing bidi-fixture pattern (see "a bidi override in the invocation
   // basename renders escaped and isolated" below) for the host name.
   await expect(hostDominant.locator(".session-host")).toHaveText(escapedLongHost);
-  await expect(hostDominant.locator(".session-host")).toHaveAttribute("data-tooltip", escapedLongHost);
+  await expect(cardSource.locator(".session-summary-host .session-host")).toHaveText(escapedLongHost);
+  await expect(hostDominant.locator(".session-host")).not.toHaveAttribute("data-tooltip", /./);
 
   // Every field ellipsizes inside the sidebar rather than forcing the row —
   // or the line — wider than the column, in both cases.
@@ -4047,7 +4051,7 @@ test("the empty-fleet placeholder appears only when proven and yields to auto-se
  * exist on whatever machine runs this suite, so the shape-based fold can
  * only be proven here against a fabricated reply.
  */
-test("a /home/<user> cwd shows the folded form with the exact path on title", async ({
+test("a /home/<user> cwd shows the folded form with the exact path in the card", async ({
   page,
   request,
 }) => {
@@ -4080,7 +4084,8 @@ test("a /home/<user> cwd shows the folded form with the exact path on title", as
   const target = row(page, "tilde-fold-session");
   await expect(target).toBeVisible({ timeout: 20_000 });
   await expect(target.locator(".session-cwd-text")).toHaveText("~/src/api");
-  await expect(target.locator(".session-cwd")).toHaveAttribute("data-tooltip", cwd);
+  await expect(page.locator("#session-summary-tilde-fold-session .session-summary-path")).toHaveText(cwd);
+  await expect(target.locator(".session-cwd")).not.toHaveAttribute("data-tooltip", /./);
 });
 
 /**

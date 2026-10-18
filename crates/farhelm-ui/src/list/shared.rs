@@ -270,17 +270,24 @@ pub(crate) fn SessionHostIcon(locality: HostLocality, icon: HostIcon, color: Hos
 /// Pass the raw name carried by the session, not the registry's current name.
 /// Only confirmed local sessions earn the local wording; unknown locality
 /// still shows an available name. Callers omit this component when the legacy
-/// session has no host name at all rather than inventing one.
+/// session has no host name at all rather than inventing one. A row or card
+/// that already offers the full name in its summary turns off this element's
+/// redundant hover text; other surfaces keep the existing tooltip.
 #[component]
-pub(crate) fn SessionHostName(name: String, locality: HostLocality) -> Element {
+pub(crate) fn SessionHostName(
+    name: String,
+    locality: HostLocality,
+    #[props(default = true)] tooltip: bool,
+) -> Element {
     // gui_host_name escapes peer controls itself; only its fixed local label
-    // bypasses that path. Keep text and tooltip on the same escaped value.
+    // bypasses that path. When a tooltip is wanted, it must use the same
+    // escaped value as the visible text.
     let shown_name = gui_host_name(&name, locality == HostLocality::Local);
     rsx! {
         span {
             class: "session-host peer-value",
             dir: "ltr",
-            "data-tooltip": "{shown_name}",
+            "data-tooltip": tooltip.then_some(shown_name.clone()),
             "{shown_name}"
         }
     }
