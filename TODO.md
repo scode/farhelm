@@ -140,8 +140,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   xterm.js unmodified, so an upstream fix arrives only with a stable release.
 
 - **Cheaper clones from the repository cache.** Look into whether a managed checkout's clone from the host's repository
-  cache can skip most of the compression and delta work git does today, so the clone stage finishes sooner. Plan:
-  `plans/queue/cheaper-cache-clones.md`.
+  cache can skip most of the compression and delta work git does today, so the clone stage finishes sooner. A first plan
+  was abandoned on 2026-10-18, pending the maintainer's review of what it found: cloning straight from the cache without
+  checking out, pointing the remote back at GitHub and then checking out does not behave like a plain GitHub clone. An
+  ordinary clone gives a long-running checkout filter (`filter.<name>.process`) the branch name and commit, which that
+  checkout does not, so such a filter could produce different files or refuse; filter, hook and reflog behavior also
+  differ. Revisit only with a checkout shown to match a plain clone, or after deciding to relax that requirement.
 
 ## Doc todo
 
