@@ -1,27 +1,34 @@
 ---
 title: Agent wrappers
-description: Running agents through a wrapper that changes directory and stays resident as the agent's parent.
+description: Run Farhelm's agent command through a wrapper, or write a custom command when the wrapper needs more control.
 sidebar:
   order: 60
 ---
 
-An agent can request a launch with `farhelm agent create --wrapper 'with-endpoint --profile work --'` or
-`farhelm spawn --wrapper 'with-endpoint --profile work --'`. Farhelm places the prefix before its composed agent command
-and retains the agent's status, conversation capture and resume behavior. The wrapper must run that agent and pass its
-arguments and environment through; Farhelm takes your word for that. The prefix is split into literal words using
-shell-style quotes and escapes, without shell expansion or placeholders. An agent-supplied prefix needs your approval on
-a host that asks before YOLO launches. Do not put secrets in a prefix: it appears in the launch command, and an agent on
-any host can read a saved template's prefix in the templates listing.
+To run a known agent through a wrapper, choose the agent in the session launcher's **agent** tab and enter a **wrapper
+prefix**, such as `with-endpoint --profile work --`. Farhelm puts those words before the command it would otherwise run,
+including on resume. It still chooses the agent's arguments, reads its status, and follows its conversation where that
+agent supports it. The wrapper must run that agent and pass its arguments and environment through. Farhelm takes your
+word for that; it cannot check what the wrapper actually does.
 
-For a wrapper that needs a directory argument or a different resume command, use a
-[custom command](/docs/agents/custom-commands/). Write `{cwd}` where the wrapper wants the directory and Farhelm
-substitutes the session's own directory at every launch and every restart, so one command (or one
-[launch template](/docs/using/launch-templates/)) serves every directory. Declare the agent the wrapper ends up running
-as the command's agent, and put `{farhelm_args}` where that agent's arguments go: without a declared agent, the session
-gets no agent-specific status, no conversation tracking, and no restart. On stop the wrapper is killed along with the
-agent; being the agent's parent exempts it from nothing.
+The field splits quotes and backslash escapes into words, without running shell expansions. Farhelm refuses placeholders
+such as `{cwd}` in a prefix; use a custom command when your wrapper needs one. Leave it empty for no wrapper. Each agent
+has its own last used prefix, shared across your Farhelm windows; switching agents picks up that agent's value. A
+[launch template](/docs/using/launch-templates/) can set a prefix or explicitly clear one, including for
+[quick launch](/docs/using/launch-templates/#quick-launch). Clone, Replace with, and Restart with open with the
+session's prefix so you can keep or change it. Plain Restart reuses the stored launch.
 
-## A wrapper command, field by field
+NOTE: Do not put secrets in a prefix. It becomes part of the launch command, which other processes may see, and an agent
+on any host can read prefixes saved in the templates listing.
+
+Some wrappers need more than a prefix: `wrapper run <dir> <agent...>` needs a directory argument, and another wrapper
+may need a different resume command. Use the [command tab](/docs/agents/custom-commands/) for those. Write `{cwd}` where
+the wrapper wants the session's directory and `{farhelm_args}` where the agent's arguments go. Declare the agent the
+wrapper ends up running, and write a resume command when it can resume. The rest of this page covers that route and the
+rules both routes share. On stop the wrapper is killed along with the agent; being the agent's parent exempts it from
+nothing.
+
+## A custom wrapper command, field by field
 
 On the session launcher's **command** tab, four fields matter:
 
@@ -77,13 +84,14 @@ cannot be restarted at all, only replaced.
 
 ## What the wrapper must pass through
 
-Farhelm puts its arguments exactly where `{farhelm_args}` stands, and only there; for an agent that takes none it stands
-for nothing. They are what turns the agent's conversation reporting on, as
+With a prefix on the **agent** tab, Farhelm composes the agent's arguments and places them after your prefix. With a
+custom command, it puts its arguments exactly where `{farhelm_args}` stands, and only there; for an agent that takes
+none it stands for nothing. Those arguments turn the agent's conversation reporting on, as
 [Agent hook injection](/docs/how-it-works/agent-hook-injection/) describes. A resume is no exception: the resume command
 is a complete command line in its own right — Farhelm fills in its `{conversation}` and `{farhelm_args}` and runs THAT
 instead of the start command, which is why the wrapper has to appear in it too.
 
-So Farhelm's arguments are what a wrapper must forward, and one that treats everything after its own arguments as the
+Farhelm's arguments are what a wrapper must forward, and one that treats everything after its own arguments as the
 command to run, verbatim, does. A wrapper that parses trailing options as its own eats them first, and the symptom is
 indirect: the agent never reports its conversation, and the session cannot be restarted. NOTE: that is the one thing
 Farhelm cannot check for you. Its own tests stand in `sh -c` for the real wrapper, so whether YOUR wrapper stops at the
@@ -107,6 +115,14 @@ a **restart** before the switch would have resumed. If the followed Codex exits 
 terminal, Farhelm can follow the new one. The native Codex executable must still be named `codex`; a renamed one cannot
 supply the conversation **restart** needs.
 
+Grok accepts a wrapper that `exec`s Grok or stays resident as Grok's one parent process. A deeper resident chain
+prevents Farhelm from following the conversation, leaving **restart** unavailable. Its hooks still have to be
+[installed](/docs/agents/grok/#setup), and the wrapper must pass through its environment.
+
+OMP accepts a prefix wrapper only when the wrapper `exec`s OMP, leaving no extra process between the session and OMP's
+own launcher. A resident wrapper can run OMP, but Farhelm will not follow its conversation, so **restart** stays
+unavailable. The same process rule applies when you write a custom command.
+
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that
 says this process belongs to the session's AGENT rather than to one of its terminal tabs; that is the marker a stop
@@ -120,11 +136,12 @@ session.
 ## What happens on stop
 
 There are fewer processes involved than the launch chain suggests. tmux starts the pane's login shell, the shell `exec`s
-Farhelm's launch shim, and the shim `exec`s your command — so the WRAPPER is the pane's own process and the agent is its
-child. Where farhelm's own probe finds a WORKING systemd user manager — it creates a throwaway scope, looks it up, kills
-it, and confirms it went away, rather than trusting a `systemd-run` on `PATH` — the launch also runs inside a per-launch
-cgroup scope, which is containment rather than a level of the tree (`systemd-run --scope` execs in place too). Each
-launch records what it selected, so a session can outlive the manager that scoped it.
+Farhelm's launch shim, and the shim `exec`s your command — so a resident wrapper is the pane's own process and the agent
+is its child. A wrapper that `exec`s the agent leaves the agent in that place instead. Where farhelm's own probe finds a
+WORKING systemd user manager — it creates a throwaway scope, looks it up, kills it, and confirms it went away, rather
+than trusting a `systemd-run` on `PATH` — the launch also runs inside a per-launch cgroup scope, which is containment
+rather than a level of the tree (`systemd-run --scope` execs in place too). Each launch records what it selected, so a
+session can outlive the manager that scoped it.
 
 Stopping a session and restarting it reap the agent's tree and leave the session's terminal tabs running; deleting it
 takes the tabs too. What a stop claims is the pane process's descendants plus every process carrying the session's
@@ -168,12 +185,13 @@ agent's lifetime needs no handler at all.
 
 ## Related shapes
 
-`env FOO=1 claude {farhelm_args}` and `bash -c` are not wrappers in the sense above, and they need no `{cwd}` — the
-session's terminal already starts in its directory and the command inherits it. `env` is for variables you do not mind
-being public: the value is stored verbatim with the session and sits in the launch's argv, where `ps` shows it to anyone
-who can read the process table for as long as the process runs. A secret belongs in a file the agent reads, not on a
-command line. Declare the agent and write the resume command out as for any wrapper:
-`env FOO=1 claude --resume {conversation} {farhelm_args}`.
+`env FOO=1` can be a prefix for an agent launch; it `exec`s the agent, so it adds no resident process. A custom command
+such as `env FOO=1 claude {farhelm_args}` works too, but then you must write its resume command. Neither form needs
+`{cwd}` — the session's terminal already starts in its directory and the command inherits it. `env` is for variables you
+do not mind being public: the value is stored verbatim with the session and sits in the launch's argv, where `ps` shows
+it to anyone who can read the process table for as long as the process runs. A secret belongs in a file the agent reads,
+not on a command line. For the custom-command form, declare the agent and write the resume command out as for any
+wrapper: `env FOO=1 claude --resume {conversation} {farhelm_args}`.
 
 `bash -c` needs one more step. `{farhelm_args}` written inside the script string is not a whole argument, so it does not
 count, and a command whose only `{farhelm_args}` is there is refused. Pass it after the script as positional parameters

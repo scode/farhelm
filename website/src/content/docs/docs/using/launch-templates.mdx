@@ -34,6 +34,11 @@ with suggestions when the template sets an **agent type**. Approvals and other o
 Without an agent type, every approval choice is offered, and applying the template is refused if the chosen agent does
 not offer that choice.
 
+An agent template can also set a **wrapper prefix**. Type the words that go before Farhelm's agent command, or leave
+the field empty to explicitly run without a wrapper. Removing the field with **✕** leaves the launcher's current prefix
+alone, including its remembered value. See [Agent wrappers](/docs/agents/agent-wrappers/) for the pass-through rules and
+why a prefix should not contain secrets.
+
 To reuse a first message, add **initial prompt** and type it into the multiline box. Each new session started from the
 template receives that message; you can edit it in the launcher before starting. The field is offered for agents that
 accept an initial prompt, or while the template leaves the agent type unset. It is not offered for command templates.
@@ -119,7 +124,7 @@ When you have set up a launch in **new** or **clone**, choose **save as template
   alt="The save as template panel with a name typed and the agent and effort checked, with the name, checkboxes, and save explained."
 />
 
-Agent, model and effort choices are checked when set, as are command choices. Approvals
+Agent, model and effort choices are checked when set, as are command choices. Approvals and a wrapper prefix
 are checked when you chose them; a host, directory and session name only when you picked or typed them.
 A selected managed checkout's repository is checked too; unselected repository text is left out. Remembered defaults and
 a cloned session's host and directory stay available, but unchecked.

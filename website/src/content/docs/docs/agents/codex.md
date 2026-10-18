@@ -29,9 +29,10 @@ specific to Codex.
 - **restart** resumes the conversation Farhelm last learned of. After `/clear`, Farhelm learns of the new conversation
   when you send your next prompt, and restart can resume it once Codex has finished that reply. Restarting before you
   send that prompt can bring back the earlier conversation.
-- If you start Codex through a launcher of your own (a [custom command](/docs/agents/custom-commands/)), Farhelm can
-  follow its conversation even when the launcher stays running as Codex's parent. It must forward Farhelm's arguments
-  and environment, and the native Codex executable must still be named `codex`. Put the launcher in the resume command
-  too, so **restart** goes through it. [Agent wrappers](/docs/agents/agent-wrappers/) has the details.
+- If you start Codex through a [wrapper prefix](/docs/agents/agent-wrappers/) or a
+  [custom command](/docs/agents/custom-commands/), Farhelm can follow its conversation even when the launcher stays
+  running as Codex's parent. It must forward Farhelm's arguments and environment, and the native Codex executable must
+  still be named `codex`. Put the launcher in the resume command too for a custom command, so **restart** goes through
+  it. Farhelm includes a prefix in the resume command itself.
 - On a remote host, Codex's browser sign-in reports that it opened the link before you answer the card, so it cannot
   tell when you deny it. A sign-in that redirects back to `localhost` on the host still cannot finish from your browser.

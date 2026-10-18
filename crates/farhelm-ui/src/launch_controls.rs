@@ -119,6 +119,7 @@ pub(crate) fn LaunchControls(
     effort: Option<LaunchEffort>,
     permissions: Option<LaunchPermission>,
     permission_flags: String,
+    wrapper_prefix: String,
     catalog: Vec<LaunchCatalogModel>,
     busy: bool,
     model_draft: String,
@@ -143,6 +144,7 @@ pub(crate) fn LaunchControls(
     on_effort: EventHandler<Option<LaunchEffort>>,
     on_permissions: EventHandler<Option<LaunchPermission>>,
     on_permission_flags: EventHandler<String>,
+    on_wrapper_prefix: EventHandler<String>,
 ) -> Element {
     let omitted_permission = harness.and_then(LaunchHarness::omitted_permission);
     let efforts = harness
@@ -224,6 +226,20 @@ pub(crate) fn LaunchControls(
             ),
         )
     });
+    let wrapper_error = (!wrapper_prefix.is_empty())
+        .then(|| farhelm_proto::split_wrapper_prefix(&wrapper_prefix).err())
+        .flatten();
+    // Prefixes can come from another host or an agent-written template. Show
+    // unsafe characters as text, while keeping the original words untouched
+    // until the user explicitly clears this inherited choice.
+    let wrapper_unsafe = wrapper_prefix
+        .chars()
+        .any(farhelm_proto::text::is_presentation_unsafe);
+    let shown_wrapper = if wrapper_unsafe {
+        crate::peer::editable_peer(&wrapper_prefix)
+    } else {
+        wrapper_prefix.clone()
+    };
 
     rsx! {
         if harness.is_none_or(LaunchHarness::offers_model) {
@@ -552,6 +568,33 @@ pub(crate) fn LaunchControls(
             }
             if permissions == Some(LaunchPermission::Custom) {
                 CustomPermissionFlags { text: permission_flags, busy, harness, on_change: on_permission_flags }
+            }
+            div { class: "launch-composer-choice launch-composer-wrapper-choice",
+                label {
+                    span { class: "launch-composer-section-label", "wrapper prefix" }
+                    input {
+                        class: "launch-composer-wrapper", r#type: "text", value: shown_wrapper,
+                        disabled: busy, readonly: wrapper_unsafe, aria_invalid: wrapper_error.is_some(),
+                        autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                        placeholder: "with-endpoint --profile work --",
+                        "data-tooltip": "wrapper prefix: shell-style words before Farhelm's agent command; no placeholders",
+                        oninput: move |event| { if !busy { on_wrapper_prefix.call(event.value()); } },
+                        onkeydown: move |event| enter_choice(event, busy, || {}, on_choice_enter),
+                    }
+                }
+                if wrapper_unsafe {
+                    button {
+                        class: "btn btn-neutral launch-composer-wrapper-clear",
+                        r#type: "button", disabled: busy,
+                        "data-tooltip": "clear wrapper prefix: remove this value before editing",
+                        onclick: move |_| on_wrapper_prefix.call(String::new()),
+                        "clear wrapper prefix"
+                    }
+                }
+                p { "Farhelm runs these words before its agent command. Leave empty for no wrapper." }
+                if let Some(reason) = wrapper_error.as_ref() {
+                    div { class: "launch-composer-choice-error", role: "status", "{reason}" }
+                }
             }
         if let Some(reason) = choice_error {
             div { class: "launch-composer-choice-error", "{reason}" }

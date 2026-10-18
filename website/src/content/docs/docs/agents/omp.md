@@ -20,6 +20,7 @@ specific to OMP.
 - OMP matches model names loosely: a typo or a retired model name can quietly start a different model instead of
   failing. If the exact model matters, check it in OMP itself after launch.
 - Farhelm can follow the conversation when OMP is started directly, through `bun x` or `npx`, or as OMP's compiled
-  binary. Running it under Node, or through some other wrapper, works normally, but **restart** stays greyed out.
+  binary. A [wrapper prefix](/docs/agents/agent-wrappers/) must `exec` that command; a resident wrapper or Node launcher
+  runs it normally, but **restart** stays greyed out.
 - Restart refuses, rather than starting fresh, when OMP has compressed the conversation's file into a `.jsonl.gz`
   archive, or has moved it and not yet said where. Replace the session to start over.

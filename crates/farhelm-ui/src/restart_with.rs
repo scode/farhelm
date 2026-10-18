@@ -307,6 +307,12 @@ pub(crate) fn RestartWithDialog(
         .map(shell_words::join)
         .unwrap_or_default();
     let mut permission_flags_text = use_signal(move || flags_seed);
+    let wrapper_seed = baseline
+        .wrapper_prefix
+        .as_ref()
+        .map(shell_words::join)
+        .unwrap_or_default();
+    let mut wrapper_text = use_signal(move || wrapper_seed);
     // A named target belongs to this dialog instance, never the saved selection.
     let mut conversation = use_signal(String::new);
     let conversation_required =
@@ -387,6 +393,8 @@ pub(crate) fn RestartWithDialog(
                 RestartEdit::Agent(_) | RestartEdit::NamedAgent(_, _) => {
                     !(model_open() && !model_draft().is_empty())
                         && model_error().is_none()
+                        && (wrapper_text().is_empty()
+                            || farhelm_proto::split_wrapper_prefix(&wrapper_text()).is_ok())
                         && compatible
                         && (!conversation_required || !conversation().is_empty())
                 }
@@ -594,6 +602,22 @@ pub(crate) fn RestartWithDialog(
                     effort: current.effort,
                     permissions: current.permissions,
                     permission_flags: permission_flags_text(),
+                    wrapper_prefix: wrapper_text(),
+                    on_wrapper_prefix: move |text: String| {
+                        // Keep invalid raw text in the field, but retain the
+                        // last valid selection. The readiness gate above must
+                        // then refuse submit until this text parses, or the
+                        // visible edit could launch those older words.
+                        let parsed = if text.is_empty() { Ok(None) } else {
+                            farhelm_proto::split_wrapper_prefix(&text).map(Some)
+                        };
+                        if let Ok(prefix) = parsed {
+                            let mut after = selection();
+                            after.wrapper_prefix = prefix;
+                            selection.set(after);
+                        }
+                        wrapper_text.set(text);
+                    },
                     on_permission_flags: move |text: String| {
                         let mut after = selection();
                         after.permission_flags = farhelm_proto::split_permission_flags(&text).ok();

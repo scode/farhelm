@@ -61,6 +61,12 @@ The card has three buttons:
   that link's permission instead. Other cards from that host that are already waiting stay up until you answer them.
 - **deny** refuses it, and the agent is told you declined.
 
+An agent-supplied [wrapper prefix](/docs/agents/agent-wrappers/) on a host that asks before YOLO is a special case: its
+launch card offers **allow** and **deny** only, even if you turned on **Run farhelm commands without asking** for that
+host. The prefix is the agent's own command text, which Farhelm cannot check; allowing one request does not approve
+later prefixes. An agent that creates or edits a template so that it carries a wrapper prefix gets the same **allow**
+and **deny** card on every host, because launches from that template later treat the prefix as yours.
+
 The oldest waiting request opens first. Other requests appear as headers below it; click one to read and answer that
 request instead. The card shows how many requests are waiting, and the request you chose stays open until it is answered
 or expires. Then the oldest remaining request opens. A long request scrolls as a whole; its command text is shown in
@@ -139,6 +145,11 @@ start a YOLO session at all, with or without your approval. It cannot start a se
 runs in YOLO mode, and an agent's word on that is not enough. The same goes for copying a session that an older version
 of Farhelm started, whose command line may not be the one Farhelm would put together today. To let agents do any of
 these on a host, turn on its **Start YOLO sessions without asking** setting.
+
+An agent can use a prefix already saved in a launch template; you approved the template when it was written. If it
+supplies `--wrapper` itself, copies a session with a prefix, or inherits one from its own session, Farhelm asks you to
+approve that prefix before starting a non-YOLO agent launch on a host that asks before YOLO. This does not let the agent
+start a YOLO launch there.
 
 [Restarting](/docs/using/stop-restart-resume/) a session that already exists is not affected: a restart resumes the
 session with the settings it has saved, and is asked about like any other request.

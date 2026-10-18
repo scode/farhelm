@@ -54,6 +54,46 @@ async function commandTemplate(request: APIRequestContext, name: string, yolo = 
   expect(response.ok(), await response.text()).toBe(true);
 }
 
+/** A direct quick launch must apply a template's prefix before building the
+ * agent request. A stamped refusal reveals the submitted draft without
+ * starting an agent, which distinguishes an applied prefix from list text. */
+test("quick launch submits the wrapper prefix saved in its agent template", async ({ page, request }) => {
+  const name = `quick-wrapper-${Date.now()}`;
+  const prefix = ["env", "WRAPPER_CASE=quick", "--"];
+  const bodies: Record<string, any>[] = [];
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    bodies.push(route.request().postDataJSON());
+    await fulfillQuickFixture(route, request, 409, "wrapper quick-launch fixture refusal");
+  });
+  try {
+    const saved = await request.put(`/api/templates/${encodeURIComponent(name)}`, {
+      data: { kind: "agent", agent: "codex", destination: { folder: "/tmp" }, name: `${name}-session`, wrapper_prefix: prefix },
+    });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    const listing = await request.get("/api/templates");
+    expect(listing.ok(), await listing.text()).toBe(true);
+    const template = (await listing.json()).templates.find((entry: { name: string }) => entry.name === name);
+    expect(template?.fields, "the quick-launch fixture must exist before the chord").toMatchObject({ wrapper_prefix: prefix });
+    await patchPreferences(request, { quick_launch_template: name });
+    expect((await readPreferences(request)).quick_launch_template).toBe(name);
+
+    await page.goto("/");
+    await chord(page);
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await expect(form.locator(".create-session-error")).toContainText("wrapper quick-launch fixture refusal");
+    await expect(form.locator(".launch-composer-wrapper")).toHaveValue("env 'WRAPPER_CASE=quick' --");
+    expect(bodies, "quick launch must submit once before revealing its refused draft").toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ launch: { harness: "codex", wrapper_prefix: prefix } });
+  } finally {
+    await page.unroute("**/api/sessions");
+    await patchPreferences(request, { quick_launch_template: null });
+    const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+    expect(removed.ok() || removed.status() === 404, "cleaning up the wrapper template").toBe(true);
+  }
+});
+
 /** A real key chord, including repeat, must pass through the capture listener. */
 async function chord(page: Page, mac = false, repeat = false) {
   await expect(page.locator(".quick-launch-trigger")).toHaveCount(1);

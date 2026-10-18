@@ -338,6 +338,7 @@ pub(super) enum Field {
     Model,
     Effort,
     Permissions,
+    Wrapper,
     Command,
     Yolo,
     Resume,
@@ -349,13 +350,14 @@ pub(super) enum Field {
 impl Field {
     // Command-only fields lead when present; their absence keeps the agent
     // editor in its usual agent/model/effort order without a second ordering table.
-    pub(super) const ALL: [Self; 11] = [
+    pub(super) const ALL: [Self; 12] = [
         Self::Command,
         Self::Yolo,
         Self::Agent,
         Self::Model,
         Self::Effort,
         Self::Permissions,
+        Self::Wrapper,
         Self::Resume,
         Self::Prompt,
         Self::Host,
@@ -372,6 +374,7 @@ impl Field {
             Self::Model => "model",
             Self::Effort => "effort",
             Self::Permissions | Self::Yolo => "approvals",
+            Self::Wrapper => "wrapper prefix",
             Self::Command => "command",
             Self::Resume => "resume command",
             Self::Host => "host",
@@ -389,6 +392,7 @@ impl Field {
             Self::Model => "model",
             Self::Effort => "effort",
             Self::Permissions => "permissions",
+            Self::Wrapper => "wrapper",
             Self::Yolo => "yolo",
             Self::Command => "command",
             Self::Resume => "resume",
@@ -407,6 +411,7 @@ impl Field {
             Self::Model => f.model.is_some(),
             Self::Effort => f.effort.is_some(),
             Self::Permissions => f.permissions.is_some(),
+            Self::Wrapper => f.wrapper_prefix.is_some(),
             Self::Command => f.command.is_some(),
             Self::Yolo => f.yolo.is_some(),
             Self::Resume => f.resume_command.is_some(),
@@ -421,12 +426,21 @@ impl Field {
     /// folder or session-name text. Keep the raw seed untouched until the field
     /// is removed or replaced through another explicit control, including a model suggestion.
     fn escaped_read_only_value(self, f: &TemplateFields) -> Option<String> {
+        if self == Self::Wrapper {
+            let words = f.wrapper_prefix.as_ref()?.as_ref()?;
+            let joined = shell_words::join(words);
+            return joined
+                .chars()
+                .any(farhelm_proto::text::is_presentation_unsafe)
+                .then(|| display_peer(&joined));
+        }
         let value = match self {
             Self::Name => f.name.as_deref(),
             Self::Prompt => f.prompt.as_deref(),
             Self::Command => f.command.as_deref(),
             Self::Resume => f.resume_command.as_ref().and_then(|v| v.as_deref()),
             Self::Model => f.model.as_ref().and_then(|v| v.as_deref()),
+            Self::Wrapper => unreachable!("wrapper has a word-wise display path"),
             Self::Destination => match &f.destination {
                 Some(TemplateDestination::Folder(v) | TemplateDestination::Github(v)) => {
                     Some(v.as_str())
@@ -455,6 +469,7 @@ impl Field {
             Self::Model => f.model = Some(None),
             Self::Effort => f.effort = Some(None),
             Self::Permissions => f.permissions = Some(None),
+            Self::Wrapper => f.wrapper_prefix = Some(None),
             Self::Command => f.command = Some(String::new()),
             Self::Yolo => f.yolo = Some(false),
             Self::Resume => f.resume_command = Some(None),
@@ -476,6 +491,7 @@ impl Field {
                 f.permissions = None;
                 f.permission_flags = None;
             }
+            Self::Wrapper => f.wrapper_prefix = None,
             Self::Command => f.command = None,
             Self::Yolo => f.yolo = None,
             Self::Resume => f.resume_command = None,
@@ -508,6 +524,7 @@ impl Field {
             Self::Permissions => {
                 f.kind == Some(LauncherKind::Agent) && f.agent.is_none_or(|a| !a.offers_only_yolo())
             }
+            Self::Wrapper => f.kind == Some(LauncherKind::Agent),
         }
     }
 
@@ -603,6 +620,9 @@ fn effort_options(
 struct Draft {
     name: String,
     fields: TemplateFields,
+    /// An incomplete shell quote stays visible and blocks save without
+    /// replacing the last valid word list in the wire fields.
+    wrapper_input: Option<String>,
 }
 impl Default for Draft {
     fn default() -> Self {
@@ -612,6 +632,7 @@ impl Default for Draft {
                 kind: Some(LauncherKind::Agent),
                 ..Default::default()
             },
+            wrapper_input: None,
         }
     }
 }
@@ -629,12 +650,22 @@ impl Draft {
         Self {
             name: t.name.clone(),
             fields,
+            wrapper_input: None,
         }
     }
 
     /// Refuse incompatible or unfinished fields without requiring a complete
     /// launch. Another stacked template may supply the missing agent or command.
     fn refusal(&self, catalog: Option<&[LaunchCatalogModel]>) -> Option<String> {
+        if let Some(text) = &self.wrapper_input {
+            return Some(
+                farhelm_proto::split_wrapper_prefix(text)
+                    .err()
+                    .unwrap_or_else(|| {
+                        "wrapper prefix changed while saving; review it and try again".to_string()
+                    }),
+            );
+        }
         if let Err(reason) = farhelm_proto::check_permission_flags(
             self.fields.permissions.flatten(),
             self.fields.permission_flags.as_deref(),
@@ -731,6 +762,7 @@ pub(super) fn saved_fields_refusal(
     Draft {
         name: template.name.clone(),
         fields: template.fields.clone(),
+        wrapper_input: None,
     }
     .refusal(catalog)
 }
@@ -782,6 +814,15 @@ pub(super) fn template_summary(fields: &TemplateFields) -> String {
     }
     if let Some(words) = &fields.permission_flags {
         parts.push(crate::peer::display_peer(&shell_words::join(words)));
+    }
+    if let Some(prefix) = &fields.wrapper_prefix {
+        parts.push(match prefix {
+            Some(words) => format!(
+                "wrapper prefix {}",
+                crate::peer::display_peer(&shell_words::join(words))
+            ),
+            None => "wrapper prefix none".to_string(),
+        });
     }
     if fields.command.is_some() {
         parts.push("command".to_string());
@@ -870,6 +911,46 @@ fn FieldEditor(
     let refusal = field.refusal(&current, catalog.as_deref());
     let label = field.label();
     let controls = match field {
+        Field::Wrapper => {
+            let value = escaped.unwrap_or_else(|| {
+                draft().wrapper_input.unwrap_or_else(|| {
+                    current
+                        .wrapper_prefix
+                        .clone()
+                        .flatten()
+                        .map(|words| shell_words::join(&words))
+                        .unwrap_or_default()
+                })
+            });
+            rsx! {
+                label { class: "templates-field",
+                    span { "wrapper prefix" }
+                    input { class: "templates-wrapper templates-code", r#type: "text", value,
+                        disabled, readonly: text_read_only, autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
+                        placeholder: "with-endpoint --profile work --",
+                        "data-tooltip": "wrapper prefix: words placed before Farhelm's agent command; no placeholders",
+                        oninput: move |event| {
+                            let text = event.value();
+                            if !text_read_only { draft.with_mut(|d| {
+                                if text.is_empty() {
+                                    d.fields.wrapper_prefix = Some(None);
+                                    d.wrapper_input = None;
+                                } else {
+                                    match farhelm_proto::split_wrapper_prefix(&text) {
+                                        Ok(words) => {
+                                            d.fields.wrapper_prefix = Some(Some(words));
+                                            d.wrapper_input = None;
+                                        }
+                                        Err(_) => d.wrapper_input = Some(text),
+                                    }
+                                }
+                            }); }
+                        },
+                    }
+                }
+                span { class: "templates-hint", "An empty input removes the wrapper. The prefix runs before Farhelm's agent command." }
+            }
+        }
         Field::Prompt => rsx! {
             label { class: "templates-field",
                 span { "initial prompt" }
@@ -1041,7 +1122,7 @@ fn FieldEditor(
                 if let Some(ref message)=refusal { p { class: "templates-error", "{message}" } }
             }
             button { class: "templates-remove", r#type: "button", disabled, aria_label: "remove {label}", "data-tooltip": "remove {label}: this template will leave it as is",
-                onclick: move |_| draft.with_mut(|d| field.remove(&mut d.fields)), "✕"
+                onclick: move |_| draft.with_mut(|d| { field.remove(&mut d.fields); if field == Field::Wrapper { d.wrapper_input = None; } }), "✕"
             }
         }
     }
@@ -1109,6 +1190,7 @@ fn leave_editor(
             baseline.set(Draft {
                 name: template.name.clone(),
                 fields: template.fields.clone(),
+                wrapper_input: None,
             });
             draft.set(Draft::from_template(&template));
             previous.set(Some(template.name));
@@ -1734,6 +1816,32 @@ pub(super) fn TemplatesDialog(
 mod tests {
     use super::*;
 
+    /// The editor distinguishes an absent edit from a present reset. Prefix
+    /// words are displayed as shell text, with unsafe persisted bytes escaped
+    /// without changing the stored value.
+    #[test]
+    fn wrapper_field_keeps_reset_and_safe_display_distinct() {
+        let mut fields = Draft::default().fields;
+        assert!(Field::Wrapper.offered(&fields));
+        assert!(!Field::Wrapper.is_set(&fields));
+        Field::Wrapper.add(&mut fields);
+        assert_eq!(fields.wrapper_prefix, Some(None));
+        assert!(template_summary(&fields).contains("wrapper prefix none"));
+        fields.wrapper_prefix = Some(Some(vec!["wrapper".into(), "--".into()]));
+        assert!(template_summary(&fields).contains("wrapper prefix wrapper --"));
+        fields.wrapper_prefix = Some(Some(vec!["wrapper\u{202e}".into()]));
+        assert!(
+            Field::Wrapper
+                .escaped_read_only_value(&fields)
+                .unwrap()
+                .contains("<U+202E>")
+        );
+        Field::Wrapper.remove(&mut fields);
+        assert_eq!(fields.wrapper_prefix, None);
+        fields.kind = Some(LauncherKind::Command);
+        assert!(!Field::Wrapper.offered(&fields));
+    }
+
     /// Presence is the template edit, including an empty message that clears
     /// the receiving draft. Compatibility belongs to the selected agent;
     /// line breaks stay editable, while invisible formatting stays escaped.
@@ -2059,7 +2167,8 @@ mod tests {
                 draft
                     != Draft {
                         name: stored.name,
-                        fields: stored.fields
+                        fields: stored.fields,
+                        wrapper_input: None,
                     },
                 kind.is_some()
             );
@@ -2107,6 +2216,7 @@ mod tests {
                 yolo: Some(false),
                 ..Default::default()
             },
+            wrapper_input: None,
         };
         assert!(Field::Resume.offered(&draft.fields));
         assert!(!Field::Effort.offered(&draft.fields));
@@ -2138,6 +2248,7 @@ mod tests {
                 model: Some(Some("any future model".into())),
                 ..Default::default()
             },
+            wrapper_input: None,
         };
         assert_eq!(draft.refusal(None), None);
         draft.fields.agent = Some(LaunchHarness::Claude);
@@ -2197,6 +2308,7 @@ mod tests {
                         .then(|| vec!["--mode".into()]),
                     ..Default::default()
                 },
+                wrapper_input: None,
             };
             assert_eq!(draft.refusal(None), None);
             check_template_shape(&LaunchTemplate {
