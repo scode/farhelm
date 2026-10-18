@@ -39,11 +39,13 @@
 // genuinely one-off snippet still stays local with the test that needs it.
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator } from "@playwright/test";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import {
   createSession,
   forgetAutoSelect,
   listSessions,
   openRowMenu,
+  openHostMenu,
   pinAutoSelect,
   readPreferences,
   patchPreferences,
@@ -118,6 +120,93 @@ test("matches Ghostty's terminal theme and surface", async ({ page }) => {
   expect(colors.themeBackground.toLowerCase()).toBe("#282c34");
   expect(colors.viewportBackground, "the vendored #000 viewport rule must lose to the app override").toBe("rgb(40, 44, 52)");
   expect(colors.terminalBackground).toBe(colors.viewportBackground);
+});
+
+/**
+ * The opt-in frame must be a host identity cue without recoloring xterm's
+ * theme or resizing its viewport. Changing the local host's color in its
+ * dialog must repaint an already-open session through the hosts feed, and
+ * turning the shared switch off must restore the original surface at once.
+ */
+test("host-colored terminal frame follows local appearance and Settings", async ({ page, request }) => {
+  const previous = await readPreferences(request);
+  const hostsResponse = await request.get("/api/hosts");
+  expect(hostsResponse.ok()).toBe(true);
+  const local = (await hostsResponse.json()).hosts.find((host: { kind: string }) => host.kind === "local");
+  expect(local?.kind, "the shared terminal's local host must be registered").toBe("local");
+  expect([local.icon, local.color], "the untouched local host is a red laptop").toEqual(["laptop", "red"]);
+  await patchPreferences(request, { color_terminal_frames: null });
+  let bodyFailed = false;
+  try {
+    await openTerminal(page);
+    const panes = page.locator(".terminal-panes");
+    // xterm also uses the class name `terminal`; the frame belongs to the
+    // outer island whose padding surrounds it.
+    const terminal = page.locator(".terminal-pane.selected > .terminal");
+    const viewport = terminal.locator(".xterm-viewport");
+    const surface = await terminal.evaluate((element) => getComputedStyle(element).backgroundColor);
+    const viewportSize = await viewport.evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }));
+    await expect(panes).toHaveAttribute("data-colored-frame", "false");
+    await expect(terminal).toHaveCSS("box-shadow", "none");
+
+    const gear = page.getByRole("button", { name: "settings", exact: true });
+    const settings = page.getByRole("dialog", { name: "settings", exact: true });
+    const switcher = settings.getByRole("checkbox", { name: "color terminal frames by host", exact: true });
+    await gear.click();
+    await expect(switcher).not.toBeChecked();
+    await switcher.setChecked(true);
+    await expect.poll(async () => (await readPreferences(request)).color_terminal_frames).toBe(true);
+    await settings.getByRole("button", { name: "close", exact: true }).click();
+    await expect(panes).toHaveAttribute("data-colored-frame", "true");
+    const red = await page.locator(`.host-row[data-host-id="${local.id}"] .host-kind-icon`)
+      .evaluate((element) => getComputedStyle(element).color);
+    const initialFrame = await terminal.evaluate((element) => getComputedStyle(element).boxShadow);
+    expect(initialFrame).toContain(red);
+    expect(initialFrame).toContain("4px");
+    await expect(terminal.locator(".xterm")).toHaveCSS("box-shadow", "none");
+    await expect(terminal).toHaveCSS("background-color", surface);
+    await expect(viewport).toHaveCSS("background-color", surface);
+    expect(await viewport.evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }))).toEqual(viewportSize);
+    await openTerminal(page);
+    await expect(panes).toHaveAttribute("data-colored-frame", "true");
+    await gear.click();
+    await expect(switcher).toBeChecked();
+    await settings.getByRole("button", { name: "close", exact: true }).click();
+
+    await openHostMenu(page.locator(`.host-row[data-host-id="${local.id}"]`));
+    await page.locator(".host-settings").click();
+    const hostDialog = page.locator(".host-settings-dialog");
+    const teal = hostDialog.getByRole("group", { name: "color", exact: true })
+      .getByRole("button", { name: "teal", exact: true });
+    await teal.click();
+    await expect(teal).toHaveAttribute("aria-pressed", "true");
+    await hostDialog.locator(".host-settings-close").click();
+    await expect.poll(() => terminal.evaluate((element) => getComputedStyle(element).boxShadow))
+      .toContain("rgb(79, 200, 192)");
+    await expect(terminal).toHaveCSS("background-color", surface);
+    await expect(viewport).toHaveCSS("background-color", surface);
+    expect(await viewport.evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }))).toEqual(viewportSize);
+    await test.info().attach("host-colored-terminal-frame", { body: await page.locator(".app-main").screenshot(), contentType: "image/png" });
+
+    await gear.click();
+    await switcher.setChecked(false);
+    await expect.poll(async () => (await readPreferences(request)).color_terminal_frames).toBe(false);
+    await settings.getByRole("button", { name: "close", exact: true }).click();
+    await expect(panes).toHaveAttribute("data-colored-frame", "false");
+    await expect(terminal).toHaveCSS("box-shadow", "none");
+    await expect(viewport).toHaveCSS("background-color", surface);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["frame preference", () => patchPreferences(request, { color_terminal_frames: previous.color_terminal_frames ?? null })],
+      ["local appearance", async () => {
+        const reset = await request.post(`/api/hosts/${local.id}/appearance`, { data: { icon: local.icon, color: local.color } });
+        expect(reset.ok(), "restore the shared local host appearance").toBe(true);
+      }],
+    ]);
+  }
 });
 
 /**

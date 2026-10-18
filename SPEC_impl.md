@@ -160,29 +160,34 @@ false disables it, so upgraded helms have the same default as fresh ones. The Se
 confirmations writes an explicit boolean through the ordinary sparse preference queue. Null restores the enabled default
 and omission preserves the stored choice. Older helms refuse this schema.
 
+Helm schema 59 adds nullable `preferences.color_terminal_frames`. Unset and false leave terminal frames uncolored on
+fresh and upgraded helms. The Settings switch under Sessions writes through the same sparse preference queue: a null
+restores the off default, and an omitted key preserves another client's choice. Older helms refuse this schema.
+
 The session list's chosen ORDER, last-selected session, compact-row choice, and the launch composer's remembered
 permissions, host confirmation choices, and remembered feedback contact are one preference the HELM keeps, in a
 singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`, `remembered_permissions`,
 `remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`, `feedback_contact`,
-`terminal_link_click`, `skip_session_confirmations`, `name_session_on_quick_launch`, `quick_launch_template`,
-`template_shortcuts`, `welcome_seen`) behind `GET`/`PUT /api/preferences`, device-authenticated like every other route.
-The remembered permission field is written by the helm after a successful user structured launch; no shipped client PUTs
-it. The `remembered_workspace_trust` column remains for upgrade compatibility but is neither read nor written.
-Remembered permissions describe accepted launches rather than one client's claim. Both clients read the row once after
-authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the sort
-control and the auto-select effect see the remembered values on their first run and no frame shows a default that is
-then corrected. On desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so
-nothing is visible; in the browser the first paint deliberately waits on that one round trip to the helm — a page with a
-valid credential used to paint its sidebar synchronously from localStorage — so the list never appears in an order that
-then changes. A write is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent
-field is untouched, an explicit `null` clears one), so two clients changing different fields at nearly the same time
-cannot clobber each other; the signal in the page is updated before the request leaves, which is what keeps the choice
-in force when the write fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot
-land on the helm in reverse order; the write queue is process state outside the remounted tree, and after the browser's
-credential recovery the gate overlays and replays any local choice whose write never got through, so reauthentication
-cannot roll the current client back to the helm's older row. The desktop app never signs in again, so nothing remounts
-its tree. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a
-stalled preference endpoint cannot blank the page for the funnel's full sixty seconds.
+`terminal_link_click`, `skip_session_confirmations`, `name_session_on_quick_launch`, `color_terminal_frames`,
+`quick_launch_template`, `template_shortcuts`, `welcome_seen`) behind `GET`/`PUT /api/preferences`, device-authenticated
+like every other route. The remembered permission field is written by the helm after a successful user structured
+launch; no shipped client PUTs it. The `remembered_workspace_trust` column remains for upgrade compatibility but is
+neither read nor written. Remembered permissions describe accepted launches rather than one client's claim. Both clients
+read the row once after authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the
+read lands, so the sort control and the auto-select effect see the remembered values on their first run and no frame
+shows a default that is then corrected. On desktop the IPC authentication gate already holds the tree and the read is
+one loopback hop, so nothing is visible; in the browser the first paint deliberately waits on that one round trip to the
+helm — a page with a valid credential used to paint its sidebar synchronously from localStorage — so the list never
+appears in an order that then changes. A write is a sparse patch naming only the field the user changed, merged
+per-field by the helm (an absent field is untouched, an explicit `null` clears one), so two clients changing different
+fields at nearly the same time cannot clobber each other; the signal in the page is updated before the request leaves,
+which is what keeps the choice in force when the write fails. Same-field writes are serialized latest-wins in the
+client, so a burst of changes cannot land on the helm in reverse order; the write queue is process state outside the
+remounted tree, and after the browser's credential recovery the gate overlays and replays any local choice whose write
+never got through, so reauthentication cannot roll the current client back to the helm's older row. The desktop app
+never signs in again, so nothing remounts its tree. The seed read runs under a seconds-scale deadline of its own and
+expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty
+seconds.
 
 The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
 number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
@@ -5106,11 +5111,11 @@ both choices; the existing UI hosts read supplies session-row state as well as t
 redraws memoized rows without adding another fetch.
 
 `HostMark` draws the sixteen Farhelm-owned paths in the existing 16-unit box at stroke weight 1.3; `data-glyph` carries
-the icon word (`laptop` for an untouched local host, `cloud` for an untouched SSH host). The eight `--host-icon-*` CSS
+the icon word (`laptop` for an untouched local host, `cloud` for an untouched SSH host). The seven `--host-icon-*` CSS
 tokens are identity colors with no state meaning, and the contrast harness binds them to the chrome, selected, dialog
-and picker surfaces. Red has its own identity token with the same value as `--danger`. Only the SVG receives the tint;
-its hover text still describes the host's locality even when a remote host chooses a red laptop. The unknown-locality
-slot stays blank.
+and picker surfaces. Red has its own identity token with the same value as `--danger`. Only the SVG receives the tint,
+apart from the optional terminal frame; its hover text still describes the host's locality even when a remote host
+chooses a red laptop. The unknown-locality slot stays blank.
 
 Appearance controls live for both known host kinds in the host settings dialog's own refresh classes, between Connection
 and Permissions. Each choice is a named button with `aria-pressed`, in a labelled icon or color group, and saves through
@@ -5132,3 +5137,13 @@ uses a case-insensitive prefix, restarting after a one-second pause and cycling 
 busy work and unmounts with its launcher; the committed id stays empty until hosts arrive. The parent retains the old
 native select's synchronous destination/history fence, browse invalidation, clone takeover and intent reset. Picking the
 already committed host does not reset the draft. Template editing retains its native host select.
+
+`SessionView` reuses `AppBody`'s `Signal<HostsRead>` context that the sidebar refreshes from the hosts feed; its
+separate stale-only host read remains limited to outage details. The shared preferences signal controls whether a
+colored frame is drawn. The host color word becomes one CSS custom property on the terminal panes container, inherited
+by each terminal, using `--fg-0` for `default` and the matching `--host-icon-*` token otherwise. The current web and
+WebKit render has no distinct dark margin: pane, terminal and xterm viewport all paint `--terminal-bg`. With coloring
+enabled, a 4px inset shadow fills the terminal element's existing padding. The shadow leaves the terminal background and
+xterm theme unchanged and adds no layout space; the setting-off render has no shadow. A host appearance refresh recolors
+an open session without fetching hosts from the session view, and a Settings write updates this client's preference
+signal immediately.

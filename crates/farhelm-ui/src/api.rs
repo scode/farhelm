@@ -407,6 +407,9 @@ pub(crate) struct Preferences {
     /// Unset enables naming on fresh and upgraded helms; only false opts out.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) name_session_on_quick_launch: Option<bool>,
+    /// Off unless this helm has explicitly enabled host-colored terminal frames.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) color_terminal_frames: Option<bool>,
     /// Shared quick-launch mark, separate from a template editor's fields.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) quick_launch_template: Option<String>,
@@ -732,6 +735,7 @@ pub(crate) enum PreferenceField {
     HostSetupConfirmation,
     SessionConfirmations,
     NameSessionOnQuickLaunch,
+    ColorTerminalFrames,
     QuickLaunchTemplate,
     TemplateShortcuts,
     FeedbackContact,
@@ -760,6 +764,7 @@ impl PreferenceField {
             PreferenceField::HostSetupConfirmation => "skip_host_setup_confirmation",
             PreferenceField::SessionConfirmations => "skip_session_confirmations",
             PreferenceField::NameSessionOnQuickLaunch => "name_session_on_quick_launch",
+            PreferenceField::ColorTerminalFrames => "color_terminal_frames",
             PreferenceField::QuickLaunchTemplate => "quick_launch_template",
             PreferenceField::TemplateShortcuts => "template_shortcuts",
             PreferenceField::FeedbackContact => "feedback_contact",
@@ -789,6 +794,7 @@ pub(crate) enum PreferenceValue {
     HostSetupConfirmation(bool),
     SessionConfirmations(bool),
     NameSessionOnQuickLaunch(bool),
+    ColorTerminalFrames(bool),
     /// Explicit clear removes the sole mark without changing template fields.
     QuickLaunchTemplate(Option<String>),
     /// Empty clears every key; each write replaces the entire shared map.
@@ -824,6 +830,7 @@ impl PreferenceValue {
             Self::HostSetupConfirmation(_) => PreferenceField::HostSetupConfirmation,
             Self::SessionConfirmations(_) => PreferenceField::SessionConfirmations,
             Self::NameSessionOnQuickLaunch(_) => PreferenceField::NameSessionOnQuickLaunch,
+            Self::ColorTerminalFrames(_) => PreferenceField::ColorTerminalFrames,
             Self::QuickLaunchTemplate(_) => PreferenceField::QuickLaunchTemplate,
             Self::TemplateShortcuts(_) => PreferenceField::TemplateShortcuts,
             Self::FeedbackContact(_) => PreferenceField::FeedbackContact,
@@ -849,6 +856,7 @@ impl PreferenceValue {
             | Self::HostRemoveConfirmation(value)
             | Self::SessionConfirmations(value)
             | Self::NameSessionOnQuickLaunch(value)
+            | Self::ColorTerminalFrames(value)
             | Self::HostSetupConfirmation(value) => serde_json::json!(value),
         }
     }
@@ -874,6 +882,7 @@ impl PreferenceValue {
             Self::NameSessionOnQuickLaunch(value) => {
                 seed.name_session_on_quick_launch = Some(*value)
             }
+            Self::ColorTerminalFrames(value) => seed.color_terminal_frames = Some(*value),
             Self::QuickLaunchTemplate(value) => seed.quick_launch_template = value.clone(),
             Self::TemplateShortcuts(value) => seed.template_shortcuts = value.clone(),
             Self::FeedbackContact(value) => seed.feedback_contact = value.clone(),
@@ -962,6 +971,7 @@ struct PreferenceWrites {
     host_setup_confirmation: FieldWrite,
     session_confirmations: FieldWrite,
     name_session_on_quick_launch: FieldWrite,
+    color_terminal_frames: FieldWrite,
     quick_launch_template: FieldWrite,
     template_shortcuts: FieldWrite,
     feedback_contact: FieldWrite,
@@ -983,6 +993,7 @@ impl PreferenceWrites {
             PreferenceField::HostSetupConfirmation => &mut self.host_setup_confirmation,
             PreferenceField::SessionConfirmations => &mut self.session_confirmations,
             PreferenceField::NameSessionOnQuickLaunch => &mut self.name_session_on_quick_launch,
+            PreferenceField::ColorTerminalFrames => &mut self.color_terminal_frames,
             PreferenceField::QuickLaunchTemplate => &mut self.quick_launch_template,
             PreferenceField::TemplateShortcuts => &mut self.template_shortcuts,
             PreferenceField::FeedbackContact => &mut self.feedback_contact,
@@ -1137,6 +1148,7 @@ impl PreferenceWrites {
             PreferenceField::HostSetupConfirmation => &self.host_setup_confirmation,
             PreferenceField::SessionConfirmations => &self.session_confirmations,
             PreferenceField::NameSessionOnQuickLaunch => &self.name_session_on_quick_launch,
+            PreferenceField::ColorTerminalFrames => &self.color_terminal_frames,
             PreferenceField::QuickLaunchTemplate => &self.quick_launch_template,
             PreferenceField::TemplateShortcuts => &self.template_shortcuts,
             PreferenceField::FeedbackContact => &self.feedback_contact,
@@ -1246,6 +1258,7 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
         PreferenceField::HostSetupConfirmation,
         PreferenceField::SessionConfirmations,
         PreferenceField::NameSessionOnQuickLaunch,
+        PreferenceField::ColorTerminalFrames,
         PreferenceField::QuickLaunchTemplate,
         PreferenceField::TemplateShortcuts,
         PreferenceField::FeedbackContact,

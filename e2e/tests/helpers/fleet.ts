@@ -1102,6 +1102,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
     skip_host_setup_confirmation: null,
     skip_session_confirmations: null,
     name_session_on_quick_launch: null,
+    color_terminal_frames: null,
     quick_launch_template: null,
     template_shortcuts: null,
     feedback_contact: null,

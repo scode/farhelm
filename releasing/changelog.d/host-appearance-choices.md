@@ -2,4 +2,4 @@
 kind: added
 ---
 
-You can now choose an icon and color for your Mac as well as remote hosts. The red laptop remains your Mac's starting mark, and every host can use it.
+Your Mac can now choose an icon and color like a remote host; it still starts as a red laptop. A Settings switch, off by default, can color each terminal's thin frame to match its host without changing the terminal background.

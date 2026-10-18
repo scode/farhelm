@@ -152,7 +152,7 @@ flask, database, chip, rocket, gear, gem, hexagon, triangle, ring, square, bug, 
 drawings were made for Farhelm and carry no third-party brand provenance. Keep their silhouette and stroke weight when
 adding callers, rather than applying the harness marks' 12-unit normalization rule.
 
-The helm stores stable icon and color words. The eight host color tokens identify a host and carry no connection,
+The helm stores stable icon and color words. The seven host color tokens identify a host and carry no connection,
 permission or activity state; default uses the ordinary foreground. The SVG is decorative, with the caller's accessible
 locality word beside it and an explanation of that locality on hover. Its `data-glyph` is the icon word, so tests
 distinguish an actual drawing from a locality label that could agree with the wrong picture.

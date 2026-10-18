@@ -305,7 +305,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 58;
+const SCHEMA_VERSION: i64 = 59;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -1029,6 +1029,10 @@ pub struct Preferences {
     /// so upgrading an existing helm has the same default as a fresh installation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name_session_on_quick_launch: Option<bool>,
+    /// Color each session's terminal frame with its host identity color.
+    /// Unset stays off for fresh and upgraded helms.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_terminal_frames: Option<bool>,
     /// One shared template name, independent of any editor's saved fields.
     /// A missing or deleted name is handled as no quick launch by clients.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1161,6 +1165,13 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub name_session_on_quick_launch: Option<Option<bool>>,
+    /// Null restores the off default; omission preserves another client's choice.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub color_terminal_frames: Option<Option<bool>>,
     /// Null removes the mark; omission preserves another client's choice.
     #[serde(
         default,
@@ -1986,6 +1997,8 @@ pub struct HelmStore {
 /// - 58: host icon and color choices open to the local row. Null keeps each
 ///   kind's original mark: laptop/red locally, cloud/default over SSH. Only
 ///   the two checked columns are replaced, leaving host references intact.
+/// - 59: nullable shared terminal-frame coloring. Unset keeps every terminal's
+///   original surface, including on upgraded helms.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2208,7 +2221,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  name_session_on_quick_launch INTEGER CHECK (name_session_on_quick_launch IN (0, 1)),
                  codex_trust_hint_dismissed INTEGER CHECK (codex_trust_hint_dismissed IN (0, 1)),
                  muse_trust_hint_dismissed INTEGER CHECK (muse_trust_hint_dismissed IN (0, 1)),
-                 pi_trust_hint_dismissed INTEGER CHECK (pi_trust_hint_dismissed IN (0, 1))
+                 pi_trust_hint_dismissed INTEGER CHECK (pi_trust_hint_dismissed IN (0, 1)),
+                 color_terminal_frames INTEGER CHECK (color_terminal_frames IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2300,7 +2314,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 58;",
+              PRAGMA user_version = 59;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3579,6 +3593,21 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 58")?;
         version = 58;
     }
+    if version == 58 {
+        // Rewound fixtures can already carry the column. Keep their stored
+        // choice instead of treating the version marker as proof it is absent.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('preferences') WHERE name = 'color_terminal_frames'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch("ALTER TABLE preferences ADD COLUMN color_terminal_frames INTEGER CHECK (color_terminal_frames IN (0, 1));")?;
+        }
+        tx.execute_batch("PRAGMA user_version = 59;")
+            .context("migrating helm.db to schema version 59")?;
+        version = 59;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4529,7 +4558,7 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -4539,6 +4568,7 @@ impl HelmStore {
                             muse_trust_hint_dismissed: row.get(16)?,
                             pi_trust_hint_dismissed: row.get(17)?,
                             name_session_on_quick_launch: row.get(15)?,
+                            color_terminal_frames: row.get(18)?,
                             tunnel_consent: row.get(14)?,
                             claude_trust_hint_dismissed: row.get(13)?,
                             welcome_seen: row.get(12)?,
@@ -4623,6 +4653,8 @@ impl HelmStore {
             let skip_session_confirmations = patch.skip_session_confirmations.flatten();
             let name_session_on_quick_launch_present = patch.name_session_on_quick_launch.is_some();
             let name_session_on_quick_launch = patch.name_session_on_quick_launch.flatten();
+            let color_terminal_frames_present = patch.color_terminal_frames.is_some();
+            let color_terminal_frames = patch.color_terminal_frames.flatten();
             let quick_launch_template_present = patch.quick_launch_template.is_some();
             let quick_launch_template = patch.quick_launch_template.flatten();
             let template_shortcuts_present = patch.template_shortcuts.is_some();
@@ -4639,8 +4671,8 @@ impl HelmStore {
             conn
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -4664,7 +4696,8 @@ impl HelmStore {
                          tunnel_consent = CASE WHEN ?30 THEN excluded.tunnel_consent ELSE tunnel_consent END, \
                          name_session_on_quick_launch = CASE WHEN ?32 THEN excluded.name_session_on_quick_launch ELSE name_session_on_quick_launch END, \
                          muse_trust_hint_dismissed = CASE WHEN ?34 THEN excluded.muse_trust_hint_dismissed ELSE muse_trust_hint_dismissed END, \
-                         pi_trust_hint_dismissed = CASE WHEN ?36 THEN excluded.pi_trust_hint_dismissed ELSE pi_trust_hint_dismissed END",
+                         pi_trust_hint_dismissed = CASE WHEN ?36 THEN excluded.pi_trust_hint_dismissed ELSE pi_trust_hint_dismissed END, \
+                         color_terminal_frames = CASE WHEN ?38 THEN excluded.color_terminal_frames ELSE color_terminal_frames END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -4701,7 +4734,9 @@ impl HelmStore {
                         muse_trust_hint,
                         muse_trust_hint_present,
                         pi_trust_hint,
-                        pi_trust_hint_present
+                        pi_trust_hint_present,
+                        color_terminal_frames,
+                        color_terminal_frames_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -8155,6 +8190,10 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN tunnel_consent;
                  ALTER TABLE preferences DROP COLUMN name_session_on_quick_launch;
+                 ALTER TABLE preferences DROP COLUMN codex_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN muse_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN pi_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN color_terminal_frames;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -10550,6 +10589,7 @@ mod tests {
                 terminal_link_click: None,
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
+                color_terminal_frames: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -10581,6 +10621,7 @@ mod tests {
                 terminal_link_click: None,
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
+                color_terminal_frames: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -10611,6 +10652,7 @@ mod tests {
                 terminal_link_click: None,
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
+                color_terminal_frames: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -10690,6 +10732,7 @@ mod tests {
                 terminal_link_click: None,
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
+                color_terminal_frames: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -11976,6 +12019,10 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN claude_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN tunnel_consent;
                  ALTER TABLE preferences DROP COLUMN name_session_on_quick_launch;
+                 ALTER TABLE preferences DROP COLUMN codex_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN muse_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN pi_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN color_terminal_frames;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -12149,6 +12196,7 @@ mod tests {
                 terminal_link_click: None,
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
+                color_terminal_frames: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -12227,6 +12275,7 @@ mod tests {
                 terminal_link_click: None,
                 skip_session_confirmations: None,
                 name_session_on_quick_launch: None,
+                color_terminal_frames: None,
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
@@ -12308,6 +12357,65 @@ mod tests {
                     name_session_on_quick_launch: expected,
                     ..Preferences::default()
                 }
+            );
+        }
+    }
+
+    /// Upgraded helms must leave the new frame choice off without replacing
+    /// preferences that were already shared. True, false, and null then need
+    /// the same durable sparse-write behavior as other Settings switches.
+    #[farhelm_testtrace::test]
+    async fn terminal_frame_color_migration_and_sparse_round_trip() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("helm.db");
+        store
+            .update_preferences(serde_json::from_str(r#"{"compact":true}"#).unwrap())
+            .await
+            .unwrap();
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE preferences DROP COLUMN color_terminal_frames;
+                 PRAGMA user_version = 58;",
+            )
+            .unwrap();
+        }
+        let migrated = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            migrated.preferences().await.unwrap(),
+            Preferences {
+                compact: Some(true),
+                ..Preferences::default()
+            },
+            "migration keeps the previous choice and leaves frame coloring off",
+        );
+        drop(migrated);
+        for (json, expected) in [
+            (r#"{"color_terminal_frames":true}"#, Some(true)),
+            (r#"{"color_terminal_frames":false}"#, Some(false)),
+            (r#"{"color_terminal_frames":null}"#, None),
+        ] {
+            let store = HelmStore::open(&path).await.unwrap();
+            store
+                .update_preferences(serde_json::from_str(json).unwrap())
+                .await
+                .unwrap();
+            store
+                .update_preferences(serde_json::from_str(r#"{"list_sort":"title"}"#).unwrap())
+                .await
+                .unwrap();
+            drop(store);
+            let reopened = HelmStore::open(&path).await.unwrap();
+            assert_eq!(
+                reopened.preferences().await.unwrap(),
+                Preferences {
+                    compact: Some(true),
+                    list_sort: Some("title".into()),
+                    color_terminal_frames: expected,
+                    ..Preferences::default()
+                },
+                "an unrelated sparse write cannot replace the frame choice",
             );
         }
     }

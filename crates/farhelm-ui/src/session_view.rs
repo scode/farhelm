@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
+use farhelm_proto::host_appearance::HostColor;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
@@ -2172,6 +2173,15 @@ pub(crate) fn SessionView(
     let host_appearance = registry.iter().find(|host| Some(host.id) == shown.host);
     let host_icon = host_appearance.map(|host| host.icon).unwrap_or_default();
     let host_color = host_appearance.map(|host| host.color).unwrap_or_default();
+    // The sidebar's live host snapshot already invalidates this view after
+    // an appearance write. Keep the frame tied to that identity word, while
+    // the shared preference signal controls whether any frame is painted.
+    let frame_color = if host_color == HostColor::Default {
+        "var(--fg-0)".to_string()
+    } else {
+        format!("var(--host-icon-{})", host_color.as_str())
+    };
+    let color_frame = preferences.0.read().color_terminal_frames == Some(true);
     let header_session = shown.clone();
     let header_replace_session = shown.clone();
     // A legacy session's launch cannot be copied as it is, so plain Replace
@@ -3041,6 +3051,8 @@ pub(crate) fn SessionView(
                 // WKWebView (MT-5).
                 div {
                     class: "terminal-panes",
+                    "data-colored-frame": if color_frame { "true" } else { "false" },
+                    style: "--host-frame-color: {frame_color};",
                     "data-unavailable": "{shown.stale}",
                     "data-deleting": if header_deleting { "true" } else { "false" },
                     // What terminal.js's page-wide drop guard shows when a

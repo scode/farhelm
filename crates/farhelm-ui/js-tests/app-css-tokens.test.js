@@ -31,12 +31,15 @@ const path = require("node:path");
 
 const APP_CSS_PATH = path.join(__dirname, "../assets/app.css");
 
-// `--menu-top` is the one token this file legitimately references without
-// declaring: `menu_panel.rs` sets it inline via a `style` attribute the
-// panel's measured position computes at runtime (search that file for
-// `--menu-top:` to confirm), so there is no fixed value for `:root` to
-// hold. Every other custom property app.css touches has to be declared.
-const RUNTIME_ALLOWLISTED_VARS = new Set(["--menu-top"]);
+// These tokens are legitimately referenced without being declared, because
+// Rust sets them inline via a `style` attribute at runtime, so there is no
+// fixed value for `:root` to hold. `--menu-top`: `menu_panel.rs` computes it
+// from the panel's measured position (search that file for `--menu-top:`).
+// `--host-frame-color`: `session_view.rs` sets it from the session host's
+// identity color when terminal frames are colored by host (search for
+// `--host-frame-color:`). Every other custom property app.css touches has to
+// be declared.
+const RUNTIME_ALLOWLISTED_VARS = new Set(["--menu-top", "--host-frame-color"]);
 
 const HEX_COLOR_RE = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/;
 const COLOR_FUNCTION_RE = /\b(?:rgb|rgba|hsl|hsla)\(/i;
