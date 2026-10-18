@@ -2830,11 +2830,13 @@ impl SupervisorClient {
     /// Ask the connected supervisor to browse one directory on its own host.
     ///
     /// The returned paths are supervisor-validated values; this client does
-    /// not expand `~` or inspect the local filesystem.
+    /// not expand `~` or inspect the local filesystem. The final boolean is
+    /// registry ownership of the canonical directory at browse time, used
+    /// only as a launch-composition snapshot rather than an admission lease.
     pub async fn browse_directory(
         &self,
         cwd: &str,
-    ) -> anyhow::Result<(String, Option<String>, Vec<String>, bool)> {
+    ) -> anyhow::Result<(String, Option<String>, Vec<String>, bool, bool)> {
         let req_id = self.req_id();
         match self
             .request(
@@ -2842,6 +2844,7 @@ impl SupervisorClient {
                 ControlMsg::BrowseDirectory {
                     req_id,
                     cwd: cwd.to_string(),
+                    membership_only: false,
                 },
             )
             .await?
@@ -2851,9 +2854,36 @@ impl SupervisorClient {
                 parent,
                 children,
                 truncated,
+                managed_checkout,
                 ..
-            } => Ok((cwd, parent, children, truncated)),
+            } => Ok((cwd, parent, children, truncated, managed_checkout)),
             other => Err(wrong_reply("BrowseDirectory", &other)),
+        }
+    }
+
+    /// Resolve launch ownership without listing unrelated children. The path
+    /// and membership are one target-side observation; callers granting trust
+    /// must dispatch this canonical path, so an alias cannot change its target
+    /// while approval waits.
+    pub async fn managed_checkout_for_cwd(&self, cwd: &str) -> anyhow::Result<(String, bool)> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::BrowseDirectory {
+                    req_id,
+                    cwd: cwd.to_string(),
+                    membership_only: true,
+                },
+            )
+            .await?
+        {
+            ControlMsg::DirectoryListing {
+                cwd,
+                managed_checkout,
+                ..
+            } => Ok((cwd, managed_checkout)),
+            other => Err(wrong_reply("BrowseDirectory membership", &other)),
         }
     }
 
@@ -4122,6 +4152,7 @@ mod tests {
         SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: id.into(),

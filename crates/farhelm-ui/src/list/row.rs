@@ -2559,6 +2559,7 @@ pub(super) fn row_specimen(id: &str) -> Session {
     Session {
         screen_yolo: false,
         claude_trust_prompt: false,
+        workspace_trust_prompt: false,
         id: id.to_string(),
         title: "stable".to_string(),
         cwd: "/tmp".to_string(),

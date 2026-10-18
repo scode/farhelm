@@ -224,11 +224,6 @@ fn record_launch_history(
         .filter(|permission| Some(*permission) != selection.harness.omitted_permission())
         .filter(|permission| *permission != farhelm_proto::LaunchPermission::Custom)
         .map(farhelm_proto::LaunchPermission::wire_word);
-    let workspace_trust = if selection.harness.offers_workspace_trust() {
-        selection.workspace_trust
-    } else {
-        None
-    };
     let launch_json =
         serde_json::to_string(selection).context("serializing structured launch history")?;
     let changed = tx
@@ -265,18 +260,8 @@ fn record_launch_history(
             rusqlite::params![permissions_word],
         )
         .context("remembering the launched permissions choice")?;
-        // An unsupported harness or an omitted choice has no opinion about
-        // the last explicit trust choice.
-        if let Some(workspace_trust) = workspace_trust {
-            tx.execute(
-                "INSERT INTO preferences (singleton, remembered_workspace_trust) \
-                 VALUES (1, ?1) \
-                 ON CONFLICT (singleton) DO UPDATE SET \
-                     remembered_workspace_trust = excluded.remembered_workspace_trust",
-                rusqlite::params![workspace_trust],
-            )
-            .context("remembering the launched workspace-trust choice")?;
-        }
+        // Trust now comes from managed-checkout Settings. Preserve the old
+        // preference column for stored-data compatibility, but never refresh it.
     }
     Ok(changed)
 }
@@ -320,7 +305,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 56;
+const SCHEMA_VERSION: i64 = 57;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -475,7 +460,10 @@ const CHECKOUT_CONFIG_SCHEMA: &str = "\
                  root       TEXT,
                  post_clone TEXT,
                  revision   INTEGER NOT NULL,
-                 claude_trust INTEGER NOT NULL DEFAULT 0 CHECK (claude_trust IN (0, 1))
+                 claude_trust INTEGER NOT NULL DEFAULT 0 CHECK (claude_trust IN (0, 1)),
+                 codex_trust INTEGER NOT NULL DEFAULT 0 CHECK (codex_trust IN (0, 1)),
+                 muse_trust INTEGER NOT NULL DEFAULT 0 CHECK (muse_trust IN (0, 1)),
+                 pi_trust INTEGER NOT NULL DEFAULT 0 CHECK (pi_trust IN (0, 1))
              ) STRICT;
              INSERT INTO checkout_config (singleton, root, post_clone, revision)
                  VALUES (1, NULL, NULL, 0);
@@ -975,14 +963,16 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 /// [`PreferencePatch`], not this type: a patch has to tell "leave alone"
 /// from "clear", and a plain `Option` cannot.
 ///
-/// The remembered launch fields are server-observed facts, unlike the
+/// The remembered permission is a server-observed fact, unlike the
 /// client-declared list fields. The helm writes them as side effects of
 /// successful structured launches
 /// (`record_create_history_with_destination`) — see that function's doc for why
 /// origin-gating them to user-initiated launches matters. The wire route still
 /// accepts them on `PUT` like the others (kept uniform with the rest of this
 /// type rather than carved into a read-only exception), but no shipped
-/// client sends either one. Host setup and removal confirmation choices are
+/// client sends it. Workspace-trust memory is retired: old wire writes are
+/// accepted and ignored, and its retained database column is never read.
+/// Host setup and removal confirmation choices are
 /// helm-wide opt-outs: an explicit permanent answer is shared by every
 /// client, while an unset field keeps asking. Feedback contact is a client
 /// choice recorded only after a successful send, and explicit null forgets it.
@@ -997,6 +987,14 @@ pub struct Preferences {
     /// Shared opt-out for the managed-checkout Claude trust hint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claude_trust_hint_dismissed: Option<bool>,
+    /// Shared opt-outs for each agent's managed-checkout trust hint. Unset
+    /// and false both allow the hint, independently of the trust switch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_trust_hint_dismissed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muse_trust_hint_dismissed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pi_trust_hint_dismissed: Option<bool>,
     /// Dismissal shared by every client of this helm. Unset means unseen,
     /// including existing helms upgraded from before the welcome card.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1015,8 +1013,8 @@ pub struct Preferences {
     /// to a client that could not act on it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remembered_permissions: Option<String>,
-    /// The last explicit workspace-trust choice from a successful user
-    /// structured launch on a harness that supports it.
+    /// Retired wire field. Reads are always unset; the historical database
+    /// column is retained, but trust now comes from managed-checkout Settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remembered_workspace_trust: Option<bool>,
     /// Whether host removal skips its confirmation dialog for this helm.
@@ -1078,6 +1076,25 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub claude_trust_hint_dismissed: Option<Option<bool>>,
+    /// Null restores this agent's hint; omission leaves its shared dismissal alone.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub codex_trust_hint_dismissed: Option<Option<bool>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub muse_trust_hint_dismissed: Option<Option<bool>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub pi_trust_hint_dismissed: Option<Option<bool>>,
     /// Null restores unseen; omission preserves another client's dismissal.
     #[serde(
         default,
@@ -1112,7 +1129,7 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub remembered_permissions: Option<Option<String>>,
-    /// See [`Preferences::remembered_workspace_trust`].
+    /// Retired field accepted for older clients and deliberately ignored.
     #[serde(
         default,
         deserialize_with = "double_option_bool",
@@ -1968,6 +1985,8 @@ pub struct HelmStore {
 ///   Pre-upgrade keyed attempts no longer match and need fresh approval once.
 /// - 55: nullable shared tunnel consent. Upgraded helms start without authorization.
 /// - 56: nullable quick-launch naming choice. Unset enables naming on upgraded helms.
+/// - 57: off-by-default Codex, Muse and Pi managed-checkout trust settings,
+///   with independent nullable hint dismissals; old launcher trust stays inert.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2158,8 +2177,9 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              ) STRICT;
              -- The ONE client preference row (SPEC.md, Session list): the
              -- chosen list order, last user-selected session, compact rows,
-             -- and the permissions and workspace-trust choices of successful STRUCTURED
-             -- launch used, shared by every client of this helm. Singleton
+             -- and the permissions choice of successful STRUCTURED launches,
+             -- shared by every client of this helm. The old workspace-trust
+             -- column remains for compatibility but is no longer read or written. Singleton
              -- for the same reason web_token is: no client keeps its own
              -- copy, so there is exactly one answer to remember. Preference
              -- columns are nullable — an unset preference is a real state
@@ -2186,7 +2206,10 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  welcome_seen INTEGER CHECK (welcome_seen IN (0, 1)),
                  claude_trust_hint_dismissed INTEGER CHECK (claude_trust_hint_dismissed IN (0, 1)),
                  tunnel_consent INTEGER CHECK (tunnel_consent IN (0, 1)),
-                 name_session_on_quick_launch INTEGER CHECK (name_session_on_quick_launch IN (0, 1))
+                 name_session_on_quick_launch INTEGER CHECK (name_session_on_quick_launch IN (0, 1)),
+                 codex_trust_hint_dismissed INTEGER CHECK (codex_trust_hint_dismissed IN (0, 1)),
+                 muse_trust_hint_dismissed INTEGER CHECK (muse_trust_hint_dismissed IN (0, 1)),
+                 pi_trust_hint_dismissed INTEGER CHECK (pi_trust_hint_dismissed IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2278,7 +2301,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 56;",
+              PRAGMA user_version = 57;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3481,6 +3504,56 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 56")?;
         version = 56;
     }
+    if version == 56 {
+        // Some historical fixtures rewind only user_version. Check each
+        // column separately so replay preserves both settings and dismissals.
+        for (table, column, declaration) in [
+            (
+                "checkout_config",
+                "codex_trust",
+                "INTEGER NOT NULL DEFAULT 0 CHECK (codex_trust IN (0, 1))",
+            ),
+            (
+                "checkout_config",
+                "muse_trust",
+                "INTEGER NOT NULL DEFAULT 0 CHECK (muse_trust IN (0, 1))",
+            ),
+            (
+                "checkout_config",
+                "pi_trust",
+                "INTEGER NOT NULL DEFAULT 0 CHECK (pi_trust IN (0, 1))",
+            ),
+            (
+                "preferences",
+                "codex_trust_hint_dismissed",
+                "INTEGER CHECK (codex_trust_hint_dismissed IN (0, 1))",
+            ),
+            (
+                "preferences",
+                "muse_trust_hint_dismissed",
+                "INTEGER CHECK (muse_trust_hint_dismissed IN (0, 1))",
+            ),
+            (
+                "preferences",
+                "pi_trust_hint_dismissed",
+                "INTEGER CHECK (pi_trust_hint_dismissed IN (0, 1))",
+            ),
+        ] {
+            let present: bool = tx.query_row(
+                "SELECT count(*) != 0 FROM pragma_table_info(?1) WHERE name = ?2",
+                rusqlite::params![table, column],
+                |row| row.get(0),
+            )?;
+            if !present {
+                tx.execute_batch(&format!(
+                    "ALTER TABLE {table} ADD COLUMN {column} {declaration};"
+                ))?;
+            }
+        }
+        tx.execute_batch("PRAGMA user_version = 57;")
+            .context("migrating helm.db to schema version 57")?;
+        version = 57;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4431,12 +4504,15 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
                         let remembered_permissions: Option<String> = row.get(3)?;
                         Ok(Preferences {
+                            codex_trust_hint_dismissed: row.get(4)?,
+                            muse_trust_hint_dismissed: row.get(16)?,
+                            pi_trust_hint_dismissed: row.get(17)?,
                             name_session_on_quick_launch: row.get(15)?,
                             tunnel_consent: row.get(14)?,
                             claude_trust_hint_dismissed: row.get(13)?,
@@ -4454,7 +4530,7 @@ impl HelmStore {
                             // forwarded to a client that has no flag for it.
                             remembered_permissions: remembered_permissions
                                 .filter(|word| is_known_remembered_permissions_word(word)),
-                            remembered_workspace_trust: row.get(4)?,
+                            remembered_workspace_trust: None,
                             skip_host_remove_confirmation: row.get(5)?,
                             skip_host_setup_confirmation: row.get(6)?,
                             feedback_contact: row.get(7)?,
@@ -4485,6 +4561,8 @@ impl HelmStore {
     /// per FIELD, which is the only order anyone can observe anyway. The
     /// clear lets a successful feedback send forget its contact and lets test
     /// harnesses establish a "nothing remembered" precondition.
+    /// The retired `remembered_workspace_trust` field is the exception: older
+    /// clients may still send it, but no patch changes its historical column.
     ///
     /// Validation (that `list_sort` is a word this helm serves) belongs to
     /// the handler, not here: the store records what it is told, exactly as
@@ -4507,7 +4585,9 @@ impl HelmStore {
             let selected_present = patch.last_selected.is_some();
             let compact_present = patch.compact.is_some();
             let remembered_permissions_present = patch.remembered_permissions.is_some();
-            let remembered_workspace_trust_present = patch.remembered_workspace_trust.is_some();
+            let codex_trust_hint_present = patch.codex_trust_hint_dismissed.is_some();
+            let muse_trust_hint_present = patch.muse_trust_hint_dismissed.is_some();
+            let pi_trust_hint_present = patch.pi_trust_hint_dismissed.is_some();
             let skip_host_remove_confirmation_present = patch.skip_host_remove_confirmation.is_some();
             let skip_host_setup_confirmation_present = patch.skip_host_setup_confirmation.is_some();
             let feedback_contact_present = patch.feedback_contact.is_some();
@@ -4526,14 +4606,16 @@ impl HelmStore {
             let selected = patch.last_selected.flatten();
             let compact = patch.compact.flatten();
             let remembered_permissions = patch.remembered_permissions.flatten();
-            let remembered_workspace_trust = patch.remembered_workspace_trust.flatten();
+            let codex_trust_hint = patch.codex_trust_hint_dismissed.flatten();
+            let muse_trust_hint = patch.muse_trust_hint_dismissed.flatten();
+            let pi_trust_hint = patch.pi_trust_hint_dismissed.flatten();
             let skip_host_remove_confirmation = patch.skip_host_remove_confirmation.flatten();
             let skip_host_setup_confirmation = patch.skip_host_setup_confirmation.flatten();
             conn
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -4541,8 +4623,8 @@ impl HelmStore {
                          compact = CASE WHEN ?12 THEN excluded.compact ELSE compact END, \
                          remembered_permissions = CASE WHEN ?13 \
                              THEN excluded.remembered_permissions ELSE remembered_permissions END, \
-                         remembered_workspace_trust = CASE WHEN ?14 \
-                             THEN excluded.remembered_workspace_trust ELSE remembered_workspace_trust END, \
+                         codex_trust_hint_dismissed = CASE WHEN ?14 \
+                             THEN excluded.codex_trust_hint_dismissed ELSE codex_trust_hint_dismissed END, \
                          skip_host_remove_confirmation = CASE WHEN ?15 \
                              THEN excluded.skip_host_remove_confirmation ELSE skip_host_remove_confirmation END, \
                          skip_host_setup_confirmation = CASE WHEN ?16 \
@@ -4555,13 +4637,15 @@ impl HelmStore {
                          welcome_seen = CASE WHEN ?26 THEN excluded.welcome_seen ELSE welcome_seen END, \
                          claude_trust_hint_dismissed = CASE WHEN ?28 THEN excluded.claude_trust_hint_dismissed ELSE claude_trust_hint_dismissed END, \
                          tunnel_consent = CASE WHEN ?30 THEN excluded.tunnel_consent ELSE tunnel_consent END, \
-                         name_session_on_quick_launch = CASE WHEN ?32 THEN excluded.name_session_on_quick_launch ELSE name_session_on_quick_launch END",
+                         name_session_on_quick_launch = CASE WHEN ?32 THEN excluded.name_session_on_quick_launch ELSE name_session_on_quick_launch END, \
+                         muse_trust_hint_dismissed = CASE WHEN ?34 THEN excluded.muse_trust_hint_dismissed ELSE muse_trust_hint_dismissed END, \
+                         pi_trust_hint_dismissed = CASE WHEN ?36 THEN excluded.pi_trust_hint_dismissed ELSE pi_trust_hint_dismissed END",
                     rusqlite::params![
                         sort,
                         selected,
                         compact,
                         remembered_permissions,
-                        remembered_workspace_trust,
+                        codex_trust_hint,
                         skip_host_remove_confirmation,
                         skip_host_setup_confirmation,
                         feedback_contact,
@@ -4570,7 +4654,7 @@ impl HelmStore {
                         selected_present,
                         compact_present,
                         remembered_permissions_present,
-                        remembered_workspace_trust_present,
+                        codex_trust_hint_present,
                         skip_host_remove_confirmation_present,
                         skip_host_setup_confirmation_present,
                         feedback_contact_present,
@@ -4588,7 +4672,11 @@ impl HelmStore {
                         tunnel_consent,
                         tunnel_consent_present,
                         name_session_on_quick_launch,
-                        name_session_on_quick_launch_present
+                        name_session_on_quick_launch_present,
+                        muse_trust_hint,
+                        muse_trust_hint_present,
+                        pi_trust_hint,
+                        pi_trust_hint_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -6594,8 +6682,8 @@ impl HelmStore {
     /// the GUI for this create, or `None` (an agent-originated create, a
     /// plain Replace, a raw create). It alone decides the
     /// `launch_history` row and, from the same selection, the helm-wide
-    /// `preferences.remembered_permissions` memory and, for an explicit
-    /// Codex, Muse, or Pi trust choice, `remembered_workspace_trust`.
+    /// `preferences.remembered_permissions` memory. Workspace trust remains
+    /// on the stored selection for compatibility, but never seeds GUI defaults.
     /// Never `entry.launch`: that is the supervisor's reply, which a remote
     /// host controls, and SPEC.md allows only explicit GUI selections to
     /// shape GUI defaults and suggestions. Piggybacked on the launch-history
@@ -7723,6 +7811,7 @@ mod tests {
         SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: id.to_string(),
@@ -8370,20 +8459,19 @@ mod tests {
         }
     }
 
-    /// Trust memory follows admitted human launches, while agent launches
-    /// and harnesses without a per-run switch cannot change that default.
+    /// Old stored trust choices still decode, but admitted launches must
+    /// never revive the retired launcher preference, regardless of origin.
     #[farhelm_testtrace::test]
-    async fn workspace_trust_memory_requires_an_explicit_supported_user_launch() {
+    async fn workspace_trust_memory_is_inert_for_all_admitted_launches() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "trust.example", "identity-a").await;
-        for (id, seq, harness, trust, user, expected) in [
+        for (id, seq, harness, trust, user) in [
             (
                 "agent",
                 1,
                 farhelm_proto::LaunchHarness::Muse,
                 Some(true),
                 false,
-                None,
             ),
             (
                 "decline",
@@ -8391,7 +8479,6 @@ mod tests {
                 farhelm_proto::LaunchHarness::Pi,
                 Some(false),
                 true,
-                Some(false),
             ),
             (
                 "unsupported",
@@ -8399,23 +8486,14 @@ mod tests {
                 farhelm_proto::LaunchHarness::Claude,
                 Some(true),
                 true,
-                Some(false),
             ),
-            (
-                "omitted",
-                4,
-                farhelm_proto::LaunchHarness::Muse,
-                None,
-                true,
-                Some(false),
-            ),
+            ("omitted", 4, farhelm_proto::LaunchHarness::Muse, None, true),
             (
                 "codex",
                 5,
                 farhelm_proto::LaunchHarness::Codex,
                 Some(true),
                 true,
-                Some(true),
             ),
             (
                 "accept",
@@ -8423,7 +8501,6 @@ mod tests {
                 farhelm_proto::LaunchHarness::Muse,
                 Some(true),
                 true,
-                Some(true),
             ),
         ] {
             let entry = SessionInfo {
@@ -8462,8 +8539,22 @@ mod tests {
                     .await
                     .unwrap()
                     .remembered_workspace_trust,
-                expected
+                None
             );
+            // The public reader deliberately hides the retired column. Check
+            // its raw value too, or a forgotten create-side writer is invisible.
+            let persisted: Option<bool> = store
+                .conn()
+                .lock()
+                .query_row(
+                    "SELECT remembered_workspace_trust FROM preferences WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .unwrap()
+                .flatten();
+            assert_eq!(persisted, None, "accepted creates never write trust memory");
         }
     }
 
@@ -9536,6 +9627,7 @@ mod tests {
                     &SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         creation_seq: None,
                         ..session("b100", 10)
                     }
@@ -10436,6 +10528,9 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                codex_trust_hint_dismissed: None,
+                muse_trust_hint_dismissed: None,
+                pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
             "a selection write must not discard the sort written before it"
@@ -10464,6 +10559,9 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                codex_trust_hint_dismissed: None,
+                muse_trust_hint_dismissed: None,
+                pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
@@ -10491,6 +10589,9 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                codex_trust_hint_dismissed: None,
+                muse_trust_hint_dismissed: None,
+                pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
             "an explicit null clears exactly the field it names"
@@ -10567,6 +10668,9 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                codex_trust_hint_dismissed: None,
+                muse_trust_hint_dismissed: None,
+                pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
@@ -12023,6 +12127,9 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                codex_trust_hint_dismissed: None,
+                muse_trust_hint_dismissed: None,
+                pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
             "the new field defaults absent while both existing choices survive"
@@ -12098,6 +12205,9 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                codex_trust_hint_dismissed: None,
+                muse_trust_hint_dismissed: None,
+                pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
             "the new field defaults absent while every existing choice survives"
@@ -16175,18 +16285,21 @@ mod tests {
                     SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         title: "keeper".to_string(),
                         ..session("good-1", 500)
                     },
                     SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         title: "keeper".to_string(),
                         ..session("undecodable", 400)
                     },
                     SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         title: "keeper".to_string(),
                         ..session("mislabelled", 300)
                     },

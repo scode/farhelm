@@ -922,6 +922,7 @@ pub(crate) fn SessionView(
     // before this closure is ever reached and the failure arm here would be
     // one nobody could take.
     let occurrences = use_context::<crate::claude_trust::OccurrenceDismissals>();
+    let workspace_occurrences = use_context::<crate::workspace_trust::OccurrenceDismissals>();
     let mut commit_detail =
         move |generation: u64, fetched: Option<Session>, started_at: u32, index: u64| {
             match admit_detail(
@@ -968,6 +969,7 @@ pub(crate) fn SessionView(
                     });
                     closed_tabs.write().retain(|id| live.contains(id.as_str()));
                     occurrences.observe(&fresh);
+                    workspace_occurrences.observe(&fresh);
                     current.set(fresh);
                     true
                 }
@@ -2183,6 +2185,7 @@ pub(crate) fn SessionView(
     let card_replace_with_session = shown.clone();
     rsx! {
         div { class: "layout", "data-claude-trust-prompt": "{shown.claude_trust_prompt}",
+            "data-workspace-trust-prompt": "{shown.workspace_trust_prompt}",
             // Tabs share the top row with actions; identity stays below the
             // terminal so a wider path never competes with a lifecycle control.
             header { class: "session-topbar",
@@ -3001,6 +3004,10 @@ pub(crate) fn SessionView(
                 }
                 if shown.working_copy.is_some() {
                     crate::claude_trust::ClaudeTrustBand {
+                        session: current,
+                        agent_visible: active_tab.is_none(),
+                    }
+                    crate::workspace_trust::WorkspaceTrustBand {
                         session: current,
                         agent_visible: active_tab.is_none(),
                     }
@@ -4038,6 +4045,7 @@ mod tests {
         Session {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             id: "sess".to_string(),
             title: "sess".to_string(),
             cwd: "/tmp".to_string(),
@@ -4545,6 +4553,7 @@ mod tests {
             Session {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 id: id.to_string(),
                 title: title.to_string(),
                 cwd: "/tmp".to_string(),
@@ -4601,6 +4610,7 @@ mod tests {
             Session {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 id: "sess".to_string(),
                 title: "sess".to_string(),
                 cwd: "/tmp".to_string(),
@@ -4697,6 +4707,7 @@ mod tests {
         let unknown = Session {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             id: "sess".to_string(),
             title: "sess".to_string(),
             cwd: "/tmp".to_string(),
@@ -4769,6 +4780,7 @@ mod tests {
             Session {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 id: "sess".to_string(),
                 title: "t".to_string(),
                 cwd: "/tmp".to_string(),
@@ -4802,6 +4814,7 @@ mod tests {
             !seen_effect_eligible(&Session {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 stale: true,
                 ..base()
             }),
@@ -4811,6 +4824,7 @@ mod tests {
             !seen_effect_eligible(&Session {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 status: crate::SessionStatus::Exited { exit_code: Some(0) },
                 ..base()
             }),
@@ -4820,6 +4834,7 @@ mod tests {
             !seen_effect_eligible(&Session {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 seen_activity_at: None,
                 pinned: false,
                 notifications: Vec::new(),
@@ -4841,6 +4856,7 @@ mod tests {
         let already_seen = Session {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             id: "sess".to_string(),
             title: "t".to_string(),
             cwd: "/tmp".to_string(),

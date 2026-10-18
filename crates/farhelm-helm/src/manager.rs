@@ -5781,6 +5781,7 @@ mod tests {
         SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: id.to_string(),

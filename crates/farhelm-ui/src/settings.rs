@@ -67,6 +67,7 @@ fn restore_automatic_checkbox(in_force: bool) {
 pub(crate) fn SettingsDialog(
     on_close: EventHandler<()>,
     #[props(default)] focus_claude_trust: bool,
+    #[props(default)] focus_workspace_trust: Option<crate::workspace_trust::TrustAgent>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let setup_base = base.clone();
@@ -93,6 +94,13 @@ pub(crate) fn SettingsDialog(
     });
     // Why the last change of that choice was not saved, until the next try.
     let mut automatic_error = use_signal(|| None::<String>);
+    // Retain Claude's existing entry point while each flag-based band lands on
+    // its own switch. The selector is built only from the closed agent enum.
+    let trust_focus = if focus_claude_trust {
+        Some("#checkout-claude-trust".to_string())
+    } else {
+        focus_workspace_trust.map(|agent| format!("#checkout-{}-trust", agent.key()))
+    };
 
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
@@ -105,14 +113,14 @@ pub(crate) fn SettingsDialog(
                 onmounted: move |_| {
                     install_dialog_with_selector(
                         DIALOG_SELECTOR,
-                        if focus_claude_trust { "#checkout-claude-trust" } else { "input" },
+                        trust_focus.as_deref().unwrap_or("input"),
                         Some(".app-settings-close"),
                     );
-                    if focus_claude_trust {
+                    if let Some(selector) = &trust_focus {
                         // The shared dialog focus helper deliberately prevents
-                        // scrolling. This entry point promises the caveats, so
-                        // bring their section into the dialog's scroll viewport.
-                        document::eval("requestAnimationFrame(() => document.querySelector('#checkout-claude-trust')?.scrollIntoView({block: 'start'}))");
+                        // scrolling. A band's entry point promises its setting
+                        // and explanation, so bring that section into view.
+                        document::eval(&format!("requestAnimationFrame(() => document.querySelector('{selector}')?.scrollIntoView({{block: 'start'}}))"));
                     }
                 },
                 onkeydown: move |event: KeyboardEvent| {
@@ -290,6 +298,9 @@ pub(crate) fn SettingsDialog(
                         }
                         crate::checkout_post_clone::CheckoutPostCloneField {}
                         crate::claude_trust::ClaudeTrustSettings {}
+                        crate::workspace_trust::WorkspaceTrustSettings { agent: crate::workspace_trust::TrustAgent::Codex }
+                        crate::workspace_trust::WorkspaceTrustSettings { agent: crate::workspace_trust::TrustAgent::Muse }
+                        crate::workspace_trust::WorkspaceTrustSettings { agent: crate::workspace_trust::TrustAgent::Pi }
                     }
                     crate::sounds::SoundSettings {}
                     crate::ntfy_settings::NtfySettings {}

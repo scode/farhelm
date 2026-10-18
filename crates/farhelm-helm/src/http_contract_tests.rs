@@ -53,6 +53,7 @@ fn session_list_body() -> SessionListBody {
     let info = SessionInfo {
         screen_yolo: false,
         claude_trust_prompt: false,
+        workspace_trust_prompt: false,
         agent_kind: farhelm_proto::AgentKind::Codex,
         id: "fh-0123abcd".to_string(),
         parent: Some("fh-89abcdef".to_string()),

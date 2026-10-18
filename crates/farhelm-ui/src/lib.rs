@@ -177,6 +177,7 @@ mod tabs;
 mod tunnels;
 mod welcome;
 mod window_chrome;
+mod workspace_trust;
 /// The loud confirmation a YOLO launch asks for on a host that asks first.
 mod yolo_confirm;
 // Same reasoning as `webview_watchdog` below: declared for every non-wasm
@@ -350,6 +351,10 @@ pub struct Session {
     /// Current sampled trust question; never admission or permission evidence.
     #[serde(default)]
     pub claude_trust_prompt: bool,
+    /// Harness-neutral observed question. The band still requires a structured
+    /// launch identifying its agent; older cached snapshots omit this hint.
+    #[serde(default)]
+    pub workspace_trust_prompt: bool,
     pub id: String,
     pub title: String,
     pub cwd: String,
@@ -1620,6 +1625,9 @@ fn AppBody() -> Element {
     use_context_provider(|| {
         claude_trust::OccurrenceDismissals(Signal::new(std::collections::HashSet::new()))
     });
+    use_context_provider(|| {
+        workspace_trust::OccurrenceDismissals(Signal::new(std::collections::HashSet::new()))
+    });
     // Authentication recovery remounts PreferencesGate, but must not decide
     // whether to introduce the app a second time in the same page load.
     use_context_provider(|| welcome::WelcomeDecided(Signal::new(false)));
@@ -2803,6 +2811,7 @@ mod tests {
         let at = |last_activity_at: i64, created_at: i64| Session {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             cwd: "/tmp".to_string(),
@@ -2871,6 +2880,7 @@ mod tests {
         let at = |seen_activity_at: Option<Option<i64>>, last_activity_at: i64| Session {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             cwd: "/tmp".to_string(),

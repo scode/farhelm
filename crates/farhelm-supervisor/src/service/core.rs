@@ -88,6 +88,7 @@ pub(crate) struct DirectoryBrowse {
     pub(crate) parent: Option<String>,
     pub(crate) children: Vec<String>,
     pub(crate) truncated: bool,
+    pub(crate) managed_checkout: bool,
 }
 
 /// The number of usable immediate child directories one browse reply may
@@ -5001,14 +5002,36 @@ impl Supervisor {
     /// This is deliberately a nonrecursive browse operation. It expands `~`
     /// using this daemon's resolved home and canonicalizes the accepted
     /// directory, which gives history a verified path identity without ever
-    /// resolving a remote path on the helm or browser machine.
+    /// resolving a remote path on the helm or browser machine. Ownership is
+    /// read from the registry for that same canonical answer, not guessed from
+    /// a configured root. It is a composition snapshot, not an admission lease.
+    #[cfg(test)]
     pub(crate) async fn browse_directory(&self, cwd: &str) -> anyhow::Result<DirectoryBrowse> {
+        self.inspect_directory(cwd, false).await
+    }
+
+    /// Share the bounded filesystem worker while letting trust composition
+    /// inspect only its destination. Reading unrelated entries would make
+    /// an unreadable directory or a hung child symlink prevent a valid launch.
+    pub(crate) async fn inspect_directory(
+        &self,
+        cwd: &str,
+        membership_only: bool,
+    ) -> anyhow::Result<DirectoryBrowse> {
         // A timed-out caller can drop its request buffer while the worker is
         // still blocked in the filesystem. Copy the expanded path before
         // spawning so the detached worker never borrows that caller state.
         let cwd = expand_tilde_cwd(cwd, self.user_home.as_deref())?.into_owned();
+        let conn = self.store.conn.clone();
         Self::run_directory_worker(Arc::clone(&self.directory_browse_workers), move || {
-            Self::browse_directory_blocking(&cwd)
+            let mut listing = if membership_only {
+                Self::directory_membership_blocking(&cwd)?
+            } else {
+                Self::browse_directory_blocking(&cwd)?
+            };
+            listing.managed_checkout =
+                crate::working_copies::cwd_is_managed(&conn.lock(), &listing.cwd)?;
+            Ok(listing)
         })
         .await
     }
@@ -5141,6 +5164,29 @@ impl Supervisor {
             parent,
             children,
             truncated,
+            // The filesystem-only helper knows no registry. The production
+            // worker fills this after canonicalization, before replying.
+            managed_checkout: false,
+        })
+    }
+
+    /// Validate the destination using admission's path contract, without
+    /// imposing the visual picker's printable-label rule or read permission.
+    /// The surrounding worker adds registry ownership for this canonical path.
+    fn directory_membership_blocking(cwd: &str) -> anyhow::Result<DirectoryBrowse> {
+        Self::ensure_browse_cwd_usable(cwd)?;
+        let canonical = std::fs::canonicalize(cwd)
+            .with_context(|| format!("canonicalizing launch directory {cwd}"))?;
+        let cwd = canonical_cwd_text(cwd, canonical)?;
+        if cwd.len() > DIRECTORY_BROWSE_FIELD_BYTES {
+            anyhow::bail!("the selected directory path exceeds the browse field limit");
+        }
+        Ok(DirectoryBrowse {
+            cwd,
+            parent: None,
+            children: Vec::new(),
+            truncated: false,
+            managed_checkout: false,
         })
     }
 
@@ -5222,6 +5268,7 @@ impl Supervisor {
             parent: parent.map(str::to_string),
             children: children.to_vec(),
             truncated: false,
+            managed_checkout: false,
         });
         // `Frame::encoded_len` excludes only the four-byte length prefix;
         // include it because this is a budget on bytes sent, not on JSON.
@@ -6367,6 +6414,7 @@ impl Supervisor {
                     info: SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         parent: row.parent,
                         id: row.id,
                         title: row.title,
@@ -8685,6 +8733,7 @@ impl Supervisor {
                 let info = SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     parent: row.parent,
                     restart_offer: snapshot.restart_offer(
                         row.captured_conversation.as_deref(),
@@ -9623,6 +9672,7 @@ impl Supervisor {
         let info = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             parent,
             id: id.clone(),
             title,
@@ -11926,6 +11976,7 @@ impl Supervisor {
         let info = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             parent: entry.info.parent.clone(),
             id: entry.info.id.clone(),
             title: entry.info.title.clone(),
@@ -14289,6 +14340,7 @@ impl Supervisor {
         let info = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             parent: row.parent.clone(),
             id: row.id.clone(),
             title: row.title.clone(),
@@ -17690,6 +17742,105 @@ pub(crate) mod tests {
         assert_eq!(listing.parent.as_deref(), canonical_home.to_str());
     }
 
+    /// Trust composition must use the canonical target's registry membership.
+    /// A symlink into a checkout qualifies, while a similarly named sibling
+    /// does not; the answer must not depend on a session-list projection.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn directory_browse_reports_canonical_managed_membership() {
+        let state = StateDir::new();
+        let directory = tempfile::tempdir().expect("checkout root");
+        let root = directory.path().canonicalize().unwrap();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let registry_root = root.to_string_lossy().into_owned();
+        let allocated = sup
+            .store
+            .conn
+            .call("browse ownership fixture panicked", move |conn| {
+                let row = crate::working_copies::record_planned(
+                    conn,
+                    &crate::working_copies::PlannedWorkingCopy {
+                        id: "browse-checkout".into(),
+                        canonical_root: registry_root,
+                        repo_owner: "example".into(),
+                        repo_name: "project".into(),
+                        original_basename: "checkout".into(),
+                        origin_session_id: "browse-origin".into(),
+                        root_identity: None,
+                        preparation_snapshot: None,
+                    },
+                )?;
+                Ok(crate::working_copies::allocate(conn, &row.id, None)?.row)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            allocated.allocation_state,
+            crate::working_copies::AllocationState::Allocated
+        );
+        let checkout = PathBuf::from(allocated.canonical_path.unwrap());
+        let nested = checkout.join("nested");
+        let sibling = root.join("checkout-other");
+        let alias = root.join("alias");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::create_dir(&sibling).unwrap();
+        std::os::unix::fs::symlink(&checkout, &alias).unwrap();
+        assert_eq!(
+            alias.canonicalize().unwrap(),
+            checkout,
+            "fixture aliases the managed root"
+        );
+        for (path, managed) in [
+            (&checkout, true),
+            (&nested, true),
+            (&alias, true),
+            (&sibling, false),
+        ] {
+            let listing = sup
+                .inspect_directory(path.to_str().unwrap(), true)
+                .await
+                .unwrap();
+            assert_eq!(listing.cwd, path.canonicalize().unwrap().to_string_lossy());
+            assert_eq!(listing.managed_checkout, managed, "{}", path.display());
+            assert!(listing.children.is_empty() && listing.parent.is_none());
+        }
+    }
+
+    /// Trust lookup shares launch admission's path contract rather than the
+    /// picker's printable-label and read-directory requirements. A checkout
+    /// can remain executable even when listing its unrelated children fails.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn membership_only_accepts_launch_paths_without_listing_children() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("project\nsource");
+        std::fs::create_dir(&cwd).unwrap();
+        std::fs::create_dir(cwd.join("child")).unwrap();
+        let canonical = cwd.canonicalize().unwrap().to_str().unwrap().to_string();
+        assert!(
+            Supervisor::browse_directory_blocking(cwd.to_str().unwrap()).is_err(),
+            "the picker cannot render this valid launch path"
+        );
+        let old_permissions = std::fs::metadata(&cwd).unwrap().permissions();
+        std::fs::set_permissions(&cwd, std::fs::Permissions::from_mode(0o111)).unwrap();
+        let listing_denied = std::fs::read_dir(&cwd).is_err();
+        let result = Supervisor::directory_membership_blocking(cwd.to_str().unwrap());
+        // Restore before any assertion can unwind, so temporary-state cleanup
+        // remains possible even when the behavior under test fails.
+        std::fs::set_permissions(&cwd, old_permissions).unwrap();
+        if !listing_denied {
+            eprintln!(
+                "SKIPPED permission-denied premise: this account bypasses directory read permissions; path-contract assertions still run"
+            );
+        }
+        let listing = result.unwrap();
+        assert_eq!(listing.cwd, canonical);
+        assert!(listing.parent.is_none() && listing.children.is_empty() && !listing.truncated);
+    }
+
     /// Why this matters: people keep project folders behind symlinks (a
     /// `~/src` pointing at another disk), and the picker used to keep only
     /// entries whose own type is a directory, so those folders never showed
@@ -17834,6 +17985,7 @@ pub(crate) mod tests {
             parent: first.parent.clone(),
             children: first.children.clone(),
             truncated: first.truncated,
+            managed_checkout: first.managed_checkout,
         });
         let mut wire = Vec::new();
         frame
@@ -17955,6 +18107,7 @@ pub(crate) mod tests {
                             parent: None,
                             children: Vec::new(),
                             truncated: false,
+                            managed_checkout: false,
                         })
                     }),
                 )
@@ -17986,6 +18139,7 @@ pub(crate) mod tests {
                             parent: None,
                             children: Vec::new(),
                             truncated: false,
+                            managed_checkout: false,
                         })
                     }),
                 )
@@ -18001,6 +18155,7 @@ pub(crate) mod tests {
             parent: None,
             children: Vec::new(),
             truncated: false,
+            managed_checkout: false,
         })))));
         let mut pending_contenders = Vec::new();
         let mut ready_contender_results = Vec::new();
@@ -18065,6 +18220,7 @@ pub(crate) mod tests {
                         parent: None,
                         children: Vec::new(),
                         truncated: false,
+                        managed_checkout: false,
                     })
                 })
                 .await
@@ -18257,6 +18413,7 @@ pub(crate) mod tests {
             info: SessionInfo {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
@@ -18551,6 +18708,18 @@ pub(crate) mod tests {
             1,
             "a sample taken through the old entry must be what the published one reports"
         );
+        // A rename must preserve a current trust hint too. The immutable
+        // session row predates sampling, so replies need the shared run cell.
+        {
+            let mut sample = old.run.activity.lock().unwrap();
+            sample.claude_trust_prompt = true;
+            sample.workspace_trust_prompt = true;
+        }
+        {
+            let sample = renamed.run.activity.lock().unwrap();
+            assert!(sample.claude_trust_prompt);
+            assert!(sample.workspace_trust_prompt);
+        }
 
         // The two hook-diagnostic flags are the newest cells here and the
         // easiest to get wrong, because their sibling rule under RELAUNCH

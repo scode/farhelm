@@ -453,7 +453,7 @@ pub(crate) async fn browse_directory(
         return http_error(error);
     }
     match client.browse_directory(&req.cwd).await {
-        Ok((cwd, parent, children, truncated)) => {
+        Ok((cwd, parent, children, truncated, _managed_checkout)) => {
             if let Some(identity) = claim.identity.as_deref()
                 && let Err(error) = state
                     .store
@@ -1159,11 +1159,10 @@ fn accepted_checkout_preview<'a>(
 /// root and post-clone hook come from helm configuration. The accepted
 /// preview carries the target-resolved paths without the effective hook.
 /// Settings reads only the all-hosts command through a separate route.
-async fn github_checkout_resolution(
-    state: &AppState,
-    claim: &manager::SessionClaim,
+fn github_checkout_resolution(
     req: &CreateReq,
     client_identity: String,
+    config: &crate::checkout_config::ResolvedCheckoutConfig,
 ) -> Option<anyhow::Result<Option<farhelm_proto::ResolvedGithubCheckout>>> {
     let checkout = req.github_checkout.as_ref()?;
     if let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo) {
@@ -1176,13 +1175,9 @@ async fn github_checkout_resolution(
             ),
         })));
     }
-    // One database snapshot: root and revision resolved together, the same
-    // pair the preview endpoint presents.
-    let config = match state.store.resolve_checkout_config(Some(claim.host)).await {
-        Ok(config) => config,
-        Err(error) => return Some(Err(error)),
-    };
-    let Some(root) = config.root else {
+    // Browser compositions use this same snapshot for agent trust. An agent
+    // launch instead retains the choice already shown on its approval card.
+    let Some(root) = config.root.clone() else {
         return Some(Err(anyhow::Error::new(SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
             kind: ErrorKind::InvalidRequest,
@@ -1222,7 +1217,7 @@ async fn github_checkout_resolution(
         client_identity,
         repo,
         root,
-        post_clone: config.post_clone,
+        post_clone: config.post_clone.clone(),
         claude_trust: config.claude_trust,
         preview: preview.binding.clone(),
     })))
@@ -1575,6 +1570,18 @@ pub(crate) async fn create_session(
         }
         let mode =
             ordinary_mode.expect("fresh requests returned through their shared admission path");
+        let mode = match normalize_launch_workspace_trust(
+            &state,
+            &client,
+            mode,
+            &mut req.cwd,
+            false,
+        )
+        .await
+        {
+            Ok(mode) => mode,
+            Err(error) => return http_error(error),
+        };
         let named_start = match req
             .conversation
             .take()
@@ -1955,12 +1962,12 @@ pub(crate) enum CreateOrigin {
 pub(crate) type CreatedSessionCheck =
     Box<dyn Fn(&farhelm_proto::SessionInfo) -> anyhow::Result<()> + Send>;
 
-/// The launch a copy of `source` runs, for the two copies SPEC.md defines
-/// as exact: plain Replace and `farhelm agent clone`. An agent or command
-/// launch is copied as stored (its composed commands are not recompiled
+/// Snapshot the stored launch before the two copying paths diverge.
+/// Plain Replace keeps this exact value. Agent clone checks it against the
+/// original-source YOLO guard before replacing only its workspace-trust
+/// segment for the destination. Neither path recompiles historical words
 /// through today's catalog, which could change an older choice nobody has
-/// reviewed again). A legacy session is refused: SPEC.md has these copies
-/// refuse it with a remedy, which `remedy` names for the caller's surface.
+/// reviewed again. A legacy session is refused with the caller's remedy.
 ///
 /// `source` must come from a LIVE read of the owning host's session list
 /// (`manager::drain_sessions`), never from the helm's cache: a cached row
@@ -2058,7 +2065,12 @@ async fn create_fresh_session_resolved(
         // the same durable form an uninterrupted create records (this path
         // may accept a lost-reply retry without compiling anything).
         explicit_selection: if origin == CreateOrigin::User {
-            req.launch.clone().map(crate::launches::normalize_selection)
+            req.launch.clone().map(|mut selection| {
+                // Retained old-client trust is not an explicit user choice
+                // anymore, including on a lost-reply acceptance path.
+                selection.workspace_trust = None;
+                crate::launches::normalize_selection(selection)
+            })
         } else {
             None
         },
@@ -2088,13 +2100,17 @@ async fn create_fresh_session_resolved(
         if req.title.is_none() {
             req.title = checkout.title.clone();
         }
-        let github_checkout =
-            github_checkout_resolution(state, claim, &req, client_identity.clone())
-                .await
-                .expect("fresh request requires resolution")?;
+        let config = state
+            .store
+            .resolve_checkout_config(Some(claim.host))
+            .await?;
+        let github_checkout = github_checkout_resolution(&req, client_identity.clone(), &config)
+            .expect("fresh request requires resolution")?;
         let mode = match resolved_mode {
+            // An agent's approval already fixed this trust choice. Reading
+            // Settings again here must not change the approved launch.
             Some(mode) => mode,
-            None => create_mode(&mut req)?,
+            None => configured_launch_workspace_trust(create_mode(&mut req)?, &config, true)?,
         };
         Ok((github_checkout, mode))
     }
@@ -2265,15 +2281,173 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<SessionLaunch> {
 /// runs: an agent type and its choices composed by this helm's catalog
 /// (`launches::compile`), or a command launch checked by SPEC.md's
 /// command-launch rules. Both refusals are the caller's to fix, so both are
-/// `InvalidRequest`.
+/// `InvalidRequest`. Incoming workspace trust is retained on the wire only
+/// for compatibility; the destination-aware composition phase supplies it
+/// from Settings after this local validation succeeds.
 pub(crate) fn resolve_launch_request(request: LaunchRequest) -> anyhow::Result<SessionLaunch> {
     match request {
-        LaunchRequest::Agent { selection } => {
+        LaunchRequest::Agent { mut selection } => {
+            // Keep the strict wire field for stored data and old clients,
+            // but only Settings may supply it for a newly composed launch.
+            selection.workspace_trust = None;
             crate::launches::compile(selection).map_err(invalid_request)
         }
         LaunchRequest::Command(command) => {
             command.validate().map_err(invalid_request)?;
             Ok(SessionLaunch::Command(command))
+        }
+    }
+}
+
+/// Apply Settings to a new composition, consulting target-host ownership only
+/// when it can change the answer. An off switch always clears incoming trust
+/// and needs no directory read; ordinary default-off creates keep their
+/// existing admission and failure path. Explicit fresh intent is already
+/// known to be managed, even before its directory exists. A managed answer
+/// replaces the caller's cwd with the exact canonical path that supplied
+/// trust, so approval cannot later dispatch through a repointed alias.
+pub(crate) async fn normalize_launch_workspace_trust(
+    state: &AppState,
+    client: &SupervisorClient,
+    launch: SessionLaunch,
+    cwd: &mut String,
+    fresh_checkout: bool,
+) -> anyhow::Result<SessionLaunch> {
+    let Some(selection) = launch.agent_selection() else {
+        return Ok(launch);
+    };
+    if !selection.harness.offers_workspace_trust() {
+        return Ok(launch);
+    }
+    let config = state.store.resolve_checkout_config(None).await?;
+    let managed = if !launches::workspace_trust_enabled(selection.harness, &config) {
+        false
+    } else if fresh_checkout {
+        true
+    } else {
+        // This canonical ownership answer belongs to the pinned destination
+        // supervisor. Neither the configured root nor source provenance
+        // proves that an arbitrary existing cwd is a managed checkout.
+        let (canonical_cwd, managed) = client.managed_checkout_for_cwd(cwd).await?;
+        if managed {
+            *cwd = canonical_cwd;
+        }
+        managed
+    };
+    configured_launch_workspace_trust(launch, &config, managed)
+}
+
+/// Resolve the setting into the selection while preserving non-trust argv.
+/// Fresh creates use this with their root/hook snapshot; approved agent
+/// launches use it once before the card and carry that result to dispatch.
+fn configured_launch_workspace_trust(
+    launch: SessionLaunch,
+    config: &crate::checkout_config::ResolvedCheckoutConfig,
+    managed: bool,
+) -> anyhow::Result<SessionLaunch> {
+    let trust = launch.agent_selection().and_then(|selection| {
+        (managed && launches::workspace_trust_enabled(selection.harness, config)).then_some(true)
+    });
+    launches::with_workspace_trust(launch, trust).map_err(invalid_request)
+}
+
+#[cfg(test)]
+mod workspace_trust_tests {
+    use super::*;
+    use farhelm_proto::{LaunchHarness, LaunchSelection};
+
+    /// Old clients still send this strict wire member. Its value cannot
+    /// bypass Settings or make an unrelated harness's request invalid.
+    #[test]
+    fn incoming_workspace_trust_is_ignored_before_request_validation() {
+        for harness in LaunchHarness::ALL.iter().copied() {
+            for trust in [None, Some(false), Some(true)] {
+                let selection = LaunchSelection {
+                    harness,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                    permission_flags: None,
+                    workspace_trust: trust,
+                };
+                let resolved = resolve_launch_request(LaunchRequest::Agent { selection }).unwrap();
+                assert_eq!(
+                    resolved.agent_selection().unwrap().workspace_trust,
+                    None,
+                    "{harness:?}"
+                );
+            }
+        }
+    }
+
+    /// The setting is scoped to a managed destination and the selected
+    /// harness. Disabled and ordinary-folder compositions remove old trust
+    /// instead of retaining a client or cloned source's choice.
+    #[test]
+    fn settings_supply_trust_only_for_managed_supported_launches() {
+        for enabled in [false, true] {
+            let config = crate::checkout_config::ResolvedCheckoutConfig {
+                claude_trust: false,
+                codex_trust: enabled,
+                muse_trust: enabled,
+                pi_trust: enabled,
+                root: None,
+                post_clone: None,
+                config_revision: 0,
+            };
+            for harness in LaunchHarness::ALL.iter().copied() {
+                for managed in [false, true] {
+                    let selection = LaunchSelection {
+                        harness,
+                        model: None,
+                        effort: None,
+                        permissions: None,
+                        permission_flags: None,
+                        workspace_trust: harness.offers_workspace_trust().then_some(true),
+                    };
+                    let launch = launches::compile(selection).unwrap();
+                    let normalized =
+                        configured_launch_workspace_trust(launch, &config, managed).unwrap();
+                    assert_eq!(
+                        normalized.agent_selection().unwrap().workspace_trust,
+                        (enabled && managed && harness.offers_workspace_trust()).then_some(true),
+                        "{harness:?}, setting {enabled}, managed {managed}",
+                    );
+                    assert_eq!(
+                        launches::compile(normalized.agent_selection().unwrap().clone()).unwrap(),
+                        normalized,
+                        "the selection must still prove the exact launch to the YOLO guard",
+                    );
+                }
+            }
+        }
+    }
+
+    /// The switches have different vendor mechanisms and caveats. Enabling
+    /// one must not authorize another harness through a shared trust bit.
+    #[test]
+    fn managed_workspace_trust_settings_remain_independent() {
+        for (enabled_harness, codex_trust, muse_trust, pi_trust) in [
+            (LaunchHarness::Codex, true, false, false),
+            (LaunchHarness::Muse, false, true, false),
+            (LaunchHarness::Pi, false, false, true),
+        ] {
+            let config = crate::checkout_config::ResolvedCheckoutConfig {
+                claude_trust: true,
+                codex_trust,
+                muse_trust,
+                pi_trust,
+                root: None,
+                post_clone: None,
+                config_revision: 0,
+            };
+            for harness in LaunchHarness::ALL.iter().copied() {
+                assert_eq!(
+                    launches::workspace_trust_enabled(harness, &config),
+                    harness == enabled_harness,
+                    "{enabled_harness:?} enabled, composing {harness:?}",
+                );
+            }
         }
     }
 }
@@ -2613,7 +2787,42 @@ async fn do_restart_session_named(
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     // Resolved before routing: a malformed edit is the caller's to fix
     // wherever the session lives.
-    let with = with.map(resolve_launch_request).transpose()?;
+    let mut with = with.map(resolve_launch_request).transpose()?;
+    if let Some(value) = conversation.as_ref() {
+        let launch = with.as_ref().ok_or_else(|| {
+            invalid_request("a named restart requires Restart with an agent launch".into())
+        })?;
+        // Preserve the local refusal precedence. The actual argv is built
+        // again below after Settings has supplied the final trust choice.
+        launches::named_start(launch, value.clone()).map_err(invalid_request)?;
+    }
+    let (claim, client) = route_session(state, id).await?;
+    if let Some(launch) = with.take() {
+        with = Some(match launch.agent_selection() {
+            Some(selection) if selection.harness.offers_workspace_trust() => {
+                let config = state.store.resolve_checkout_config(None).await?;
+                let managed = if launches::workspace_trust_enabled(selection.harness, &config) {
+                    // Restart with cannot change cwd. Its owner's live
+                    // membership projection answers exactly this question,
+                    // without inferring anything about another directory.
+                    manager::drain_sessions(&client)
+                        .await?
+                        .sessions
+                        .into_iter()
+                        .find(|session| session.id == id)
+                        .ok_or_else(|| {
+                            invalid_request("the session to restart no longer exists".into())
+                        })?
+                        .working_copy
+                        .is_some()
+                } else {
+                    false
+                };
+                configured_launch_workspace_trust(launch, &config, managed)?
+            }
+            _ => launch,
+        });
+    }
     let named_start = conversation
         .map(|value| {
             let launch = with.as_ref().ok_or_else(|| {
@@ -2622,7 +2831,6 @@ async fn do_restart_session_named(
             launches::named_start(launch, value).map_err(invalid_request)
         })
         .transpose()?;
-    let (claim, client) = route_session(state, id).await?;
     // Restart WITH a new launch is a new launch choice, so it gets the
     // same YOLO check a create does; a plain restart relaunches a choice
     // already made and does not (see `yolo_guard`).
@@ -3334,7 +3542,7 @@ pub(crate) async fn do_replace_session(
     // never sends it again (SPEC.md's initial-prompt rules).
     // `do_create_session` validates it against the launch mode.
     let prompt = with.as_mut().and_then(|body| body.prompt.take());
-    let (mode, cwd, title, cols, rows) = match (with, with_mode) {
+    let (mode, mut cwd, title, cols, rows) = match (with, with_mode) {
         (Some(with), Some(mode)) => (mode, with.cwd, with.title, with.cols, with.rows),
         // The two halves travel together: `with_mode` is `Some` exactly
         // when `with` is, since both come from the same `Option` above.
@@ -3356,6 +3564,11 @@ pub(crate) async fn do_replace_session(
                 default_rows(),
             )
         }
+    };
+    let mode = if settings_from_source {
+        mode
+    } else {
+        normalize_launch_workspace_trust(state, &client, mode, &mut cwd, false).await?
     };
     let named_start = conversation
         .map(|value| launches::named_start(&mode, value).map_err(invalid_request))

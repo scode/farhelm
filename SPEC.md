@@ -877,6 +877,23 @@ shared dismissal, reversible beside the switch. × hides only the current occurr
 screen. The normal invalidation feed updates the hint band in other clients; Settings reads the current shared values
 when opened.
 
+The same Settings section offers separate off-by-default, all-hosts trust switches for Codex, Muse and Pi. Each applies
+only when Farhelm composes an agent launch into a managed checkout, including a checkout an agent requests and an
+existing managed checkout selected for New, Clone, Restart with or Replace with. Codex receives a per-launch trusted
+directory override, Muse receives `--trust-workspace`, and Pi receives `--approve` for project settings and extensions.
+These switches never edit the agent's saved configuration. Their help states that the repository's hooks, settings and
+commands may then run as if the user had approved them. Ordinary user-selected directories receive no trust override,
+even when the client or a cloned source carries an old trust choice. Plain Restart and plain Replace keep their stored
+launch. Settings changes affect newly composed attempts; an accepted fresh-checkout retry retains its original trust
+choice, and an ordinary keyed retry whose resolved launch changes may refuse the reused key.
+
+Codex and Muse show the same nonmodal discovery hint while their recognized trust question is current in a managed
+checkout's agent terminal, their switch is off, and their own hint has not been dismissed. The hint names the agent,
+offers Settings at its switch and Don't show again, and has an occurrence-only ×. Each shared dismissal is independent
+and reversible beside its switch. Failed settings reads never count as an off switch. Pi has a switch but no hint band:
+its project-resource approval is not currently recognized as a trust question. Older stored session snapshots default
+the new hint evidence to absent; the legacy Claude hint remains Claude-only.
+
 When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
 explicit-save field, explaining that it sets the folder for every host and can be changed later in Settings. Refusal
 keeps the draft editable; success refreshes repository suggestions and the checkout preview without reopening the

@@ -843,6 +843,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/checkout-claude-trust",
             get(checkout_config::get_claude_trust).put(checkout_config::put_claude_trust),
         )
+        .route(
+            "/api/checkout-agent-trust/{harness}",
+            get(checkout_config::get_agent_trust).put(checkout_config::put_agent_trust),
+        )
         // The invalidation feed (PLAN_M6_75.md item 5). A WebSocket like the
         // terminal routes, and served beside them for the same reason they
         // are here at all — one process, one port, one origin guard — but

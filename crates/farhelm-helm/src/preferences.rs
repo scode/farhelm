@@ -1,7 +1,7 @@
 //! `GET`/`PUT /api/preferences` — the one client preference the helm
 //! remembers for every client (SPEC.md, Session list): the chosen list order,
 //! last user-selected session, compact-row choice, and the remembered
-//! permissions and workspace-trust choices of successful structured launches,
+//! permissions choice of successful structured launches, per-agent trust-hint dismissals,
 //! host confirmation choices, terminal web-link ownership, quick-launch template,
 //! number-key bindings, welcome dismissal, tunnel consent, and contact reused after successful feedback.
 //!
@@ -16,14 +16,16 @@
 //! listeners, and an acknowledged false/null write closes listeners and their
 //! accepted relays. That transaction survives a disconnected HTTP caller.
 //!
-//! The remembered launch choices are exceptions to "every client writes its own
-//! choice": no shipped client ever PUTs them. They are written only by the helm
+//! The remembered permission is an exception to "every client writes its own
+//! choice": no shipped client ever PUTs it. It is written only by the helm
 //! itself, as a side effect of a successful user-initiated structured
 //! launch (`store::HelmStore::record_create_history_with_destination`), which is
-//! what makes them facts every client and the spawn path agree on rather
-//! than choices any one client claims happened. The route still accepts
-//! them on `PUT` for wire uniformity with the client-declared fields (and so a
+//! what makes it a fact every client and the spawn path agree on rather
+//! than a choice any one client claims happened. The route still accepts
+//! it on `PUT` for wire uniformity with the client-declared fields (and so a
 //! test fixture can plant a value directly). The permissions word is validated.
+//! The retired workspace-trust field still decodes for older clients but is
+//! ignored: only managed-checkout Settings can supply a new launch's trust.
 //!
 //! ## What the handlers check, and what they leave alone
 //!
@@ -66,7 +68,7 @@ use farhelm_proto::feedback::FEEDBACK_CONTACT_MAX_CHARS;
 use farhelm_proto::{ErrorKind, MAX_SESSION_ID_BYTES};
 use std::sync::Arc;
 
-/// `GET /api/preferences` — the row as stored, with unset fields omitted.
+/// `GET /api/preferences` — current preferences, with unset and retired fields omitted.
 ///
 /// A helm that has nothing remembered answers `{}` rather than an error:
 /// "nothing chosen yet" is the ordinary state of a fresh install, and the
@@ -97,7 +99,10 @@ pub(crate) async fn put_preferences(
     State(state): State<Arc<AppState>>,
     axum::Json(patch): axum::Json<PreferencePatch>,
 ) -> impl IntoResponse {
-    let trust_hint_changed = patch.claude_trust_hint_dismissed.is_some();
+    let trust_hint_changed = patch.claude_trust_hint_dismissed.is_some()
+        || patch.codex_trust_hint_dismissed.is_some()
+        || patch.muse_trust_hint_dismissed.is_some()
+        || patch.pi_trust_hint_dismissed.is_some();
     let tunnel_consent_changed = patch.tunnel_consent.is_some();
     if let Some(Some(bindings)) = &patch.template_shortcuts {
         let mut names = std::collections::BTreeSet::new();
@@ -780,6 +785,9 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                codex_trust_hint_dismissed: None,
+                muse_trust_hint_dismissed: None,
+                pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
             "each sparse patch lands its own field and keeps the others"
@@ -890,6 +898,9 @@ mod tests {
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
                 claude_trust_hint_dismissed: None,
+                codex_trust_hint_dismissed: None,
+                muse_trust_hint_dismissed: None,
+                pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
             "an explicit null clears the field it names and only that one"

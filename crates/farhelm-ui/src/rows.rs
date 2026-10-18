@@ -755,6 +755,7 @@ mod tests {
         Session {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             id: id.into(),
             title: title.into(),
             cwd: "/tmp".into(),
@@ -1098,6 +1099,7 @@ mod tests {
             Session {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 stale: true,
                 ..session("a", "a")
             },

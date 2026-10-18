@@ -1081,9 +1081,7 @@ pub fn attach_existing_ancestors(
             continue;
         };
         let managed = PathBuf::from(path);
-        let is_self_or_ancestor =
-            managed == cwd || (cwd.starts_with(&managed) && managed != Path::new("/"));
-        if is_self_or_ancestor {
+        if managed_ancestor(&managed, &cwd) {
             let before = member_count(conn, &id)?;
             add_member(conn, session_id, &id)?;
             let after = member_count(conn, &id)?;
@@ -1091,6 +1089,34 @@ pub fn attach_existing_ancestors(
         }
     }
     Ok(added)
+}
+
+/// Read the registry's ownership snapshot for an already canonical directory.
+/// Nested checkouts can hide their outer memberships in session-list display
+/// projections, so a launch must ask the registry itself. This read takes no
+/// lifecycle lease: admission still validates the destination when it creates.
+pub(crate) fn cwd_is_managed(conn: &Connection, canonical_cwd: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(
+        "SELECT canonical_path FROM working_copies \
+         WHERE allocation_state = ?1 AND canonical_path IS NOT NULL",
+    )?;
+    let paths = stmt.query_map(
+        rusqlite::params![AllocationState::Allocated.as_str()],
+        |row| row.get::<_, String>(0),
+    )?;
+    let cwd = Path::new(canonical_cwd);
+    for path in paths {
+        if managed_ancestor(Path::new(&path?), cwd) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Match accepted paths by components, with the same root exception as create
+/// membership binding. A corrupt root row must not claim every directory.
+fn managed_ancestor(managed: &Path, cwd: &Path) -> bool {
+    managed == cwd || (cwd.starts_with(managed) && managed != Path::new("/"))
 }
 
 // ---------------------------------------------------------------------------
@@ -2764,6 +2790,38 @@ mod tests {
             tx.commit().expect("commit");
         }
         assert_eq!(member_count(&conn, &row.id).expect("count"), 1);
+    }
+
+    /// Launch trust follows allocated registry ancestry, not session display
+    /// metadata or a textual prefix. Retired/planned rows confer no ownership,
+    /// and querying a hidden outer root must not depend on any session member.
+    #[test]
+    fn managed_directory_snapshot_uses_allocated_component_ancestors() {
+        let conn = registry_conn();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let row = planned_row(&conn, dir.path(), "managed");
+        let planned_path = dir.path().join("managed");
+        assert!(!cwd_is_managed(&conn, planned_path.to_str().unwrap()).unwrap());
+        let allocated = allocate(&conn, &row.id, None).expect("allocated checkout");
+        let root = allocated.row.canonical_path.as_deref().unwrap();
+        assert_eq!(allocated.row.allocation_state, AllocationState::Allocated);
+        assert!(cwd_is_managed(&conn, root).unwrap());
+        assert!(cwd_is_managed(&conn, &format!("{root}/nested/sibling")).unwrap());
+        assert!(!cwd_is_managed(&conn, &format!("{root}-other")).unwrap());
+        assert!(!cwd_is_managed(&conn, dir.path().to_str().unwrap()).unwrap());
+
+        // The membership snapshot deliberately does not use member projections:
+        // an outer checkout can be obscured by a nested checkout in every row.
+        conn.execute("DELETE FROM working_copy_members", [])
+            .unwrap();
+        assert!(cwd_is_managed(&conn, &format!("{root}/outside-inner")).unwrap());
+        conn.execute(
+            "UPDATE working_copies SET allocation_state = 'retired' WHERE id = ?1",
+            [&row.id],
+        )
+        .unwrap();
+        assert!(!cwd_is_managed(&conn, root).unwrap());
+        assert!(!managed_ancestor(Path::new("/"), Path::new("/ordinary")));
     }
 
     // -- identity verification ---------------------------------------------

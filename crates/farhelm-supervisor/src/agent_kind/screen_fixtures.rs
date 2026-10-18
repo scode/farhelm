@@ -23,14 +23,15 @@ use std::path::{Path, PathBuf};
 /// whatever it last concluded.
 const EXPECTED_STATES: &[&str] = &["working", "waiting", "idle", "unknown"];
 
-/// The harnesses the capture tool drives; a directory outside this list is a
-/// typo or a stale leftover rather than a new harness nobody wired up.
+/// Harnesses with dedicated activity readers and complete automated captures.
+/// Muse's manually captured trust dialog supplies only hint evidence: it does
+/// not give the Generic activity reader a new working/waiting/idle contract.
 const HARNESSES: &[&str] = &["claude", "codex"];
 
 /// One captured screen with the state the capture tool drove the agent into.
 #[derive(Debug)]
 pub(crate) struct ScreenFixture {
-    /// `claude` or `codex`.
+    /// A dedicated activity harness, or Muse's trust-only manual capture.
     pub(crate) harness: String,
     /// The vendor's version string the screen was captured from.
     pub(crate) version: String,
@@ -62,7 +63,7 @@ pub(crate) fn load_fixtures() -> Vec<ScreenFixture> {
     for harness_dir in sorted_dirs(&root) {
         let harness = file_name(&harness_dir);
         assert!(
-            HARNESSES.contains(&harness.as_str()),
+            HARNESSES.contains(&harness.as_str()) || harness == "muse",
             "unexpected harness directory {}",
             harness_dir.display()
         );
@@ -258,7 +259,10 @@ fn screen_fixtures_email_detector_matches_addresses_only() {
 #[test]
 fn screen_fixtures_read_as_the_state_they_were_captured_in() {
     let mut failures = Vec::new();
-    for fixture in load_fixtures() {
+    for fixture in load_fixtures()
+        .into_iter()
+        .filter(|fixture| HARNESSES.contains(&fixture.harness.as_str()))
+    {
         let kind = match fixture.harness.as_str() {
             "claude" => AgentKind::Claude,
             "codex" => AgentKind::Codex,

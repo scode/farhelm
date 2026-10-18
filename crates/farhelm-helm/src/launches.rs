@@ -464,27 +464,13 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
                 .cloned(),
         );
     }
-    // Workspace trust is independent of tool approval. Codex's project key
-    // needs the target's final cwd, which the supervisor fills only after a
-    // possible checkout has been prepared.
-    match (selection.harness, selection.workspace_trust) {
-        (LaunchHarness::Codex, Some(trust)) => argv.extend([
-            "-c".to_string(),
-            if trust {
-                farhelm_supervisor::agent_kind::CODEX_TRUSTED_CWD_PLACEHOLDER
-            } else {
-                farhelm_supervisor::agent_kind::CODEX_UNTRUSTED_CWD_PLACEHOLDER
-            }
-            .to_string(),
-        ]),
-        (LaunchHarness::Muse, Some(true)) => argv.push("--trust-workspace".to_string()),
-        (LaunchHarness::Pi, Some(trust)) => argv.push(if trust {
-            "--approve".to_string()
-        } else {
-            "--no-approve".to_string()
-        }),
-        _ => {}
-    }
+    // This final compiler-owned segment can also be replaced when cloning
+    // a stored launch, without recomposing its historical permission flags.
+    argv.extend(
+        workspace_trust_arguments(selection.harness, selection.workspace_trust)
+            .iter()
+            .map(|word| (*word).to_string()),
+    );
 
     let resume = resume_arguments(selection.harness).map(|suffix| {
         let mut resume = argv.clone();
@@ -498,6 +484,122 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
         start: argv,
         resume,
     })
+}
+
+/// Which all-hosts opt-in governs this harness's managed-checkout launches.
+/// The compiler itself never reads configuration: callers resolve this fact
+/// into the selection before composition, preserving exact YOLO verification.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub(crate) fn workspace_trust_enabled(
+    harness: LaunchHarness,
+    config: &crate::checkout_config::ResolvedCheckoutConfig,
+) -> bool {
+    match harness {
+        LaunchHarness::Codex => config.codex_trust,
+        LaunchHarness::Muse => config.muse_trust,
+        LaunchHarness::Pi => config.pi_trust,
+        LaunchHarness::Claude
+        | LaunchHarness::Cursor
+        | LaunchHarness::Grok
+        | LaunchHarness::Goose
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Omp => false,
+    }
+}
+
+/// Compiler-owned trust words, independent of tool permissions. Codex's
+/// directory marker waits for the supervisor to resolve the final cwd.
+/// False remains supported because stored launches must still recompose.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn workspace_trust_arguments(
+    harness: LaunchHarness,
+    trust: Option<bool>,
+) -> &'static [&'static str] {
+    match harness {
+        LaunchHarness::Codex => match trust {
+            Some(true) => &[
+                "-c",
+                farhelm_supervisor::agent_kind::CODEX_TRUSTED_CWD_PLACEHOLDER,
+            ],
+            Some(false) => &[
+                "-c",
+                farhelm_supervisor::agent_kind::CODEX_UNTRUSTED_CWD_PLACEHOLDER,
+            ],
+            None => &[],
+        },
+        LaunchHarness::Muse => match trust {
+            Some(true) => &["--trust-workspace"],
+            Some(false) | None => &[],
+        },
+        LaunchHarness::Pi => match trust {
+            Some(true) => &["--approve"],
+            Some(false) => &["--no-approve"],
+            None => &[],
+        },
+        LaunchHarness::Claude
+        | LaunchHarness::Cursor
+        | LaunchHarness::Grok
+        | LaunchHarness::Goose
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Omp => &[],
+    }
+}
+
+/// Replace only a stored agent launch's compiler-owned trust segment.
+///
+/// Agent clones keep the source's other words, including permission omissions
+/// and models no longer offered by today's catalog. The start command records
+/// the segment immediately before its final Farhelm marker; the resume command
+/// shares that entire prefix before adding its own conversation selector.
+/// This structural boundary keeps custom permission words out of the edit.
+/// Callers must check the original launch against the agent YOLO guard first:
+/// rewriting a copy must never erase the evidence that a source was forged.
+pub(crate) fn with_workspace_trust(
+    mut launch: SessionLaunch,
+    trust: Option<bool>,
+) -> Result<SessionLaunch, String> {
+    let SessionLaunch::Agent {
+        selection,
+        start,
+        resume,
+    } = &mut launch
+    else {
+        return Ok(launch);
+    };
+    if !selection.harness.offers_workspace_trust() || selection.workspace_trust == trust {
+        return Ok(launch);
+    }
+    let old_words = workspace_trust_arguments(selection.harness, selection.workspace_trust);
+    let new_words = workspace_trust_arguments(selection.harness, trust);
+    let old_prefix = start
+        .strip_suffix(&[FARHELM_ARGS_PLACEHOLDER.to_string()])
+        .ok_or("the stored launch has no final Farhelm argument boundary")?;
+    let prefix_len = old_prefix
+        .len()
+        .checked_sub(old_words.len())
+        .filter(|&index| {
+            old_prefix[index..]
+                .iter()
+                .map(String::as_str)
+                .eq(old_words.iter().copied())
+        })
+        .ok_or("the stored launch's workspace-trust segment does not match its selection")?;
+    let old_prefix_len = old_prefix.len();
+    if let Some(resume) = resume {
+        if !resume.starts_with(old_prefix) {
+            return Err("the stored resume command does not share its start command's workspace-trust boundary".into());
+        }
+        resume.splice(
+            prefix_len..old_prefix_len,
+            new_words.iter().map(|word| (*word).to_string()),
+        );
+    }
+    start.splice(
+        prefix_len..old_prefix_len,
+        new_words.iter().map(|word| (*word).to_string()),
+    );
+    selection.workspace_trust = trust;
+    Ok(launch)
 }
 
 /// What an agent type's resume command adds to its start command to select
@@ -1988,5 +2090,266 @@ mod tests {
                 "workspace trust is not offered by this harness"
             );
         }
+    }
+
+    /// Every supported old trust value can be replaced with Settings' result
+    /// without changing the compiler's other words or its resume contract.
+    /// This also pins the old false forms that retained sessions still use.
+    #[test]
+    fn stored_trust_replacement_matches_current_composition() {
+        for harness in LaunchHarness::ALL
+            .iter()
+            .copied()
+            .filter(|harness| harness.offers_workspace_trust())
+        {
+            for previous in [None, Some(false), Some(true)] {
+                let mut choice = selection(harness);
+                choice.workspace_trust = previous;
+                let source = super::compile(choice.clone()).unwrap();
+                assert_eq!(source.agent_selection().unwrap().workspace_trust, previous);
+                for next in [None, Some(true)] {
+                    choice.workspace_trust = next;
+                    assert_eq!(
+                        super::with_workspace_trust(source.clone(), next).unwrap(),
+                        super::compile(choice.clone()).unwrap(),
+                        "{harness:?}: {previous:?} to {next:?}",
+                    );
+                }
+            }
+        }
+    }
+
+    /// Cloning is not permission migration or model validation. A historic
+    /// launch may omit today's safety flags and carry words the current
+    /// catalog would not compose; only its trust segment may change.
+    #[test]
+    fn stored_trust_replacement_preserves_historical_nontrust_words() {
+        for (harness, program) in [
+            (LaunchHarness::Codex, "codex"),
+            (LaunchHarness::Muse, "muse"),
+            (LaunchHarness::Pi, "pi"),
+        ] {
+            let mut choice = selection(harness);
+            choice.permissions = None;
+            choice.model = Some("historical model spelling".into());
+            choice.workspace_trust = Some(true);
+            let mut prefix = vec![
+                program.to_string(),
+                "--historic-option".into(),
+                "old-value".into(),
+            ];
+            let nontrust_prefix = prefix.clone();
+            prefix.extend(
+                super::workspace_trust_arguments(harness, Some(true))
+                    .iter()
+                    .map(|word| (*word).to_string()),
+            );
+            let mut start = prefix.clone();
+            start.push(FARHELM_ARGS_PLACEHOLDER.into());
+            let suffix = vec![
+                "historic-resume-selector".to_string(),
+                CONVERSATION_PLACEHOLDER.into(),
+                FARHELM_ARGS_PLACEHOLDER.into(),
+            ];
+            let mut resume = prefix;
+            resume.extend(suffix.clone());
+            let source = SessionLaunch::Agent {
+                selection: choice,
+                start,
+                resume: Some(resume),
+            };
+            assert_eq!(source.agent_selection().unwrap().permissions, None);
+            let cleared = super::with_workspace_trust(source, None).unwrap();
+            let SessionLaunch::Agent {
+                selection,
+                start,
+                resume,
+            } = cleared
+            else {
+                panic!("agent")
+            };
+            assert_eq!(selection.permissions, None);
+            assert_eq!(
+                selection.model.as_deref(),
+                Some("historical model spelling")
+            );
+            assert_eq!(selection.workspace_trust, None);
+            let mut expected_start = nontrust_prefix.clone();
+            expected_start.push(FARHELM_ARGS_PLACEHOLDER.into());
+            assert_eq!(start, expected_start);
+            let mut expected_resume = nontrust_prefix;
+            expected_resume.extend(suffix);
+            assert_eq!(resume, Some(expected_resume));
+        }
+    }
+
+    /// The pre-launch-kinds compiler stored a shell-joined start, while the
+    /// Codex/Pi integrations copied that original argv and appended their
+    /// selector. Conversion adds the final Farhelm markers. These are those
+    /// actual generated shapes, including Codex's historic permission omission;
+    /// enabling Settings must not strand their otherwise supported clones.
+    #[test]
+    fn stored_trust_replacement_accepts_pre_launch_kind_agent_conversions() {
+        for (harness, kind, model, permissions, base, suffix) in [
+            (
+                LaunchHarness::Codex,
+                AgentKind::Codex,
+                "gpt-6-luna",
+                None,
+                vec![
+                    "codex",
+                    "-m",
+                    "gpt-6-luna",
+                    "-c",
+                    "model_reasoning_effort=high",
+                ],
+                vec!["resume", CONVERSATION_PLACEHOLDER],
+            ),
+            (
+                LaunchHarness::Pi,
+                AgentKind::Pi,
+                "z-ai/glm-5.3",
+                Some(LaunchPermission::Yolo),
+                vec![
+                    "pi",
+                    "--provider",
+                    "openrouter",
+                    "--model",
+                    "z-ai/glm-5.3",
+                    "--thinking",
+                    "high",
+                ],
+                vec!["--session", CONVERSATION_PLACEHOLDER],
+            ),
+        ] {
+            for previous in [None, Some(false), Some(true)] {
+                let mut original: Vec<String> =
+                    base.iter().map(|word| (*word).to_string()).collect();
+                original.extend(
+                    super::workspace_trust_arguments(harness, previous)
+                        .iter()
+                        .map(|word| (*word).to_string()),
+                );
+                let mut old_resume = original.clone();
+                old_resume.extend(suffix.iter().map(|word| (*word).to_string()));
+                let selection = LaunchSelection {
+                    harness,
+                    model: Some(model.into()),
+                    effort: Some(LaunchEffort::High),
+                    permissions,
+                    permission_flags: None,
+                    workspace_trust: previous,
+                };
+                let converted = SessionLaunch::from_pre_launch_kinds(
+                    &shell_words::join(original),
+                    kind,
+                    Some(old_resume),
+                    Some(selection),
+                );
+                assert!(
+                    matches!(converted, SessionLaunch::Agent { .. }),
+                    "premise: the historical structured row remains Agent, not a refused Legacy copy"
+                );
+                converted.validate_new().unwrap();
+                for next in [None, Some(true)] {
+                    let normalized = super::with_workspace_trust(converted.clone(), next).unwrap();
+                    let SessionLaunch::Agent {
+                        selection,
+                        start,
+                        resume,
+                    } = normalized
+                    else {
+                        panic!("agent")
+                    };
+                    assert_eq!(selection.permissions, permissions);
+                    assert_eq!(selection.model.as_deref(), Some(model));
+                    assert_eq!(selection.workspace_trust, next);
+                    let mut expected: Vec<String> =
+                        base.iter().map(|word| (*word).to_string()).collect();
+                    expected.extend(
+                        super::workspace_trust_arguments(harness, next)
+                            .iter()
+                            .map(|word| (*word).to_string()),
+                    );
+                    let mut expected_resume = expected.clone();
+                    expected.push(FARHELM_ARGS_PLACEHOLDER.into());
+                    expected_resume.extend(suffix.iter().map(|word| (*word).to_string()));
+                    expected_resume.push(FARHELM_ARGS_PLACEHOLDER.into());
+                    assert_eq!(start, expected, "{harness:?}, {previous:?} to {next:?}");
+                    assert_eq!(resume, Some(expected_resume));
+                }
+            }
+        }
+    }
+
+    /// Trust-looking custom permission words belong to the user, not this
+    /// setting. Matching only the compiler's trailing segment avoids stripping
+    /// those words while normalizing the separately recorded trust choice.
+    #[test]
+    fn stored_trust_replacement_keeps_custom_words_and_command_launches() {
+        for harness in [LaunchHarness::Codex, LaunchHarness::Muse] {
+            let mut choice = selection(harness);
+            choice.permissions = Some(LaunchPermission::Custom);
+            choice.permission_flags = Some(vec!["--trust-workspace".into(), "--approve".into()]);
+            choice.workspace_trust = Some(true);
+            let source = super::compile(choice.clone()).unwrap();
+            choice.workspace_trust = None;
+            assert_eq!(
+                super::with_workspace_trust(source, None).unwrap(),
+                super::compile(choice).unwrap(),
+            );
+        }
+        let command = SessionLaunch::plain_command("codex -c '{codex:trusted-cwd}'");
+        assert_eq!(
+            super::with_workspace_trust(command.clone(), None).unwrap(),
+            command
+        );
+        for harness in LaunchHarness::ALL
+            .iter()
+            .copied()
+            .filter(|harness| !harness.offers_workspace_trust())
+        {
+            let source = super::compile(selection(harness)).unwrap();
+            assert_eq!(
+                super::with_workspace_trust(source.clone(), Some(true)).unwrap(),
+                source
+            );
+        }
+    }
+
+    /// A source whose selected trust does not occupy the compiler boundary
+    /// cannot be repaired by guessing. Rejecting the edit preserves the
+    /// original-source YOLO proof instead of laundering arbitrary argv.
+    #[test]
+    fn stored_trust_replacement_refuses_unrecognized_boundaries() {
+        let mut choice = selection(LaunchHarness::Codex);
+        choice.workspace_trust = Some(true);
+        let source = super::compile(choice).unwrap();
+        let SessionLaunch::Agent { start, .. } = &source else {
+            panic!("agent")
+        };
+        assert_eq!(
+            start.last().map(String::as_str),
+            Some(FARHELM_ARGS_PLACEHOLDER)
+        );
+        let mut missing_marker = source.clone();
+        let SessionLaunch::Agent { start, .. } = &mut missing_marker else {
+            panic!("agent")
+        };
+        start.pop();
+        assert!(super::with_workspace_trust(missing_marker, None).is_err());
+        let mut wrong_trust = source.clone();
+        let SessionLaunch::Agent { start, .. } = &mut wrong_trust else {
+            panic!("agent")
+        };
+        let index = start.len() - 2;
+        start[index] = "unrecognized-trust-word".into();
+        assert!(super::with_workspace_trust(wrong_trust, None).is_err());
+        let mut wrong_resume = source;
+        let SessionLaunch::Agent { resume, .. } = &mut wrong_resume else {
+            panic!("agent")
+        };
+        resume.as_mut().unwrap()[0] = "another-program".into();
+        assert!(super::with_workspace_trust(wrong_resume, None).is_err());
     }
 }

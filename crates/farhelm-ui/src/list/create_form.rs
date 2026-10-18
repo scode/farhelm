@@ -7230,6 +7230,9 @@ mod tests {
             template_shortcuts: Default::default(),
             welcome_seen: None,
             claude_trust_hint_dismissed: None,
+            codex_trust_hint_dismissed: None,
+            muse_trust_hint_dismissed: None,
+            pi_trust_hint_dismissed: None,
             tunnel_consent: None,
         };
         assert_eq!(

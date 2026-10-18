@@ -237,6 +237,16 @@ a Claude session exiting at the same instant can lose either program's update, a
 how the file works without notice. Read the caution in Settings before turning it on. As with answering Yes yourself,
 trust allows the repository's own Claude hooks and commands to run.
 
+Beside Claude's setting are separate switches for Codex, Muse and Pi, all off by default. They apply when you start or
+change an agent launch in a managed checkout, including one an agent requests. Farhelm passes the agent's trust option
+for that launch without editing its saved settings. Directories outside managed checkouts keep the agent's own trust
+behavior; **restart** and **replace** keep the trust choice the session already had.
+
+Trust lets a repository's own hooks, settings and commands run as if you had approved them yourself. Pi's switch
+approves project settings and extensions; it does not add approval prompts for the agent's actions. Codex and Muse show
+a hint above a recognized trust question, with **Settings** and **Don't show again**. You can restore each hint beside
+its switch in Settings.
+
 The directory and the command apply to every host. To give one host a directory or command of its own, run
 `farhelm helm checkout-config` on the machine that runs the helm (the program that serves the Farhelm app; see
 [The pieces](/docs/how-it-works/the-pieces/)); `farhelm helm checkout-config --help` lists the options. A host given its

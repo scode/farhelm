@@ -631,13 +631,14 @@ async fn handle_browse_directory(
     tasks: &mut tokio::task::JoinSet<()>,
     req_id: u64,
     cwd: String,
+    membership_only: bool,
 ) {
     let sup2 = Arc::clone(sup);
     spawn_admitted(&sup.admission, tasks, tx, req_id, |tx| async move {
         let reply = directory_browse_reply(
             req_id,
             DIRECTORY_BROWSE_TIMEOUT,
-            sup2.browse_directory(&cwd),
+            sup2.inspect_directory(&cwd, membership_only),
         )
         .await;
         send_reply(&tx, &reply).await;
@@ -664,6 +665,7 @@ where
             parent: list.parent,
             children: list.children,
             truncated: list.truncated,
+            managed_checkout: list.managed_checkout,
         },
         Ok(Err(error)) => ControlMsg::Error {
             create_unaccepted: false,
@@ -2563,14 +2565,18 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             )
             .await;
         }
-        ControlMsg::BrowseDirectory { req_id, cwd } => {
+        ControlMsg::BrowseDirectory {
+            req_id,
+            cwd,
+            membership_only,
+        } => {
             // Keep this at debug level because directory names can be private,
             // but make the receiving supervisor observable when a deployment
             // needs to distinguish a routed browse from a locally answered one.
             // The request is logged before its async filesystem work begins, so
             // a later timeout or invalid-directory reply still has a receipt.
             debug!(%cwd, "received directory browse request");
-            handle_browse_directory(sup, ctx.tx, ctx.tasks, req_id, cwd).await
+            handle_browse_directory(sup, ctx.tx, ctx.tasks, req_id, cwd, membership_only).await
         }
         // The GitHub-checkout preview: the supervisor's half of the
         // three-way preview contract. The HELM resolves its configuration
@@ -8281,6 +8287,7 @@ mod tests {
                 info: SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "s1".to_string(),
@@ -8473,6 +8480,7 @@ mod tests {
             info: SessionInfo {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 agent_kind: farhelm_proto::AgentKind::Generic,
                 parent: None,
                 id: id.to_string(),
@@ -8681,6 +8689,7 @@ mod tests {
                 info: SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "s1".to_string(),
