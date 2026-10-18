@@ -114,6 +114,8 @@ pub mod http;
 #[cfg(feature = "io")]
 pub mod io;
 pub mod launch;
+/// Final-extension policy shared by desktop settings and the helm's opener.
+pub mod open_extensions;
 
 /// What counts as a YOLO launch (see the module's own docs).
 pub mod yolo;
