@@ -111,3 +111,98 @@ that could lose the original approval boundary; the guarded recovery was correct
 message was corrected. The second review found an unsafe saved-prefix display and a command-template save blocked by a
 dormant invalid agent prefix; both were corrected, retested on both browser engines and confirmed resolved. Commit and
 PR wording passed the separate cold-read gate. Both PRs remain drafts for the landing monitor.
+
+### Landing
+
+Landed on its own in round 94, as #2271 and #2272, merged bottom-up, with several fixes made during the landing (below)
+and one decision left for the maintainer.
+
+#### What landed since the stack was based, and whether it interacted
+
+Only plan-queue bookkeeping reached main between this stack's base and its landing, and no other plan landed in this
+round; the landing rebase was clean. The executor had already rebased over the changes main gained while it worked,
+among them the command that sends a message to a running agent, the managed-agent trust settings, the dialog focus
+change and the host colors. The landing monitor read the stack against all of them, and a fresh-context reviewer did the
+same independently. Neither found a conflict:
+
+- Sending a message to a running agent chooses its delivery by the agent type the session was launched as, not by the
+  process, so a wrapper does not change it.
+- Trust arguments are placed from the end of the command, and Farhelm's own placeholders are refused in a prefix, so the
+  trust settings and wrappers compose.
+- The launcher's and Restart with's new prefix field behaves under the dialog focus rules like the other fields.
+- YOLO, command and older-style launches stay refused after an Allow on a host that asks before YOLO launches; an Allow
+  is bound to its card, and Always allow is refused for these cards on both the helm and the app. Clone and inheriting a
+  session's launch always force the card; a managed-checkout retry is judged on the original request's launch and
+  approval, not on today's template. Status detection and conversation capture follow each agent's existing rules for
+  wrapped processes.
+
+#### Upgrade
+
+#2271 raises the protocol from 57 to 59 and the helm database from schema 59 to 60. The protocol skips 58, most likely
+because the executor bumped it twice inside the unmerged PR (once for the new launch field, once for fields added after
+review); one bump would have done, and the skip is harmless since none of these versions has shipped (v0.29.0 carries
+protocol 51). The next release already requires remote hosts to be updated, and an older helm refuses the newer
+database. The pending agent-quick-launch-templates plan also changes the protocol and will need 60.
+
+#### Fixes made during the landing
+
+The whole test libraries, rather than the executor's selections, found five failures in the stack itself, all fixed
+before merging:
+
+- The new remembered-wrapper column sat in a different position in a newly created database than in an upgraded one, so
+  the test that compares the two failed, and three tests that rewind a database to an older schema did not remove it.
+  The new column now comes last in a new database, as every column added since that table was created does, and the
+  rewinds remove it.
+- A test of the agent instructions still expected the usage line for creating a session without the new wrapper option.
+
+From the reviews:
+
+- The rule that decides which approval cards force a visible Allow ended in a catch-all that answered "no". The pending
+  agent-quick-launch-templates plan adds a card that carries everything a template write carries, and through that
+  catch-all it would have skipped the forced Allow for a wrapper prefix. Every card kind is now listed, so a new one has
+  to decide. That plan's executor should know its card must force Allow when it carries a prefix and show the prefix.
+- SPEC.md and the Approve what agents do docs page described the forced Allow only for launch cards. An agent's template
+  write that leaves a wrapper prefix in the template also always shows a card with Allow or Deny only, whatever the host
+  allows without asking, because launches from that template later count the prefix as the user's; both now say so.
+
+#### A decision for the maintainer
+
+When an agent's request names a template and also asks for a different agent type, the helm keeps the template's wrapper
+prefix for the new agent type, while the session launcher, on the same change, swaps in the prefix remembered for the
+new agent type. So an agent running `farhelm agent create --template wrapped --agent codex`, where `wrapped` is your
+Claude template with a wrapper, runs that Claude wrapper in front of Codex, and because the words came from your
+template rather than the agent's own flags, no card is shown even on a host that asks before YOLO launches. It can only
+run wrapper words you saved, but it lets an agent pair your wrapper with a different agent, and it contradicts SPEC.md's
+rule that applying a template means the same as making those edits by hand.
+
+The options: (a) clear the prefix when the agent type changes in the helm, a small change that matches what the launcher
+does when no prefix is remembered for the new agent; (b) carry a template's prefix across an agent change in both
+places, launcher included. Either way SPEC.md should say which. The landing monitor recommends (a), since a wrapper is
+usually written for one agent.
+
+#### Possible follow-ups
+
+- The changelog entry leaves out caveats worth keeping at release time: the wrapper must pass Farhelm's arguments and
+  environment through, OMP needs the wrapper to replace itself with the agent, and the prefix must not hold secrets.
+- If managed-checkout retry handling changes again, a direct test of a second interruption after Allow would strengthen
+  it, as the report says.
+
+#### Checks
+
+- Run now, on the rebased stack with the landing fixes (the landed diffs are identical to it):
+  `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check (304 delays, none without a reason), and `dprint check` on the changed docs; through the test
+  recorder with pinned nextest and tmux, four slots, no retries, the whole protocol, helm, supervisor and UI libraries,
+  the `farhelm` binary's tests, and the end-to-end wrapper, structured-launch, Restart with, managed-checkout and
+  agent-listing tests: 3270 passed, run `30c352ba-b443-49c0-8e86-8b6bba3d8c0c`; the UI JavaScript harness, run directly
+  rather than through the recorder: 294 passed; then fresh `cargo build` and web builds and `npx playwright test` on
+  `launcher-tabs.spec.ts`, `quick-launch.spec.ts`, `restart-with.spec.ts`, `templates.spec.ts`, `clone.spec.ts`,
+  `launcher-enter.spec.ts`, `approval-layout.spec.ts`, `yolo-guard.spec.ts` and `remembered-permissions.spec.ts` on both
+  engines, one worker, no retries: 332 passed, run `e6265481-d123-44a2-aeed-cd98df1cc2b1`.
+- Retained: the first whole-library run with the five failures above, run `f04d9aee-fede-43cb-9954-0cab2d28a68d`.
+- Reused: the executor's website build and changelog format check; the landing's docs edit adds no link.
+- Skipped: everything else the report skipped, for the reasons it gives.
+
+Nothing else in the executor's report became untrue at landing, apart from the checks and fixes above and its statement
+that no decision is pending: the landing found the one above.
