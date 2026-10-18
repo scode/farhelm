@@ -92,3 +92,96 @@ documentation mismatch in the host Settings dialog header, which was corrected. 
 stale Settings test count after the browser run revealed the selector problem; both were corrected and the reviewer
 confirmed no finding remained. Both reviews included the complete test-authoring checklist. The commit and PR wording
 passed separate cold reads.
+
+### Landing
+
+Landed on its own in round 93, as #2266 and #2269, merged bottom-up, with two conflicts resolved and three fixes made
+during the landing (below).
+
+#### What landed since the stack was based, and whether it interacted
+
+Since this stack's base, main gained the dialog focus change (launcher-enter-focus, #2267: clicking empty space in a
+dialog keeps focus on the control in use, and Enter on a focused dialog presses its main action) and two TODO.md edits.
+The landing monitor read the stack against them, and a fresh-context reviewer did the same independently. Neither found
+an interaction:
+
+- The host settings dialog, with the local host's new appearance choices, and the Settings dialog, with the new frame
+  switch, both use #2267's shared dialog setup. Neither has a main action, so Enter on the focused dialog does nothing,
+  which suits appearance choices that save on click; empty-space clicks leave the icon and color buttons alone, and the
+  first focused control is unchanged.
+- The terminal frame is drawn inside the terminal's existing padding and changes no layout. The approval cards, the
+  covered-link refusal and the session details bar landed before the executor's final rebase, and the landing rechecked
+  them anyway: they are unaffected. Separately, every place that draws a host mark now uses the host's saved icon and
+  color.
+
+Two conflicts came from #2267, which had updated the Settings test's switch count from 11 to 16 and given its tall
+window more room: the test now expects 17 switches, counting this stack's new one, and keeps #2267's taller window. In
+TODO.md both sides had removed an entry, and both removals stay.
+
+#### Upgrade
+
+#2266 moves the helm database from schema 57 to 58 and #2269 to 59, the next free numbers; there is no protocol change,
+because the appearance choices travel only between the helm and the app. An older helm refuses the newer database. The
+agent-wrappers plan, now in flight, also plans a schema change and will need 60. A browser tab still running the
+previous app cannot read the host list after the helm is updated until it reloads, which the existing version-mismatch
+reload prompt covers.
+
+#### Main was failing three helm tests, and this landing fixes them
+
+The managed-agent trust settings (#2255, landed in round 90) added three preference columns but did not remove them from
+the three helm tests that rewind a database to an older schema, so those tests have failed on main since then (confirmed
+on main before this landing, run `9a51e73d-8bd5-4c3f-92d8-f2eb2af53d61`). The landing monitor missed it in round 90 by
+reusing that plan's targeted helm test runs instead of running the whole helm library, the same mistake it made with the
+tunnels in round 85. This stack's new frame column hit the same tests. The landing added the missing column removals to
+those rewinds, and the whole helm library now passes (below).
+
+#### Other fixes made during the landing
+
+- The UI style test that requires every style variable to be declared failed on the frame color, which the app sets on
+  each terminal at runtime from its host's color, like the menu position it already allows. The landing added it to that
+  allowance with the reason. The executor had not run this test for #2269.
+- SPEC.md said a host's color tints only its icon; it now also mentions the terminal frame when the switch is on.
+  SPEC_impl.md and the harness-marks guide said there were eight host color tokens; there are seven, the default color
+  having none.
+
+#### A regression on main from the previous round
+
+This landing's browser run also failed
+`host picker opened without click focus still owns the keyboard and closes outside` in both engines, and the same test
+fails on main without this stack (run `3263ebe4-796a-4faa-a0b0-472842f918fd`). With the launcher's host menu open,
+clicking empty space in the launcher no longer closes the menu: #2267's rule that an empty-space click keeps focus where
+it is means the menu, which closes when focus leaves it, never sees focus leave. Neither #2267's executor nor the
+round-92 landing ran that test file. It is a product regression in launcher-enter-focus, not in this stack, and fixing
+it needs a choice (close open menus on any empty-space click, or have the menu watch for outside clicks); asking for a
+follow-up on launcher-enter-focus is the natural place for it. Other menus inside dialogs may behave the same way; that
+was not checked.
+
+#### Possible follow-ups
+
+- A code comment on the host's icon field still says an untouched host defaults to the cloud, which is no longer true
+  for the local host.
+- The new SPEC_impl.md paragraph about the frame sits after the launcher's host picker text rather than with host
+  appearance or preferences.
+
+#### Checks
+
+- Run now, on the rebased stack with the landing fixes (the landed diffs are identical to it):
+  `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, `dprint check` on the changed docs,
+  `python3 scripts/check-agents-md.py`, and the isolated `python -B scripts/check-test-sleeps.py` (304 delays, none
+  without a reason); through the test recorder with pinned nextest and tmux, four slots, no retries,
+  `cargo nextest run -p farhelm-helm --lib` (the whole helm library): 1185 passed, run
+  `ebe5bf9b-1318-4510-ad1d-2dde24225746`, and the stack's selected appearance, schema and preference cases in the shared
+  protocol and helm crates, together with the whole UI library: 560 passed, run `13b5e60f-d1bc-42a8-aece-3f9cbf98550e`;
+  the UI JavaScript harness: 294 passed, run `75e2dc25-bc59-4f42-8670-672d08821ada`; then fresh `cargo build` and web
+  builds and `npx playwright test` on `settings.spec.ts`, `terminal-multihost.spec.ts`, `host-picker.spec.ts`,
+  `terminal.spec.ts`, `launcher-enter.spec.ts`, `approval-layout.spec.ts` and `header.spec.ts` on both engines, one
+  worker, no retries: 336 passed and the two host-picker failures above, run `a67b4e8b-d4d1-4d1c-b116-dc5be23e9155`.
+- Earlier observations, retained: the first selection run before the fixture fix (three rewind tests failed, run
+  `f0ebeadb-ee47-4434-8b0e-2db71d280dbf`), a whole-library run in which the landing's own first fixture edit duplicated
+  a column removal (one failure, run `98e183cd-e1a0-44b7-81a3-8251911312cf`), and the JavaScript run before the
+  allowance (one failure, run `2b165700-d73a-41ca-9216-dd8ad394db55`).
+- Reused: the executor's website build, whose page nothing since has changed.
+- Skipped: everything the report skipped, for the reasons it gives.
+
+Nothing in the executor's report became untrue at landing, apart from the checks the landing added and the fixes above.

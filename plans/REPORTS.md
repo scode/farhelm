@@ -14,3 +14,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`codex-trust-prompts`](reports/codex-trust-prompts.report.md) landed 2026-10-18 in #2255, #2256: Codex, Muse and Pi workspace trust move from the launcher to per-agent Settings switches for managed checkouts
 - [`prompt-running-agent`](reports/prompt-running-agent.report.md) landed 2026-10-18 in #2257, #2265: farhelm command to type a prompt into another session's running Claude or Codex
 - [`launcher-enter-focus`](reports/launcher-enter-focus.report.md) landed 2026-10-18 in #2267: dialogs keep focus on empty-space clicks, and Enter on the dialog itself presses its main button
+- [`host-terminal-colors`](reports/host-terminal-colors.report.md) landed 2026-10-18 in #2266, #2269: local host picks its icon and color, red for every host, optional host-colored terminal frame
