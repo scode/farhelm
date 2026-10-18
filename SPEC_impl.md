@@ -560,6 +560,9 @@ The app bar's gear opens a modal `settings` dialog as a sibling of the sticky ba
 cap the backdrop below main-pane surfaces. It holds the two app-wide host-confirmation choices, with state-specific help
 and an explanation that other open clients see changes on reload, and, only in a desktop app whose updater is active,
 the automatic-updates switch, which reads and writes the desktop state file instead (see The desktop app's updater). The
+desktop file-opening field lives in the shared preference row but bypasses the best-effort preference queue: it sends
+one acknowledged sparse `PUT /api/preferences`, keeps a refused draft editable, and updates the shared client mirror
+only after success. Its warnings use the same parser and type classifier as the helm's stat and open checks. The
 switches retain native checkbox inputs for label activation and Space handling. Each host-confirmation switch reads
 `Some(true)` as without asking, updates `SharedPreferences` immediately and sends an explicit boolean through the
 existing sparse preference queue. Host-confirmation preference failures retain that queue's silent behavior. The session

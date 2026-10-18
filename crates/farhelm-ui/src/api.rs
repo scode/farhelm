@@ -368,6 +368,9 @@ impl ListSort {
 /// gets everywhere else in this codebase.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
 pub(crate) struct Preferences {
+    /// A NULL choice uses the desktop opener's default; an empty choice disables it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) open_extensions: Option<String>,
     /// Only a successfully acknowledged true value permits native tunnels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) tunnel_consent: Option<bool>,
@@ -4466,6 +4469,25 @@ pub(crate) async fn write_tunnel_consent(base: &str, allowed: bool) -> Result<()
         client()
             .put(&url)
             .json(&serde_json::json!({"tunnel_consent": allowed})),
+    )
+    .await?;
+    if !response.status().is_success() {
+        return Err(refusal_text("PUT", &url, response).await);
+    }
+    Ok(())
+}
+
+/// Save the desktop opener's list only after the helm accepts its validation.
+///
+/// The ordinary preference queue cannot report a rejected security choice to
+/// the field, and replaying a stale queued write could undo a later save.
+#[cfg(native_desktop)]
+pub(crate) async fn write_open_extensions(base: &str, value: &str) -> Result<(), String> {
+    let url = format!("{base}/api/preferences");
+    let response = send(
+        client()
+            .put(&url)
+            .json(&serde_json::json!({"open_extensions": value})),
     )
     .await?;
     if !response.status().is_success() {

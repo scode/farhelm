@@ -3296,6 +3296,42 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 .host-settings-section { display: grid; gap: 14px; min-width: 0; }
 .host-settings-section + .host-settings-section { border-top: 1px solid var(--border-dim); padding-top: 20px; }
+.open-extensions-field { display: grid; gap: 8px; min-width: 0; }
+.open-extensions-label { color: var(--fg-0); font-weight: 600; }
+.open-extensions-field input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  color: var(--fg-0);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+.open-extensions-field > button { justify-self: start; }
+/* A risky type is a standing warning, not a hover hint. Only the border
+   glows: movement in the warning text would make the consequence harder to read.
+   The glow steps rather than interpolates, like every looping animation here
+   (SPEC_impl.md, looping animations): 4 steps over 2 keyframe intervals per
+   3s cycle is under 3 redraws a second instead of one per display refresh. */
+.open-extensions-warning {
+  padding: 10px 12px;
+  color: var(--fg-0);
+  background: var(--danger-bg-dim);
+  border: 2px solid var(--danger-strong);
+  border-radius: var(--radius-md);
+  animation: open-extensions-glow 3s steps(4) infinite;
+}
+.open-extensions-warning p { margin: 0; line-height: 1.5; }
+.open-extensions-warning p + p { margin-top: 6px; }
+.open-extensions-warning-heading { font-weight: 700; }
+.open-extensions-warning-heading span { color: var(--danger-strong); }
+@keyframes open-extensions-glow {
+  50% { box-shadow: 0 0 12px 3px var(--danger-strong); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .open-extensions-warning { animation: none; }
+}
 .host-settings-section-title {
   margin: 0;
   color: var(--fg-1);

@@ -19,6 +19,9 @@
 //! new choice through the shared signal, while other clients reload to get it.
 //! Native tunnel consent also requires an acknowledged save; its controller
 //! owns the shared warning and revokes listeners when the switch turns off.
+//! The desktop download-opening list uses an acknowledged save too: the helm
+//! decides what opens, while this dialog warns about listed types it does not
+//! recognize as safe.
 
 use dioxus::prelude::*;
 
@@ -63,6 +66,8 @@ fn restore_automatic_checkbox(in_force: bool) {
 /// The checkout and ntfy fields are exceptions: their explicit saves expose validation
 /// refusals rather than treating arbitrary text like a switch preference.
 /// Tunnel consent is another exception: it is never optimistic or silently retried.
+/// The desktop file-opening list also waits for an acknowledged save before
+/// updating the shared preference; its warnings follow the unsaved draft.
 /// Only the grouped body scrolls; both dismissal paths stay outside it and
 /// share the caller's close callback and focus-return lifecycle.
 #[component]
@@ -293,7 +298,7 @@ pub(crate) fn SettingsDialog(
                         aria_label: "terminal links",
                         h3 { class: "host-settings-section-title", "terminal links" }
                         p { class: "host-settings-help",
-                            "Clicking a web link in a terminal: this choice applies to every client of this helm. Other open clients pick it up when they reload. File downloads are unchanged."
+                            "Clicking a web link in a terminal: this choice applies to every client of this helm. Other open clients pick it up when they reload. This web-link choice does not change file downloads."
                         }
                         TerminalLinkChoice {
                             value: TerminalLinkClick::Intercept,
@@ -311,6 +316,7 @@ pub(crate) fn SettingsDialog(
                             help: "Let the program handle links. Farhelm does not open them; without mouse reporting, clicking a link does nothing.",
                         }
                         NativeTunnelSettings {}
+                        NativeOpenExtensionsSettings {}
                     }
                     section {
                         class: "host-settings-section",
@@ -386,7 +392,15 @@ pub(crate) fn SettingsDialog(
                     }
                 }
                 div { class: "host-settings-actions host-settings-footer",
-                    span { "Most choices save immediately. Ntfy alerts and checkout fields use save." }
+                    // Only the desktop app shows the file-types field, so only
+                    // its footer names it.
+                    span {
+                        if cfg!(native_desktop) {
+                            "Most choices save immediately. Ntfy alerts, checkout fields and file types use save."
+                        } else {
+                            "Most choices save immediately. Ntfy alerts and checkout fields use save."
+                        }
+                    }
                     button {
                         r#type: "button",
                         class: "btn btn-neutral app-settings-close",
@@ -410,6 +424,221 @@ fn NativeTunnelSettings() -> Element {
     #[cfg(not(native_desktop))]
     {
         rsx! {}
+    }
+}
+
+/// Keep the desktop-only opener setting out of browsers, which cannot open a saved file.
+#[component]
+fn NativeOpenExtensionsSettings() -> Element {
+    #[cfg(native_desktop)]
+    {
+        rsx! { OpenExtensionsSettings {} }
+    }
+    #[cfg(not(native_desktop))]
+    {
+        rsx! {}
+    }
+}
+
+/// Warnings follow recognizable draft entries even when another entry is invalid.
+///
+/// A malformed full draft cannot be saved, but hiding a warning merely because
+/// a neighboring token is malformed would make the risky type disappear while
+/// the user is correcting the list. The parser still defines each token.
+#[cfg(native_desktop)]
+fn open_extension_warnings(
+    raw: &str,
+) -> Vec<(String, farhelm_proto::open_extensions::WarningKind)> {
+    use farhelm_proto::open_extensions::{OpenExtensions, WarningKind};
+
+    let mut warnings = Vec::new();
+    for token in raw.split(',') {
+        if let Ok(list) = OpenExtensions::parse(token) {
+            for (extension, kind) in list.entries() {
+                if kind != WarningKind::Safe && !warnings.iter().any(|(seen, _)| seen == extension)
+                {
+                    warnings.push((extension.to_string(), kind));
+                    // A valid policy has at most 32 distinct entries. Bound
+                    // the display for an invalid, arbitrarily long draft.
+                    if warnings.len() == 32 {
+                        return warnings;
+                    }
+                }
+            }
+        }
+    }
+    warnings
+}
+
+/// Edit the helm-wide opener policy with visible validation and live risk warnings.
+///
+/// The save survives dialog dismissal. The component's feedback handles do not:
+/// after an awaited write, they are used only while the dialog is still mounted.
+#[cfg(native_desktop)]
+#[component]
+fn OpenExtensionsSettings() -> Element {
+    use std::{cell::Cell, rc::Rc};
+
+    use farhelm_proto::open_extensions::{DEFAULT, OpenExtensions, WarningKind};
+
+    let base = use_context::<ApiBase>().0;
+    let mut preferences = use_context::<SharedPreferences>();
+    let mut draft = use_signal(|| {
+        preferences
+            .0
+            .read()
+            .open_extensions
+            .clone()
+            .unwrap_or_else(|| DEFAULT.to_string())
+    });
+    let mut saving = use_signal(|| false);
+    let mut outcome = use_signal(|| None::<Result<(), String>>);
+    let mounted = use_hook(|| Rc::new(Cell::new(true)));
+    let drop_mounted = mounted.clone();
+    use_drop(move || drop_mounted.set(false));
+    let warnings = open_extension_warnings(&draft());
+    let modifier = if cfg!(target_os = "macos") {
+        "Cmd"
+    } else {
+        "Ctrl"
+    };
+
+    rsx! {
+        div { class: "open-extensions-field",
+            label { r#for: "open-extensions-input", class: "open-extensions-label",
+                "file types to open with {modifier}-click"
+            }
+            input {
+                id: "open-extensions-input", r#type: "text", value: "{draft}",
+                readonly: saving(), aria_disabled: saving(),
+                autocomplete: "off", spellcheck: "false", autocorrect: "off", autocapitalize: "none",
+                aria_describedby: "open-extensions-help",
+                oninput: move |event| {
+                    if !saving() {
+                        draft.set(event.value());
+                        outcome.set(None);
+                    }
+                },
+                onkeydown: move |event: KeyboardEvent| {
+                    if event.key() == Key::Enter {
+                        event.prevent_default();
+                        event.stop_propagation();
+                    }
+                },
+            }
+            p { id: "open-extensions-help", class: "host-settings-help",
+                "Comma-separated final extensions. A leading dot is optional. Save an empty field to stop opening downloaded files; downloads still save. This choice applies to this helm."
+            }
+            for (extension, kind) in warnings {
+                div { class: "open-extensions-warning", role: "alert", key: "{extension}",
+                    p { class: "open-extensions-warning-heading",
+                        span { aria_hidden: "true", "⚠" }
+                        " {extension}: "
+                        if kind == WarningKind::Html { "an agent-written page may run in your browser" }
+                        else { "no protection from the default app" }
+                    }
+                    p {
+                        if kind == WarningKind::Html {
+                            "An agent-written page can run scripts in your browser and open web addresses outside Farhelm's link permissions. It can send cross-site requests to services on your computer, including localhost on other ports, and those requests may carry the service's cookies even though the page cannot read them directly."
+                        } else {
+                            "Farhelm does not restrict what your default app does with this file. An agent can write this type of file, and opening it may run code on your computer."
+                        }
+                    }
+                }
+            }
+            button {
+                r#type: "button", class: "btn btn-neutral", aria_disabled: saving(),
+                "data-tooltip": "save the file types this helm may open",
+                onclick: move |_| {
+                    if saving() { return; }
+                    let value = match OpenExtensions::parse(&draft()) {
+                        Ok(list) => list.normalized(),
+                        Err(reason) => {
+                            outcome.set(Some(Err(reason)));
+                            return;
+                        }
+                    };
+                    saving.set(true);
+                    outcome.set(None);
+                    let base = base.clone();
+                    let mounted = mounted.clone();
+                    // Explicit Save belongs to the app, even if the dialog closes.
+                    dioxus::core::spawn_forever(async move {
+                        let result = crate::api::write_open_extensions(&base, &value).await;
+                        if result.is_ok() {
+                            // The next dialog reads this shared mirror even
+                            // when this one closed during the write.
+                            preferences.0.write().open_extensions = Some(value.clone());
+                        }
+                        if !mounted.get() { return; }
+                        saving.set(false);
+                        if result.is_ok() {
+                            draft.set(value);
+                        }
+                        outcome.set(Some(result));
+                    });
+                },
+                if saving() { "saving…" } else { "save file types" }
+            }
+            if let Some(result) = outcome() {
+                match result {
+                    Ok(()) => rsx! { p { class: "checkout-root-success", role: "status", "file types saved" } },
+                    Err(reason) => rsx! { p { class: "checkout-root-error", role: "alert", "{reason}" } },
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(test, native_desktop))]
+mod open_extensions_tests {
+    use super::open_extension_warnings;
+    use farhelm_proto::open_extensions::WarningKind;
+
+    /// Recognized document and log types need no risk message beside the field.
+    #[test]
+    fn safe_draft_has_no_warnings() {
+        assert!(open_extension_warnings("md, txt, json, log").is_empty());
+    }
+
+    /// Each unrecognized type gets its own warning, even in an invalid draft.
+    #[test]
+    fn unsafe_draft_warns_per_type() {
+        assert_eq!(
+            open_extension_warnings("command, tar.gz, shell, COMMAND"),
+            vec![
+                ("command".into(), WarningKind::Other),
+                ("shell".into(), WarningKind::Other)
+            ]
+        );
+    }
+
+    /// HTML-like final types share the browser-specific warning vocabulary.
+    #[test]
+    fn html_family_gets_specific_warning() {
+        assert_eq!(
+            open_extension_warnings("html, htm, xhtml, svg"),
+            vec![
+                ("html".into(), WarningKind::Html),
+                ("htm".into(), WarningKind::Html),
+                ("xhtml".into(), WarningKind::Html),
+                ("svg".into(), WarningKind::Html),
+            ]
+        );
+    }
+
+    /// Repeated and empty tokens do not consume the policy's distinct-type cap.
+    /// The warning scan must still reach each risky type after those tokens.
+    #[test]
+    fn duplicates_before_unsafe_types_do_not_hide_warnings() {
+        let draft = format!("{}html, command", "md,".repeat(40));
+        assert_eq!(
+            open_extension_warnings(&draft),
+            vec![
+                ("html".into(), WarningKind::Html),
+                ("command".into(), WarningKind::Other),
+            ]
+        );
     }
 }
 
