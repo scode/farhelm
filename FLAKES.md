@@ -2260,3 +2260,22 @@ Escape caller, failure cleanup and documentation, leaving the drain mechanism un
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-10-17 — build-skew rewrite removal (e2e/tests/terminal-reconnect.spec.ts)
+
+The retained WebKit failure for `client-helm-skew-prompts-reload` in run `b8635849-b577-4ec0-a8df-315fbdb4e5de` shows
+interception removed at 7450217.893 ms, then an in-flight rewrite's fulfillment rejected at 7450227.075 ms with
+`Route is already handled!`. Plain `unroute` continued the browser request while the callback was still fetching its
+replacement reply. The test now stops admitting rewrites and drains callback work before removing its own handler,
+including on a failed body. This uses the drain helper introduced for the confirmation fixture in #2259; catching the
+error and then asking Playwright's wait drain to finish would retain that other deadlock. The existing agreeing-reply
+and latched-warning assertions remain. The TODO entry and sweep exclusion are removed with this fix. Original failure
+substrate and classification observations remain in the 2026-10-16 entry; the private trace may expire.
+
+```text
+Route is already handled!
+```
+
+Class: peer-lifecycle
+
+Cause: established

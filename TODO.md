@@ -217,13 +217,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Isolated classification reruns failed, passed, failed: `213407df-5293-46eb-87ca-d08bbe6b3535`,
   `46df9503-ab98-4587-a36d-c8392c58183d`, `a4bb8764-8cf4-42f0-aeee-d97ad0267184`. Cause unknown (FLAKES.md, 2026-10-17).
 
-- **Client/helm skew reload route is already handled.** `client-helm-skew-prompts-reload` in
-  `e2e/tests/terminal-reconnect.spec.ts` failed in WebKit with `route.fulfill: Route is already handled!` in the browser
-  sweep `b8635849-b577-4ec0-a8df-315fbdb4e5de`. All three isolated reruns passed both engines:
-  `77619451-124d-4eee-85cf-44670a49c415`, `22f0678e-5f74-4319-add5-782956071cf1`, and
-  `69c22916-c5ad-4c91-81e7-1fc670825542`. The route handler failed after fetching an API response; the cause is unknown
-  (FLAKES.md, 2026-10-16).
-
 - **Browser stack parent-SIGTERM cleanup.** `scripts/test-start-stack-cleanup.sh` left the stack serving, with state and
   processes intact, after killing its spawner with SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`. The isolated
   repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45` passed unchanged. Leading hypothesis (2026-10-01 review, not
