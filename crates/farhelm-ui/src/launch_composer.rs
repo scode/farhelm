@@ -374,8 +374,8 @@ pub(crate) enum ComposerSearchResult {
 
 /// The permission choices exposed by launch-composer search.
 ///
-/// Guarded and YOLO carry explicit wire choices; own-setting leaves the
-/// permission absent. This is request intent, so it must not be used to
+/// Every mode except own-setting carries an explicit wire choice. Own-setting
+/// leaves permission absent. This is request intent, so it must not be used to
 /// classify an older session's stored command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ComposerPermission {
@@ -383,6 +383,28 @@ pub(crate) enum ComposerPermission {
     OwnSetting,
     Yolo,
     Custom,
+    Approve,
+    SmartApprove,
+    Chat,
+}
+
+impl ComposerPermission {
+    /// The word a person sees and types for this search choice.
+    ///
+    /// Own-setting has no wire permission, while explicit modes share the
+    /// launcher's visible spelling. Search matching and exact preselection
+    /// must use this same word or Enter can select a different row.
+    const fn search_word(self) -> &'static str {
+        match self {
+            Self::Guarded => permission_value(LaunchPermission::Guarded),
+            Self::OwnSetting => "own",
+            Self::Yolo => permission_value(LaunchPermission::Yolo),
+            Self::Custom => permission_value(LaunchPermission::Custom),
+            Self::Approve => permission_value(LaunchPermission::Approve),
+            Self::SmartApprove => permission_value(LaunchPermission::SmartApprove),
+            Self::Chat => permission_value(LaunchPermission::Chat),
+        }
+    }
 }
 
 /// The host facts search needs without taking ownership of list-view state.
@@ -981,12 +1003,16 @@ pub(crate) fn search_results(
         && let Some(harness) = harness
     {
         let choices = [
-            ("yolo", ComposerPermission::Yolo),
-            ("guarded", ComposerPermission::Guarded),
-            ("own", ComposerPermission::OwnSetting),
-            ("custom", ComposerPermission::Custom),
+            ComposerPermission::Yolo,
+            ComposerPermission::Guarded,
+            ComposerPermission::OwnSetting,
+            ComposerPermission::Custom,
+            ComposerPermission::Approve,
+            ComposerPermission::SmartApprove,
+            ComposerPermission::Chat,
         ];
-        for (word, choice) in choices {
+        for choice in choices {
+            let word = choice.search_word();
             let supported = match choice {
                 ComposerPermission::Yolo => {
                     normalized_permissions(harness, Some(LaunchPermission::Yolo)).is_some()
@@ -994,11 +1020,22 @@ pub(crate) fn search_results(
                 ComposerPermission::Guarded => harness.offers_permission(LaunchPermission::Guarded),
                 ComposerPermission::OwnSetting => harness.omitted_permission().is_none(),
                 ComposerPermission::Custom => harness.offers_permission(LaunchPermission::Custom),
+                ComposerPermission::Approve => harness.offers_permission(LaunchPermission::Approve),
+                ComposerPermission::SmartApprove => {
+                    harness.offers_permission(LaunchPermission::SmartApprove)
+                }
+                ComposerPermission::Chat => harness.offers_permission(LaunchPermission::Chat),
             };
             if supported
                 && (query.is_empty()
+                    // Only these two permission words join combined search.
+                    // Own, custom and approval words would match ordinary
+                    // search text too often; all remain available via perms:.
                     || (scope == SearchScope::All
-                        && word == "yolo"
+                        && matches!(
+                            choice,
+                            ComposerPermission::Yolo | ComposerPermission::Guarded
+                        )
                         && word.contains(&folded_query))
                     || (scope == SearchScope::Permissions && word.starts_with(&folded_query)))
             {
@@ -1134,12 +1171,7 @@ fn exact_word_group(
             Some(ComposerSearchGroup::Efforts)
         }
         ComposerSearchResult::Permissions(permission)
-            if match permission {
-                ComposerPermission::Guarded => folded_query == "guarded",
-                ComposerPermission::OwnSetting => folded_query == "own",
-                ComposerPermission::Yolo => folded_query == "yolo",
-                ComposerPermission::Custom => folded_query == "custom",
-            } =>
+            if permission.search_word() == folded_query =>
         {
             Some(ComposerSearchGroup::Permissions)
         }
@@ -1678,8 +1710,8 @@ mod tests {
         }
     }
 
-    /// Permission search exposes exactly the two settled shorthand words and
-    /// respects harness normalization, including Pi's mandatory YOLO mode.
+    /// Scoped permission search follows the harness's buttons, so adding an
+    /// approval mode cannot silently leave its keyboard route behind.
     #[test]
     fn permission_search_actions_follow_harness_capabilities() {
         let history = LaunchHistory::default();
@@ -1705,6 +1737,68 @@ mod tests {
             search_results(&history, &[], "perms:", Some(LaunchHarness::Pi), None),
             vec![ComposerSearchResult::Permissions(ComposerPermission::Yolo)]
         );
+        assert_eq!(
+            search_results(&history, &[], "perms:", Some(LaunchHarness::Goose), None),
+            vec![
+                ComposerSearchResult::Permissions(ComposerPermission::Yolo),
+                ComposerSearchResult::Permissions(ComposerPermission::Approve),
+                ComposerSearchResult::Permissions(ComposerPermission::SmartApprove),
+                ComposerSearchResult::Permissions(ComposerPermission::Chat),
+            ]
+        );
+        assert_eq!(
+            search_results(&history, &[], "perms:", Some(LaunchHarness::Omp), None),
+            vec![
+                ComposerSearchResult::Permissions(ComposerPermission::Yolo),
+                ComposerSearchResult::Permissions(ComposerPermission::Guarded),
+                ComposerSearchResult::Permissions(ComposerPermission::Custom),
+                ComposerSearchResult::Permissions(ComposerPermission::Approve),
+            ]
+        );
+        assert_eq!(
+            search_results(
+                &history,
+                &[],
+                "perms:smart",
+                Some(LaunchHarness::Goose),
+                None
+            ),
+            vec![ComposerSearchResult::Permissions(
+                ComposerPermission::SmartApprove
+            )]
+        );
+        let smart = grouped_search_results(search_results(
+            &history,
+            &[],
+            "perms:smart approve",
+            Some(LaunchHarness::Goose),
+            None,
+        ));
+        assert_eq!(default_search_index(&smart, "perms:smart approve"), 0);
+        assert_eq!(
+            exact_word_group(
+                &ComposerSearchResult::Permissions(ComposerPermission::SmartApprove),
+                "smart approve"
+            ),
+            Some(ComposerSearchGroup::Permissions)
+        );
+        for &harness in LaunchHarness::ALL {
+            let actual = search_results(&history, &[], "perms:", Some(harness), None);
+            for (choice, mode) in [
+                (ComposerPermission::Approve, LaunchPermission::Approve),
+                (
+                    ComposerPermission::SmartApprove,
+                    LaunchPermission::SmartApprove,
+                ),
+                (ComposerPermission::Chat, LaunchPermission::Chat),
+            ] {
+                assert_eq!(
+                    actual.contains(&ComposerSearchResult::Permissions(choice)),
+                    harness.offers_permission(mode),
+                    "{harness:?}: {mode:?} search must follow its offered button"
+                );
+            }
+        }
         assert!(
             search_results(
                 &history,
@@ -1718,11 +1812,10 @@ mod tests {
         assert!(search_results(&history, &[], "perms:yolo", None, None).is_empty());
     }
 
-    /// Bare YOLO is the only unscoped permission shorthand; its exact word
-    /// wins keyboard preselection without turning bare `default` into an
-    /// ambiguous permissions action.
+    /// Bare YOLO and Guarded follow the same substring and exact-word rules.
+    /// Other permission words stay scoped so common prose cannot change modes.
     #[test]
-    fn bare_yolo_offers_permissions_and_preselects_exactly() {
+    fn bare_yolo_and_guarded_offer_permissions_and_preselect_exactly() {
         let history = LaunchHistory::default();
         let yolo = search_results(&history, &[], "yolo", Some(LaunchHarness::Codex), None);
         assert!(yolo.contains(&ComposerSearchResult::Permissions(ComposerPermission::Yolo)));
@@ -1733,6 +1826,49 @@ mod tests {
         );
         let groups = grouped_search_results(yolo);
         assert_eq!(default_search_index(&groups, "yolo"), 0);
+        for query in ["guarded", "ar"] {
+            let results = search_results(&history, &[], query, Some(LaunchHarness::Codex), None);
+            assert!(results.contains(&ComposerSearchResult::Permissions(
+                ComposerPermission::Guarded
+            )));
+            if query == "guarded" {
+                assert_eq!(
+                    default_search_index(&grouped_search_results(results), query),
+                    0
+                );
+            }
+        }
+        assert!(
+            !search_results(&history, &[], "guarded", None, None)
+                .iter()
+                .any(|result| matches!(result, ComposerSearchResult::Permissions(_)))
+        );
+        for harness in [
+            LaunchHarness::Goose,
+            LaunchHarness::Pi,
+            LaunchHarness::OpenCode,
+            LaunchHarness::Cursor,
+        ] {
+            assert!(
+                !search_results(&history, &[], "guarded", Some(harness), None).contains(
+                    &ComposerSearchResult::Permissions(ComposerPermission::Guarded)
+                )
+            );
+        }
+        for (query, harness) in [
+            ("own", LaunchHarness::Cursor),
+            ("custom", LaunchHarness::Cursor),
+            ("approve", LaunchHarness::Goose),
+            ("smart approve", LaunchHarness::Goose),
+            ("chat", LaunchHarness::Goose),
+        ] {
+            assert!(
+                !search_results(&history, &[], query, Some(harness), None)
+                    .iter()
+                    .any(|result| matches!(result, ComposerSearchResult::Permissions(_))),
+                "{query} must require the perms: scope even where {harness:?} offers it"
+            );
+        }
     }
 
     /// Shared reconciliation must still clear historical trust values on an

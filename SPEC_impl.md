@@ -726,10 +726,11 @@ GUI labels an unaliased local row `local (this machine)` in the selector, Hosts 
 while preserving aliases and the registry's own `this machine` name. A session row without confirmed locality retains
 the name supplied by the helm; the GUI does not infer locality from its text.
 
-The `perms:` scope offers guarded, YOLO and own-setting choices only where the active harness supports them. Bare `yolo`
-joins the ordinary combined search and gets exact-word preselection; guarded and own-setting use `perms:guarded` and
-`perms:own`. Applying a permission row updates the same explicit-choice bookkeeping as the segmented control and leaves
-the other draft fields intact. Command mode has no active structured harness, so it offers no permission actions.
+The `perms:` scope offers guarded, YOLO, custom, own-setting and approval-mode choices only where the active harness
+supports them. Bare `yolo` and `guarded` join the ordinary combined search and get exact-word preselection; own setting,
+custom and the approval modes require `perms:`. Bare `own` and `custom` would match too many unrelated queries. Applying
+a permission row updates the same explicit-choice bookkeeping as the segmented control and leaves the other draft fields
+intact. Command mode has no active structured harness, so it offers no permission actions.
 
 The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
 `HostId` is a registry row that outlives a retarget or an adopt) before the selector trusts it. A row whose install this

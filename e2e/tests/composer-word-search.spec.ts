@@ -113,10 +113,10 @@ test("composer word search drives a structured launch", async ({ page, request }
   await expect(search).toHaveValue("");
   await expect(search).toBeFocused();
 
-  // Guarded is the explicit Codex choice that replaces YOLO. Search no
+  // Bare Guarded is the explicit Codex choice that replaces YOLO. Search no
   // longer offers the old implicit-default permission; the stored launch
   // below must retain this explicit choice as well as the model and effort.
-  await search.fill("perms:guarded");
+  await search.fill("guarded");
   await expect(form.getByRole("option", { name: "Permissions: guarded", exact: true, selected: true }))
     .toBeVisible();
   await search.press("Enter");
