@@ -239,6 +239,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **WebKit SSH help keyboard-scroll timeout with no hosts.** `SSH help remains keyboard-scrollable with no hosts` in
+  `e2e/tests/keyboard-scroll.spec.ts` timed out after 60 seconds in WebKit during browser run
+  `3727b704-5894-4a20-9fb6-1967d56fabb8` on clean main. Isolated classification reruns passed twice and timed out once
+  (`84ec8315-ddda-47ad-8514-1b5a8d325ffd`, `839a11bb-abaa-464c-9267-74ec02a1a9b0`,
+  `2b03f1ba-45f4-4c86-823c-90bd5bf0b4d9`); the WebKit passes took about three seconds. The timeout snapshot has no SSH
+  help dialog, but the report does not locate the wait that stalled. Find that step in the retained trace before
+  changing the test or its deadline (FLAKES.md, 2026-10-18).
+
 - **Same-source Replace menu fails to open after YOLO cancellation.**
   `plain Replace keeps a newer same-source key after old header YOLO cancellation` in `e2e/tests/replace.spec.ts` failed
   in WebKit waiting five seconds for the source row's menu in browser run `d01a19ad-811c-4dae-90b8-2c22a70ab473`.
