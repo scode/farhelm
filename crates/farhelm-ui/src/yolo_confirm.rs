@@ -308,6 +308,7 @@ mod tests {
             model: None,
             effort: None,
             permissions,
+            wrapper_prefix: None,
             workspace_trust: None,
         }
     }

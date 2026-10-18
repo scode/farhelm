@@ -335,7 +335,9 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
     let selection = normalize_selection(selection);
     validate_selection(&selection)?;
 
-    let mut argv = Vec::new();
+    // The wrapper is a literal prefix around the complete command, including
+    // Goose's `env` launcher. Both fresh and resume argv reuse this sequence.
+    let mut argv = selection.wrapper_prefix.clone().unwrap_or_default();
     if selection.harness == LaunchHarness::Goose
         && (selection.effort.is_some() || selection.permissions.is_some())
     {
@@ -713,6 +715,7 @@ fn program(harness: LaunchHarness) -> &'static str {
 /// The catalog constrains an entered model and effort; an omitted model is
 /// valid for every harness and is resolved by that harness when it starts.
 fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
+    farhelm_proto::check_wrapper_prefix(selection.wrapper_prefix.as_deref())?;
     farhelm_proto::check_permission_flags(
         selection.permissions,
         selection.permission_flags.as_deref(),
@@ -1096,6 +1099,37 @@ mod tests {
         }
     }
 
+    /// A wrapper belongs to the stored launch, so every way to start that
+    /// launch must put the same literal words ahead of the agent command.
+    /// Goose is the sensitive case: its environment-setting `env` executable
+    /// is part of the command being wrapped, not a replacement for the prefix.
+    #[farhelm_testtrace::test]
+    fn wrapper_prefix_surrounds_every_agent_start_and_resume() {
+        let prefix = vec!["with-endpoint".to_string(), "--".to_string()];
+        for harness in LaunchHarness::ALL {
+            let bare = super::compile(selection(*harness)).expect("bare agent compiles");
+            let wrapped = super::compile(LaunchSelection {
+                wrapper_prefix: Some(prefix.clone()),
+                ..selection(*harness)
+            })
+            .expect("wrapped agent compiles");
+            let bare_start = bare.start_argv().unwrap();
+            let wrapped_start = wrapped.start_argv().unwrap();
+            assert_eq!(wrapped_start[..prefix.len()], prefix, "{harness:?}");
+            assert_eq!(wrapped_start[prefix.len()..], bare_start, "{harness:?}");
+            if *harness == LaunchHarness::Goose {
+                assert_eq!(wrapped_start[prefix.len()], "env");
+            }
+            if let Some(bare_resume) = bare.resume_argv().unwrap() {
+                let wrapped_resume = wrapped.resume_argv().unwrap().unwrap();
+                assert_eq!(wrapped_resume[..prefix.len()], prefix, "{harness:?}");
+                assert_eq!(wrapped_resume[prefix.len()..], bare_resume, "{harness:?}");
+            }
+            let named = super::named_start(&wrapped, "saved".into()).unwrap();
+            assert_eq!(named.argv[..prefix.len()], prefix, "{harness:?}");
+        }
+    }
+
     fn selection(harness: LaunchHarness) -> LaunchSelection {
         LaunchSelection {
             permission_flags: None,
@@ -1103,6 +1137,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         }
     }
@@ -1124,6 +1159,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let normalized = normalize_selection(pi.clone());
@@ -1141,6 +1177,7 @@ mod tests {
                     model: model.map(str::to_owned),
                     effort: None,
                     permissions,
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 };
                 let launch = compile(input.clone()).unwrap();
@@ -1269,6 +1306,7 @@ mod tests {
             model: Some("gpt-5.6-terra".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         assert_eq!(
@@ -1289,6 +1327,7 @@ mod tests {
             model: Some("claude-fable-5".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         assert_eq!(
@@ -1309,6 +1348,7 @@ mod tests {
             model: Some("muse-spark-1.3-contributor".to_string()),
             effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         assert_eq!(
@@ -1329,6 +1369,7 @@ mod tests {
             model: Some("opencode/grok-4.6".to_string()),
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let compiled = compile(opencode).expect("OpenCode's documented flags compile");
@@ -1356,6 +1397,7 @@ mod tests {
             model: Some("private-zen-model".to_string()),
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let compiled = compile(bare.clone()).expect("bare Zen model");
@@ -1414,6 +1456,7 @@ mod tests {
                     model: Some(typed.clone()),
                     effort: None,
                     permissions: None,
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 };
                 let compiled = compile(opencode.clone())
@@ -1465,6 +1508,7 @@ mod tests {
             model: Some("opencode/glm-5.3".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
 
@@ -1593,6 +1637,7 @@ mod tests {
                 model: Some("muse-spark-1.3-contributor".to_string()),
                 effort: Some(effort),
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             };
             assert!(
@@ -1612,6 +1657,7 @@ mod tests {
             model: Some("x-ai/grok-4.6".into()),
             effort: Some(LaunchEffort::Max),
             permissions: Some(LaunchPermission::SmartApprove),
+            wrapper_prefix: None,
             workspace_trust: None,
         })
         .expect("Goose selection compiles");
@@ -1636,6 +1682,7 @@ mod tests {
             model: Some("x-ai/grok-4.6".into()),
             effort: Some(LaunchEffort::Minimal),
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         })
         .expect("Pi selection compiles");
@@ -1665,6 +1712,7 @@ mod tests {
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         assert_eq!(
@@ -1689,6 +1737,7 @@ mod tests {
         ] {
             let compiled = compile(LaunchSelection {
                 permissions: Some(permission),
+                wrapper_prefix: None,
                 workspace_trust: None,
                 ..base.clone()
             })
@@ -1719,12 +1768,14 @@ mod tests {
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let omitted = shell_words::split(&compile(base.clone()).unwrap().invocation).unwrap();
         let yolo = shell_words::split(
             &compile(LaunchSelection {
                 permissions: Some(LaunchPermission::Yolo),
+                wrapper_prefix: None,
                 workspace_trust: None,
                 ..base.clone()
             })
@@ -1742,6 +1793,7 @@ mod tests {
             assert!(
                 compile(LaunchSelection {
                     permissions: Some(permission),
+                    wrapper_prefix: None,
                     workspace_trust: None,
                     ..base.clone()
                 })
@@ -1764,6 +1816,7 @@ mod tests {
             model: Some("x-ai/grok-4.6".into()),
             effort: Some(LaunchEffort::Minimal),
             permissions: Some(LaunchPermission::Approve),
+            wrapper_prefix: None,
             workspace_trust: None,
         })
         .expect("OMP selection compiles");
@@ -1790,6 +1843,7 @@ mod tests {
             model: Some("z-ai/glm-5.3".into()),
             effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         })
         .expect("OMP yolo compiles");
@@ -1815,6 +1869,7 @@ mod tests {
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         })
         .expect("OMP default compiles");
@@ -1864,6 +1919,7 @@ mod tests {
             model: Some("release/candidate'42;$literal".to_string()),
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         })
         .expect("a custom OMP id is the escape hatch");
@@ -1896,6 +1952,7 @@ mod tests {
                     model: Some("z-ai/glm-5.3".into()),
                     effort: Some(*effort),
                     permissions: None,
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 })
                 .is_ok(),
@@ -1909,6 +1966,7 @@ mod tests {
                 model: Some("z-ai/glm-5.3".into()),
                 effort: Some(LaunchEffort::Ultra),
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             })
             .is_err(),
@@ -1924,6 +1982,7 @@ mod tests {
                     model: Some("z-ai/glm-5.3".into()),
                     effort: None,
                     permissions: Some(permission),
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 })
                 .is_err(),
@@ -1978,6 +2037,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         })
         .expect("compile permissive Grok launch");
@@ -2017,6 +2077,7 @@ mod tests {
                     model: Some("z-ai/glm-5.3".into()),
                     effort: None,
                     permissions: None,
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 })
                 .is_ok()
@@ -2029,6 +2090,7 @@ mod tests {
                 model: Some("z-ai/glm-5.3".into()),
                 effort: None,
                 permissions: Some(LaunchPermission::Chat),
+                wrapper_prefix: None,
                 workspace_trust: None,
             })
             .is_err()
@@ -2238,6 +2300,7 @@ mod tests {
                     effort: Some(LaunchEffort::High),
                     permissions,
                     permission_flags: None,
+                    wrapper_prefix: None,
                     workspace_trust: previous,
                 };
                 let converted = SessionLaunch::from_pre_launch_kinds(

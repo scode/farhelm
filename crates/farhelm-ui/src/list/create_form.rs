@@ -55,6 +55,7 @@ fn submitted_structured_selection(
         effort,
         permissions: crate::launch_composer::normalized_permissions(harness, permissions),
         permission_flags: crate::launch_composer::permission_words(permissions, permission_flags),
+        wrapper_prefix: None,
         workspace_trust: None,
     }
 }
@@ -503,6 +504,7 @@ fn launcher_snapshot(
             *t.structured_permissions.peek(),
             &t.structured_permission_flags.peek(),
         ),
+        wrapper_prefix: None,
         workspace_trust: None,
         command: submitted_field(
             &t.invocation.peek(),
@@ -894,6 +896,7 @@ fn apply_composer_search_result(
                 model: structured_model(),
                 effort: structured_effort(),
                 permissions: structured_permissions(),
+                wrapper_prefix: None,
                 workspace_trust: None,
             };
             let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
@@ -941,6 +944,7 @@ fn apply_composer_search_result(
                 model: structured_model(),
                 effort: structured_effort(),
                 permissions: structured_permissions(),
+                wrapper_prefix: None,
                 workspace_trust: None,
             };
             // Retain the source harness until reconciliation has removed its
@@ -3334,6 +3338,7 @@ pub(super) fn CreateSessionForm(
             model: structured_model(),
             effort: structured_effort(),
             permissions: structured_permissions(),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         (!crate::launch_composer::selection_fits_catalog(&selection, catalog_answer.as_deref())).then_some(
@@ -3384,6 +3389,7 @@ pub(super) fn CreateSessionForm(
                     harness,
                     structured_permissions(),
                 ),
+                wrapper_prefix: None,
                 workspace_trust: None,
             })
         })
@@ -3838,6 +3844,7 @@ pub(super) fn CreateSessionForm(
                             model: structured_model(),
                             effort: structured_effort(),
                             permissions: structured_permissions(),
+                            wrapper_prefix: None,
                             workspace_trust: None,
                         };
                         let (selection, owner) =
@@ -4315,6 +4322,7 @@ pub(super) fn CreateSessionForm(
                 model: structured_model(),
                 effort: structured_effort(),
                 permissions: structured_permissions(),
+                wrapper_prefix: None,
                 workspace_trust: None,
             };
             let previous_selection = selection.clone();
@@ -4340,6 +4348,7 @@ pub(super) fn CreateSessionForm(
                     model: structured_model(),
                     effort: structured_effort(),
                     permissions: structured_permissions(),
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 },
                 &selection,
@@ -6589,6 +6598,7 @@ pub(super) fn CreateSessionForm(
                                                     model: structured_model(),
                                                     effort: structured_effort(),
                                                     permissions: structured_permissions(),
+                                                    wrapper_prefix: None,
                                                     workspace_trust: None,
                                                 };
                                                 let selection = LaunchSelection {
@@ -6597,6 +6607,7 @@ pub(super) fn CreateSessionForm(
                                                     model: Some(model),
                                                     effort: structured_effort(),
                                                     permissions: structured_permissions(),
+                                                    wrapper_prefix: None,
                                                     workspace_trust: None,
                                                 };
                                                 // An unknown catalog keeps the effort: see
@@ -7129,6 +7140,7 @@ mod tests {
             last_selected: None,
             compact: None,
             remembered_permissions: word.map(str::to_string),
+            remembered_wrapper_prefixes: Default::default(),
             remembered_workspace_trust: None,
             skip_host_remove_confirmation: None,
             skip_host_setup_confirmation: None,
@@ -7300,6 +7312,7 @@ mod tests {
                     model: None,
                     effort: None,
                     permissions: None,
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 }),
                 ..base.clone()
@@ -7612,6 +7625,7 @@ mod tests {
                     model: None,
                     effort: None,
                     permissions: None,
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 },
             }),
@@ -7631,6 +7645,7 @@ mod tests {
             model: Some("muse-spark-1.3-contributor".to_string()),
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let session = Session {

@@ -42,6 +42,9 @@ pub(crate) struct Resolution {
     /// keyed recovery, so an accepted retry does not propose another clone.
     pub(crate) github_repo: Option<String>,
     pub(crate) launch: SessionLaunch,
+    /// Request flags override named templates. A wrapper set by those flags
+    /// is the agent's own choice and needs a direct answer on guarded hosts.
+    pub(crate) agent_wrapper_supplied: bool,
     pub(crate) title: Option<String>,
     /// The install identity a template set as the host, if one did. The
     /// caller uses it only when no `--host` was given.
@@ -92,6 +95,7 @@ fn flag_for(field: &str) -> &'static str {
         "initial prompt" => "--prompt/--prompt-file",
         "effort" => "--effort",
         "permissions" => "--permissions",
+        "wrapper prefix" => "--wrapper",
         "workspace trust" => "--trust",
         "command" => "--command",
         "YOLO answer" => "--yolo/--no-yolo",
@@ -206,6 +210,7 @@ pub(crate) fn resolve(
             LaunchRequest::Agent {
                 selection: LaunchSelection {
                     permission_flags: state.permission_flags,
+                    wrapper_prefix: state.wrapper_prefix,
                     harness,
                     model: state.model,
                     effort: state.effort,
@@ -246,11 +251,16 @@ pub(crate) fn resolve(
     launch
         .validate_initial_prompt(prompt.as_deref(), false)
         .map_err(invalid)?;
+    let agent_wrapper_supplied = edits.wrapper_prefix.is_some()
+        && launch
+            .agent_selection()
+            .is_some_and(|selection| selection.wrapper_prefix.is_some());
     Ok(Resolution {
         prompt,
         cwd,
         github_repo,
         launch,
+        agent_wrapper_supplied,
         title: state.name,
         template_host: state.host,
     })
@@ -258,6 +268,47 @@ pub(crate) fn resolve(
 
 #[cfg(test)]
 mod tests {
+    /// A named template's wrapper was chosen through the template approval
+    /// path; a flag that repeats it is still the agent's own choice. The
+    /// resolved command is identical, so argv comparison cannot decide this.
+    #[farhelm_testtrace::test]
+    fn wrapper_provenance_follows_the_request_flag() {
+        let words = vec!["with-endpoint".to_string(), "--".to_string()];
+        let named = template(
+            "wrapped",
+            TemplateFields {
+                agent: Some(LaunchHarness::Claude),
+                wrapper_prefix: Some(Some(words.clone())),
+                destination: folder("/work"),
+                ..Default::default()
+            },
+        );
+        let template_only = resolve(
+            std::slice::from_ref(&named),
+            &["wrapped".into()],
+            &TemplateFields::default(),
+            &[],
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(!template_only.agent_wrapper_supplied);
+        let flag_override = resolve(
+            &[named],
+            &["wrapped".into()],
+            &TemplateFields {
+                wrapper_prefix: Some(Some(words)),
+                ..Default::default()
+            },
+            &[],
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(flag_override.agent_wrapper_supplied);
+        assert_eq!(template_only.launch, flag_override.launch);
+    }
+
     /// Templates and explicit flags share one prompt field; later edits win
     /// without turning that transient message into the session's launch argv.
     #[test]

@@ -1599,7 +1599,7 @@ pub(crate) fn create_fingerprint(
             prompt: prompt.map(str::to_owned),
             parent: parent.map(str::to_owned),
             requested_cwd: cwd.to_owned(),
-            launch: launch.clone(),
+            launch: Box::new(launch.clone()),
             title: title.map(str::to_owned),
             checkout: Box::new(checkout.clone()),
         })
@@ -2230,7 +2230,7 @@ pub(crate) struct CreateInputs<'a> {
 ///
 /// The version tag rejects other fingerprint families on decode. Existing
 /// directory encodings remain frozen and never deserialize through this type.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", deny_unknown_fields)]
 enum FreshCreateFingerprint {
     /// A helm-local refusal can precede launch/config resolution. Only the
@@ -2249,10 +2249,40 @@ enum FreshCreateFingerprint {
         prompt: Option<String>,
         parent: Option<String>,
         requested_cwd: String,
-        launch: SessionLaunch,
+        /// Keep the durable launch out of the enum's inline storage. Agent
+        /// selections can carry wrapper words, but the JSON shape is stable.
+        launch: Box<SessionLaunch>,
         title: Option<String>,
         checkout: Box<farhelm_proto::ResolvedGithubCheckout>,
     },
+}
+
+/// A later direct Allow changes only retained consent, not create identity.
+/// The original in-flight create still carries its pre-approval snapshot and
+/// must replay this same attempt without loosening launch or destination matching.
+fn same_fresh_checkout_except_wrapper_approval(recorded: &str, requested: &str) -> bool {
+    let (Ok(mut recorded), Ok(mut requested)) = (
+        serde_json::from_str::<FreshCreateFingerprint>(recorded),
+        serde_json::from_str::<FreshCreateFingerprint>(requested),
+    ) else {
+        return false;
+    };
+    let (
+        FreshCreateFingerprint::GithubCheckout {
+            checkout: recorded_checkout,
+            ..
+        },
+        FreshCreateFingerprint::GithubCheckout {
+            checkout: requested_checkout,
+            ..
+        },
+    ) = (&mut recorded, &mut requested)
+    else {
+        return false;
+    };
+    recorded_checkout.wrapper_approved = false;
+    requested_checkout.wrapper_approved = false;
+    recorded == requested
 }
 
 /// Checkout basenames the registry still claims directly under
@@ -6689,14 +6719,21 @@ impl Supervisor {
     #[warn(clippy::wildcard_enum_match_arm)]
     async fn record_launch_provenance(
         &self,
-        kind: AgentKind,
+        snapshot: &IntegrationSnapshot,
         id: &str,
         generation: i64,
         hooked: bool,
         argv: &[String],
     ) {
-        match kind {
-            AgentKind::Omp => self.record_omp_launch(id, generation, hooked, argv).await,
+        match snapshot.kind {
+            AgentKind::Omp => {
+                // The selection, not argv parsing, identifies the user's
+                // wrapper words. OMP still classifies only the command
+                // Farhelm composed behind them for its strict process proof.
+                let agent_argv = argv.get(snapshot.wrapper_prefix_words..).unwrap_or(&[]);
+                self.record_omp_launch(id, generation, hooked, agent_argv)
+                    .await
+            }
             AgentKind::Claude
             | AgentKind::Codex
             | AgentKind::Goose
@@ -7163,6 +7200,7 @@ impl Supervisor {
     /// neither legacy fingerprints nor restricted spawn reservations can enter
     /// this recovery path. Intent and directory admission remain held through
     /// the ordinary settlement/relaunch state machine, closing the lookup gap.
+    #[cfg(test)]
     pub(crate) async fn reconcile_github_checkout(
         &self,
         intent_key: String,
@@ -7171,6 +7209,42 @@ impl Supervisor {
         rows: u16,
         refuse_unknown: bool,
     ) -> anyhow::Result<Option<SessionInfo>> {
+        let (session, _) = self
+            .reconcile_github_checkout_checked(
+                intent_key,
+                client_identity,
+                cols,
+                rows,
+                refuse_unknown,
+                false,
+                None,
+                false,
+            )
+            .await?;
+        Ok(session)
+    }
+
+    /// Inspect an accepted checkout or resume it against an exact inspected
+    /// snapshot. The intent admission guard spans the fingerprint comparison,
+    /// any approval recording, and the launch-capable recovery below.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wire admission inputs remain explicit"
+    )]
+    pub(crate) async fn reconcile_github_checkout_checked(
+        &self,
+        intent_key: String,
+        client_identity: &str,
+        cols: u16,
+        rows: u16,
+        refuse_unknown: bool,
+        inspect_only: bool,
+        expected_fingerprint: Option<&str>,
+        approve_wrapper_recovery: bool,
+    ) -> anyhow::Result<(
+        Option<SessionInfo>,
+        Option<farhelm_proto::GithubCheckoutRecovery>,
+    )> {
         if intent_key.is_empty()
             || intent_key.len() > 512
             || client_identity.is_empty()
@@ -7181,9 +7255,25 @@ impl Supervisor {
                 "fresh reconciliation requires a nonempty key of at most 512 bytes and a nonempty request identity of at most 512 KiB",
             ).into());
         }
+        if inspect_only && (refuse_unknown || approve_wrapper_recovery)
+            || approve_wrapper_recovery && expected_fingerprint.is_none()
+        {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "checkout inspection cannot refuse or approve, and recovery approval needs an inspected fingerprint",
+            )
+            .into());
+        }
         let guards = self.admit_create(Some(&intent_key)).await?;
         let mut reservation = self.store.reservation(&intent_key).await?;
-        if reservation.is_none() && refuse_unknown {
+        if reservation.is_none() && expected_fingerprint.is_some() {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this inspected checkout attempt is no longer recorded",
+            )
+            .into());
+        }
+        if reservation.is_none() && refuse_unknown && !inspect_only {
             anyhow::ensure!(
                 self.may_record(),
                 "this supervisor cannot durably refuse an intent without recording authority"
@@ -7224,7 +7314,7 @@ impl Supervisor {
             );
         }
         let Some(reservation) = reservation else {
-            return Ok(None);
+            return Ok((None, None));
         };
         if reservation.dedup_scope != DedupScope::Permanent {
             return Err(RequestError::new(
@@ -7240,7 +7330,9 @@ impl Supervisor {
         if crate::store::is_tombstone_fingerprint(&reservation.fingerprint) {
             return match crate::store::tombstone_identity_digest(&reservation.fingerprint) {
                 Some(recorded) if recorded == crate::store::identity_digest(client_identity) => {
-                    self.answer_from(&reservation).await.map(Some)
+                    self.answer_from(&reservation)
+                        .await
+                        .map(|session| (Some(session), None))
                 }
                 Some(_) => Err(RequestError::new(
                     ErrorKind::Conflict,
@@ -7254,8 +7346,8 @@ impl Supervisor {
                 .into()),
             };
         }
-        let fingerprint: FreshCreateFingerprint = serde_json::from_str(&reservation.fingerprint)
-            .map_err(|_| {
+        let mut fingerprint: FreshCreateFingerprint =
+            serde_json::from_str(&reservation.fingerprint).map_err(|_| {
                 RequestError::new(
                     ErrorKind::Conflict,
                     "this intent key has no compatible managed-checkout recovery snapshot",
@@ -7287,6 +7379,106 @@ impl Supervisor {
                 .into()),
             };
         }
+        let FreshCreateFingerprint::GithubCheckout { checkout, .. } = &fingerprint else {
+            unreachable!("refusal-only fingerprint handled above")
+        };
+        if checkout.client_identity != client_identity {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this intent key belongs to a different create request",
+            )
+            .into());
+        }
+        if expected_fingerprint.is_some_and(|expected| expected != reservation.fingerprint) {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the retained checkout attempt differs from the one approved",
+            )
+            .into());
+        }
+        if inspect_only {
+            if let ReservationOutcome::Created | ReservationOutcome::Failed { .. } =
+                &reservation.outcome
+            {
+                return self
+                    .answer_from(&reservation)
+                    .await
+                    .map(|session| (Some(session), None));
+            }
+            // Pending is not synonymous with unlaunched: a crash can leave
+            // launch evidence before the reservation's final write. The
+            // same read-only evidence probe used by recovery keeps an
+            // already-running session from acquiring a new approval card.
+            match self.reserved_launch_evidence(&reservation).await {
+                LaunchEvidence::Present => {
+                    return self
+                        .replay_created_session(&reservation)
+                        .await
+                        .map(|session| (Some(session), None));
+                }
+                LaunchEvidence::Absent => {}
+                LaunchEvidence::Unresolved(error) => return Err(error),
+            }
+            let FreshCreateFingerprint::GithubCheckout {
+                prompt,
+                launch,
+                title,
+                checkout,
+                ..
+            } = fingerprint
+            else {
+                unreachable!("refusal-only fingerprint handled above")
+            };
+            return Ok((
+                None,
+                Some(farhelm_proto::GithubCheckoutRecovery {
+                    launch: *launch,
+                    prompt,
+                    title,
+                    repo: checkout.repo,
+                    cwd: checkout.preview.cwd,
+                    fingerprint: reservation.fingerprint,
+                    agent_wrapper_supplied: checkout.agent_wrapper_supplied,
+                    wrapper_approved: checkout.wrapper_approved,
+                }),
+            ));
+        }
+        let mut reservation = reservation;
+        if approve_wrapper_recovery {
+            anyhow::ensure!(
+                self.may_record(),
+                "this supervisor cannot retain wrapper approval without recording authority"
+            );
+            let FreshCreateFingerprint::GithubCheckout {
+                checkout, launch, ..
+            } = &mut fingerprint
+            else {
+                unreachable!("refusal-only fingerprint handled above")
+            };
+            if !matches!(reservation.outcome, ReservationOutcome::Pending)
+                || !checkout.agent_wrapper_supplied
+                || checkout.wrapper_approved
+                || !launch
+                    .agent_selection()
+                    .is_some_and(|selection| selection.wrapper_prefix.is_some())
+            {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "this pending checkout has no unapproved agent wrapper to authorize",
+                )
+                .into());
+            }
+            checkout.wrapper_approved = true;
+            let approved = serde_json::to_string(&fingerprint)?;
+            self.store
+                .replace_pending_reservation_fingerprint(
+                    &intent_key,
+                    &reservation.fingerprint,
+                    &approved,
+                )
+                .await?;
+            reservation.fingerprint = approved;
+        }
         let FreshCreateFingerprint::GithubCheckout {
             prompt,
             parent,
@@ -7298,13 +7490,6 @@ impl Supervisor {
         else {
             unreachable!("refusal-only fingerprint handled above")
         };
-        if checkout.client_identity != client_identity {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "this intent key belongs to a different create request",
-            )
-            .into());
-        }
         self.create_session_admitted(
             CreateInputs {
                 prompt,
@@ -7312,7 +7497,7 @@ impl Supervisor {
                 cwd: &requested_cwd,
                 parent,
                 github_checkout: Some(*checkout),
-                launch,
+                launch: *launch,
                 title,
                 cols,
                 rows,
@@ -7325,7 +7510,7 @@ impl Supervisor {
             guards,
         )
         .await
-        .map(Some)
+        .map(|session| (Some(session), None))
     }
 
     /// Resolve or launch under admission already held by the caller.
@@ -8447,6 +8632,10 @@ impl Supervisor {
             .is_some_and(|(recorded, requested)| recorded.0 == requested.0);
         let same_request = same_agent_request
             || reservation.fingerprint == claim.fingerprint
+            || same_fresh_checkout_except_wrapper_approval(
+                &reservation.fingerprint,
+                &claim.fingerprint,
+            )
             || reservation.fingerprint == crate::store::tombstone_fingerprint(&claim.fingerprint);
         if !same_request {
             return Resolution::Answer(Box::new(Err(RequestError::new(
@@ -14070,7 +14259,7 @@ impl Supervisor {
         // reporter exists to read any marker. A tmux failure below
         // keeps the decided values: the argv was fixed, so an
         // ambiguous survivor runs exactly what the row describes.
-        self.record_launch_provenance(snapshot.kind, id, generation, hooked, &spec.argv)
+        self.record_launch_provenance(snapshot, id, generation, hooked, &spec.argv)
             .await;
         // The same argv decision must survive supervisor restart for every
         // agent, independently of OMP's admission provenance. Best effort:
@@ -15825,6 +16014,7 @@ pub(crate) mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
                 permission_flags: None,
             },
@@ -16561,6 +16751,7 @@ pub(crate) mod tests {
             _ => {
                 return IntegrationSnapshot {
                     kind: AgentKind::Generic,
+                    wrapper_prefix_words: 0,
                     resume_template: None,
                 };
             }
@@ -16570,6 +16761,7 @@ pub(crate) mod tests {
         resume.push(crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string());
         IntegrationSnapshot {
             kind,
+            wrapper_prefix_words: 0,
             resume_template: Some(resume),
         }
     }
@@ -16656,6 +16848,7 @@ pub(crate) mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             },
             start: vec!["claude".into(), "{farhelm_args}".into()],
@@ -18567,6 +18760,7 @@ pub(crate) mod tests {
             },
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Generic,
+                wrapper_prefix_words: 0,
                 resume_template: None,
             },
             canonical_cwd: None,
@@ -20103,6 +20297,7 @@ pub(crate) mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
                 permission_flags: None,
             },
@@ -23758,6 +23953,89 @@ exit 0
         );
     }
 
+    /// A structured OMP launch records the agent program behind its wrapper.
+    ///
+    /// The wrapper's own executable is unknown to OMP's strict process
+    /// corridor. Classifying the whole argv would persist `unknown` and deny
+    /// every report from a valid `omp` process, so this checks the durable
+    /// provenance written by the supervisor's launch boundary, not only the
+    /// classifier applied to a hand-picked suffix.
+    #[farhelm_testtrace::test]
+    async fn omp_launch_provenance_skips_a_structured_wrapper_prefix() {
+        let fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                None,
+                None,
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let prefix = vec![
+            "with-endpoint".to_string(),
+            "--profile".to_string(),
+            "work".to_string(),
+            "--".to_string(),
+        ];
+        let start: Vec<String> = prefix
+            .iter()
+            .cloned()
+            .chain([
+                "omp".to_string(),
+                "--approval-mode".to_string(),
+                "always-ask".to_string(),
+            ])
+            .collect();
+        let launch = SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                permission_flags: None,
+                harness: LaunchHarness::Omp,
+                model: None,
+                effort: None,
+                permissions: None,
+                wrapper_prefix: Some(prefix.clone()),
+                workspace_trust: None,
+            },
+            start: start.clone(),
+            resume: None,
+        };
+        let snapshot = IntegrationSnapshot::of(&launch);
+        assert_eq!(snapshot.kind, AgentKind::Omp);
+        assert_eq!(snapshot.wrapper_prefix_words, prefix.len());
+        assert_eq!(
+            crate::agent_kind::omp::classify_omp_launch(&start),
+            crate::agent_kind::omp::OmpLaunchProgram::Unknown,
+            "the untrimmed wrapper must be a competing, wrong classification"
+        );
+
+        fixture
+            .sup
+            .as_ref()
+            .expect("supervisor")
+            .record_launch_provenance(&snapshot, &id, 0, true, &start)
+            .await;
+        let row = fixture
+            .sup
+            .as_ref()
+            .expect("supervisor")
+            .store
+            .session(&id)
+            .await
+            .expect("read recorded launch provenance")
+            .expect("seeded OMP session remains stored");
+        assert_eq!(row.omp_launch_program.as_deref(), Some("omp"));
+        assert_eq!(
+            row.omp_reporter_asset.as_deref(),
+            Some(crate::pi_extension::OMP_ASSET.file_name)
+        );
+    }
+
     /// A supported direct launch with a shell-based resume override still
     /// admits: the corridor reads the RETAINED launch program (`omp`),
     /// not the resume template's (`sh`). The template is decodable on
@@ -26168,6 +26446,7 @@ exit 0
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             },
             start: vec!["claude".into(), "{farhelm_args}".into()],
@@ -26391,6 +26670,7 @@ exit 0
                         model: Some("gpt-6-astra".to_string()),
                         effort: Some(farhelm_proto::LaunchEffort::High),
                         permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                        wrapper_prefix: None,
                         workspace_trust: None,
                     },
                     start: vec!["codex".into(), "--yolo".into(), "{farhelm_args}".into()],
@@ -26692,6 +26972,7 @@ exit 0
                 model: Some("x-ai/grok-4.6".into()),
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: Some(farhelm_proto::LaunchPermission::Approve),
+                wrapper_prefix: None,
                 workspace_trust: None,
             }
         );
@@ -29576,6 +29857,7 @@ exit 0
                     rows: 24,
                     snapshot: IntegrationSnapshot {
                         kind: farhelm_proto::AgentKind::Generic,
+                        wrapper_prefix_words: 0,
                         resume_template: None,
                     },
                     canonical_cwd: Some(cwd.clone()),
@@ -31831,6 +32113,8 @@ exit 0
         let canonical_root = root.canonicalize().expect("fixture root canonicalizes");
         farhelm_proto::ResolvedGithubCheckout {
             client_identity: "fixture-request".into(),
+            agent_wrapper_supplied: false,
+            wrapper_approved: false,
             repo: farhelm_proto::GithubRepo {
                 owner: "acme".to_string(),
                 name: "bar".to_string(),
@@ -32286,6 +32570,7 @@ exit 0
                 model: model.map(str::to_string),
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             },
             start: vec!["same-command".into(), "{farhelm_args}".into()],
@@ -32332,7 +32617,7 @@ exit 0
         assert_eq!(requested_cwd, "requested-cwd");
         assert_eq!(title.as_deref(), Some("accepted-title"));
         assert_eq!(*resolved, checkout);
-        assert_eq!(recovered, launch);
+        assert_eq!(*recovered, launch);
         assert_eq!(
             encoded,
             create_fingerprint(
@@ -32623,6 +32908,162 @@ exit 0
         assert!(sup.store.load_all().await.unwrap().is_empty());
         assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    /// A retained Allow belongs to one original pending launch. Inspection
+    /// must leave that launch dormant, and a mismatched card fingerprint must
+    /// neither relaunch it nor change its approval record. After an exact
+    /// Allow, the original pre-approval create frame remains a valid replay.
+    #[farhelm_testtrace::test]
+    async fn checkout_inspection_binds_wrapper_approval_to_original_pending_attempt() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut checkout = checkout_fixture(&root);
+        checkout.agent_wrapper_supplied = true;
+        let launch = SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                harness: LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: None,
+                permission_flags: None,
+                wrapper_prefix: Some(vec!["sh".into()]),
+                workspace_trust: None,
+            },
+            start: vec![
+                "sh".into(),
+                "-c".into(),
+                "true".into(),
+                "{farhelm_args}".into(),
+            ],
+            resume: None,
+        };
+        let key = "wrapped-checkout-recovery";
+        let original = create_fingerprint(Some(&checkout), None, "", &launch, None, None);
+        let claim = IntentClaim {
+            intent_key: key.into(),
+            fingerprint: original.clone(),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let sup = checkout_crash_supervisor(&state, CreateStage::AfterRecord).await;
+        let inputs = || CreateInputs {
+            prompt: None,
+            named_start: None,
+            cwd: "",
+            parent: None,
+            github_checkout: Some(checkout.clone()),
+            launch: launch.clone(),
+            title: None,
+            cols: 80,
+            rows: 24,
+        };
+        let crash = sup
+            .create_session(inputs(), Some(claim.clone()))
+            .await
+            .unwrap_err();
+        assert!(crash.is::<SimulatedCrash>(), "{crash:#}");
+        let pending = sup.store.reservation(key).await.unwrap().unwrap();
+        assert!(matches!(pending.outcome, ReservationOutcome::Pending));
+        assert_eq!(pending.fingerprint, original);
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+
+        let unknown = sup
+            .reconcile_github_checkout_checked(
+                "unknown".into(),
+                &checkout.client_identity,
+                80,
+                24,
+                false,
+                true,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(unknown, (None, None));
+        assert!(sup.store.reservation("unknown").await.unwrap().is_none());
+        let (session, snapshot) = sup
+            .reconcile_github_checkout_checked(
+                key.into(),
+                &checkout.client_identity,
+                80,
+                24,
+                false,
+                true,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(session.is_none());
+        let snapshot = snapshot.unwrap();
+        assert_eq!(snapshot.launch, launch);
+        assert_eq!(snapshot.repo, checkout.repo);
+        assert_eq!(snapshot.cwd, checkout.preview.cwd);
+        assert_eq!(snapshot.fingerprint, original);
+        assert!(snapshot.agent_wrapper_supplied);
+        assert!(!snapshot.wrapper_approved);
+        assert_eq!(sup.store.reservation(key).await.unwrap().unwrap(), pending);
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+
+        let mismatch = sup
+            .reconcile_github_checkout_checked(
+                key.into(),
+                &checkout.client_identity,
+                80,
+                24,
+                false,
+                false,
+                Some("different card"),
+                true,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error_kind(&mismatch), ErrorKind::Conflict);
+        assert_eq!(sup.store.reservation(key).await.unwrap().unwrap(), pending);
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+
+        let (recovered, snapshot) = sup
+            .reconcile_github_checkout_checked(
+                key.into(),
+                &checkout.client_identity,
+                80,
+                24,
+                false,
+                false,
+                Some(&original),
+                true,
+            )
+            .await
+            .unwrap();
+        assert!(snapshot.is_none());
+        let recovered = recovered.unwrap();
+        let stored = sup.store.reservation(key).await.unwrap().unwrap();
+        assert_ne!(stored.fingerprint, original);
+        assert!(same_fresh_checkout_except_wrapper_approval(
+            &stored.fingerprint,
+            &original
+        ));
+        let (settled, snapshot) = sup
+            .reconcile_github_checkout_checked(
+                key.into(),
+                &checkout.client_identity,
+                80,
+                24,
+                false,
+                true,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(snapshot.is_none());
+        assert_eq!(settled.unwrap().id, recovered.id);
+        assert_eq!(
+            sup.create_session(inputs(), Some(claim)).await.unwrap().id,
+            recovered.id
+        );
     }
 
     /// Refusal and creation compete for the same real intent lock. Observe

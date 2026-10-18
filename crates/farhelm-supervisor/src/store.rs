@@ -574,9 +574,10 @@ type OutcomeColumns = (String, Option<i32>, Option<String>, Option<String>);
 pub struct Reservation {
     pub intent_key: String,
     /// The canonical encoding of every session-shaping request field this
-    /// key was claimed with; see `service::create_fingerprint`. Compared
-    /// verbatim: equal means "the same request", anything else means the
-    /// client reused a key, which is a bug rather than a merge.
+    /// key was claimed with; see `service::create_fingerprint`. Ordinary
+    /// requests compare verbatim. A managed checkout may later record a
+    /// direct wrapper Allow in this snapshot; that one consent bit does not
+    /// change the accepted create's identity or the launch it can recover.
     pub fingerprint: String,
     /// The session id assigned when the reservation was made, not when the
     /// session was created — the two are the same id, which is the point:
@@ -4388,6 +4389,39 @@ impl SessionStore {
             .await
     }
 
+    /// Retain a direct wrapper Allow on the exact pending checkout attempt.
+    ///
+    /// The caller holds intent admission while it checks the old fingerprint
+    /// and immediately resumes recovery. This compare-and-swap also refuses
+    /// an unexpected writer rather than silently attaching consent elsewhere.
+    pub async fn replace_pending_reservation_fingerprint(
+        &self,
+        intent_key: &str,
+        expected: &str,
+        approved: &str,
+    ) -> anyhow::Result<()> {
+        let intent_key = intent_key.to_owned();
+        let expected = expected.to_owned();
+        let approved = approved.to_owned();
+        self.conn
+            .call(
+                "pending reservation approval task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    let changed = conn.execute(
+                        "UPDATE create_reservations SET fingerprint = ?1 \
+                         WHERE intent_key = ?2 AND fingerprint = ?3 AND state = 'pending'",
+                        rusqlite::params![approved, intent_key, expected],
+                    )?;
+                    anyhow::ensure!(
+                        changed == 1,
+                        "the inspected checkout attempt changed before its wrapper approval"
+                    );
+                    Ok(())
+                },
+            )
+            .await
+    }
+
     /// Every reservation still `Pending` — the reconciliation worklist
     /// `service::Supervisor::reload_sessions` resolves against the session
     /// map it has just rebuilt from tmux.
@@ -6195,6 +6229,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let replacement = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
@@ -7179,6 +7214,7 @@ mod tests {
             );
             let integration = IntegrationSnapshot {
                 kind: AgentKind::Claude,
+                wrapper_prefix_words: 0,
                 resume_template: row.resume_template(),
             };
             assert_eq!(
@@ -8904,6 +8940,7 @@ mod tests {
             model: Some("gpt-6-astra".to_string()),
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let session_launch = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
@@ -9000,6 +9037,7 @@ mod tests {
                 model: Some(model.to_string()),
                 effort,
                 permissions: Some(permissions),
+                wrapper_prefix: None,
                 workspace_trust: None,
             };
             let session_launch = farhelm_proto::SessionLaunch::from_pre_launch_kinds(
@@ -9070,6 +9108,7 @@ mod tests {
             model: Some("provider/model".into()),
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Approve),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let locator = r#"omp:{"version":1,"session_id":"persisted-omp","session_file":"/work/conversation.jsonl"}"#;
@@ -12197,6 +12236,7 @@ mod tests {
             model: Some("gpt-x".to_string()),
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         plant_v25_launch_rows(
@@ -12286,6 +12326,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         {

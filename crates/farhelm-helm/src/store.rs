@@ -193,8 +193,8 @@ fn upsert_folder_history(
 }
 
 /// Record the launch the user explicitly selected for `create` in
-/// `launch_history`, and remember its permission and workspace-trust
-/// choices. Returns whether the history row was new. A create with no
+/// `launch_history`, and remember its permission and wrapper choices.
+/// Returns whether the history row was new. A create with no
 /// explicit selection records nothing here and returns `false`.
 ///
 /// The selection comes from the caller, never from `create.entry.launch`:
@@ -252,12 +252,36 @@ fn record_launch_history(
     // gated on `memory` and placed here rather than written unconditionally
     // from `entry.launch`.
     {
+        // Read and write the whole per-harness map inside the admission
+        // transaction. A replayed create must not teach New a prefix that
+        // the user did not choose for the latest admitted launch.
+        let stored: Option<String> = tx
+            .query_row(
+                "SELECT remembered_wrapper_prefixes FROM preferences WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        let mut wrappers: std::collections::BTreeMap<farhelm_proto::LaunchHarness, Vec<String>> =
+            stored
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?
+                .unwrap_or_default();
+        if let Some(prefix) = &selection.wrapper_prefix {
+            wrappers.insert(selection.harness, prefix.clone());
+        } else {
+            wrappers.remove(&selection.harness);
+        }
+        let wrappers_json = serde_json::to_string(&wrappers)?;
         tx.execute(
-            "INSERT INTO preferences (singleton, remembered_permissions) \
-             VALUES (1, ?1) \
+            "INSERT INTO preferences (singleton, remembered_permissions, remembered_wrapper_prefixes) \
+             VALUES (1, ?1, ?2) \
              ON CONFLICT (singleton) DO UPDATE SET \
-                 remembered_permissions = excluded.remembered_permissions",
-            rusqlite::params![permissions_word],
+                 remembered_permissions = excluded.remembered_permissions, \
+                 remembered_wrapper_prefixes = excluded.remembered_wrapper_prefixes",
+            rusqlite::params![permissions_word, wrappers_json],
         )
         .context("remembering the launched permissions choice")?;
         // Trust now comes from managed-checkout Settings. Preserve the old
@@ -305,7 +329,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 59;
+const SCHEMA_VERSION: i64 = 60;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -1012,6 +1036,11 @@ pub struct Preferences {
     /// to a client that could not act on it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remembered_permissions: Option<String>,
+    /// Last explicitly launched prefix for each agent type. An absent key
+    /// means New should start without a wrapper for that type.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub remembered_wrapper_prefixes:
+        std::collections::BTreeMap<farhelm_proto::LaunchHarness, Vec<String>>,
     /// Retired wire field. Reads are always unset; the historical database
     /// column is retained, but trust now comes from managed-checkout Settings.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2207,6 +2236,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  last_selected          TEXT,
                  compact                INTEGER CHECK (compact IN (0, 1)),
                  remembered_permissions TEXT,
+                 remembered_wrapper_prefixes TEXT NOT NULL DEFAULT '{{}}',
                  remembered_workspace_trust INTEGER CHECK (remembered_workspace_trust IN (0, 1)),
                  skip_host_remove_confirmation INTEGER CHECK (skip_host_remove_confirmation IN (0, 1)),
                  skip_host_setup_confirmation INTEGER CHECK (skip_host_setup_confirmation IN (0, 1)),
@@ -2314,7 +2344,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 59;",
+              PRAGMA user_version = 60;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3608,6 +3638,24 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
             .context("migrating helm.db to schema version 59")?;
         version = 59;
     }
+    if version == 59 {
+        // Some migration fixtures rewind only user_version on a fresh
+        // database. Keep their already-present column while still upgrading
+        // real schema-59 databases that have no wrapper memory.
+        let present: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('preferences') WHERE name = 'remembered_wrapper_prefixes'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !present {
+            tx.execute_batch(
+                "ALTER TABLE preferences ADD COLUMN remembered_wrapper_prefixes TEXT NOT NULL DEFAULT '{}';",
+            )?;
+        }
+        tx.execute_batch("PRAGMA user_version = 60;")
+            .context("migrating helm.db to schema version 60")?;
+        version = 60;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -4558,7 +4606,7 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -4585,6 +4633,8 @@ impl HelmStore {
                             // forwarded to a client that has no flag for it.
                             remembered_permissions: remembered_permissions
                                 .filter(|word| is_known_remembered_permissions_word(word)),
+                            remembered_wrapper_prefixes: serde_json::from_str(&row.get::<_, String>(19)?)
+                                .map_err(|error| rusqlite::Error::FromSqlConversionFailure(19, rusqlite::types::Type::Text, Box::new(error)))?,
                             remembered_workspace_trust: None,
                             skip_host_remove_confirmation: row.get(5)?,
                             skip_host_setup_confirmation: row.get(6)?,
@@ -7933,6 +7983,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         });
         entry.github_repo = Some(other.clone());
@@ -8253,6 +8304,7 @@ mod tests {
                 model: Some("gpt-6-astra".to_string()),
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             }),
             ..session("created", 100)
@@ -8319,6 +8371,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                wrapper_prefix: Some(vec!["with-endpoint".into(), "--".into()]),
                 workspace_trust: None,
             }),
             ..session(id, 100)
@@ -8343,6 +8396,15 @@ mod tests {
             store.preferences().await.unwrap().remembered_permissions,
             None,
             "a reply's launch must not move the remembered defaults"
+        );
+        assert!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .remembered_wrapper_prefixes
+                .is_empty(),
+            "a reply's wrapper must not become a user preference"
         );
         assert!(
             store
@@ -8378,6 +8440,16 @@ mod tests {
             Some("yolo"),
             "an explicit selection sets the memory"
         );
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .remembered_wrapper_prefixes
+                .get(&farhelm_proto::LaunchHarness::Codex),
+            Some(&vec!["with-endpoint".into(), "--".into()]),
+            "only a successful explicit launch can remember its wrapper"
+        );
 
         let custom = SessionInfo {
             cwd: "/custom".into(),
@@ -8389,6 +8461,7 @@ mod tests {
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Custom),
             permission_flags: Some(vec!["--mode".into(), "ask me".into()]),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         store
@@ -8438,6 +8511,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Approve),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         store
@@ -8493,6 +8567,7 @@ mod tests {
                     model: Some("z-ai/glm-5.3".into()),
                     effort: None,
                     permissions: Some(permission),
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 }),
                 ..session(&format!("goose-mode-{index}"), 101 + index as i64)
@@ -8576,6 +8651,7 @@ mod tests {
                     model: None,
                     effort: None,
                     permissions: None,
+                    wrapper_prefix: None,
                     workspace_trust: trust,
                 }),
                 ..session(id, 100)
@@ -8789,6 +8865,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let first = SessionInfo {
@@ -9129,6 +9206,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             }),
             ..session("proven", 1)
@@ -9205,6 +9283,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             }),
             ..session("proven-older", 1)
@@ -9351,6 +9430,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             }),
             ..session("before-retarget", 100)
@@ -9429,6 +9509,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         for sequence in 1..=MAX_LAUNCH_HISTORY as u64 {
@@ -9499,6 +9580,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             }),
             ..session("structured", 1)
@@ -9557,6 +9639,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let first = SessionInfo {
@@ -9759,6 +9842,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let early = SessionInfo {
@@ -9893,6 +9977,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         for sequence in 1..=MAX_LAUNCH_HISTORY as u64 {
@@ -9958,6 +10043,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         for identity in ["retired-one", "retired-two"] {
@@ -10582,6 +10668,7 @@ mod tests {
                 last_selected: Some("session-1".to_string()),
                 compact: Some(true),
                 remembered_permissions: None,
+                remembered_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
@@ -10614,6 +10701,7 @@ mod tests {
                 last_selected: Some("session-1".to_string()),
                 compact: Some(true),
                 remembered_permissions: None,
+                remembered_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
@@ -10645,6 +10733,7 @@ mod tests {
                 last_selected: None,
                 compact: Some(true),
                 remembered_permissions: None,
+                remembered_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
@@ -10725,6 +10814,7 @@ mod tests {
                 last_selected: None,
                 compact: None,
                 remembered_permissions: None,
+                remembered_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: Some(true),
                 skip_host_setup_confirmation: Some(true),
@@ -11088,6 +11178,34 @@ mod tests {
         drop(conn);
         let reopened = HelmStore::open(&path).await.unwrap();
         assert_eq!(reopened.registry_namespace().await.unwrap(), namespace);
+    }
+
+    /// Schema 60 adds only the empty per-agent memory. Existing list choices
+    /// must survive an upgrade, while old helms have no wrapper value to
+    /// invent for any agent type.
+    #[farhelm_testtrace::test]
+    async fn schema_60_adds_empty_wrapper_memory_without_losing_preferences() {
+        let (dir, store) = fresh_store().await;
+        store
+            .update_preferences(PreferencePatch {
+                compact: Some(Some(true)),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
+             PRAGMA user_version = 59;",
+        )
+        .unwrap();
+        drop(conn);
+        let upgraded = HelmStore::open(&path).await.unwrap();
+        let preferences = upgraded.preferences().await.unwrap();
+        assert_eq!(preferences.compact, Some(true));
+        assert!(preferences.remembered_wrapper_prefixes.is_empty());
     }
 
     /// A fresh database must come up on the current schema with the reserved
@@ -12114,6 +12232,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             }),
             ..session("post-migration", 2)
@@ -12189,6 +12308,7 @@ mod tests {
                 last_selected: Some("session-before-compact".to_string()),
                 compact: None,
                 remembered_permissions: None,
+                remembered_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: None,
                 skip_host_setup_confirmation: None,
@@ -12268,6 +12388,7 @@ mod tests {
                 last_selected: Some("session-before-permissions-memory".to_string()),
                 compact: Some(true),
                 remembered_permissions: None,
+                remembered_wrapper_prefixes: Default::default(),
                 remembered_workspace_trust: None,
                 skip_host_remove_confirmation: None,
                 skip_host_setup_confirmation: None,

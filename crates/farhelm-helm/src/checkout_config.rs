@@ -2784,6 +2784,7 @@ mod tests {
                 model: Some(format!("model-{sequence}")),
                 effort: None,
                 permissions: None,
+                wrapper_prefix: None,
                 workspace_trust: None,
             });
             store
@@ -2800,6 +2801,7 @@ mod tests {
                 model: Some("gpt-6-astra".into()),
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: Some(farhelm_proto::LaunchPermission::Approve),
+                wrapper_prefix: None,
                 workspace_trust: None,
             }),
             ..migration_session("history-retained", 1_700_000_100)

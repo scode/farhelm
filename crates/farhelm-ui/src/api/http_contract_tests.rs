@@ -51,6 +51,7 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
             model: Some("gpt-5".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: Some(true),
         })
     );

@@ -437,6 +437,11 @@ fn ApprovalCard(
             if let Some(error) = error {
                 p { class: "approval-card-error", role: "alert", "{display_peer(&error)}" }
             }
+            if matches!(&card.action, ApprovalAction::LaunchWithAgentWrapper { .. }) {
+                p { class: "approval-card-note",
+                    "The agent supplied this wrapper. Farhelm cannot check what it runs; this request needs your Allow."
+                }
+            }
             div { class: "approval-card-actions",
                 if tunnel_available {
                     button { r#type: "button", class: "btn btn-primary approval-tunnel", disabled: busy,
@@ -450,7 +455,7 @@ fn ApprovalCard(
                     onclick: answer(ApprovalAnswer::Allow),
                     if tunnel_available { "Open" } else if preapproved { "open" } else { "allow" }
                 }
-                if !preapproved && !tunnel_available {
+                if !preapproved && !tunnel_available && !card.action.requires_direct_allow() {
                 button {
                     r#type: "button",
                     class: "btn btn-neutral approval-always-allow",
@@ -597,6 +602,7 @@ fn action_kind(action: &ApprovalAction) -> &'static str {
         ApprovalAction::OpenUrl { .. } => "open_url",
         ApprovalAction::Launch { .. } => "launch",
         ApprovalAction::LaunchWithPrompt { .. } => "launch_with_prompt",
+        ApprovalAction::LaunchWithAgentWrapper { .. } => "launch_with_agent_wrapper",
         ApprovalAction::Rename { .. } => "rename",
         ApprovalAction::Stop { .. } => "stop",
         ApprovalAction::Prompt { .. } => "prompt",
@@ -618,6 +624,10 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
         | ApprovalAction::LaunchWithPrompt {
             verb: LaunchVerb::Spawn | LaunchVerb::Create,
             ..
+        }
+        | ApprovalAction::LaunchWithAgentWrapper {
+            verb: LaunchVerb::Spawn | LaunchVerb::Create,
+            ..
         } => "start a new session",
         ApprovalAction::Launch {
             verb: LaunchVerb::SpawnInherited,
@@ -626,12 +636,20 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
         | ApprovalAction::LaunchWithPrompt {
             verb: LaunchVerb::SpawnInherited,
             ..
+        }
+        | ApprovalAction::LaunchWithAgentWrapper {
+            verb: LaunchVerb::SpawnInherited,
+            ..
         } => "start a new session running the asking session's own launch",
         ApprovalAction::Launch {
             verb: LaunchVerb::Clone,
             ..
         }
         | ApprovalAction::LaunchWithPrompt {
+            verb: LaunchVerb::Clone,
+            ..
+        }
+        | ApprovalAction::LaunchWithAgentWrapper {
             verb: LaunchVerb::Clone,
             ..
         } => "start a copy of a session",
@@ -686,6 +704,15 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
             launch,
             source,
             ..
+        }
+        | ApprovalAction::LaunchWithAgentWrapper {
+            host_name,
+            cwd,
+            repo,
+            title,
+            launch,
+            source,
+            ..
         } => {
             if let Some(source) = source {
                 session_rows(
@@ -708,8 +735,25 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
                 Some(title) => rows.push(CardRow::Value("title", title.clone())),
                 None => rows.push(CardRow::Note("title", "generated")),
             }
+            if matches!(action, ApprovalAction::LaunchWithAgentWrapper { .. })
+                && let Some(words) = launch
+                    .agent_selection()
+                    .and_then(|selection| selection.wrapper_prefix.as_ref())
+            {
+                rows.push(CardRow::Block(
+                    "agent supplied wrapper",
+                    shell_words::join(words),
+                ));
+            }
             launch_rows(launch, Runs::Start, &mut rows);
             if let ApprovalAction::LaunchWithPrompt { prompt, .. } = action {
+                rows.push(CardRow::Block("initial prompt", prompt.clone()));
+            }
+            if let ApprovalAction::LaunchWithAgentWrapper {
+                prompt: Some(prompt),
+                ..
+            } = action
+            {
                 rows.push(CardRow::Block("initial prompt", prompt.clone()));
             }
             // Farhelm's own verdict only where it has one: a command launch's
@@ -969,6 +1013,12 @@ fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Ve
     if let Some(words) = &fields.permission_flags {
         rows.push(CardRow::Value("permission flags", shell_words::join(words)));
     }
+    if let Some(wrapper) = &fields.wrapper_prefix {
+        match wrapper {
+            Some(words) => rows.push(CardRow::Block("wrapper prefix", shell_words::join(words))),
+            None => rows.push(CardRow::Note("wrapper prefix", "none")),
+        }
+    }
     if let Some(command) = &fields.command {
         rows.push(CardRow::Block("command", command.clone()));
     }
@@ -1222,6 +1272,47 @@ mod tests {
         assert!(rows.contains(&CardRow::Note("title", "generated")));
     }
 
+    /// A wrapped launch's exact prefix is peer-controlled data the user must
+    /// see beside the full command before giving its one-time Allow.
+    #[test]
+    fn agent_wrapper_card_names_the_agents_prefix() {
+        let words = vec!["with-endpoint".to_string(), "--".to_string()];
+        let launch = SessionLaunch::Agent {
+            selection: farhelm_proto::LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: None,
+                permission_flags: None,
+                wrapper_prefix: Some(words.clone()),
+                workspace_trust: None,
+            },
+            start: vec![
+                "with-endpoint".into(),
+                "--".into(),
+                "claude".into(),
+                farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER.into(),
+            ],
+            resume: None,
+        };
+        let action = ApprovalAction::LaunchWithAgentWrapper {
+            verb: LaunchVerb::Create,
+            host_name: "host".into(),
+            cwd: "/work".into(),
+            repo: None,
+            title: None,
+            launch,
+            source: None,
+            prompt: None,
+        };
+        assert_eq!(action_kind(&action), "launch_with_agent_wrapper");
+        assert!(action.requires_direct_allow());
+        assert!(action_rows(&action).contains(&CardRow::Block(
+            "agent supplied wrapper",
+            shell_words::join(&words)
+        )));
+    }
+
     /// Spec: a template write's card shows the whole resulting template,
     /// custom permission flags included.
     ///
@@ -1270,6 +1361,7 @@ mod tests {
                     model: None,
                     effort: None,
                     permissions,
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 },
                 start: vec!["claude".to_string()],

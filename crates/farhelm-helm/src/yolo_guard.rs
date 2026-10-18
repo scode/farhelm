@@ -11,7 +11,7 @@
 //!
 //! A refused launch is never dispatched. The browser answers the refusal
 //! with a loud confirmation and retries the same request with the override
-//! set. An agent has no override: its launches go through [`check_agent`]
+//! set. An agent has no override: its launches go through [`check_agent_wrapper`]
 //! instead, which refuses outright what [`check`] would ask about, and more
 //! (SPEC.md, Agent-spawned sessions).
 
@@ -87,32 +87,40 @@ pub(crate) async fn check(
     }
 }
 
-/// Refuse an agent's launch on `host` when the host asks before YOLO launches
-/// and the launch is one Farhelm cannot vouch for: YOLO by its own verdict,
-/// unclassified, a command launch whatever its YOLO assertion says, or an
-/// agent launch whose command lines are not what Farhelm composes for its
-/// choices.
-///
-/// SPEC.md lets an agent start, on such a host, only what runs the way the
-/// user already approved. Farhelm never reads a command line, so a command
-/// launch's assertion is the caller's word, and an agent's word is exactly
-/// what this host's setting says not to take. An agent launch is classified
-/// by its choices, which is exact only while its stored command lines are the
-/// ones Farhelm composes from those choices: a clone copies its source's
-/// stored launch as the SOURCE host's supervisor reports it, and a
-/// compromised one could pair "default permissions" with a YOLO command line.
-/// So the launch is recomposed here (`launches::compile`) and vouched for
-/// only when it matches exactly; one composed by an older Farhelm, or forged,
-/// is refused like a command launch. The refusal comes
-/// before the approval card, so the user is never asked to approve something
-/// the host's own setting rules out, and again when the user approves (the
-/// setting can change during the wait). Reads the setting at the moment of
-/// the decision, like [`check`].
+/// An exact, non-YOLO agent launch may still need one user's Allow when the
+/// agent supplied its wrapper. This verdict is about this request, never a
+/// durable property of the launch or a host setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AgentVerdict {
+    Vouched,
+    ApprovalRequired,
+}
+
+/// Test the ordinary recomposition rule without an agent-supplied wrapper.
+#[cfg(test)]
 pub(crate) async fn check_agent(
     state: &AppState,
     host: HostId,
     launch: &farhelm_proto::SessionLaunch,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<AgentVerdict> {
+    check_agent_wrapper(state, host, launch, false).await
+}
+
+/// Refuse a launch the host's YOLO rule cannot vouch for, or require a direct
+/// Allow when only its agent-supplied wrapper lacks approval.
+///
+/// A copied launch comes from the source supervisor, which could pair safe
+/// choices with a different command. Recomposition must match both stored
+/// command lines exactly before wrapper provenance matters. YOLO, legacy and
+/// command launches stay refused on a host that asks first, even with an
+/// approval; that decision is made before the card, then repeated after the
+/// wait and at dispatch because the host setting can change in between.
+pub(crate) async fn check_agent_wrapper(
+    state: &AppState,
+    host: HostId,
+    launch: &farhelm_proto::SessionLaunch,
+    agent_wrapper_supplied: bool,
+) -> anyhow::Result<AgentVerdict> {
     let vouched = match launch {
         farhelm_proto::SessionLaunch::Agent { selection, .. } => {
             launch.yolo() == Some(false)
@@ -122,8 +130,13 @@ pub(crate) async fn check_agent(
             false
         }
     };
-    if vouched {
-        return Ok(());
+    let wrapper_needs_approval = vouched
+        && agent_wrapper_supplied
+        && launch
+            .agent_selection()
+            .is_some_and(|selection| selection.wrapper_prefix.is_some());
+    if vouched && !wrapper_needs_approval {
+        return Ok(AgentVerdict::Vouched);
     }
     let row = state
         .store
@@ -132,7 +145,8 @@ pub(crate) async fn check_agent(
         .into_iter()
         .find(|row| row.id == host);
     match row {
-        Some(row) if row.yolo_without_asking => Ok(()),
+        Some(row) if row.yolo_without_asking => Ok(AgentVerdict::Vouched),
+        Some(_) if wrapper_needs_approval => Ok(AgentVerdict::ApprovalRequired),
         Some(row) => {
             let host_name = crate::aggregate::host_display_name(
                 row.kind,
@@ -155,6 +169,29 @@ pub(crate) async fn check_agent(
     }
 }
 
+/// Repeat the host check after a wait and at dispatch. Only the exact forced
+/// wrapper card grants the approval required by this verdict; a host command
+/// shortcut or an unrelated card cannot supply it.
+pub(crate) async fn check_agent_approved(
+    state: &AppState,
+    host: HostId,
+    launch: &farhelm_proto::SessionLaunch,
+    agent_wrapper_supplied: bool,
+    wrapper_approved: bool,
+) -> anyhow::Result<()> {
+    match check_agent_wrapper(state, host, launch, agent_wrapper_supplied).await? {
+        AgentVerdict::Vouched => Ok(()),
+        AgentVerdict::ApprovalRequired if wrapper_approved => Ok(()),
+        AgentVerdict::ApprovalRequired => Err(anyhow::Error::new(crate::SupervisorError {
+            origin: crate::client::ErrorOrigin::Helm,
+            kind: farhelm_proto::ErrorKind::Unauthorized,
+            message:
+                "the agent's wrapper needs an Allow answer for this launch; nothing was started"
+                    .to_string(),
+        })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +209,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         });
         assert_eq!(
@@ -207,6 +245,7 @@ mod tests {
             effort: None,
             permissions: Some(farhelm_proto::LaunchPermission::Custom),
             permission_flags: Some(vec!["--permission-mode".into(), "auto".into()]),
+            wrapper_prefix: None,
             workspace_trust: None,
         })
         .unwrap();
@@ -294,6 +333,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let composed = crate::launches::compile(selection.clone()).expect("compiles");
@@ -317,5 +357,72 @@ mod tests {
             .await
             .expect_err("forged command lines are not vouched for");
         assert!(format!("{refused:#}").contains("may not start a YOLO launch"));
+    }
+
+    /// A matching command proves what Farhelm composed, but only request
+    /// provenance says whether the agent chose its wrapper. The approval
+    /// exception covers that one choice without admitting a YOLO launch.
+    #[farhelm_testtrace::test]
+    async fn agent_wrapper_needs_an_explicit_answer_on_a_guarded_host() {
+        let harness = crate::rest_harness::idle_helm().await;
+        let host = crate::rest_harness::local_id(&harness.store).await;
+        assert!(
+            !harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == host)
+                .unwrap()
+                .yolo_without_asking,
+            "premise: this host asks before YOLO"
+        );
+        let selection = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: None,
+            permission_flags: None,
+            wrapper_prefix: Some(vec!["with-endpoint".into(), "--".into()]),
+            workspace_trust: None,
+        };
+        let launch = crate::launches::compile(selection.clone()).expect("composed wrapper");
+        assert_eq!(launch.yolo(), Some(false), "premise: guarded agent");
+        assert_eq!(
+            check_agent_wrapper(&harness.state, host, &launch, false)
+                .await
+                .unwrap(),
+            AgentVerdict::Vouched,
+            "a named template supplied the wrapper"
+        );
+        assert_eq!(
+            check_agent_wrapper(&harness.state, host, &launch, true)
+                .await
+                .unwrap(),
+            AgentVerdict::ApprovalRequired,
+            "the request flags supplied the same wrapper"
+        );
+        assert!(
+            check_agent_approved(&harness.state, host, &launch, true, false)
+                .await
+                .is_err()
+        );
+        check_agent_approved(&harness.state, host, &launch, true, true)
+            .await
+            .expect("the forced card was answered Allow");
+
+        let yolo = crate::launches::compile(farhelm_proto::LaunchSelection {
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            ..selection
+        })
+        .expect("composed YOLO wrapper");
+        assert_eq!(yolo.yolo(), Some(true), "premise: YOLO choice");
+        assert!(
+            check_agent_approved(&harness.state, host, &yolo, true, true)
+                .await
+                .is_err(),
+            "a wrapper approval cannot override the host YOLO guard"
+        );
     }
 }

@@ -2177,6 +2177,7 @@ mod tests {
         entry.info.id = id.to_string();
         entry.snapshot = IntegrationSnapshot {
             kind,
+            wrapper_prefix_words: 0,
             resume_template: None,
         };
         sup.sessions
@@ -5961,6 +5962,7 @@ mod tests {
         let entry = SessionEntry {
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Claude,
+                wrapper_prefix_words: 0,
                 resume_template: None,
             },
             run: RunCells {
@@ -6014,6 +6016,7 @@ mod tests {
         let entry = SessionEntry {
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Claude,
+                wrapper_prefix_words: 0,
                 resume_template: None,
             },
             ..entry_with(Some(a_terminal()), LastOutcome::Running)
@@ -6118,6 +6121,7 @@ mod tests {
                 Arc::new(SessionEntry {
                     snapshot: IntegrationSnapshot {
                         kind: AgentKind::Claude,
+                        wrapper_prefix_words: 0,
                         resume_template: None,
                     },
                     info: entry.info.clone(),
@@ -6617,6 +6621,7 @@ mod tests {
         integrated.info = base.info.clone();
         integrated.snapshot = IntegrationSnapshot {
             kind: AgentKind::Claude,
+            wrapper_prefix_words: 0,
             resume_template: None,
         };
         integrated.session.last_activity_at = Arc::clone(&base.session.last_activity_at);

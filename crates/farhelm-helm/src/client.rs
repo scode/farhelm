@@ -2952,6 +2952,94 @@ impl SupervisorClient {
         rows: u16,
         refuse_unknown: bool,
     ) -> anyhow::Result<Option<SessionInfo>> {
+        self.reconcile_github_checkout_options(
+            intent_key,
+            client_identity,
+            cols,
+            rows,
+            refuse_unknown,
+            false,
+            None,
+            false,
+        )
+        .await
+        .map(|(session, _)| session)
+    }
+
+    /// Inspect a managed-checkout key without recovering its pending launch.
+    /// A settled key returns its session, a pending key returns the original
+    /// card facts, and an unknown key returns neither. Only an authenticated
+    /// helm connection can make this request.
+    pub(crate) async fn inspect_github_checkout(
+        &self,
+        intent_key: String,
+        client_identity: String,
+    ) -> anyhow::Result<(
+        Option<SessionInfo>,
+        Option<farhelm_proto::GithubCheckoutRecovery>,
+    )> {
+        self.reconcile_github_checkout_options(
+            intent_key,
+            client_identity,
+            80,
+            24,
+            false,
+            true,
+            None,
+            false,
+        )
+        .await
+    }
+
+    /// Recover only the exact snapshot that was inspected before approval.
+    /// If another request won the key in between, the supervisor refuses it
+    /// under the same create admission lock instead of launching new words.
+    /// `approve_wrapper_recovery` records a direct Allow for this exact
+    /// pending attempt before a possible relaunch, so another interruption
+    /// does not discard the user's answer.
+    pub(crate) async fn reconcile_github_checkout_exact(
+        &self,
+        intent_key: String,
+        client_identity: String,
+        cols: u16,
+        rows: u16,
+        expected_fingerprint: String,
+        approve_wrapper_recovery: bool,
+    ) -> anyhow::Result<Option<SessionInfo>> {
+        self.reconcile_github_checkout_options(
+            intent_key,
+            client_identity,
+            cols,
+            rows,
+            false,
+            false,
+            Some(expected_fingerprint),
+            approve_wrapper_recovery,
+        )
+        .await
+        .map(|(session, _)| session)
+    }
+
+    /// Keep inspection, ordinary reconciliation and conditional approval on
+    /// one wire path so their authority flags are always explicit together.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wire reconciliation options remain explicit"
+    )]
+    async fn reconcile_github_checkout_options(
+        &self,
+        intent_key: String,
+        client_identity: String,
+        cols: u16,
+        rows: u16,
+        refuse_unknown: bool,
+        inspect_only: bool,
+        expected_fingerprint: Option<String>,
+        approve_wrapper_recovery: bool,
+    ) -> anyhow::Result<(
+        Option<SessionInfo>,
+        Option<farhelm_proto::GithubCheckoutRecovery>,
+    )> {
         let req_id = self.req_id();
         match self
             .request(
@@ -2963,11 +3051,16 @@ impl SupervisorClient {
                     cols,
                     rows,
                     refuse_unknown,
+                    inspect_only,
+                    expected_fingerprint,
+                    approve_wrapper_recovery,
                 },
             )
             .await?
         {
-            ControlMsg::GithubCheckoutReconciled { session, .. } => session
+            ControlMsg::GithubCheckoutReconciled {
+                session, snapshot, ..
+            } => session
                 .map(|session| {
                     created_session_from(
                         session,
@@ -2975,7 +3068,8 @@ impl SupervisorClient {
                         "GithubCheckoutReconciled",
                     )
                 })
-                .transpose(),
+                .transpose()
+                .map(|session| (session, snapshot.map(|snapshot| *snapshot))),
             other => Err(wrong_reply("ReconcileGithubCheckout", &other)),
         }
     }
@@ -6028,6 +6122,7 @@ mod tests {
                 .write_control(&ControlMsg::GithubCheckoutReconciled {
                     req_id,
                     session: Some(session("forged\nline")),
+                    snapshot: None,
                 })
                 .await
                 .unwrap();

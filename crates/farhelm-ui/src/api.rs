@@ -394,6 +394,10 @@ pub(crate) struct Preferences {
     pub(crate) compact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) remembered_permissions: Option<String>,
+    /// The last successful user launch's prefix for each agent type.
+    #[serde(default)]
+    pub(crate) remembered_wrapper_prefixes:
+        std::collections::BTreeMap<crate::LaunchHarness, Vec<String>>,
     /// Legacy compatibility only; workspace trust now comes from Settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) remembered_workspace_trust: Option<bool>,
@@ -4714,6 +4718,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
             permission_flags: None,
         };
@@ -4939,6 +4944,7 @@ mod tests {
             model: Some("example-model".into()),
             effort: None,
             permissions: Some(crate::LaunchPermission::Yolo),
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let plain = restart_request_body(false, None);
@@ -5186,6 +5192,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         let structured = create_body(
@@ -5230,6 +5237,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            wrapper_prefix: None,
             workspace_trust: None,
         };
         for (agent, selector) in [

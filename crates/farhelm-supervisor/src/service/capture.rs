@@ -422,6 +422,7 @@ mod tests {
         let mut entry = entry_with(None, crate::store::LastOutcome::Running);
         entry.snapshot = IntegrationSnapshot {
             kind,
+            wrapper_prefix_words: 0,
             resume_template: None,
         };
         *entry.run.first_input.lock().unwrap() = at;
@@ -572,6 +573,7 @@ mod tests {
         published.info.id = id.to_string();
         published.snapshot = IntegrationSnapshot {
             kind,
+            wrapper_prefix_words: 0,
             resume_template: None,
         };
         *published.run.first_input.lock().unwrap() = Some(started);
@@ -1133,6 +1135,7 @@ mod tests {
         let mut entry = entry_with(None, crate::store::LastOutcome::Running);
         entry.snapshot = IntegrationSnapshot {
             kind: AgentKind::Claude,
+            wrapper_prefix_words: 0,
             resume_template: Some(vec![
                 "claude".to_string(),
                 "--resume".to_string(),

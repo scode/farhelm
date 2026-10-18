@@ -872,6 +872,7 @@ mod tests {
         SessionEntry {
             snapshot: IntegrationSnapshot {
                 kind,
+                wrapper_prefix_words: 0,
                 resume_template: None,
             },
             ..entry

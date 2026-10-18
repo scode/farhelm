@@ -437,6 +437,14 @@ pub struct ResolvedGithubCheckout {
     /// compare this identity before using the durable resolved snapshot.
     /// Only the authenticated helm constructs it; it is not a credential.
     pub client_identity: String,
+    /// Whether the original agent request supplied its own wrapper. Recovery
+    /// must judge the retained launch, not a template's later resolution.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub agent_wrapper_supplied: bool,
+    /// A direct Allow for that retained wrapper. This is per attempt, not a
+    /// host setting, and an absent field in older snapshots means no Allow.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wrapper_approved: bool,
     /// The validated repository to clone.
     pub repo: GithubRepo,
     /// The canonical absolute root directory, re-resolved on the target
@@ -891,6 +899,8 @@ mod tests {
 
         let resolved = ResolvedGithubCheckout {
             client_identity: "fixture-request".into(),
+            agent_wrapper_supplied: false,
+            wrapper_approved: false,
             repo: repo.clone(),
             root: "/srv/checkouts".to_string(),
             post_clone: Some("npm install".to_string()),
@@ -910,6 +920,24 @@ mod tests {
                 .as_object()
                 .unwrap()
                 .contains_key("claude_trust")
+        );
+        let old_snapshot = serde_json::to_value(&resolved).unwrap();
+        assert!(old_snapshot.get("agent_wrapper_supplied").is_none());
+        assert!(old_snapshot.get("wrapper_approved").is_none());
+        let decoded: ResolvedGithubCheckout = serde_json::from_value(old_snapshot).unwrap();
+        assert!(!decoded.agent_wrapper_supplied);
+        assert!(!decoded.wrapper_approved);
+        let approved = ResolvedGithubCheckout {
+            agent_wrapper_supplied: true,
+            wrapper_approved: true,
+            ..resolved.clone()
+        };
+        let approved_wire = serde_json::to_value(&approved).unwrap();
+        assert_eq!(approved_wire["agent_wrapper_supplied"], true);
+        assert_eq!(approved_wire["wrapper_approved"], true);
+        assert_eq!(
+            serde_json::from_value::<ResolvedGithubCheckout>(approved_wire).unwrap(),
+            approved
         );
         // Stored launch snapshots from before the opt-in remain off, while
         // new snapshots must carry true through a retry unchanged.

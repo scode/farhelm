@@ -147,10 +147,15 @@ fn render(agent: &Command) -> String {
          never both. --gh acme/web --title 'Fix parser' creates directory web-fix-parser. Without\n\
          a title Farhelm picks the next free web-N. A taken or over-long name is refused,\n\
          never suffixed. The checkout folder and post-clone command come from helm settings.\n\
-         An agent launch is --agent TYPE with optional\n\
-         --model, --effort and --permissions; Farhelm composes its command. Guarded\n\
-         permissions select the agent's automatic safety mode with explicit flags, not a\n\
-         promise to ask before every action: Claude uses auto mode, Grok auto-review, Codex uses\n\
+         An agent launch is --agent TYPE with optional --model, --effort, --permissions\n\
+         and --wrapper COMMAND; Farhelm composes its command.\n\
+         A wrapper is a shell-quoted list of words placed before that command, with no\n\
+         placeholders or shell evaluation. A wrapper you supply needs the user's explicit\n\
+         Allow on hosts that ask before YOLO launches, even when they allow other Farhelm\n\
+         commands without asking. A wrapper from a named template is already user-approved.\n\
+         Do not put secrets in a wrapper: its words appear in process listings and templates.\n\
+         Guarded permissions select the agent's automatic safety mode with explicit flags.\n\
+         They do not promise to ask before every action: Claude uses auto mode, Grok auto-review, Codex uses\n\
          workspace-write with on-request approval, Muse uses its auto-review profile, and\n\
          OMP's guarded choice approves workspace edits and asks about other actions. Your\n\
          own rules and in-session mode switches can loosen these modes. Older stored launches without those flags and\n\
@@ -194,6 +199,7 @@ fn render(agent: &Command) -> String {
          The user approves every acting verb. spawn, create, clone, rename, stop, prompt,\n\
          restart, delete and the template writes each wait while Farhelm shows the user\n\
          a card, for up to 9 minutes, unless the user told Farhelm not to ask for this host.\n\
+         A template write containing a wrapper still needs one explicit Allow.\n\
          Listings and instructions never wait. Run acting verbs with a tool timeout of at least\n\
          10 minutes, and give create, clone and spawn an --idempotency-key, so a retry after your tool\n\
          gave up returns the session the user approved instead of starting another. A create\n\

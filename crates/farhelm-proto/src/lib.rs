@@ -133,7 +133,7 @@ pub mod time;
 pub mod version;
 pub use launch::{
     LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, NamedConversationStart,
-    check_permission_flags, split_permission_flags,
+    check_permission_flags, check_wrapper_prefix, split_permission_flags, split_wrapper_prefix,
 };
 pub use version::is_development_build;
 /// The launcher's shared rules: the model catalog, agent-type
@@ -205,7 +205,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_57` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_59` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -216,7 +216,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 57;
+pub const PROTOCOL_VERSION: u32 = 59;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -2480,6 +2480,35 @@ pub struct SessionDeleteOutcome {
     pub archived: bool,
 }
 
+/// The original managed-checkout request retained under one authenticated key.
+///
+/// An inspection may be followed by a launch-capable reconciliation. The
+/// fingerprint must be supplied back as `expected_fingerprint`, since a card
+/// for this snapshot cannot authorize a different winner of the same key.
+/// A snapshot is returned only while recovery can still launch; a settled or
+/// already-running attempt is returned as a session instead.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GithubCheckoutRecovery {
+    /// The command the first accepted attempt would start, unchanged by a
+    /// later edit to a named template.
+    pub launch: SessionLaunch,
+    /// The first message, if any, shown with the command on an approval card.
+    pub prompt: Option<String>,
+    /// The title and destination shown for this accepted checkout.
+    pub title: Option<String>,
+    pub repo: GithubRepo,
+    pub cwd: String,
+    /// Opaque equality token the helm must return for launch-capable recovery.
+    pub fingerprint: String,
+    /// Provenance frozen at acceptance; today's template resolution cannot
+    /// turn an agent-supplied prefix into a user-configured one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub agent_wrapper_supplied: bool,
+    /// Direct Allow for this attempt, retained across an interrupted retry.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wrapper_approved: bool,
+}
+
 /// Control-channel messages. `req_id` correlates a response to its request
 /// so one connection can carry concurrent requests; unsolicited events —
 /// `Detached`, as of version 6 `UploadAck` and `UploadAborted`, and as of
@@ -2751,6 +2780,9 @@ pub enum ControlMsg {
     /// identity before consulting current configuration or launch catalogs.
     /// Full-authority helm connections only. An unknown key never allocates;
     /// a matching pending attempt recovers under its recorded snapshot.
+    /// `inspect_only` reports a matching attempt's original snapshot without
+    /// settling or launching it. `expected_fingerprint` binds a later
+    /// launch-capable call to that inspection under the same intent admission.
     /// `refuse_unknown` spends an unknown key permanently under create
     /// admission. Its durable CheckoutConflict permits a new explicit user
     /// submission; a concurrent accepted request instead replays its outcome.
@@ -2762,6 +2794,14 @@ pub enum ControlMsg {
         rows: u16,
         #[serde(default)]
         refuse_unknown: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        inspect_only: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_fingerprint: Option<String>,
+        /// Persist this card's direct Allow on the already-inspected pending
+        /// attempt before trying to launch it. It cannot approve a new key.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        approve_wrapper_recovery: bool,
     },
     /// `None` observes no reservation at lookup time; it does not prevent
     /// a concurrent create from accepting the key afterward. A refusal
@@ -2771,6 +2811,12 @@ pub enum ControlMsg {
     GithubCheckoutReconciled {
         req_id: u64,
         session: Option<SessionInfo>,
+        /// Present only for an inspect-only request of a matching live
+        /// managed-checkout reservation. Indirection keeps this optional
+        /// recovery payload from inflating every control message in memory;
+        /// serde still sends the same JSON object.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot: Option<Box<GithubCheckoutRecovery>>,
     },
     /// List every session this supervisor has, in one reply. There is no
     /// cursor and no page size, by contract (`PROTOCOL_VERSION` 14 and
@@ -4028,8 +4074,14 @@ mod tests {
             cols: 80,
             rows: 24,
             refuse_unknown: true,
+            inspect_only: false,
+            expected_fingerprint: None,
+            approve_wrapper_recovery: false,
         };
         let mut value = serde_json::to_value(request).unwrap();
+        assert!(value.get("inspect_only").is_none());
+        assert!(value.get("expected_fingerprint").is_none());
+        assert!(value.get("approve_wrapper_recovery").is_none());
         assert!(matches!(
             serde_json::from_value::<ControlMsg>(value.clone()).unwrap(),
             ControlMsg::ReconcileGithubCheckout {
@@ -4045,9 +4097,58 @@ mod tests {
             serde_json::from_value::<ControlMsg>(value).unwrap(),
             ControlMsg::ReconcileGithubCheckout {
                 refuse_unknown: false,
+                inspect_only: false,
+                expected_fingerprint: None,
+                approve_wrapper_recovery: false,
                 ..
             }
         ));
+    }
+
+    /// A later Allow must name the exact snapshot an inspection returned.
+    /// The optional request fields and recovery reply are one wire contract:
+    /// dropping any of them would let the helm display one attempt and resume
+    /// another after a concurrent same-key acceptance.
+    #[test]
+    fn checkout_recovery_snapshot_and_fingerprint_roundtrip() {
+        let request = ControlMsg::ReconcileGithubCheckout {
+            req_id: 7,
+            intent_key: "key".into(),
+            client_identity: "request".into(),
+            cols: 80,
+            rows: 24,
+            refuse_unknown: false,
+            inspect_only: false,
+            expected_fingerprint: Some("original".into()),
+            approve_wrapper_recovery: true,
+        };
+        let wire = serde_json::to_value(&request).unwrap();
+        assert_eq!(wire["expected_fingerprint"], "original");
+        assert_eq!(wire["approve_wrapper_recovery"], true);
+        assert_eq!(serde_json::from_value::<ControlMsg>(wire).unwrap(), request);
+
+        let response = ControlMsg::GithubCheckoutReconciled {
+            req_id: 7,
+            session: None,
+            snapshot: Some(Box::new(GithubCheckoutRecovery {
+                launch: SessionLaunch::plain_command("agent"),
+                prompt: Some("continue".into()),
+                title: Some("work".into()),
+                repo: parse_github_repo("acme/bar").unwrap(),
+                cwd: "/checkouts/bar".into(),
+                fingerprint: "original".into(),
+                agent_wrapper_supplied: true,
+                wrapper_approved: false,
+            })),
+        };
+        let wire = serde_json::to_value(&response).unwrap();
+        assert_eq!(wire["snapshot"]["fingerprint"], "original");
+        assert_eq!(wire["snapshot"]["agent_wrapper_supplied"], true);
+        assert!(wire["snapshot"].get("wrapper_approved").is_none());
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(wire).unwrap(),
+            response
+        );
     }
 
     /// Round-trip through the real encoder/decoder: any drift between
@@ -4814,6 +4915,8 @@ mod tests {
         let repo = parse_github_repo("acme/bar").expect("valid repo");
         let resolved = ResolvedGithubCheckout {
             client_identity: "fixture-request".into(),
+            agent_wrapper_supplied: false,
+            wrapper_approved: false,
             repo,
             root: "/checkouts".to_string(),
             post_clone: Some("cargo fetch".to_string()),
@@ -4988,8 +5091,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_57() {
-        assert_eq!(PROTOCOL_VERSION, 57);
+    fn protocol_version_is_pinned_at_59() {
+        assert_eq!(PROTOCOL_VERSION, 59);
     }
 
     /// A follow-up is an approved mutation even though its success has no
@@ -6723,6 +6826,7 @@ mod tests {
                     model: Some("opus".to_string()),
                     effort: None,
                     permissions: None,
+                    wrapper_prefix: None,
                     workspace_trust: None,
                 },
                 start: vec![
