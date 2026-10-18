@@ -69,6 +69,13 @@ pub(crate) enum Precondition {
     /// approved against what the card showed; checked in the same store
     /// transaction as the write, so another writer cannot land in between.
     Unchanged(Option<Box<TemplateFields>>),
+    /// The agent's card also showed a shortcut move; the template and every
+    /// binding must still match that card before one transaction changes both.
+    UnchangedWithBindings {
+        template: Option<Box<TemplateFields>>,
+        expected: crate::store::TemplateBindings,
+        desired: crate::store::TemplateBindings,
+    },
 }
 
 /// Store `template`, creating or replacing it, and announce the change: the
@@ -106,6 +113,21 @@ pub(crate) async fn store_template(
                 task_state
                     .store
                     .put_launch_template_if(template, expected.map(|fields| *fields))
+                    .await?
+            }
+            Precondition::UnchangedWithBindings {
+                template: expected,
+                expected: bindings,
+                desired,
+            } => {
+                task_state
+                    .store
+                    .put_launch_template_with_bindings_if(
+                        template,
+                        expected.map(|fields| *fields),
+                        bindings,
+                        desired,
+                    )
                     .await?
             }
         };
@@ -157,6 +179,9 @@ pub(crate) async fn remove_template(
                     .store
                     .delete_launch_template_if(name, *expected)
                     .await?
+            }
+            Precondition::UnchangedWithBindings { .. } => {
+                anyhow::bail!("binding expectations belong to template writes, not deletes")
             }
         };
         if deleted {

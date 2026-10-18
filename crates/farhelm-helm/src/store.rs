@@ -3861,6 +3861,50 @@ fn clear_template_bindings(tx: &rusqlite::Transaction<'_>, name: &str) -> anyhow
     Ok(())
 }
 
+/// The fleet shortcut state an agent's approval saw before a template write.
+///
+/// It is checked as a unit inside the write transaction. Comparing only the
+/// destination key would miss another client's concurrent move of ⚡ or a
+/// different key, while the card's consent covers this whole snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TemplateBindings {
+    pub(crate) quick_launch: Option<String>,
+    pub(crate) keys: std::collections::BTreeMap<String, String>,
+}
+
+impl TemplateBindings {
+    /// Capture the two preference fields that an agent card must bind to its
+    /// eventual write. Other preference fields remain last-write-wins.
+    pub(crate) fn from_preferences(preferences: &Preferences) -> Self {
+        Self {
+            quick_launch: preferences.quick_launch_template.clone(),
+            keys: preferences.template_shortcuts.clone(),
+        }
+    }
+}
+
+/// Read the two shortcut columns under the caller's write lock.
+fn template_bindings_in(tx: &rusqlite::Transaction<'_>) -> anyhow::Result<TemplateBindings> {
+    let row: Option<(Option<String>, String)> = tx
+        .query_row(
+            "SELECT quick_launch_template, template_shortcuts FROM preferences WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .context("reading template bindings")?;
+    match row {
+        Some((quick_launch, keys)) => Ok(TemplateBindings {
+            quick_launch,
+            keys: serde_json::from_str(&keys).context("decoding template key bindings")?,
+        }),
+        None => Ok(TemplateBindings {
+            quick_launch: None,
+            keys: Default::default(),
+        }),
+    }
+}
+
 /// Whether the template named `name` is exactly `expected` (`None`: no
 /// template has the name). Called inside the conditional template writes'
 /// own transaction, for the same reason as [`claimant_of`]. Fields are
@@ -4233,6 +4277,62 @@ impl HelmStore {
                     .context("storing a launch template")?;
                     tx.commit()
                         .context("committing the conditional template write")?;
+                    Ok(true)
+                },
+            )
+            .await
+    }
+
+    /// Commit an approved template and shortcut move only if both snapshots
+    /// still match what its card showed.
+    ///
+    /// This is the agent-only counterpart of `put_launch_template_if`. GUI
+    /// preference writes keep their documented last-writer-wins contract.
+    pub(crate) async fn put_launch_template_with_bindings_if(
+        &self,
+        template: farhelm_proto::launcher::LaunchTemplate,
+        expected_template: Option<farhelm_proto::launcher::TemplateFields>,
+        expected_bindings: TemplateBindings,
+        new_bindings: TemplateBindings,
+    ) -> anyhow::Result<bool> {
+        let json = serde_json::to_string(&template.fields).context("encoding template fields")?;
+        let keys_json =
+            serde_json::to_string(&new_bindings.keys).context("encoding template key bindings")?;
+        let updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        self.conn
+            .call(
+                "launch template and bindings write task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .context("starting the conditional template and bindings write")?;
+                    if !template_row_is(&tx, &template.name, expected_template.as_ref())?
+                        || template_bindings_in(&tx)? != expected_bindings
+                    {
+                        return Ok(false);
+                    }
+                    tx.execute(
+                        "INSERT INTO launch_templates (name, fields_json, updated_at)
+                         VALUES (?1, ?2, ?3)
+                         ON CONFLICT (name) DO UPDATE SET
+                             fields_json = excluded.fields_json,
+                             updated_at = excluded.updated_at",
+                        rusqlite::params![template.name, json, updated_at],
+                    )
+                    .context("storing a launch template with bindings")?;
+                    tx.execute(
+                        "INSERT INTO preferences (singleton, quick_launch_template, template_shortcuts)
+                         VALUES (1, ?1, ?2)
+                         ON CONFLICT (singleton) DO UPDATE SET
+                             quick_launch_template = excluded.quick_launch_template,
+                             template_shortcuts = excluded.template_shortcuts",
+                        rusqlite::params![new_bindings.quick_launch, keys_json],
+                    )
+                    .context("storing approved template bindings")?;
+                    tx.commit()
+                        .context("committing the conditional template and bindings write")?;
                     Ok(true)
                 },
             )
@@ -16940,6 +17040,106 @@ mod tests {
                 .unwrap()
         );
         assert!(stored(&store).await.is_empty());
+    }
+
+    /// A card's template and fleet bindings are one compare-and-write unit.
+    ///
+    /// An unrelated key moving while the card waits still invalidates its
+    /// snapshot. Refusal must preserve both the template and the newer
+    /// preferences; a matching snapshot must commit both changes together.
+    #[farhelm_testtrace::test]
+    async fn conditional_template_and_bindings_write_is_atomic() {
+        use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
+        let (_dir, store) = fresh_store().await;
+        let template = |name: &str, command: &str| LaunchTemplate {
+            name: name.into(),
+            fields: TemplateFields {
+                command: Some(command.into()),
+                ..Default::default()
+            },
+        };
+        for row in [
+            template("old", "old"),
+            template("target", "before"),
+            template("other", "other"),
+        ] {
+            store.put_launch_template(row).await.unwrap();
+        }
+        let set_bindings = |keys: serde_json::Value| {
+            serde_json::json!({
+                "quick_launch_template": "old", "template_shortcuts": keys
+            })
+        };
+        store
+            .update_preferences(
+                serde_json::from_value(set_bindings(serde_json::json!({"1":"old"}))).unwrap(),
+            )
+            .await
+            .unwrap();
+        let expected = TemplateBindings::from_preferences(&store.preferences().await.unwrap());
+        let desired = TemplateBindings {
+            quick_launch: Some("target".into()),
+            keys: [("1".into(), "target".into())].into_iter().collect(),
+        };
+        store
+            .update_preferences(
+                serde_json::from_value(set_bindings(serde_json::json!({"1":"old", "2":"other"})))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            !store
+                .put_launch_template_with_bindings_if(
+                    template("target", "after"),
+                    Some(template("target", "before").fields),
+                    expected.clone(),
+                    desired.clone(),
+                )
+                .await
+                .unwrap()
+        );
+        let stored = store.launch_templates().await.unwrap();
+        assert!(stored.contains(&template("target", "before")));
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .template_shortcuts
+                .get("2")
+                .map(String::as_str),
+            Some("other")
+        );
+
+        store
+            .update_preferences(
+                serde_json::from_value(set_bindings(serde_json::json!({"1":"old"}))).unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            store
+                .put_launch_template_with_bindings_if(
+                    template("target", "after"),
+                    Some(template("target", "before").fields),
+                    expected,
+                    desired.clone(),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .launch_templates()
+                .await
+                .unwrap()
+                .contains(&template("target", "after"))
+        );
+        assert_eq!(
+            TemplateBindings::from_preferences(&store.preferences().await.unwrap()),
+            desired
+        );
     }
 
     /// Deletion retires only the matching shared mark, and Undo must not

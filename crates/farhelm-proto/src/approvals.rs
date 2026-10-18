@@ -69,6 +69,42 @@ pub struct ApprovalSession {
     pub host_name: Option<String>,
 }
 
+/// Shortcut effects shown by the card for a template write.
+///
+/// These are the differences from the bindings read before approval. The
+/// helm retains the full snapshot separately and checks it in the write
+/// transaction; the card carries only the changes a person must see.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TemplateShortcutCard {
+    pub quick_launch: Option<QuickLaunchCard>,
+    pub key: Option<TemplateKeyCard>,
+}
+
+/// How the ⚡ mark changes when a template write is approved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "change", rename_all = "snake_case")]
+pub enum QuickLaunchCard {
+    /// Mark this template, possibly taking the mark from another template.
+    Set { moved_from: Option<String> },
+    /// Remove the mark that this template currently holds.
+    Clear,
+}
+
+/// The full number-key effect an approval must display.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "change", rename_all = "snake_case")]
+pub enum TemplateKeyCard {
+    /// Replace this template's old key and possibly take the new key from
+    /// another template.
+    Set {
+        key: String,
+        replaced_key: Option<String>,
+        moved_from: Option<String>,
+    },
+    /// Remove the key currently held by this template.
+    Clear { key: String },
+}
+
 /// What a waiting request would do once approved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -175,6 +211,15 @@ pub enum ApprovalAction {
         /// The display name of the host `fields.host` names, when one does.
         host_name: Option<String>,
     },
+    /// A template write that also changes ⚡ or a number key. A separate kind
+    /// keeps older UIs from approving a binding move they cannot display.
+    TemplateWriteWithShortcuts {
+        name: String,
+        replaces_existing: bool,
+        fields: TemplateFields,
+        host_name: Option<String>,
+        shortcuts: TemplateShortcutCard,
+    },
     /// `farhelm agent template delete`, with the template as it is now.
     TemplateDelete {
         name: String,
@@ -191,7 +236,8 @@ impl ApprovalAction {
     pub fn requires_direct_allow(&self) -> bool {
         match self {
             Self::LaunchWithAgentWrapper { .. } => true,
-            Self::TemplateWrite { fields, .. } => {
+            Self::TemplateWrite { fields, .. }
+            | Self::TemplateWriteWithShortcuts { fields, .. } => {
                 matches!(&fields.wrapper_prefix, Some(Some(_)))
             }
             // Listed rather than caught by a wildcard: a new card kind that
@@ -325,6 +371,45 @@ mod tests {
             card
         );
         assert!(serde_json::from_value::<OlderAction>(value).is_err());
+    }
+
+    /// A separate kind prevents an older UI from offering Allow on a card
+    /// that omits a shortcut move. Wrapper-bearing writes still need a
+    /// visible Allow even on a host that normally skips cards.
+    #[test]
+    fn shortcut_template_cards_fail_an_older_action_decoder() {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum OlderAction {
+            TemplateWrite {},
+        }
+        let card = super::ApprovalAction::TemplateWriteWithShortcuts {
+            name: "fast".into(),
+            replaces_existing: true,
+            fields: crate::launcher::TemplateFields {
+                wrapper_prefix: Some(Some(vec!["with-endpoint".into()])),
+                ..Default::default()
+            },
+            host_name: None,
+            shortcuts: super::TemplateShortcutCard {
+                quick_launch: Some(super::QuickLaunchCard::Set {
+                    moved_from: Some("old".into()),
+                }),
+                key: Some(super::TemplateKeyCard::Set {
+                    key: "1".into(),
+                    replaced_key: None,
+                    moved_from: None,
+                }),
+            },
+        };
+        let value = serde_json::to_value(&card).unwrap();
+        assert_eq!(value["kind"], "template_write_with_shortcuts");
+        assert_eq!(
+            serde_json::from_value::<super::ApprovalAction>(value.clone()).unwrap(),
+            card
+        );
+        assert!(serde_json::from_value::<OlderAction>(value).is_err());
+        assert!(card.requires_direct_allow());
     }
 
     /// Old card payloads must not advertise a new native capability, while the

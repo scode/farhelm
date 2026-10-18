@@ -116,14 +116,18 @@ use std::sync::{Arc, Weak};
 
 use anyhow::Context as _;
 use async_trait::async_trait;
-use farhelm_proto::approvals::{ApprovalAction, LaunchVerb};
+use farhelm_proto::approvals::{
+    ApprovalAction, LaunchVerb, QuickLaunchCard, TemplateKeyCard, TemplateShortcutCard,
+};
 use farhelm_proto::{
     AgentHost, AgentOutcome, AgentReply, AgentSession, AgentVerb, ErrorKind, SessionStatus,
+    TemplateKeyEdit, TemplateShortcutEdit,
 };
 use tracing::info;
 
 use crate::AppState;
 use crate::store::HostId;
+use crate::store::TemplateBindings;
 
 /// Which connection an upcall arrived on — the whole of what the helm
 /// knows about who is asking, beyond the session id the supervisor
@@ -475,7 +479,12 @@ impl AgentRequestHandler for HelmAgentRequests {
                 }
             }
             AgentVerb::Templates {} => template_listing(&state, origin.host).await,
-            AgentVerb::TemplateCreate { name, fields, host } => {
+            AgentVerb::TemplateCreate {
+                name,
+                fields,
+                host,
+                shortcuts,
+            } => {
                 write_template_for_agent(
                     &state,
                     origin,
@@ -484,12 +493,18 @@ impl AgentRequestHandler for HelmAgentRequests {
                         name,
                         fields,
                         host,
+                        shortcuts,
                         create: true,
                     },
                 )
                 .await
             }
-            AgentVerb::TemplateEdit { name, fields, host } => {
+            AgentVerb::TemplateEdit {
+                name,
+                fields,
+                host,
+                shortcuts,
+            } => {
                 write_template_for_agent(
                     &state,
                     origin,
@@ -498,6 +513,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                         name,
                         fields,
                         host,
+                        shortcuts,
                         create: false,
                     },
                 )
@@ -2163,8 +2179,103 @@ struct TemplateWrite {
     fields: farhelm_proto::launcher::TemplateFields,
     /// The host to pin the template to, by display name.
     host: Option<String>,
+    /// Binding edits live in fleet preferences, outside composable template
+    /// fields, but share this write's single approval card.
+    shortcuts: TemplateShortcutEdit,
     /// `create` refuses an existing name; `edit` refuses a missing one.
     create: bool,
+}
+
+/// Resolve a shortcut edit against the same fleet snapshot the card will
+/// describe. The store later compares that whole snapshot before committing,
+/// so a move cannot silently take a binding changed during the wait.
+fn apply_template_shortcuts(
+    name: &str,
+    fields: &farhelm_proto::launcher::TemplateFields,
+    edit: &TemplateShortcutEdit,
+    create: bool,
+    before: &TemplateBindings,
+) -> Result<(TemplateBindings, Option<TemplateShortcutCard>), String> {
+    if create
+        && (edit.quick_launch == Some(false)
+            || matches!(edit.key.as_ref(), Some(TemplateKeyEdit::Clear)))
+    {
+        return Err("a new template has no shortcut to clear; use --quick-launch or --key".into());
+    }
+    let mut after = before.clone();
+    let quick_launch = match edit.quick_launch {
+        Some(true) => {
+            if before.quick_launch.as_deref() == Some(name) {
+                None
+            } else {
+                after.quick_launch = Some(name.to_string());
+                Some(QuickLaunchCard::Set {
+                    moved_from: before.quick_launch.clone(),
+                })
+            }
+        }
+        Some(false) => {
+            if before.quick_launch.as_deref() != Some(name) {
+                return Err(format!(
+                    "cannot clear ⚡ from {name:?}: it is on {}",
+                    before.quick_launch.as_deref().unwrap_or("no template")
+                ));
+            }
+            after.quick_launch = None;
+            Some(QuickLaunchCard::Clear)
+        }
+        None => None,
+    };
+    // An edit can make an already-marked template unusable without mentioning
+    // the mark. Keep the same eligibility rule for the stored result.
+    if after.quick_launch.as_deref() == Some(name)
+        && !farhelm_proto::launcher::quick_launch_eligible(fields)
+    {
+        return Err("⚡ needs a template that chooses an agent or a nonblank command".into());
+    }
+    let current_key = before
+        .keys
+        .iter()
+        .find_map(|(key, owner)| (owner == name).then(|| key.clone()));
+    let key = match &edit.key {
+        Some(TemplateKeyEdit::Set(next)) => {
+            if !matches!(
+                next.as_str(),
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "0"
+            ) {
+                return Err("--key must be one digit, 1–9 or 0".into());
+            }
+            if current_key.as_deref() == Some(next.as_str()) {
+                None
+            } else {
+                let moved_from = before
+                    .keys
+                    .get(next)
+                    .filter(|owner| *owner != name)
+                    .cloned();
+                after.keys.retain(|_, owner| owner != name);
+                after.keys.insert(next.clone(), name.to_string());
+                Some(TemplateKeyCard::Set {
+                    key: next.clone(),
+                    replaced_key: current_key,
+                    moved_from,
+                })
+            }
+        }
+        Some(TemplateKeyEdit::Clear) => {
+            let Some(old) = current_key else {
+                return Err(format!(
+                    "cannot clear a number key from {name:?}: it holds none"
+                ));
+            };
+            after.keys.retain(|_, owner| owner != name);
+            Some(TemplateKeyCard::Clear { key: old })
+        }
+        None => None,
+    };
+    let card = (quick_launch.is_some() || key.is_some())
+        .then_some(TemplateShortcutCard { quick_launch, key });
+    Ok((after, card))
 }
 
 /// `template create` and `template edit`: build the template the write would
@@ -2188,6 +2299,7 @@ async fn write_template_for_agent(
         name,
         mut fields,
         host,
+        shortcuts,
         create,
     } = write;
     if fields.host.is_some() {
@@ -2196,7 +2308,11 @@ async fn write_template_for_agent(
                 .to_string(),
         ));
     }
-    if !create && fields == farhelm_proto::launcher::TemplateFields::default() && host.is_none() {
+    if !create
+        && fields == farhelm_proto::launcher::TemplateFields::default()
+        && host.is_none()
+        && shortcuts.is_empty()
+    {
         return Err(crate::sessions::invalid_request(
             "give at least one field to change".to_string(),
         ));
@@ -2260,23 +2376,38 @@ async fn write_template_for_agent(
     }
     farhelm_proto::launcher::check_template_shape(&template)
         .map_err(crate::sessions::invalid_request)?;
+    let before_bindings = TemplateBindings::from_preferences(&state.store.preferences().await?);
+    let (desired_bindings, shortcut_card) = apply_template_shortcuts(
+        &template.name,
+        &template.fields,
+        &shortcuts,
+        create,
+        &before_bindings,
+    )
+    .map_err(crate::sessions::invalid_request)?;
     let shown_host = match (&host_name, &template.fields.host) {
         (Some(name), _) => Some(name.clone()),
         (None, Some(identity)) => template_host_name(state, identity).await,
         (None, None) => None,
     };
-    approved(
-        state,
-        origin,
-        asking_session,
+    let changes_bindings = shortcut_card.is_some();
+    let action = if let Some(shortcuts) = shortcut_card {
+        ApprovalAction::TemplateWriteWithShortcuts {
+            name: template.name.clone(),
+            replaces_existing: !create,
+            fields: template.fields.clone(),
+            host_name: shown_host.clone(),
+            shortcuts,
+        }
+    } else {
         ApprovalAction::TemplateWrite {
             name: template.name.clone(),
             replaces_existing: !create,
             fields: template.fields.clone(),
             host_name: shown_host.clone(),
-        },
-    )
-    .await?;
+        }
+    };
+    approved(state, origin, asking_session, action).await?;
     info!(
         asking = escape_for_log(asking_session).as_str(),
         template = escape_for_log(&template.name).as_str(),
@@ -2285,12 +2416,32 @@ async fn write_template_for_agent(
     // The write lands only on the template the card was built from: another
     // agent's create of the same name, or a GUI edit made while the card
     // waited, refuses this one instead of being overwritten by it.
-    let unchanged = crate::templates::Precondition::Unchanged(before.map(|t| Box::new(t.fields)));
+    let expected_template = before.map(|t| Box::new(t.fields));
+    let unchanged = if changes_bindings {
+        crate::templates::Precondition::UnchangedWithBindings {
+            template: expected_template,
+            expected: before_bindings,
+            desired: desired_bindings,
+        }
+    } else {
+        crate::templates::Precondition::Unchanged(expected_template)
+    };
     if !crate::templates::store_template(state, template.clone(), unchanged).await? {
-        return Err(template_changed());
+        return Err(if changes_bindings {
+            template_or_shortcuts_changed()
+        } else {
+            template_changed()
+        });
     }
+    let bindings = TemplateBindings::from_preferences(&state.store.preferences().await?);
+    let mut listed = farhelm_proto::AgentTemplate::listed(&template, shown_host);
+    listed.quick_launch = bindings.quick_launch.as_deref() == Some(template.name.as_str());
+    listed.key = bindings
+        .keys
+        .iter()
+        .find_map(|(key, owner)| (owner == &template.name).then(|| key.clone()));
     Ok(AgentReply::TemplateWritten {
-        template: Box::new(farhelm_proto::AgentTemplate::listed(&template, shown_host)),
+        template: Box::new(listed),
     })
 }
 
@@ -2467,12 +2618,25 @@ fn template_changed() -> anyhow::Error {
     })
 }
 
-/// `templates`: every template the helm holds, its command texts withheld
-/// (`AgentTemplate::listed`), with the host each one's install identity
-/// currently names.
+/// A shortcut card bound both the template and every shortcut assignment.
+/// Name both in this refusal so an agent knows why a retry needs a new card.
+fn template_or_shortcuts_changed() -> anyhow::Error {
+    anyhow::Error::new(crate::SupervisorError {
+        origin: crate::client::ErrorOrigin::Helm,
+        kind: ErrorKind::Conflict,
+        message: "the template or its shortcut bindings changed while this request waited for approval, so nothing was written; look again and retry".to_string(),
+    })
+}
+
+/// `templates`: every template the helm holds, with command text withheld.
+///
+/// Host display names come from current install identities, and shortcut
+/// fields come from current fleet preferences; neither is saved in the
+/// template definition itself.
 async fn template_listing(state: &AppState, caller: HostId) -> anyhow::Result<AgentReply> {
     let views = crate::hosts::host_views(state).await?;
     let templates = state.store.launch_templates().await?;
+    let bindings = TemplateBindings::from_preferences(&state.store.preferences().await?);
     Ok(AgentReply::Templates {
         templates: templates
             .iter()
@@ -2481,7 +2645,14 @@ async fn template_listing(state: &AppState, caller: HostId) -> anyhow::Result<Ag
                     crate::agent_launch::template_host_row(&views, identity)
                         .map(|view| view.name.clone())
                 });
-                farhelm_proto::AgentTemplate::listed(template, host_name)
+                let mut listed = farhelm_proto::AgentTemplate::listed(template, host_name);
+                listed.quick_launch =
+                    bindings.quick_launch.as_deref() == Some(template.name.as_str());
+                listed.key = bindings
+                    .keys
+                    .iter()
+                    .find_map(|(key, owner)| (owner == &template.name).then(|| key.clone()));
+                listed
             })
             .collect(),
         caller_host_id: caller.to_string(),
@@ -9595,6 +9766,121 @@ mod tests {
         }
     }
 
+    /// A shortcut move must name its former holder, and a clear must belong
+    /// to the edited template. Keys may still select partial templates.
+    ///
+    /// This keeps the card's account of a move tied to the preference
+    /// snapshot that the write transaction later compares. An agent should
+    /// not get a successful empty clear or take ⚡ with an unusable template.
+    #[test]
+    fn shortcut_edits_obey_the_template_and_binding_rules() {
+        use farhelm_proto::launcher::TemplateFields;
+
+        let before = TemplateBindings {
+            quick_launch: Some("old".into()),
+            keys: [("1".into(), "old".into()), ("2".into(), "new".into())]
+                .into_iter()
+                .collect(),
+        };
+        let edit = TemplateShortcutEdit {
+            quick_launch: Some(true),
+            key: Some(TemplateKeyEdit::Set("1".into())),
+        };
+        let (after, card) =
+            apply_template_shortcuts("new", &template_fields("run"), &edit, false, &before)
+                .unwrap();
+        assert_eq!(after.quick_launch.as_deref(), Some("new"));
+        assert_eq!(after.keys.get("1").map(String::as_str), Some("new"));
+        assert_eq!(after.keys.len(), 1, "the old key on new was replaced");
+        let card = card.unwrap();
+        assert_eq!(
+            card.quick_launch,
+            Some(QuickLaunchCard::Set {
+                moved_from: Some("old".into())
+            })
+        );
+        assert_eq!(
+            card.key,
+            Some(TemplateKeyCard::Set {
+                key: "1".into(),
+                replaced_key: Some("2".into()),
+                moved_from: Some("old".into()),
+            })
+        );
+
+        let partial = TemplateFields::default();
+        assert!(
+            apply_template_shortcuts(
+                "partial",
+                &partial,
+                &TemplateShortcutEdit {
+                    key: Some(TemplateKeyEdit::Set("0".into())),
+                    ..Default::default()
+                },
+                true,
+                &before,
+            )
+            .is_ok()
+        );
+        assert!(
+            apply_template_shortcuts(
+                "partial",
+                &partial,
+                &TemplateShortcutEdit {
+                    quick_launch: Some(true),
+                    ..Default::default()
+                },
+                true,
+                &before,
+            )
+            .unwrap_err()
+            .contains("nonblank command")
+        );
+        let already_marked = TemplateBindings {
+            quick_launch: Some("new".into()),
+            keys: Default::default(),
+        };
+        assert!(
+            apply_template_shortcuts(
+                "new",
+                &partial,
+                &TemplateShortcutEdit::default(),
+                false,
+                &already_marked,
+            )
+            .unwrap_err()
+            .contains("nonblank command")
+        );
+        assert!(
+            apply_template_shortcuts(
+                "new",
+                &partial,
+                &TemplateShortcutEdit {
+                    quick_launch: Some(false),
+                    ..Default::default()
+                },
+                false,
+                &before,
+            )
+            .unwrap_err()
+            .contains("old")
+        );
+        assert!(
+            apply_template_shortcuts(
+                "partial",
+                &partial,
+                &TemplateShortcutEdit {
+                    key: Some(TemplateKeyEdit::Clear),
+                    ..Default::default()
+                },
+                false,
+                &before,
+            )
+            .unwrap_err()
+            .contains("holds none")
+        );
+    }
+
     /// An agent type alone must keep its meaning when applied from the command
     /// tab; beside command fields it instead declares the command's agent.
     /// A command choice without an agent also pins the command tab, so a
@@ -9727,6 +10013,7 @@ mod tests {
                     origin,
                     "local-live",
                     AgentVerb::TemplateCreate {
+                        shortcuts: Default::default(),
                         name: created_name.clone(),
                         fields: fields.clone(),
                         host: None,
@@ -9764,6 +10051,7 @@ mod tests {
                     origin,
                     "local-live",
                     AgentVerb::TemplateEdit {
+                        shortcuts: Default::default(),
                         name: old_name.clone(),
                         fields: TemplateFields {
                             name: Some("review".into()),
@@ -9815,6 +10103,7 @@ mod tests {
             async move { handler.handle(origin, "local-live", verb).await }
         };
         let created = ask(AgentVerb::TemplateCreate {
+            shortcuts: Default::default(),
             name: "t".to_string(),
             fields: template_fields("secret-tool --go"),
             host: Some("this machine".to_string()),
@@ -9838,6 +10127,7 @@ mod tests {
 
         let checkout = farhelm_proto::launcher::TemplateDestination::Github("o/r".into());
         let created_checkout = ask(AgentVerb::TemplateCreate {
+            shortcuts: Default::default(),
             name: "checkout".into(),
             fields: farhelm_proto::launcher::TemplateFields {
                 destination: Some(checkout.clone()),
@@ -9851,6 +10141,7 @@ mod tests {
             "{created_checkout:?}"
         );
         let edited_checkout = ask(AgentVerb::TemplateEdit {
+            shortcuts: Default::default(),
             name: "checkout".into(),
             fields: farhelm_proto::launcher::TemplateFields {
                 destination: Some(farhelm_proto::launcher::TemplateDestination::Github(
@@ -9885,6 +10176,7 @@ mod tests {
         );
 
         let taken = ask(AgentVerb::TemplateCreate {
+            shortcuts: Default::default(),
             name: "t".to_string(),
             fields: template_fields("other"),
             host: None,
@@ -9902,6 +10194,7 @@ mod tests {
         );
 
         let edited = ask(AgentVerb::TemplateEdit {
+            shortcuts: Default::default(),
             name: "t".to_string(),
             fields: farhelm_proto::launcher::TemplateFields {
                 name: Some("titled".to_string()),
@@ -9926,6 +10219,7 @@ mod tests {
         // Use the real create path: its newly inferred kind must also make
         // the existing edit refusal apply to an agent-type-only template.
         let agent_created = ask(AgentVerb::TemplateCreate {
+            shortcuts: Default::default(),
             name: "agent-kind".into(),
             fields: farhelm_proto::launcher::TemplateFields {
                 agent: Some(farhelm_proto::LaunchHarness::Claude),
@@ -9955,6 +10249,7 @@ mod tests {
         let refusals: Vec<(AgentVerb, ErrorKind, &str)> = vec![
             (
                 AgentVerb::TemplateEdit {
+                    shortcuts: Default::default(),
                     name: "missing".to_string(),
                     fields: template_fields("x"),
                     host: None,
@@ -9964,6 +10259,7 @@ mod tests {
             ),
             (
                 AgentVerb::TemplateCreate {
+                    shortcuts: Default::default(),
                     name: "pinned".to_string(),
                     fields: farhelm_proto::launcher::TemplateFields {
                         host: Some("identity-local".to_string()),
@@ -9976,6 +10272,7 @@ mod tests {
             ),
             (
                 AgentVerb::TemplateEdit {
+                    shortcuts: Default::default(),
                     name: "t".to_string(),
                     fields: Default::default(),
                     host: None,
@@ -9985,6 +10282,7 @@ mod tests {
             ),
             (
                 AgentVerb::TemplateEdit {
+                    shortcuts: Default::default(),
                     name: "t".to_string(),
                     fields: farhelm_proto::launcher::TemplateFields {
                         command: Some("new-command".to_string()),
@@ -9997,6 +10295,7 @@ mod tests {
             ),
             (
                 AgentVerb::TemplateEdit {
+                    shortcuts: Default::default(),
                     name: "t".to_string(),
                     fields: farhelm_proto::launcher::TemplateFields {
                         model: Some(Some("opus".to_string())),
@@ -10011,6 +10310,7 @@ mod tests {
             // would hold nothing contradictory (`agent` is both kinds').
             (
                 AgentVerb::TemplateEdit {
+                    shortcuts: Default::default(),
                     name: "agent-kind".to_string(),
                     fields: template_fields("claude {farhelm_args}"),
                     host: None,
@@ -10066,6 +10366,170 @@ mod tests {
         );
     }
 
+    /// An agent may create bindings with a template and edit only those
+    /// bindings later. The listing must report the current assignment while
+    /// continuing to withhold the command text.
+    ///
+    /// This exercises the helm path, including the new transaction, rather
+    /// than only the shortcut resolver used to prepare the approval card.
+    #[farhelm_testtrace::test]
+    async fn agent_template_shortcut_only_edit_and_listing() {
+        let (h, local, _remote) = two_host_fleet().await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let ask = |verb| {
+            let handler = Arc::clone(&handler);
+            async move { handler.handle(origin, "local-live", verb).await }
+        };
+        let created = ask(AgentVerb::TemplateCreate {
+            name: "fast".into(),
+            fields: template_fields("private-command"),
+            host: None,
+            shortcuts: TemplateShortcutEdit {
+                quick_launch: Some(true),
+                key: Some(TemplateKeyEdit::Set("3".into())),
+            },
+        })
+        .await;
+        assert!(matches!(created, AgentOutcome::Ok { .. }), "{created:?}");
+        let edited = ask(AgentVerb::TemplateEdit {
+            name: "fast".into(),
+            fields: Default::default(),
+            host: None,
+            shortcuts: TemplateShortcutEdit {
+                quick_launch: Some(false),
+                key: Some(TemplateKeyEdit::Clear),
+            },
+        })
+        .await;
+        assert!(matches!(edited, AgentOutcome::Ok { .. }), "{edited:?}");
+        let listed = ask(AgentVerb::Templates {}).await;
+        match listed {
+            AgentOutcome::Ok {
+                reply: AgentReply::Templates { templates, .. },
+            } => {
+                let row = templates.iter().find(|row| row.name == "fast").unwrap();
+                assert!(!row.quick_launch);
+                assert_eq!(row.key, None);
+                assert!(row.sets_command);
+                assert_eq!(row.fields.command, None);
+            }
+            other => panic!("templates listing, got {other:?}"),
+        }
+        assert_eq!(
+            h.store.launch_templates().await.unwrap()[0]
+                .fields
+                .command
+                .as_deref(),
+            Some("private-command"),
+            "the shortcut-only edit preserves the stored command"
+        );
+    }
+
+    /// A shortcut move's card names both former holders. A later preference
+    /// edit invalidates that whole card, including an unrelated key, so an
+    /// Allow cannot overwrite a binding the user never saw it change.
+    #[farhelm_testtrace::test]
+    async fn a_shortcut_card_shows_moves_and_refuses_stale_bindings() {
+        use farhelm_proto::launcher::LaunchTemplate;
+        let (h, local, _remote) = two_host_fleet().await;
+        for name in ["old", "new", "other"] {
+            h.store
+                .put_launch_template(LaunchTemplate {
+                    name: name.into(),
+                    fields: template_fields("run"),
+                })
+                .await
+                .unwrap();
+        }
+        h.store
+            .update_preferences(
+                serde_json::from_value(serde_json::json!({
+                    "quick_launch_template": "old",
+                    "template_shortcuts": {"1":"old", "2":"new"}
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::TemplateEdit {
+                        name: "new".into(),
+                        fields: Default::default(),
+                        host: None,
+                        shortcuts: TemplateShortcutEdit {
+                            quick_launch: Some(true),
+                            key: Some(TemplateKeyEdit::Set("1".into())),
+                        },
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert_eq!(
+            card.action,
+            ApprovalAction::TemplateWriteWithShortcuts {
+                name: "new".into(),
+                replaces_existing: true,
+                fields: template_fields("run"),
+                host_name: None,
+                shortcuts: TemplateShortcutCard {
+                    quick_launch: Some(QuickLaunchCard::Set {
+                        moved_from: Some("old".into())
+                    }),
+                    key: Some(TemplateKeyCard::Set {
+                        key: "1".into(),
+                        replaced_key: Some("2".into()),
+                        moved_from: Some("old".into()),
+                    }),
+                },
+            }
+        );
+        h.store
+            .update_preferences(
+                serde_json::from_value(serde_json::json!({
+                    "template_shortcuts": {"1":"old", "2":"new", "0":"other"}
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        match task.await.unwrap() {
+            AgentOutcome::Err {
+                kind: ErrorKind::Conflict,
+                message,
+            } => {
+                assert!(message.contains("shortcut bindings changed"), "{message}");
+            }
+            other => panic!("stale binding refusal, got {other:?}"),
+        }
+        assert_eq!(
+            h.store
+                .preferences()
+                .await
+                .unwrap()
+                .quick_launch_template
+                .as_deref(),
+            Some("old")
+        );
+        assert_eq!(h.store.launch_templates().await.unwrap().len(), 3);
+    }
+
     /// Spec: with the host asking, a template edit waits for a card that
     /// shows the whole resulting template, the existing command text
     /// included, and a denial leaves the template as it was.
@@ -10102,6 +10566,7 @@ mod tests {
                     origin,
                     "local-live",
                     AgentVerb::TemplateEdit {
+                        shortcuts: Default::default(),
                         name: "t".to_string(),
                         fields: farhelm_proto::launcher::TemplateFields {
                             name: Some("new title".to_string()),
@@ -10220,12 +10685,14 @@ mod tests {
 
         // Two creates of one name, both waiting on cards.
         let first = ask(AgentVerb::TemplateCreate {
+            shortcuts: Default::default(),
             name: "t".to_string(),
             fields: template_fields("first"),
             host: None,
         });
         await_card(&h, &first).await;
         let second = ask(AgentVerb::TemplateCreate {
+            shortcuts: Default::default(),
             name: "t".to_string(),
             fields: template_fields("second"),
             host: None,
@@ -10263,6 +10730,7 @@ mod tests {
 
         // An edit whose template the GUI rewrites while the card waits.
         let edit = ask(AgentVerb::TemplateEdit {
+            shortcuts: Default::default(),
             name: "t".to_string(),
             fields: farhelm_proto::launcher::TemplateFields {
                 name: Some("agent title".to_string()),

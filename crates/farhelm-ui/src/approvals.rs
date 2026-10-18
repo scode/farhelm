@@ -609,6 +609,7 @@ fn action_kind(action: &ApprovalAction) -> &'static str {
         ApprovalAction::Delete { .. } => "delete",
         ApprovalAction::Restart { .. } => "restart",
         ApprovalAction::TemplateWrite { .. } => "template_write",
+        ApprovalAction::TemplateWriteWithShortcuts { .. } => "template_write_with_shortcuts",
         ApprovalAction::TemplateDelete { .. } => "template_delete",
     }
 }
@@ -662,10 +663,18 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
             replaces_existing: false,
             ..
         } => "create a launch template",
+        ApprovalAction::TemplateWriteWithShortcuts {
+            replaces_existing: false,
+            ..
+        } => "create a launch template and assign its shortcuts",
         ApprovalAction::TemplateWrite {
             replaces_existing: true,
             ..
         } => "change a launch template",
+        ApprovalAction::TemplateWriteWithShortcuts {
+            replaces_existing: true,
+            ..
+        } => "change a launch template and its shortcuts",
         ApprovalAction::TemplateDelete { .. } => "delete a launch template",
     }
 }
@@ -877,6 +886,48 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
         } => {
             rows.push(CardRow::Value("template", name.clone()));
             template_rows(fields, host_name.as_deref(), &mut rows);
+        }
+        ApprovalAction::TemplateWriteWithShortcuts {
+            name,
+            fields,
+            host_name,
+            shortcuts,
+            ..
+        } => {
+            use farhelm_proto::approvals::{QuickLaunchCard, TemplateKeyCard};
+            rows.push(CardRow::Value("template", name.clone()));
+            template_rows(fields, host_name.as_deref(), &mut rows);
+            match &shortcuts.quick_launch {
+                Some(QuickLaunchCard::Set { moved_from }) => {
+                    rows.push(CardRow::Note("⚡ quick launch", "mark this template"));
+                    if let Some(previous) = moved_from {
+                        rows.push(CardRow::Value("⚡ moves from", previous.clone()));
+                    }
+                }
+                Some(QuickLaunchCard::Clear) => {
+                    rows.push(CardRow::Note("⚡ quick launch", "clear this template"));
+                }
+                None => {}
+            }
+            match &shortcuts.key {
+                Some(TemplateKeyCard::Set {
+                    key,
+                    replaced_key,
+                    moved_from,
+                }) => {
+                    if let Some(previous) = replaced_key {
+                        rows.push(CardRow::Value("number key removed", previous.clone()));
+                    }
+                    rows.push(CardRow::Value("number key assigned", key.clone()));
+                    if let Some(previous) = moved_from {
+                        rows.push(CardRow::Value("number key moves from", previous.clone()));
+                    }
+                }
+                Some(TemplateKeyCard::Clear { key }) => {
+                    rows.push(CardRow::Value("number key removed", key.clone()));
+                }
+                None => {}
+            }
         }
         ApprovalAction::TemplateDelete {
             name,
@@ -1506,5 +1557,60 @@ mod tests {
         assert!(rows.contains(&CardRow::Note("resume command", "none")));
         assert!(rows.contains(&CardRow::Note("asserted YOLO", "yes")));
         assert_eq!(action_summary(&action), "create a launch template");
+    }
+
+    /// A shortcut card makes every assignment visible, including the old
+    /// key the edited template loses and the template a moved binding leaves.
+    /// Its destination rows remain those of an ordinary template card.
+    #[test]
+    fn a_shortcut_card_shows_moves_and_template_destination() {
+        use farhelm_proto::approvals::{QuickLaunchCard, TemplateKeyCard, TemplateShortcutCard};
+        let action = ApprovalAction::TemplateWriteWithShortcuts {
+            name: "new".into(),
+            replaces_existing: true,
+            fields: TemplateFields {
+                destination: Some(farhelm_proto::launcher::TemplateDestination::Github(
+                    "o/r".into(),
+                )),
+                ..Default::default()
+            },
+            host_name: None,
+            shortcuts: TemplateShortcutCard {
+                quick_launch: Some(QuickLaunchCard::Set {
+                    moved_from: Some("old".into()),
+                }),
+                key: Some(TemplateKeyCard::Set {
+                    key: "1".into(),
+                    replaced_key: Some("2".into()),
+                    moved_from: Some("old".into()),
+                }),
+            },
+        };
+        let rows = action_rows(&action);
+        assert_eq!(action_kind(&action), "template_write_with_shortcuts");
+        assert_eq!(
+            action_summary(&action),
+            "change a launch template and its shortcuts"
+        );
+        assert!(rows.contains(&CardRow::Value("managed checkout of", "GitHub: o/r".into())));
+        assert!(rows.contains(&CardRow::Note("⚡ quick launch", "mark this template")));
+        assert!(rows.contains(&CardRow::Value("⚡ moves from", "old".into())));
+        assert!(rows.contains(&CardRow::Value("number key removed", "2".into())));
+        assert!(rows.contains(&CardRow::Value("number key assigned", "1".into())));
+        assert!(rows.contains(&CardRow::Value("number key moves from", "old".into())));
+
+        let clear = ApprovalAction::TemplateWriteWithShortcuts {
+            name: "new".into(),
+            replaces_existing: true,
+            fields: Default::default(),
+            host_name: None,
+            shortcuts: TemplateShortcutCard {
+                quick_launch: Some(QuickLaunchCard::Clear),
+                key: Some(TemplateKeyCard::Clear { key: "1".into() }),
+            },
+        };
+        let rows = action_rows(&clear);
+        assert!(rows.contains(&CardRow::Note("⚡ quick launch", "clear this template")));
+        assert!(rows.contains(&CardRow::Value("number key removed", "1".into())));
     }
 }

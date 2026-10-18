@@ -351,6 +351,8 @@ fn templates_json_and_table_list_what_each_template_sets() {
                 sets_command: false,
                 sets_resume_command: false,
                 host_name: None,
+                quick_launch: false,
+                key: None,
             }],
         })
     };
@@ -2541,6 +2543,7 @@ fn a_template_create_sends_its_fields_and_refuses_template() {
                 name: "my-template".to_string(),
                 fields: fields.clone(),
                 host: Some("builder".to_string()),
+                shortcuts: Default::default(),
             }
         );
         Some(ControlMsg::AgentResponse {
@@ -2630,6 +2633,7 @@ fn template_edit_and_delete_send_their_verbs() {
                 name: "my-template".to_string(),
                 fields: fields.clone(),
                 host: None,
+                shortcuts: Default::default(),
             }
         );
         Some(ControlMsg::AgentResponse {

@@ -726,7 +726,9 @@ agent choice is independent of that destination:
   clears its mark through the shared delete path, and Undo never restores the mark. The editor says whether its saved
   template is marked. The shortcut reads the mark and templates fresh on each use, so another window's change takes
   effect without reloading. Templates' hover and a separate quick-switcher row advertise the chord and marked name. A
-  browser that reserves the chord keeps its behavior; the quick-switcher row remains available.
+  browser that reserves the chord keeps its behavior; the quick-switcher row remains available. An agent may set or
+  clear the mark through `farhelm agent template create` or `edit`, behind a template approval card. The helm applies
+  the same eligibility rule to an agent's write as the Templates editor does.
 - Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit in
   the Mac desktop app, or Ctrl+Shift+digit everywhere else (including a Mac browser), starts its template through the
   same direct launch path as quick launch. It reads bindings and templates fresh each time. Unbound keys open Templates
@@ -742,7 +744,9 @@ agent choice is independent of that destination:
   explains composition. The bolt retains its existing eligibility rule. Bindings are a whole-map shared preference,
   replaced on write; concurrent windows may lose one map edit. Names must be syntactically valid but need not exist at
   write time. Rename keeps a key, delete frees it through both delete paths, and Undo never restores it. A browser that
-  reserves a chord keeps its behavior.
+  reserves a chord keeps its behavior. An agent may assign or clear a number key through the same template verbs and
+  approval card. Assigning an occupied key moves it from its previous template, as the Templates editor does; a key can
+  still belong to a partial template.
 - Quick-launch sequences compose templates without changing the single-chord shortcuts. Cmd+X in the Mac desktop app, or
   Ctrl+Shift+X in browsers, starts a sequence, except in a text field where it retains its normal meaning; the
   terminal's input textarea counts as the terminal. Bare physical number keys or their usual template chord queue
@@ -2338,13 +2342,14 @@ so a click already aimed at the previous request cannot answer the next one. It 
 host, the action, and its target. For a launch it shows the target host, the folder (the exact previewed directory and
 source-qualified repository for a managed checkout), the agent type and its choices or the full command and resume
 command text, and whether the launch is YOLO. For a template write it shows the whole resulting template, including the
-command and resume command text that the templates listing withholds from agents, and for a template delete the template
-being deleted. Text an agent controls (session titles, folders, command lines) is shown as labelled data, never in a way
-that could pass for Farhelm's own wording. Link cards likewise show the entire URL as data. The card offers Allow,
-Always allow from the requesting host, and Deny (Open and Dismiss for a preapproved web link). Always allow turns that
-host's setting on and then approves the request; if turning the setting on fails, nothing is approved and the card stays
-up with the reason. It approves only the request it was answered on: other cards already waiting from that host stay
-until they are answered.
+command and resume command text that the templates listing withholds from agents. When the write changes ⚡ or a number
+key, the card shows each assignment or removal and names the template a moved mark or key leaves. For a template delete
+it shows the template being deleted. Text an agent controls (session titles, folders, command lines) is shown as
+labelled data, never in a way that could pass for Farhelm's own wording. Link cards likewise show the entire URL as
+data. The card offers Allow, Always allow from the requesting host, and Deny (Open and Dismiss for a preapproved web
+link). Always allow turns that host's setting on and then approves the request; if turning the setting on fails, nothing
+is approved and the card stays up with the reason. It approves only the request it was answered on: other cards already
+waiting from that host stay until they are answered.
 
 If no Farhelm window is open to show the card (no GUI is connected to the helm), a request that needs approval is
 refused at once, with a message saying there is no Farhelm window to ask in and to open Farhelm and retry. Otherwise it
@@ -2457,16 +2462,22 @@ text. To drop a field, delete the template with `farhelm agent template delete <
 goes for turning an agent-launch template into a command-launch one or back, which an edit refuses, since a template
 mixing the two could never apply. A command line given to a template write needs `--yolo` or `--no-yolo` with it, since
 a YOLO assertion is about one command line. A managed checkout destination is allowed, with the same repository
-spellings as create. These writes go through the same path as the GUI's template editor, with one difference: an agent's
-write or delete lands only on the template its card showed, and is refused, with nothing written, if that template
-changed or appeared while the card waited. This is the one exception to last-write-wins for templates (Concepts), and it
-exists because an approval covers exactly what the card showed.
+spellings as create. Create and edit also accept `--quick-launch` and `--key DIGIT` (`1`–`9` or `0`); edit accepts
+`--no-quick-launch` and `--no-key`, including as its only change. Assigning ⚡ or a key moves it from another template,
+which the card names. Clearing a binding this template does not hold is refused. ⚡ needs a template that chooses an
+agent or a nonblank command after the write; a number key has no such requirement. These writes go through the same path
+as the GUI's template editor, with one difference: an agent's write or delete lands only on the template its card
+showed, and is refused, with nothing written, if that template changed or appeared while the card waited. This is the
+one exception to last-write-wins for templates (Concepts), and it exists because an approval covers exactly what the
+card showed. A write that changes ⚡ or a key also refuses if the mark or any number-key binding changed while its card
+waited; the template and bindings are written together or neither is written. Template deletion keeps clearing its
+bindings through the shared delete path.
 
-Templates are ordinary fleet metadata exposed by `farhelm agent templates`: each template's name and the fields it sets,
-with their values except a command line or resume command, which are listed as set without their text. Discovery also
-has `--json` forms with a versioned envelope, exact names, the caller's host identity, and completeness fields. The
-templates listing includes a prefix's words when one is set. Prefixes belong to the launch argv and are also visible in
-process listings, so templates must not hold secrets in them.
+Templates are ordinary fleet metadata exposed by `farhelm agent templates`: each template's name, whether it holds ⚡,
+its number key if any, and the fields it sets, with their values except a command line or resume command, which are
+listed as set without their text. Discovery also has `--json` forms with a versioned envelope, exact names, the caller's
+host identity, and completeness fields. The templates listing includes a prefix's words when one is set. Prefixes belong
+to the launch argv and are also visible in process listings, so templates must not hold secrets in them.
 
 `farhelm agent instructions` (also spelled `farhelm agent help`) prints the agent-facing account of all of the above:
 the verbs, the `*` marker, that a session's own credential is what authorizes the question, what to do about "no helm is
