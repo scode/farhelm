@@ -15,7 +15,7 @@ specific to Claude.
   [Permission modes](/docs/agents/#permission-modes). Farhelm also tries to notice **bypass permissions on** in Claude's
   status line and show a YOLO shield; this is best effort, not a check of your allow rules or hooks.
 - Claude may ask whether you trust a directory the first time it starts there. Answer it in the session's terminal, or
-  opt into answering it for future [managed checkouts](/docs/using/start-a-session/#start-from-a-managed-checkout). That
+  opt into answering it for future [managed checkouts](/docs/using/start-a-session/#trust-in-managed-checkouts). That
   setting is off by default: it edits Claude's own settings file and comes with caveats. A hint above the question opens
   the setting and its explanation. Directories you choose yourself still get Claude's question.
 - If you start Claude through a [wrapper prefix](/docs/agents/agent-wrappers/) or a

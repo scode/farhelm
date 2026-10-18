@@ -19,11 +19,13 @@ terminal yourself, and everything it prints shows up here. Farhelm does not sit 
 
 The slim bar under the terminal shows the session's name and host, followed by its age, directory, and command. The host
 has the same icon and color as in the [session list](/docs/using/session-list/), so you can see where you are working.
+Settings can also [color the terminal's frame](/docs/using/manage-hosts/#host-settings) to match its host.
 Click the directory or command to copy it; your home directory appears as `~`.
 
 The terminal tabs and action buttons share the row above the terminal. The buttons at its right end restart, replace,
 clone, and delete the session; [Stop, restart, and resume](/docs/using/stop-restart-resume/) covers them. **Cmd+W** in the
-Mac app, or **Ctrl+Shift+Backspace** in a browser, does the same as the open session's Delete button.
+Mac app, or **Ctrl+Shift+Backspace** in a browser, does the same as the open session's Delete button. In the Mac app, Cmd+W does not close the window; use its close
+button or Cmd+Q.
 
 ## Open a shell beside the agent
 
@@ -110,7 +112,7 @@ does not forward browser-login callbacks automatically. When an agent asks to op
 ## When the connection drops
 
 If Farhelm loses its connection to the session, a card over the dimmed last screen explains what it is waiting for,
-with details below. The view reattaches by itself when the connection is back. **Reconnect now** tries again straight
+with details below. The view reattaches by itself when the connection is back. The **reconnect now** button tries again straight
 away when the connection from your window dropped; when the host itself is unavailable, the card instead shows any
 steps needed to reach it again. What keeps running during an outage is covered in
 [What survives what](/docs/how-it-works/what-survives-what/).

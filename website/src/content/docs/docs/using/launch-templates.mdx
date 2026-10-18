@@ -49,7 +49,7 @@ gets its own checkout and that its directory moves to the trash when its last se
 destination can stand on its own: another template can supply the agent or host.
 
 A **session name** can be a **base name** or a **fixed name**. When you apply a base name in the session launcher or a
-quick launch, a managed checkout uses it as-is when free, then adds `-2`, `-3`, and so on up to `-50` when taken. The
+quick launch, or an agent starts a session from the template, a managed checkout uses it as-is when free, then adds `-2`, `-3`, and so on up to `-50` when taken. The
 session and its checkout directory get the same number, so you can launch the same setup repeatedly. A fixed name
 reports a clash instead. Names in existing templates are base names; a launch into an ordinary directory uses either
 kind as-is.
@@ -143,9 +143,9 @@ When you have set up a launch in **new** or **clone**, choose **save as template
   alt="The save as template panel with a name typed and the agent and effort checked, with the name, checkboxes, and save explained."
 />
 
-Agent, model and effort choices are checked when set, as are command choices. Approvals and a wrapper prefix
-are checked when you chose them; a host and directory only when you picked or typed them. A session name is checked
-after you type it or apply a template that sets it.
+Agent, model and effort choices are checked when set, as are an initial prompt you typed and command choices. Approvals
+and a wrapper prefix are checked when you chose them; a host and directory only when you picked or typed them. A session
+name is checked after you type it or apply a template that sets it.
 A selected managed checkout's repository is checked too; unselected repository text is left out. Remembered defaults and
 a cloned session's host and directory stay available, but unchecked.
 
@@ -165,8 +165,10 @@ The template keeps the current **agent** or **command** tab and only the choices
 
 Choose a template's row to open its editor. **duplicate** opens an unsaved copy with a new name. Changes are saved only
 when you choose **save**; leaving an edited template asks whether to save, discard, or keep editing. At phone width, **‹
-templates** returns to the list. A template whose session name or command contains hidden or control characters still
-launches, but Farhelm refuses to save changes to it until you remove them. This includes joined emoji in a session name.
+templates** returns to the list. Hidden formatting characters in a template's fields show as visible
+codes, and such a field cannot be edited in place: remove it with **✕** and add it again. A template whose session name
+or command contains hidden or control characters still launches, but Farhelm refuses to save changes to it until you
+replace those fields. This includes joined emoji in a session name.
 
 Changing **switches launcher to** or the **agent type** can make a field that is already set no longer fit. It stays
 visible with a message: change or remove it before saving. A stored template that sets agent or command choices
@@ -174,7 +176,8 @@ but has no saved tab choice opens with that tab chosen and marked as **unsaved c
 while discarding keeps the template applying as before.
 
 **delete** removes a template immediately. The **undo** notice lasts about ten seconds while the panel stays open;
-choose it to restore the template, provided another template has not taken its name.
+choose it to restore the template, provided another template has not taken its name. An older template that no longer
+meets today's rules for saving shows **delete permanently** instead, and cannot be restored.
 
 A session remembers the choices it was launched with, not which templates supplied them, so editing or deleting a
 template never changes a session that already started from it.
@@ -226,7 +229,8 @@ option. On a host that asks before YOLO launches, an agent cannot use a template
 command ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 
 Agents can also create, edit, and delete templates with `farhelm agent template create`, `edit`, and `delete`.
-Create and edit accept `--gh`/`--github` for a managed checkout, or `--cwd` for an existing directory.
+Create and edit accept `--gh`/`--github` for a managed checkout, or `--cwd` for an existing directory, and
+`--title-kind base` or `fixed` to choose the kind of session name.
 They can assign **⚡** with `--quick-launch` or a number with `--key 1` (using any digit from 1–9 or 0). An edit can
 remove this template's mark or key with `--no-quick-launch` or `--no-key`, even without changing its other choices.
 Assigning a mark or key that belongs to another template moves it; the card tells you which template loses it.
@@ -234,7 +238,8 @@ The **⚡** mark needs a template that chooses an agent or a nonblank command. A
 `farhelm agent templates` shows these assignments alongside each template's choices.
 Each change shows you the whole template on a card first, command line included, and happens only if you allow it,
 unless you have told Farhelm not to ask for that agent's host ([Approve what agents
-do](/docs/using/approve-agent-requests/)). An agent's edit cannot remove a choice from a template, so it never drops a
+do](/docs/using/approve-agent-requests/)). A change that leaves a wrapper prefix in a template always asks, on every
+host, because later launches from it treat the prefix as yours. An agent's edit cannot remove a choice from a template, so it never drops a
 command line the agent could not see.
 
 NOTE: Templates are not a place for secrets. Every host your helm manages can read every template, command lines

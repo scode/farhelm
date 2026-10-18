@@ -20,20 +20,22 @@ remembers the width on this device, so changing it here leaves your other screen
 
 The age at the right of a row says how long ago the session last did something: `now`, `<1m`, `5m`, `1d`. Select a row
 to open its terminal beside the list. Hovering over the dot or the marks beside the title says what each one means.
+[Permission modes](/docs/agents/#permission-modes) explains the shields, including when one turns to YOLO because
+Farhelm saw the agent switch modes.
 Hover over the session's name or the open area of its row to see its full title, host, directory, start time and last
 activity in one summary; the marks keep their own explanations.
 
 A branch mark means the session uses a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout),
 a clone Farhelm made for a session. Its repository appears where other rows show a directory. With **compact** ticked,
 the branch mark follows the session's name instead. Hover it to see the full directory and what happens when you delete
-the last session using it. The same mark appears beside the directory at the top of an open session.
+the last session using it. The same mark appears beside the directory in the bar under an open session's terminal.
 
 ## Ntfy alerts
 
 To hear when a session needs you away from Farhelm, subscribe to a private topic in the
 [ntfy app](https://docs.ntfy.sh/subscribe/phone/), then configure **ntfy alerts** in Farhelm's settings. The server
 defaults to ntfy.sh; use the same server and topic you subscribed to. For a server that requires authentication, add
-an access token. Priority controls how urgently ntfy announces the alert. **save** keeps these choices for every
+an access token; changing the server later clears the saved token when you save, unless you enter a new one. Priority controls how urgently ntfy announces the alert. **save** keeps these choices for every
 window using your [helm](/docs/how-it-works/the-pieces/), the program that shows you all your hosts' sessions.
 **send test** uses the saved choices, including while alerts are switched off, and says whether it succeeded.
 When ready to receive automatic alerts, turn on **send ntfy alerts** and select **save**.
@@ -89,8 +91,8 @@ Waiting is the status worth watching for: the agent has stopped to ask you somet
 does nothing until you answer. Not every agent can tell Farhelm when it is waiting; [Supported agents](/docs/agents/)
 says which ones can.
 
-An agent can also be waiting on Farhelm itself, when it asks to start, stop, or change a session with the `farhelm`
-command. That request shows as a compact card near the top of the window, not in the session list, and you answer it on
+An agent can also be waiting on Farhelm itself, when it asks to start, stop, change, or delete a session with the
+`farhelm` command. That request shows as a compact card near the top of the window, not in the session list, and you answer it on
 the card; [Approve what agents do](/docs/using/approve-agent-requests/) covers it.
 
 A session that has ended says how in words under its name, instead of a coloured dot (with **compact** ticked, as an
@@ -163,8 +165,8 @@ accepts this chord; [browser shortcuts can take precedence](/docs/using/launch-t
 With nothing typed, the separate **Quick launch** row starts your [marked template](/docs/using/launch-templates/#quick-launch) directly, as Cmd+P on a Mac or Ctrl+Shift+P elsewhere does. With no marked template, it opens Templates to help you choose one.
 
 You can also give templates [number shortcuts](/docs/using/launch-templates/#number-shortcuts): Cmd+0–9 in the Mac app,
-or Ctrl+Shift+0–9 everywhere else, including a browser on a Mac. These start their templates directly without opening
-the quick switcher.
+or Ctrl+Shift+0–9 everywhere else, including a browser on a Mac. A template that can launch on its own starts directly,
+without opening the quick switcher; one that only changes some choices opens the session launcher instead.
 
 To combine templates, start a [launch sequence](/docs/using/launch-templates/#combine-templates-from-the-keyboard) with
 Cmd+X in the Mac app, or Ctrl+Shift+X everywhere else, then their number keys and Enter.

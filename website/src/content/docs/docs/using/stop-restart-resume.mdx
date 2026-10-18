@@ -17,7 +17,7 @@ the bar below the terminal.
 
 <Screenshot
   name="stop-restart-resume/header-actions"
-  alt="The buttons at the right of the session header, with restart, replace, and clone explained."
+  alt="The action buttons at the right of the row above the terminal, with restart, replace, and clone explained."
 />
 
 Restart always continues the session's own conversation; there is no restart that starts a new one. When Farhelm has no
@@ -50,7 +50,8 @@ conversation forgets the old one and leaves later Restart unavailable.
 new session in this one's place, so the old conversation, shell tabs, and terminal history all go, and it asks you to
 confirm first; press Enter to go ahead. **replace with** opens the [session launcher](/docs/using/start-a-session/) filled in with this session's
 choices; change anything but the host, and the new session takes this one's place. **clone** opens the launcher the same
-way but leaves this session alone, so you end up with two.
+way but leaves this session alone, so you end up with two. None of these sends an
+[initial prompt](/docs/using/start-a-session/#supply-the-first-message) again.
 
 While the agent is working (its status is running), **restart** asks you to confirm first, since restarting stops it.
 An agent that is idle or waiting for you is stopped and restarted without asking, and a session whose agent has already

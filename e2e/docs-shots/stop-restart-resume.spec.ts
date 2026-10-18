@@ -29,15 +29,18 @@ test("header actions", async ({ page, request }) => {
   );
   await director.callout(header.locator(".header-replace"), "Replace: a fresh conversation with the same settings.", {
     side: "bottom",
-    dx: -130,
+    dx: -260,
     dy: 150,
   });
   await director.callout(header.locator(".header-clone"), "Clone: another session like this one, which stays.", {
     side: "bottom",
-    dx: 160,
+    dy: 150,
   });
-  // The action buttons sit at the header's far end; crop to them rather than
-  // the whole header, which is wider than the docs' text column.
+  // An arrow ends at the point of its button nearest the box's centre, so the
+  // clone box sits straight under clone: pushed right, its arrow met clone's
+  // corner beside replace with. The replace box moves left to make room.
+  // The action buttons sit at the row's far end; crop to them rather than
+  // the whole row, which is wider than the docs' text column.
   await shot(page, `${PAGE}/header-actions`, [header.locator(".restart-primary"), header.locator(".header-delete").first()]);
 });
 

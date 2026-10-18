@@ -30,11 +30,11 @@ reopen it or your Mac reboots.
 
 ## Check for an update now
 
-To check right away, select the version number at the top of the sidebar. You can also select the **?** button there and
-choose **check for updates**, or choose **update** in the menu of your Mac's own row in the host list. Each one installs
-a new release if there is one. Beside the version number the app shows **checking…**, then **installing…**, **up to
-date**, or **check failed**. **up to date** stays for about five seconds; **check failed** stays until you dismiss it or
-check again, and hovering over it gives the reason.
+To check right away, select the version number at the top of the sidebar, unless an update is already waiting. You can
+also select the **?** button there and choose **check for updates**, or choose **update** in the menu of your Mac's own
+row in the host list. Each one installs a new release if there is one. Beside the version number the app shows
+**checking…**, then **installing…**, **up to date**, or **check failed**. **up to date** stays for about five seconds;
+**check failed** stays until you dismiss it or check again, and hovering over it gives the reason.
 
 A check Farhelm makes by itself shows nothing while it goes well; when it installs an update, the version number turns
 red. If downloading or installing an update fails, **check failed** appears right away. If Farhelm cannot reach the

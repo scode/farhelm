@@ -95,8 +95,9 @@ Codex must run as a native executable named `codex`, even when its flags are in 
 requirements in [the Grok guide](/docs/agents/grok/#setup).
 
 - **Claude, Codex, Goose, Pi or OMP picked in the session launcher** always gets its reporter, unless
-  [you turned it off](#turning-it-off): Farhelm builds that command itself and knows where the reporter goes. Cursor,
-  Muse and OpenCode have none.
+  [you turned it off](#turning-it-off): Farhelm builds that command itself and knows where the reporter goes. With a
+  [wrapper prefix](/docs/agents/agent-wrappers/), the reporter's arguments follow the prefix, and the wrapper must pass
+  them and its environment through to the agent. Cursor, Muse and OpenCode have none.
 - **A [custom command](/docs/agents/custom-commands/) that declares its agent** gets the declared agent's reporter where
   `{farhelm_args}` stands, which the command must contain exactly once. Farhelm does not read the rest of the command,
   so it does not notice a `--settings` of your own for Claude (Claude honors only the last one), Codex hook
@@ -312,5 +313,8 @@ reporter first.
 confirm that the `SessionStart`, `UserPromptSubmit`, and `Stop` entries name the absolute Farhelm binary.
 
 In every one of these failure cases the session keeps working. The only thing at stake is which conversation the restart
-offer points at. Without an accepted report, a new session cannot be restarted. Previously saved conversations remain
-available to restart under the agent's usual rules; a failed or skipped reporter supplies no new conversation to resume.
+offer points at. Without an accepted report, a new session cannot be restarted, but if you know the conversation's id
+(for Pi and OMP, its session file), **restart with** can resume it
+([Stop, restart, and resume](/docs/using/stop-restart-resume/#the-headers-actions)). Previously saved conversations
+remain available to restart under the agent's usual rules; a failed or skipped reporter supplies no new conversation to
+resume.

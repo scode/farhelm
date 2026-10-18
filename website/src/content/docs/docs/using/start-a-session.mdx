@@ -57,9 +57,10 @@ session list; leave it empty and Farhelm picks a name.
   alt="The effort and permissions choices, each explained."
 />
 
-Not every agent has every choice, and some offer more permission modes than these. Switching to another agent
+Not every agent has every choice, and some offer other permission modes; [Permission modes](/docs/agents/#permission-modes)
+explains each, including **custom** for supplying your own permission flags. Switching to another agent
 clears any choice it cannot take, and the launcher tells you when it does. If that leaves a riskier permission mode
-than you had, a red banner says so and offers **Undo**. [Supported agents](/docs/agents/) lists what
+than you had, a red banner says so and offers **undo**. [Supported agents](/docs/agents/) lists what
 each agent offers. To answer directory-trust questions automatically for directories Farhelm manages, use the
 [managed-checkout settings](/docs/using/start-a-session/#trust-in-managed-checkouts). To run something that is not one
 of these agents, switch the launcher to its **command**
@@ -70,7 +71,8 @@ before the command it builds for that agent; [Agent wrappers](/docs/agents/agent
 must pass through and when to use a custom command instead.
 
 NOTE: The launcher remembers the permissions of your last launch from its **agent** tab and the last wrapper prefix
-used with each agent, in any Farhelm window. After one YOLO launch, the next launcher opens on **yolo** too. Launches
+used with each agent, in any Farhelm window. After one YOLO launch, the next launcher opens on **yolo** too;
+**custom** flags are never remembered this way. Launches
 your agents start, custom commands, and plain **replace** do not change what it remembers.
 
 ## Continue a conversation you know
@@ -102,7 +104,8 @@ Before a YOLO launch, Farhelm asks you to confirm. Every host asks until you tel
   alt="The YOLO confirmation, with its two start buttons explained."
 />
 
-It is not only the **yolo** choice that asks. Farhelm offers Pi and OpenCode only in YOLO mode, so every launch of
+It is not only the **yolo** choice that asks. **custom** permission flags ask too, because Farhelm does not check what
+they do. Farhelm offers Pi and OpenCode only in YOLO mode, so every launch of
 either asks. Goose runs in YOLO mode unless you pick one of its approval modes, so its launches ask too, and
 so does a custom command you say runs in YOLO mode. Farhelm goes by that answer alone and never reads the command to
 check it. Cursor launches ask as well, because they run on Cursor's own setting, and so does a plain **Replace** of a
@@ -163,7 +166,7 @@ checkout](#start-from-a-managed-checkout), `tl:` applies one of your [launch
 templates](/docs/using/launch-templates/), saved sets of launcher choices,
 and `perms:` picks a [permission mode](/docs/agents/#permission-modes),
 including **agent's own setting** where available. You can also type
-`guarded` without a prefix. `effort:default` returns to your agent's default
+`guarded` or `yolo` without a prefix. `effort:default` returns to your agent's default
 reasoning effort. The rest only narrow a
 search to one kind of thing: `host:`, `harness:`, `model:`, `effort:`, `folder:`, and `recent:`. `host:local` picks the
 machine you are using.
@@ -255,8 +258,8 @@ checkout. Plain **restart** and **replace** reuse the trust carried by the saved
 [Stop, restart, and resume](/docs/using/stop-restart-resume/) for those actions. Muse's YOLO mode grants trust regardless
 of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
 
-When Codex or Muse asks about trust in a managed checkout while its switch is off, a hint above the terminal links to
-**settings**. **Don't show again** hides that agent's hint across windows, and Settings can restore it. × hides the hint
+When Codex or Muse asks about trust in a managed checkout while its switch is off, a hint above the terminal has a
+**Settings** button that opens the switch. **Don't show again** hides that agent's hint across windows, and Settings can restore it. × hides the hint
 for the current question.
 
 For Claude, Settings can also **answer Claude's "trust this folder?" for new checkouts**. This is off by default and

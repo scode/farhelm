@@ -19,9 +19,6 @@ An agent starting another session can supply its first message with `--prompt` o
 approval card shows the full message. It is sent once when the new agent starts; restarting, copying or replacing that
 session does not send it again. A launch template can supply a message on every launch using it.
 
-An agent can only do this from a session that is open in the Farhelm window. If it is not, the agent is told to ask you
-to open it.
-
 ## The card
 
 When an agent asks to change something, a compact card appears near the top of the main area, below an open session's
@@ -89,7 +86,8 @@ agent and leave the session listed.
 Each host has a **Run farhelm commands without asking** setting, in its settings next to the YOLO one
 ([Manage hosts](/docs/using/manage-hosts/#host-settings)). Every host starts with it off. Turning it on means agents in
 that host's sessions start, stop, restart, delete, rename, and copy sessions on any of your hosts, and change templates,
-without asking you. Turn it on only for a host whose agents you would let do that unsupervised.
+without asking you, except for the [wrapper prefixes](#the-card) described above. Turn it on only for a host whose
+agents you would let do that unsupervised.
 
 If you **adopt** a host that was reinstalled or replaced at the same address, the setting goes back to off, like the
 YOLO setting and both link settings: you have not decided about the new installation yet.
@@ -131,11 +129,12 @@ connect that remote login callback to your machine.
 ## YOLO sessions and custom commands
 
 On a host that asks you to [confirm YOLO launches](/docs/using/start-a-session/#confirm-a-yolo-launch), an agent cannot
-start a YOLO session at all, with or without your approval. It cannot start a session that runs a
-[custom command](/docs/agents/custom-commands/) there either, because Farhelm never reads a command to check whether it
-runs in YOLO mode, and an agent's word on that is not enough. The same goes for copying a session that an older version
-of Farhelm started, whose command line may not be the one Farhelm would put together today. To let agents do any of
-these on a host, turn on its **Start YOLO sessions without asking** setting.
+start a YOLO session at all, with or without your approval. That includes a launch with
+[custom permission flags](/docs/agents/#permission-modes), which always counts as YOLO. It cannot start a session that
+runs a [custom command](/docs/agents/custom-commands/) there either, because Farhelm never reads a command to check
+whether it runs in YOLO mode, and an agent's word on that is not enough. The same goes for copying a session that an
+older version of Farhelm started, whose command line may not be the one Farhelm would put together today. To let agents
+do any of these on a host, turn on its **Start YOLO sessions without asking** setting.
 
 An agent can use a prefix already saved in a launch template; you approved the template when it was written. If it
 supplies `--wrapper` itself, copies a session with a prefix, or inherits one from its own session, Farhelm asks you to
