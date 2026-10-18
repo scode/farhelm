@@ -612,7 +612,7 @@ pub(super) fn TrashControl(
         if open() {
             div { class: "host-settings-backdrop", role: "presentation",
                 div { class: "checkout-trash-dialog", role: "dialog", aria_modal: "true", aria_labelledby: "checkout-trash-title", tabindex: "-1",
-                    onmounted: move |_| crate::hosts::settings_dialog::install_dialog_with_selector(DIALOG, ".trash-close", Some(".trash-confirm-cancel, .trash-close")),
+                    onmounted: move |_| crate::hosts::settings_dialog::install_dialog_with_selector(DIALOG, ".trash-close", Some(".trash-confirm-cancel, .trash-close"), Some(".trash-confirm-submit")),
                     onkeydown: move |event| { if event.key() == Key::Escape && !event.is_composing() { event.prevent_default(); event.stop_propagation(); close(()); } },
                     div { class: "checkout-trash-header",
                         h2 { id: "checkout-trash-title", TrashIcon { full: count > 0 } "trash" }

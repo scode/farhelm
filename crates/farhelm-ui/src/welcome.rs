@@ -65,7 +65,7 @@ pub(crate) fn WelcomeDialog(on_close: EventHandler<()>, on_feedback: EventHandle
             div {
                 class: "app-settings-dialog welcome-dialog host-dialog-framed",
                 role: "dialog", aria_modal: "true", aria_label: "welcome to farhelm", tabindex: "-1",
-                onmounted: move |_| install_dialog_with_focus(DIALOG_SELECTOR, ".welcome-got-it", Some(".welcome-got-it"), true),
+                onmounted: move |_| install_dialog_with_focus(DIALOG_SELECTOR, ".welcome-got-it", Some(".welcome-got-it"), true, Some(".welcome-got-it")),
                 onkeydown: move |event: KeyboardEvent| {
                     if event.key() == Key::Escape && !event.is_composing() {
                         on_close.call(());

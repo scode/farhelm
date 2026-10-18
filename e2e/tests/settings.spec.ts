@@ -4,6 +4,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { clickDialogGap } from "./helpers/dialog-gap";
 import type { APIRequestContext, Request, Route } from "@playwright/test";
 import {
   forceBuildSkew,
@@ -12,6 +13,91 @@ import {
   patchPreferences,
   readPreferences,
 } from "./helpers/fleet";
+
+/**
+ * The shared installer serves Settings even though Settings has no single
+ * confirming action. Empty space preserves the current control, container
+ * Enter stays inert, and a real pointer drag can still select help text.
+ */
+test("settings gap keeps focus while text and container Enter keep their own behavior", async ({ page, request }) => {
+  const before = await readPreferences(request);
+  await page.goto("/");
+  await page.getByRole("button", { name: "settings", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "settings", exact: true });
+  await expect(dialog).toBeVisible();
+  const choice = dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true });
+  const wasChecked = await choice.isChecked();
+  await choice.focus();
+  await expect(choice).toBeFocused();
+  await clickDialogGap(page, dialog);
+  await expect(choice).toBeFocused();
+  await dialog.focus();
+  await expect(dialog).toBeFocused();
+  await dialog.press("Enter");
+  await expect(dialog).toBeVisible();
+  expect(await choice.isChecked(), "container Enter must not toggle a Settings choice").toBe(wasChecked);
+  expect(await readPreferences(request)).toEqual(before);
+
+  const help = dialog.locator("#session-confirmations-help");
+  const box = await help.boundingBox();
+  expect(box, "the visible help text must have a painted selection target").not.toBeNull();
+  await page.mouse.move(box!.x + 12, box!.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + 180, box!.y + 10, { steps: 8 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => document.getSelection()?.toString().trim()), "dragging over help text must still select it").not.toBe("");
+});
+
+/**
+ * Container Enter in a destructive dialog must use the visible confirmation.
+ * Host removal closes the prompt as soon as it accepts the answer, so its
+ * disabled-button contract is checked by setting the button's native disabled
+ * state before the real confirmation. That must prevent a deletion.
+ */
+test("host removal container Enter confirms once and respects the disabled button", async ({ page, request }, testInfo) => {
+  const previous = await readPreferences(request);
+  const name = `focus-remove-${testInfo.project.name}-${Date.now()}.invalid`;
+  const created = await request.post("/api/hosts", { data: { ssh: name } });
+  expect(created.ok(), await created.text()).toBe(true);
+  const host = await created.json();
+  let deletes = 0;
+  const intercept = async (route: Route) => {
+    if (route.request().method() !== "DELETE") return route.continue();
+    deletes += 1;
+    await route.continue();
+  };
+  try {
+    await patchPreferences(request, { skip_host_remove_confirmation: false });
+    await page.route(`**/api/hosts/${host.id}`, intercept);
+    await page.goto("/");
+    const row = hostRowByName(page, name);
+    await expect(row).toBeVisible();
+    await openHostMenu(row);
+    await row.locator(".host-remove").click();
+    const dialog = page.locator(".host-remove-dialog");
+    const confirm = dialog.getByRole("button", { name: "remove", exact: true });
+    await expect(confirm).toBeFocused();
+    await clickDialogGap(page, dialog);
+    await expect(confirm).toBeFocused();
+    await confirm.evaluate((button: HTMLButtonElement) => { button.disabled = true; });
+    await expect(confirm).toBeDisabled();
+    await dialog.focus();
+    await dialog.press("Enter");
+    expect(deletes, "disabled confirmation must not send a deletion").toBe(0);
+    await expect(row).toBeVisible();
+    await confirm.evaluate((button: HTMLButtonElement) => { button.disabled = false; });
+    await dialog.focus();
+    await dialog.press("Enter");
+    await expect.poll(() => deletes).toBe(1);
+    await expect(row).toHaveCount(0);
+  } finally {
+    await page.unroute(`**/api/hosts/${host.id}`, intercept);
+    await cleanupOwnedSteps(false, [
+      [`host ${host.id}`, () => request.delete(`/api/hosts/${host.id}`)],
+      ["host removal consent", () => patchPreferences(request, { skip_host_remove_confirmation: previous.skip_host_remove_confirmation ?? null })],
+    ]);
+  }
+});
 
 /** Closing must remain possible without scrolling a long settings body.
  * Real overflow and a changed scroll offset establish the short-window premise;
@@ -30,7 +116,7 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await page.setViewportSize({ width, height: 560 });
     await gear.click();
     await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
-    await expect(dialog.getByRole("checkbox")).toHaveCount(11);
+    await expect(dialog.getByRole("checkbox")).toHaveCount(16);
     await page.evaluate(() => document.fonts.ready);
     expect(await body.locator(":scope > section > h3").allTextContents()).toEqual([
       "sessions", "hosts", "terminal links", "managed checkouts", "sounds", "ntfy alerts",
@@ -76,11 +162,12 @@ test("settings keeps both close controls pinned around its grouped scrolling bod
     await expect(dialog).toHaveCount(0);
     await expect(gear).toBeFocused();
   }
-  // The explicit ntfy fields add a full section; this leg deliberately gives
-  // every section enough height, independently of the phone overflow proof.
-  await page.setViewportSize({ width: 1280, height: 4000 });
+  // Give the full set of sections enough height, independently of the phone
+  // overflow proof; the switches added since this test was written outgrew
+  // the former 4000-pixel viewport.
+  await page.setViewportSize({ width: 1280, height: 5000 });
   await gear.click();
-  await expect(dialog.getByRole("checkbox")).toHaveCount(11);
+  await expect(dialog.getByRole("checkbox")).toHaveCount(16);
   const tall = await body.evaluate((el) => ({ content: el.scrollHeight, height: el.clientHeight }));
   expect(tall.height).toBeGreaterThan(0);
   expect(tall.content, "a tall window must fit the settings without scrolling").toBeLessThanOrEqual(tall.height);
@@ -697,7 +784,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
     const dialog = page.getByRole("dialog", { name: "settings", exact: true });
     await expect(dialog).toBeVisible();
     await expect(page.locator('[role="menu"]')).toHaveCount(0);
-    await expect(dialog.getByRole("checkbox")).toHaveCount(11);
+    await expect(dialog.getByRole("checkbox")).toHaveCount(16);
     const setup = dialog.getByRole("checkbox", { name: "set up new hosts without asking", exact: true });
     await expect(dialog.getByRole("checkbox", { name: "skip session confirmations", exact: true })).toBeFocused();
     await expect(setup).not.toBeChecked();
@@ -727,7 +814,7 @@ test("settings dismisses a row menu, isolates the page and returns focus on Esca
           appearance: getComputedStyle(input).appearance,
         };
       }));
-      expect(rows).toHaveLength(11);
+      expect(rows).toHaveLength(16);
       for (const row of rows) {
         expect(row.textRight).toBeLessThan(row.controlLeft);
         expect(row.controlTop).toBeLessThan(row.textBottom);

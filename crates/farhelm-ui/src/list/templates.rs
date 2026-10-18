@@ -1572,7 +1572,7 @@ pub(super) fn TemplatesDialog(
             div { class: if opened() { "templates-dialog templates-editor-open" } else { "templates-dialog" }, role: "dialog", aria_modal: "true", aria_label: "templates", tabindex: "-1",
                 onscroll: move |_| dialog_epoch += 1,
                 onresize: move |_| dialog_epoch += 1,
-                onmounted: move |_| install_dialog_with_selector(DIALOG_SELECTOR,".templates-new",Some(".templates-close")),
+                onmounted: move |_| install_dialog_with_selector(DIALOG_SELECTOR,".templates-new",Some(".templates-close"), None),
                 onkeydown: move |event: KeyboardEvent| {
                     if event.key()==Key::Escape && !event.is_composing() {
                         event.stop_propagation();

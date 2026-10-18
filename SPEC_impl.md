@@ -654,6 +654,13 @@ Delete question on Escape, releases its lifecycle claim and returns focus to the
 dialogs retain quiet scripted focus and independent Escape selectors; trash focuses and scrolls its confirming answer
 into view. YOLO and Restart with keep their Cancel default.
 
+The dialog installers share a pointer rule: primary mouse-down on unused space cancels the browser's focus change, but
+controls and text keep their native behavior. An Enter listener runs only when the dialog container itself has focus; it
+submits the launcher form or clicks the dialog's named main button. The selector is resolved at keypress time so a
+button mounted by a later confirmation or disabled during a request keeps its own rule. Inline session confirmations use
+only the gap rule. Modal dialog containers have no focus ring; controls and the nonmodal notification panel retain their
+keyboard rings.
+
 Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
 appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. In-place
 confirmations retain their panel so the user can finish the interaction. Rename does not: opening it closes the menu and

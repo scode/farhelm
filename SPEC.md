@@ -600,16 +600,16 @@ agent choice is independent of that destination:
   `local (this machine)`. Accepting a result applies it and clears the box while keeping focus there, except custom
   moves focus to its flags editor. Enter on an empty box launches only a complete, valid selection through the ordinary
   Launch path; an incomplete attempt says why beside Launch, as does a refused Launch press, and the greyed-out button's
-  hover names what is missing. Request refusals appear there too, within the initial dialog viewport. Enter on a
-  non-empty query with no result never launches, and Escape closes the result list without clearing the query, so Enter
-  after Escape does nothing until the box is emptied. Enter on a choice button (launch-kind tab, harness, effort, or
-  permissions) applies that choice and then launches through the ordinary Launch path, or shows its refusal beside
-  Launch; custom instead selects the mode and focuses its required flags editor. Enter on the closed host picker or the
-  agent-type dropdown, YOLO radios, or Resume checkbox launches with the values shown, without changing them; those
-  native controls retain their Space and arrow behavior. Action buttons keep their normal press. The search box, model
-  field, YOLO confirmation, and save-as-template panel keep their own Enter rules. In the editable folder field, Enter
-  chooses an arrow-highlighted dropdown entry without launching; with no highlighted entry it launches as before. A held
-  Enter never launches.
+  hover names what is missing. Enter when the launcher itself has focus uses that same Launch path and refusal. Request
+  refusals appear there too, within the initial dialog viewport. Enter on a non-empty query with no result never
+  launches, and Escape closes the result list without clearing the query, so Enter after Escape does nothing until the
+  box is emptied. Enter on a choice button (launch-kind tab, harness, effort, or permissions) applies that choice and
+  then launches through the ordinary Launch path, or shows its refusal beside Launch; custom instead selects the mode
+  and focuses its required flags editor. Enter on the closed host picker or the agent-type dropdown, YOLO radios, or
+  Resume checkbox launches with the values shown, without changing them; those native controls retain their Space and
+  arrow behavior. Action buttons keep their normal press. The search box, model field, YOLO confirmation, and
+  save-as-template panel keep their own Enter rules. In the editable folder field, Enter chooses an arrow-highlighted
+  dropdown entry without launching; with no highlighted entry it launches as before. A held Enter never launches.
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector for every agent launch. Claude,
   Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP session file.
   Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or the session's
@@ -1075,15 +1075,15 @@ submission and focus-return behavior.
   except custom selects the mode and focuses its flags editor. Enter in the model field chooses the model and performs
   the primary action; with the model list closed it uses the selected model. Enter on a YOLO radio or command field
   performs the primary action with the values shown, without toggling the radio. An unchanged or invalid draft does
-  nothing, and held or composing Enter never restarts. Action buttons and the YOLO confirmation keep their own Enter
-  rules. When the primary action says "stop and restart", Enter on a choice or field confirms that displayed action. A
-  working agent is stopped first with the user's confirmation on that action; a live agent in any other status is
-  stopped first without it, as for Restart. The edited launch is validated exactly as a create validates it before
-  anything is stopped, so an invalid edit leaves the agent running and the dialog open with the reason. A refusal leaves
-  the dialog and its edits visible with the reason. Restart with runs the resume command, so an edited start command of
-  a command launch takes effect the next time it is cloned or replaced. Command launches offer this action exactly when
-  Restart is. Its header button remains visible but greyed out otherwise, with a hover tooltip and accessible
-  description explaining why.
+  nothing, and held or composing Enter never restarts. Enter when the dialog itself has focus presses its enabled
+  primary action under those same rules. Action buttons and the YOLO confirmation keep their own Enter rules. When the
+  primary action says "stop and restart", Enter on a choice or field confirms that displayed action. A working agent is
+  stopped first with the user's confirmation on that action; a live agent in any other status is stopped first without
+  it, as for Restart. The edited launch is validated exactly as a create validates it before anything is stopped, so an
+  invalid edit leaves the agent running and the dialog open with the reason. A refusal leaves the dialog and its edits
+  visible with the reason. Restart with runs the resume command, so an edited start command of a command launch takes
+  effect the next time it is cloned or replaced. Command launches offer this action exactly when Restart is. Its header
+  button remains visible but greyed out otherwise, with a hover tooltip and accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
   fresh-conversation counterpart to restart's resumed one unless the user names a conversation for this start. A session
   in a managed checkout starts on a managed checkout of the same repository, named `<title>-clone` with the first free
@@ -1141,6 +1141,13 @@ goes ahead; if that button is disabled, focus starts on Cancel instead. This cov
 tab close, host setup, removal and uninstall, and permanent trash deletion. Repeated or composing Enter cannot answer
 the new question. Escape cancels the header's Restart, Replace or Delete question and returns focus to the terminal. The
 YOLO confirmation and Restart with dialog still start on Cancel.
+
+A primary click on empty space keeps focus on the control in use in the session launcher, Restart with, the dialogs that
+share the host and Settings installer, and the session row and header Restart, Replace and Delete questions; text can
+still be selected. Rename, tab close, the interrupted card's Replace question and the host update confirmation do not
+have this rule yet. If a dialog container itself has focus, Enter presses its enabled main action, including a
+destructive confirmation. A dialog without one main action does nothing on container Enter. Held or composing Enter
+cannot confirm.
 
 Confirmed 2026-10-01: a destructive confirmation authorizes only what the prompt the user answered said would happen.
 This covers every destructive confirmation (Delete, Restart, Restart with, Replace and Replace with, and permanent

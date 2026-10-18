@@ -165,6 +165,7 @@ fn install_remove_dialog() {
         ".host-remove-confirm:enabled",
         Some(".host-cancel-edit, .host-settings-close"),
         true,
+        Some(".host-remove-confirm"),
     );
 }
 
@@ -175,6 +176,7 @@ pub(crate) fn install_add_dialog() {
         ADD_DIALOG_SELECTOR,
         ".add-host-ssh",
         Some(".add-host-cancel"),
+        Some(".provisioning-confirm, .add-host-submit"),
     );
 }
 
@@ -187,6 +189,7 @@ pub(crate) fn install_uninstall_dialog() {
         ".uninstall-confirm:enabled",
         Some(".uninstall-cancel"),
         true,
+        Some(".uninstall-confirm"),
     );
 }
 
@@ -222,32 +225,45 @@ fn install_dialog_with_initial_focus(initial_focus: &str) {
         DIALOG_SELECTOR,
         initial_focus,
         Some(".host-cancel-edit, .host-settings-close"),
+        None,
     );
 }
 
-/// Install focus isolation for a dialog and name its safe Escape action.
+/// Install focus isolation and container keyboard behavior for a dialog.
 ///
 /// The add-host dialog shares this helper but has a different cancel control;
 /// keeping the selector beside the dialog setup prevents the document-level
 /// Escape fallback from silently swallowing Escape when focus has escaped.
+/// A main action is separate from initial focus: destructive dialogs can open
+/// on Cancel yet still let container Enter press their visible confirmation.
 pub(crate) fn install_dialog_with_selector(
     dialog_selector: &str,
     initial_focus: &str,
     escape_selector: Option<&str>,
+    main_action_selector: Option<&str>,
 ) {
-    install_dialog_with_focus(dialog_selector, initial_focus, escape_selector, false);
+    install_dialog_with_focus(
+        dialog_selector,
+        initial_focus,
+        escape_selector,
+        false,
+        main_action_selector,
+    );
 }
 
-/// Choose whether a host confirmation's automatic focus also opens help.
+/// Set initial focus and the optional main action without coupling them.
 ///
 /// Ordinary settings keep their existing focus behavior. Removal, uninstall
 /// and welcome opt into quiet initial confirming focus here; setup
 /// uses the same tooltip hook when its already-mounted form receives an offer.
+/// If the container gets focus later, Enter clicks the caller's main button;
+/// a disabled button retains its native refusal.
 pub(crate) fn install_dialog_with_focus(
     dialog_selector: &str,
     initial_focus: &str,
     escape_selector: Option<&str>,
     quiet_initial_focus: bool,
+    main_action_selector: Option<&str>,
 ) {
     let dialog = serde_json::to_string(dialog_selector).expect("a string always serializes");
     let initial_focus = serde_json::to_string(initial_focus).expect("a string always serializes");
@@ -273,8 +289,13 @@ pub(crate) fn install_dialog_with_focus(
         // The caller supplies the dialog's safe cancel action. Settings use
         // the field-cancel selector before their dialog close control; the
         // add flow supplies its own cancel button.
-        modal_isolation::install_js(dialog_selector, escape_selector,),
+        modal_isolation::install_js(dialog_selector, escape_selector),
     ));
+    let action = main_action_selector.map_or(
+        crate::dialog_focus::ContainerEnter::None,
+        crate::dialog_focus::ContainerEnter::Click,
+    );
+    document::eval(&crate::dialog_focus::install_js(dialog_selector, action));
 }
 
 /// Put focus back inside the dialog after a write ends, if the write lost it.

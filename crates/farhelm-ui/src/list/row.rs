@@ -2011,6 +2011,9 @@ pub(super) fn SessionRow(
                             // half (see the component doc above).
                             span {
                                 class: "confirm-consequence",
+                                // The panel also hosts an ordinary menu; arm
+                                // its gap rule when confirmation first mounts.
+                                onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".session-row-menu-panel.menu-prompt", crate::dialog_focus::ContainerEnter::None)); },
                                 "{confirm_consequence(&session.status, session.tabs.len())}"
                             }
                             // The last check before an irreversible action:
@@ -2078,6 +2081,9 @@ pub(super) fn SessionRow(
                             // doc).
                             span {
                                 class: "confirm-consequence",
+                                // The replacement prompt shares the menu panel,
+                                // so its gap rule starts with this state.
+                                onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".session-row-menu-panel.menu-prompt", crate::dialog_focus::ContainerEnter::None)); },
                                 "{replace_consequence(&session.status, session.tabs.len())}"
                             }
                             // The last check before an irreversible action:

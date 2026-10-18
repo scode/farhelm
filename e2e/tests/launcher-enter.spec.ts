@@ -6,6 +6,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { clickDialogGap } from "./helpers/dialog-gap";
 
 /** Pin the reason inside the initial dialog viewport, directly after its actions. */
 async function expectReasonByLaunch(form: Locator, text: string) {
@@ -56,6 +57,40 @@ for (const attempt of ["Enter", "Launch"] as const) {
     await expect(form.locator(".launch-composer-refusal"), "correcting the prerequisite clears its reason").toHaveCount(0);
   });
 }
+
+/**
+ * An empty-space click must not discard the user's search or its focus. If
+ * focus reaches the launcher container by another route, Enter still follows
+ * Launch's ordinary refusal instead of silently doing nothing.
+ */
+test("launcher gap keeps focus and container Enter explains an incomplete draft", async ({ page }) => {
+  let posts = 0;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() === "POST") posts += 1;
+    await route.continue();
+  });
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await expect(form).toBeVisible();
+  const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true });
+  await search.focus();
+  await expect(search).toBeFocused();
+  const gap = await clickDialogGap(page, form);
+  await expect(search).toBeFocused();
+  await page.mouse.dblclick(gap.x, gap.y);
+  expect(await page.evaluate(() => document.getSelection()?.toString().trim()), "an empty gap cannot select the dialog").toBe("");
+  await expect(search).toBeFocused();
+  await page.keyboard.type("codex");
+  await expect(search).toHaveValue("codex");
+
+  await form.focus();
+  await expect(form).toBeFocused();
+  expect(await form.evaluate((node) => getComputedStyle(node).outlineStyle)).toBe("none");
+  await form.press("Enter");
+  await expectReasonByLaunch(form, "choose a structured harness before launching");
+  expect(posts, "a container refusal must not create a session").toBe(0);
+});
 
 /** Empty-command validation belongs to the visible refusal path, including implicit text-field Enter. */
 test("launcher text-field Enter explains an empty command beside Launch", async ({ page }) => {

@@ -146,6 +146,7 @@ pub mod desktop;
 #[cfg(all(test, not(native_desktop)))]
 #[path = "desktop/menu.rs"]
 mod desktop_menu_tests;
+mod dialog_focus;
 mod feed;
 mod feedback;
 mod github_checkout;

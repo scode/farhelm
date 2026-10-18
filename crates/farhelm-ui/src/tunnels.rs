@@ -349,7 +349,7 @@ pub(crate) fn TunnelControls() -> Element {
                     aria_labelledby: "tunnel-consent-heading", tabindex: "-1",
                     onmounted: move |_| {
                         document::eval(&crate::modal_isolation::release_js(SETTINGS));
-                        crate::hosts::settings_dialog::install_dialog_with_selector(DIALOG, ".tunnel-cancel", Some(".tunnel-cancel"));
+                        crate::hosts::settings_dialog::install_dialog_with_selector(DIALOG, ".tunnel-cancel", Some(".tunnel-cancel"), Some(".tunnel-allow"));
                     },
                     onkeydown: move |event: KeyboardEvent| {
                         if event.key() == Key::Escape && !event.is_composing() && !*controller.saving.peek() {
@@ -370,7 +370,7 @@ pub(crate) fn TunnelControls() -> Element {
                         div { class: "approval-card-actions",
                             button { r#type: "button", class: "btn btn-neutral tunnel-cancel", disabled: (controller.saving)(),
                                 onclick: move |_| controller.finish_warning(Ok(false)), "Cancel" }
-                            button { r#type: "button", class: "btn btn-primary", disabled: (controller.saving)(),
+                            button { r#type: "button", class: "btn btn-primary tunnel-allow", disabled: (controller.saving)(),
                                 onclick: move |_| {
                                     if *controller.saving.peek() { return; }
                                     controller.saving.set(true);

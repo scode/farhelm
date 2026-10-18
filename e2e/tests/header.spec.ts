@@ -7,6 +7,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
+import { clickDialogGap } from "./helpers/dialog-gap";
 import {
   cleanupSession,
   createResumableSession,
@@ -279,6 +280,8 @@ test("copy fields use the details bar's free width before truncating", async ({ 
  * actions together. This test pins their shared keyboard order, proves that
  * both copy buttons hand their complete values to the native bridge, and
  * verifies that header actions reuse the existing composer prefill paths.
+ * The Replace prompt must also keep its focused answer when a pointer lands
+ * on unused strip space, so the next key still reaches that answer.
  */
 test("header actions stay ordered, copy full values, and open the right flows", async ({
   page,
@@ -341,6 +344,10 @@ test("header actions stay ordered, copy full values, and open the right flows", 
     await expect(confirmation.getByRole("button", { name: "replace", exact: true })).toHaveClass(
       /btn-danger/,
     );
+    const confirmReplace = confirmation.getByRole("button", { name: "replace", exact: true });
+    await expect(confirmReplace, "a destructive prompt must own focus before the gap click").toBeFocused();
+    await clickDialogGap(page, confirmation);
+    await expect(confirmReplace, "empty strip space must leave Replace as the keyboard target").toBeFocused();
     await confirmation.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(confirmation).toHaveCount(0);
 

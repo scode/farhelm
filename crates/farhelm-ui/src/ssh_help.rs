@@ -64,7 +64,7 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
         div { class: "host-settings-backdrop", role: "presentation",
             div { class: "app-settings-dialog ssh-help-dialog host-dialog-framed", role: "dialog",
                 aria_modal: "true", aria_label: "ssh needs 2FA?", tabindex: "-1",
-                onmounted: move |_| install_dialog_with_selector(SELECTOR, ".ssh-help-close", Some(".ssh-help-close")),
+                onmounted: move |_| install_dialog_with_selector(SELECTOR, ".ssh-help-close", Some(".ssh-help-close"), None),
                 onkeydown: move |event: KeyboardEvent| {
                     if event.key() == Key::Escape && !event.is_composing() { on_close.call(()); }
                 },

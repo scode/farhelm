@@ -1824,6 +1824,13 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   outline-offset: 1px;
 }
 
+/* Modal containers are focus fallbacks, not controls. Their fields and
+   buttons retain the shared keyboard ring, including after a gap click.
+   The nonmodal notification panel keeps its own container focus ring. */
+[role="dialog"][aria-modal="true"][tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
 /* ===== Session list and rows ====================================== */
 
 /* List view (PLAN_M2.md step 7): a flat, sorted list of session rows —

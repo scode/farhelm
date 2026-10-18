@@ -278,7 +278,7 @@ pub(super) fn QuickSwitcher(
             div {
                 class: "quick-switcher-dialog", role: "dialog", aria_modal: "true", aria_label: "quick switcher", tabindex: "-1",
                 onclick: move |event| event.stop_propagation(),
-                onmounted: move |_| install_dialog_with_selector(DIALOG_SELECTOR, ".quick-switcher-search", Some(".quick-switcher-close")),
+                onmounted: move |_| install_dialog_with_selector(DIALOG_SELECTOR, ".quick-switcher-search", Some(".quick-switcher-close"), None),
                 onkeydown: move |event: KeyboardEvent| {
                     if !event.is_composing() && event.key() == Key::Escape { event.prevent_default(); on_close.call(()); }
                 },
