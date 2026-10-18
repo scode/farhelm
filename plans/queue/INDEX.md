@@ -9,5 +9,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `agent-wrappers.md` — optional command prefix for agent launches, treated exactly like the real agent
 - [pending] `agent-quick-launch-templates.md` — agents can set the quick-launch template and number keys through the farhelm command
 - [pending] `prompt-running-agent.md` — farhelm command to type a prompt into another session's running Claude or Codex
-- [pending] `one-way-yolo-shield.md` — the observed YOLO shield only ever moves toward YOLO within an agent run
+- [in-flight 4807c9] `one-way-yolo-shield.md` — the observed YOLO shield only ever moves toward YOLO within an agent run
 - [pending] `cheaper-cache-clones.md` — managed checkouts clone from the host's repository cache with hardlinks, behind a default-on setting
