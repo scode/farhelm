@@ -181,6 +181,28 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through. Overhaul it with more structure, such as tabs, so related settings are grouped and any one of them is easy to
   find. The grouping and layout are TBD.
 
+- **Keep focus inside host settings after a refused save.** A keyboard user can Tab into the host settings dialog's
+  scrollable body while a save is running. If the save is then refused, the body stops being focusable, but the dialog's
+  refocus step still picks it as the last usable element, so focus can land outside the dialog instead of on the
+  destination field, and the dialog's focus isolation swallows one keystroke to recover. A successful save is
+  unaffected. SSH help has the same shape if its commands arrive while its body has focus. Requiring the refocus target
+  to be keyboard-focusable would close it; add a test that checks focus after a refused save. Found while landing the
+  keyboard scroll audit (#2222, #2226).
+
+- **Tidy the launch-sequence hints.** The "cannot launch on its own" banner also appears for ⚡ alone with an incomplete
+  template, and for a one-template sequence, where it tells the user to use the prefix they just used; SPEC.md describes
+  it only for a single number key. If a sequence that includes ⚡ fails because a number is unbound, Templates also
+  shows the "Mark a template with ⚡" hint even when one is marked. Templates can call a template launchable when the
+  launch check does not, for example a template set to run a command that names an agent but leaves the command empty;
+  its number key then shows the "cannot launch on its own" banner. The Templates help paragraph does not yet mention
+  partial-template keys or sequences. Found while landing the quick-launch sequences (#2220, #2225, #2228).
+
+- **Stop rapid menu arrow presses from pulling focus back.** In the desktop app, a focus move already sent to the page
+  cannot be recalled, so a rapid arrow press whose request was already on its way can still pull focus back after the
+  user moved it: Down twice, click the fourth item, Down can still end on the fourth item when the second press's focus
+  move was already sent. The menu focus fix (#2232) narrowed this and removed the earlier TODO entry; this entry tracks
+  the remaining case.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
