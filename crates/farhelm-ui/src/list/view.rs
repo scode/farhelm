@@ -3434,86 +3434,101 @@ pub(crate) fn ListView(
     let quick_base = base.clone();
     // Resolve the whole ordered request from one shared-preference/template
     // read, then enter the ordinary New/template/confirmation path once.
-    let quick_launch = use_callback(move |references: Vec<Option<String>>| {
-        if *quick_launch_pending.peek()
-            || *show_create.peek()
-            || *templates_open.peek()
-            || ops.busy_now()
-        {
-            return;
-        }
-        quick_launch_pending.set(true);
-        opening_generation += 1;
-        let opening = *opening_generation.peek();
-        let base = quick_base.clone();
-        spawn(async move {
-            let modal_opening = document::eval("return window.__farhelmModalOpening || 0")
-                .join::<u64>()
-                .await
-                .unwrap_or(u64::MAX);
-            // The mark and definition can change in another client without a
-            // reload here. A fresh read decides acknowledged state; an explicit
-            // local choice still awaiting persistence keeps its queue authority.
-            let result = async {
-                let fresh = crate::api::fetch_preferences(&base).await?;
-                let templates = crate::api::fetch_templates(&base).await?;
-                Ok::<_, String>((crate::api::template_bindings_after_read(fresh), templates))
-            }
-            .await;
-            // A modal opened while the read was out must not be hidden behind
-            // this continuation. The entry chord's check alone cannot cover it.
-            let modal = document::eval(&format!("return (window.__farhelmModalOpening || 0) !== {modal_opening} || [...document.querySelectorAll('[role=\"dialog\"][aria-modal=\"true\"]')].some(node => node.getClientRects().length)")).join::<bool>().await.unwrap_or(true);
-            quick_read_completed.set(opening);
-            if *opening_generation.peek() != opening {
+    let quick_launch = use_callback(
+        move |references: Vec<crate::launch_sequence::TemplateReference>| {
+            if *quick_launch_pending.peek()
+                || *show_create.peek()
+                || *templates_open.peek()
+                || ops.busy_now()
+            {
                 return;
             }
-            quick_launch_pending.set(false);
-            if modal || *show_create.peek() || *templates_open.peek() || ops.busy_now() {
-                return;
-            }
-            match result {
-                Ok((fresh, templates)) => {
-                    let resolved = references
-                        .iter()
-                        .map(|number| {
-                            let name = match number {
-                                Some(key) => fresh.template_shortcuts.get(key),
-                                None => fresh.quick_launch_template.as_ref(),
-                            };
-                            name.and_then(|name| {
-                                templates.iter().find(|template| &template.name == name)
-                            })
-                            .cloned()
-                        })
-                        .collect::<Option<Vec<_>>>();
-                    preferences.0.write().quick_launch_template = fresh.quick_launch_template;
-                    preferences.0.write().template_shortcuts = fresh.template_shortcuts;
-                    if let Some(templates) = resolved {
-                        if open_new.call(None) {
-                            let launchable =
-                                super::templates::stacked_quick_launch_eligible(&templates);
-                            auto_launch.set(launchable);
-                            if !launchable && templates.len() == 1 {
-                                initial_partial_template.set(Some(templates[0].name.clone()));
+            quick_launch_pending.set(true);
+            opening_generation += 1;
+            let opening = *opening_generation.peek();
+            let base = quick_base.clone();
+            spawn(async move {
+                // The capture listener and dispatch ask the same JS context rule.
+                // This read also protects programmatic relays from a dialog that
+                // took the keyboard before their async work began.
+                let Some(entry_context) = crate::launch_sequence::shortcut_context_snapshot()
+                    .await
+                    .filter(|snapshot| snapshot.context == "page")
+                else {
+                    if *opening_generation.peek() == opening {
+                        quick_launch_pending.set(false);
+                    }
+                    return;
+                };
+                let modal_opening = entry_context.modal_opening;
+                // The mark and definition can change in another client without a
+                // reload here. A fresh read decides acknowledged state; an explicit
+                // local choice still awaiting persistence keeps its queue authority.
+                let result = async {
+                    let fresh = crate::api::fetch_preferences(&base).await?;
+                    let templates = crate::api::fetch_templates(&base).await?;
+                    Ok::<_, String>((crate::api::template_bindings_after_read(fresh), templates))
+                }
+                .await;
+                // A modal opened while the read was out must not be hidden behind
+                // this continuation. The entry chord's check alone cannot cover it.
+                let context = crate::launch_sequence::shortcut_context_snapshot().await;
+                quick_read_completed.set(opening);
+                if *opening_generation.peek() != opening {
+                    return;
+                }
+                quick_launch_pending.set(false);
+                if !context.is_some_and(|snapshot| {
+                    snapshot.context == "page" && snapshot.modal_opening == modal_opening
+                }) || *show_create.peek()
+                    || *templates_open.peek()
+                    || ops.busy_now()
+                {
+                    return;
+                }
+                match result {
+                    Ok((fresh, templates)) => {
+                        let resolved = crate::launch_sequence::resolve_template_references(
+                            &references,
+                            &fresh,
+                            &templates,
+                        );
+                        preferences.0.write().quick_launch_template = fresh.quick_launch_template;
+                        preferences.0.write().template_shortcuts = fresh.template_shortcuts;
+                        if let Some(templates) = resolved {
+                            if open_new.call(None) {
+                                let launchable =
+                                    super::templates::stacked_quick_launch_eligible(&templates);
+                                auto_launch.set(launchable);
+                                if !launchable && templates.len() == 1 {
+                                    initial_partial_template.set(Some(templates[0].name.clone()));
+                                }
+                                initial_quick_templates.set(templates);
                             }
-                            initial_quick_templates.set(templates);
+                        } else {
+                            initial_template.set(None);
+                            quick_launch_hint.set(references.iter().any(|reference| {
+                                matches!(reference, crate::launch_sequence::TemplateReference::Bolt)
+                            }));
+                            number_shortcut_hint.set(references.iter().any(|reference| {
+                                matches!(
+                                    reference,
+                                    crate::launch_sequence::TemplateReference::Number(_)
+                                )
+                            }));
+                            templates_open.set(true);
                         }
-                    } else {
-                        initial_template.set(None);
-                        quick_launch_hint.set(references.iter().any(Option::is_none));
-                        number_shortcut_hint.set(references.iter().any(Option::is_some));
-                        templates_open.set(true);
+                    }
+                    Err(message) => {
+                        if open_new.call(None) {
+                            initial_create_error
+                                .set(Some(format!("couldn't prepare quick launch: {message}")));
+                        }
                     }
                 }
-                Err(message) => {
-                    if open_new.call(None) {
-                        initial_create_error
-                            .set(Some(format!("couldn't prepare quick launch: {message}")));
-                    }
-                }
-            }
-        });
-    });
+            });
+        },
+    );
     let switcher_listing = request_listing.clone();
     let finish_switcher = use_callback(move |pick: Option<super::quick_switcher::SwitcherPick>| {
         if *quick_switcher_closing.peek() {
@@ -3546,7 +3561,7 @@ pub(crate) fn ListView(
                     restore = !open_new.call(Some(action));
                 }
                 Some(super::quick_switcher::SwitcherPick::QuickLaunch) => {
-                    quick_launch.call(vec![None]);
+                    quick_launch.call(vec![crate::launch_sequence::TemplateReference::Bolt]);
                     restore = false;
                 }
                 None => {}
@@ -3582,7 +3597,7 @@ pub(crate) fn ListView(
                 r#type: "button", hidden: true, tabindex: "-1",
                 onclick: move |_| {
                     if let Some(queue) = launch_sequence.write().as_mut() {
-                        queue.push(Some(key.into()));
+                        queue.push(crate::launch_sequence::TemplateReference::Number(key.into()));
                     }
                 },
             }
@@ -3591,7 +3606,7 @@ pub(crate) fn ListView(
             class: "launch-sequence-trigger", "data-sequence-action": "bolt",
             r#type: "button", hidden: true, tabindex: "-1",
             onclick: move |_| {
-                if let Some(queue) = launch_sequence.write().as_mut() { queue.push(None); }
+                if let Some(queue) = launch_sequence.write().as_mut() { queue.push(crate::launch_sequence::TemplateReference::Bolt); }
             },
         }
         button {
@@ -3625,14 +3640,14 @@ pub(crate) fn ListView(
             "data-opening-generation": "{opening_generation()}",
             "data-read-completed-generation": "{quick_read_completed()}",
             disabled: quick_launch_pending() || show_create() || templates_open() || busy,
-            onclick: move |_| quick_launch.call(vec![None]),
+            onclick: move |_| quick_launch.call(vec![crate::launch_sequence::TemplateReference::Bolt]),
         }
         for key in crate::launch_sequence::TEMPLATE_SHORTCUTS.number.keys.iter().map(|key| key.value) {
             button {
                 key: "number-{key}", class: "template-number-trigger", r#type: "button",
                 hidden: true, tabindex: "-1", "data-number-key": "{key}",
                 disabled: quick_launch_pending() || show_create() || templates_open() || busy,
-                onclick: move |_| quick_launch.call(vec![Some(key.into())]),
+                onclick: move |_| quick_launch.call(vec![crate::launch_sequence::TemplateReference::Number(key.into())]),
             }
         }
         // Status sounds follow the very replies these rows display. Keeping

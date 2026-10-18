@@ -4782,11 +4782,13 @@ reader's skip-and-log policy.
 
 ### Launch templates
 
-Quick launch resolves its ordered digit/bolt references from one fresh preference and template read. It hands the
-captured definitions to ordinary New, replaying one through the existing template/search acceptance path per effect
-pass. A refusal stops the remaining replay. Automatic submission waits for a render after the final replay, so its
-captured readiness and refusal describe the resulting draft. A coarse fold over launch kind, agent and command decides
-whether to attempt direct launch; the mounted form retains full validation, catalog, host and admission authority.
+Quick launch resolves its ordered, typed digit/bolt references as one all-or-none request from one fresh preference and
+template read. Dispatch takes a shared keyboard-context and modal-opening-epoch snapshot before and after that read
+check, so a dialog that appears during the read cannot receive its result after closing. It hands the captured
+definitions to ordinary New, replaying one through the existing template/search acceptance path per effect pass. A
+refusal stops the remaining replay. Automatic submission waits for a render after the final replay, so its captured
+readiness and refusal describe the resulting draft. A coarse fold over launch kind, agent and command decides whether to
+attempt direct launch; the mounted form retains full validation, catalog, host and admission authority.
 
 The shared template-shortcut asset owns the synchronous armed flag, a pure key classifier and the context rule. Rust
 holds the ordered references in app-owned transient context; the sidebar's hidden relays mutate that signal
