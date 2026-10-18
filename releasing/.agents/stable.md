@@ -62,8 +62,13 @@ to fix forward, so it starts the moment the pre-tag checks pass.
    directory, written exactly as it will go into `CHANGELOG.md`, and publish it to the maintainer as a snippet with the
    `scode-snippets` skill, giving them its link. If you do not know what the `scode-snippets` skill is, stop and tell
    the maintainer; do not substitute another way of showing the draft. The maintainer asked for snippets on 2026-10-13,
-   replacing a local file they edited by hand. They review the snippet and give their changes in conversation. Apply
-   them to the scratch file and update the same snippet after each round, until the maintainer approves the text. The
+   replacing a local file they edited by hand. The snippet is the interactive review page that
+   `python3 releasing/notes-review-page.py SECTION.md OUT.html` renders from the scratch file, written as the snippet's
+   `index.html` (the script's docstring has the details). The maintainer types feedback under individual entries and
+   pastes back a `notes-feedback vX.Y.Z` block, in which each note names its entry by id and by its opening words; match
+   notes on the words, since ids are positions and shift between rounds. The maintainer asked for this page as the
+   default on 2026-10-16. Apply the feedback to the scratch file, regenerate the page and update the same snippet after
+   each round, until the maintainer approves the text; the regenerated page clears the notes that round applied. The
    scratch file and the snippet hold the section as it will read once approved, without the draft notice; `CHANGELOG.md`
    gets the notice added in step 4.
 

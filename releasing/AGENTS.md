@@ -224,7 +224,7 @@ the working tree, the index or refs; other revisions are read only through `git 
 
 ### Release tooling edits
 
-Before editing `releasing/check-changelog.py`, `releasing/finalize-release-notes.py`,
+Before editing `releasing/check-changelog.py`, `releasing/finalize-release-notes.py`, `releasing/notes-review-page.py`,
 `releasing/rehearse-release-gate.py` or `releasing/EDITORIAL_GUIDANCE.md`, read these in full:
 
 - `releasing/.agents/changelog.md` (the checker must stay compatible with older sections)
