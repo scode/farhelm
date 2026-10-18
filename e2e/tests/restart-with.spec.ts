@@ -35,7 +35,7 @@ const BASELINE = {
   model: "gpt-6-astra" as string | null,
   effort: "high" as string | null,
   permissions: null as string | null,
-  workspace_trust: null,
+  workspace_trust: null as boolean | null,
 };
 
 /** Without capture the ordinary Restart stays unavailable, but Restart with
@@ -1397,19 +1397,22 @@ async function enterRestartChoice(dialog: Locator, control: Locator, bodies: unk
   return bodies[before];
 }
 
-/** A choice must reach the restart in the same key event, rather than sending the previous rendered edit. */
-test("restart with choice Enter applies effort permissions and trust before restarting", async ({ page }) => {
-  await injectSession(page, BASELINE, "resume");
+/** Choice Enter applies the current edit before submitting. Historical trust
+ * stays absent because Restart with composes trust from current Settings. */
+test("restart with choice Enter applies effort and permissions without old trust", async ({ page }) => {
+  await injectSession(page, { ...BASELINE, workspace_trust: true }, "resume");
   await installEnterCatalog(page);
   const bodies = await refuseEnterRestarts(page);
   const dialog = await openInjectedDialog(page);
+  await expect(dialog.locator(".launch-composer-trust-choice")).toHaveCount(0);
   const choice = (group: string, name: string) => dialog.locator(group).getByRole("button", { name, exact: true });
   expect(await enterRestartChoice(dialog, choice(".launch-composer-effort-choice", "low"), bodies))
     .toMatchObject({ stop_if_running: false, with: { harness: "codex", model: BASELINE.model, effort: "low" } });
   expect(await enterRestartChoice(dialog, choice(".launch-composer-permissions-choice", "yolo"), bodies))
     .toMatchObject({ with: { effort: "low", permissions: "yolo" } });
-  expect(await enterRestartChoice(dialog, choice(".launch-composer-trust-choice", "true"), bodies))
-    .toMatchObject({ with: { effort: "low", permissions: "yolo", workspace_trust: true } });
+  for (const body of bodies) {
+    expect((body as { with: object }).with).not.toHaveProperty("workspace_trust");
+  }
 });
 
 /** Enter confirms exactly the displayed stop-and-restart warning for a working agent. */

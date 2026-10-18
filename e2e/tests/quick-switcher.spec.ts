@@ -344,7 +344,7 @@ test("ranking, highlighting and the listing-cap notice use one snapshot", async 
  */
 test("the pinned name action opens ordinary New with remembered defaults", async ({ page, request }) => {
   await platform(page, false);
-  await patchPreferences(request, { remembered_permissions: "yolo", remembered_workspace_trust: true });
+  await patchPreferences(request, { remembered_permissions: "yolo" });
   const origin = await createSession(request, { title: `new-origin-${Date.now()}` });
   const name = `new-draft-${Date.now()}`;
   let creates = 0;
@@ -473,7 +473,8 @@ test("a template pick waits for launcher inputs before applying the template", a
     // Null resets to the harness's current default. For Codex that is guarded;
     // applying a template must not revive the removed default-mode control.
     await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "guarded", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(form.locator(".launch-composer-summary")).toContainText("trust: false");
+    await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
+    await expect(form.locator(".launch-composer-summary")).not.toContainText("trust:");
     await expect(form.locator(".launch-composer-template-error")).toHaveCount(0);
     await form.getByLabel("name (optional)").fill("user-edited-name");
     await form.getByLabel("folder", { exact: true }).fill("/tmp/edited");

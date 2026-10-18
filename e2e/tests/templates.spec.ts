@@ -633,6 +633,112 @@ async function storedTemplate(request: APIRequestContext, name: string) {
   return body.templates.find((template: any) => template.name === name);
 }
 
+/** Historical true, false and explicit-default trust values still decode.
+ * Inject them on a real template's read, since current writes drop the field.
+ * The composed request and subsequent PUT bodies distinguish ignoring trust
+ * from merely hiding its control; no vendor process is needed for that proof.
+ * Each legacy representation also exercises one editor write path. */
+for (const [trust, write] of [[true, "edit"], [false, "duplicate"], [null, "undo"]] as const) {
+  test(`old template trust ${trust} is ignored on launch and dropped on ${write}`, async ({ page, request }) => {
+    const source = `legacy-trust-${write}-${Date.now()}`;
+    const saved = `${source}-saved`;
+    const copy = `${source} copy`;
+    const fields = { kind: "agent", agent: "codex", permissions: "guarded", destination: { folder: "/tmp" }, name: "legacy-template" };
+    let legacyReads = 0;
+    const writes: { name: string; fields: Record<string, unknown> }[] = [];
+    const creates: { cwd: string; launch: Record<string, unknown> }[] = [];
+    try {
+      await putTemplate(request, source, fields);
+      const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"];
+      expect(build, "controlled create refusals retain the live helm identity").toBeTruthy();
+      await page.route("**/api/templates", async route => {
+        const response = await route.fetch();
+        const json = await response.json();
+        const legacy = json.templates.find((template: { name: string }) => template.name === source);
+        if (legacy) {
+          legacy.fields.workspace_trust = trust;
+          await route.fulfill({ response, json });
+          legacyReads++;
+        } else await route.fulfill({ response, json });
+      });
+      await page.route("**/api/templates/*", async route => {
+        if (route.request().method() === "PUT") writes.push({
+          name: decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1)!),
+          fields: route.request().postDataJSON(),
+        });
+        await route.fallback();
+      });
+      await page.route("**/api/sessions", async route => {
+        if (route.request().method() !== "POST") return route.fallback();
+        creates.push(route.request().postDataJSON());
+        await route.fulfill({ status: 400, headers: { "x-farhelm-build": build }, body: "legacy trust fixture refused create" });
+      });
+      const form = await openNew(page);
+      await applyTemplate(form, source);
+      await expect(form.getByLabel("name (optional)")).toHaveValue("legacy-template");
+      await expect.poll(() => legacyReads, { message: "the launcher received the old-rules template" }).toBeGreaterThan(0);
+      await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
+      await expect(form.locator(".launch-composer-summary")).not.toContainText("trust:");
+      await form.locator(".create-session-submit").click();
+      await expect(form.locator(".launch-composer-refusal")).toContainText("legacy trust fixture refused create");
+      expect(creates).toHaveLength(1);
+      expect(creates[0]).toMatchObject({ cwd: "/tmp", launch: { harness: "codex", permissions: "guarded" } });
+      expect(creates[0].launch).not.toHaveProperty("workspace_trust");
+
+      await form.locator(".launch-composer-save-template").click();
+      const panel = form.locator(".save-template-panel");
+      await expect(panel).toBeVisible();
+      await expect(panel.locator('[data-field="trust"]')).toHaveCount(0);
+      await panel.locator(".save-template-name").fill(saved);
+      await panel.locator(".save-template-save").click();
+      const dialog = page.locator('.templates-dialog[role="dialog"]');
+      await expect(dialog).toBeVisible();
+      expect((await storedTemplate(request, saved)).fields).not.toHaveProperty("workspace_trust");
+      await dialog.locator(".templates-close").click();
+      await expect(dialog).toHaveCount(0);
+
+      await openTemplatesInPlace(page);
+      const row = dialog.locator(".templates-row").filter({ has: page.getByText(source, { exact: true }) });
+      await row.click();
+      await expect(dialog.locator(".templates-name")).toHaveValue(source);
+      await expect(row.locator(".templates-row-summary")).not.toContainText("trust");
+      await expect(dialog.locator('[data-field="trust"]')).toHaveCount(0);
+      await dialog.locator(".templates-add").click();
+      await expect(dialog.getByRole("group", { name: "add field", exact: true })).toBeVisible();
+      await expect(dialog.locator(".templates-add-menu").getByRole("button", { name: "workspace trust", exact: true })).toHaveCount(0);
+      await dialog.locator(".templates-add").click();
+      let writtenName = source;
+      if (write === "duplicate") {
+        await dialog.locator(".templates-duplicate").click();
+        // Normalizing an old record is an unsaved draft. Discard selects the
+        // stored source before duplicating; that path must clear trust too.
+        await expect(dialog.locator(".templates-departure")).toBeVisible();
+        await dialog.locator(".templates-discard").click();
+        await expect(dialog.locator(".templates-name")).toHaveValue(copy);
+        writtenName = copy;
+        await dialog.locator(".templates-save").click();
+        await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+      } else if (write === "undo") {
+        await dialog.locator(".templates-delete").click();
+        await expect(dialog.locator(".templates-undo")).toBeVisible();
+        await dialog.locator(".templates-undo").click();
+        await expect(dialog.locator(".templates-undo")).toHaveCount(0);
+      } else {
+        await dialog.locator(".templates-session-name").fill("edited legacy template");
+        await dialog.locator(".templates-save").click();
+        await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+      }
+      expect((await storedTemplate(request, writtenName)).fields).not.toHaveProperty("workspace_trust");
+      expect(writes.map(entry => entry.name)).toContain(saved);
+      expect(writes.map(entry => entry.name)).toContain(writtenName);
+      for (const entry of writes) expect(entry.fields).not.toHaveProperty("workspace_trust");
+    } finally {
+      await page.unrouteAll({ behavior: "wait" });
+      for (const name of [source, saved, copy]) await deleteTemplate(request, name);
+    }
+  });
+}
+
 /** Saving a launcher message must preserve the reviewed bytes rather than
  * their escaped preview. Unchecking it must produce an absent partial edit.
  * Template stacking must distinguish an absent message from an empty reset.

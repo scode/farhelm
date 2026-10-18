@@ -627,7 +627,7 @@ fn refuse_confirm_yolo(_value: &str) -> Result<String, String> {
 fn refuse_profile_id(_value: &str) -> Result<String, String> {
     Err(
         "--profile-id is no longer accepted: agent profiles were removed. Name the launch \
-         with --agent <TYPE> (and --model, --effort, --permissions, --trust), with \
+         with --agent <TYPE> (and --model, --effort, --permissions), with \
          --command <CMD> and --yolo or --no-yolo, or with --template <NAME>; farhelm \
          agent templates lists the templates"
             .to_string(),
@@ -747,21 +747,9 @@ fn parse_permissions(value: &str) -> Result<Choice<farhelm_proto::LaunchPermissi
         })
 }
 
-/// `--trust`'s parser: `true`, `false`, or `default`.
-fn parse_trust(value: &str) -> Result<Choice<bool>, String> {
-    match value {
-        "true" => Ok(Choice(Some(true))),
-        "false" => Ok(Choice(Some(false))),
-        "default" => Ok(Choice(None)),
-        _ => Err(format!(
-            "{value:?} is not a trust choice; use true, false, or default"
-        )),
-    }
-}
-
 /// The ids of every [`LaunchFlags`] argument, which `spawn --inherit-agent`
 /// conflicts with: a spawn either reuses its own launch or describes one.
-const LAUNCH_FLAG_IDS: [&str; 13] = [
+const LAUNCH_FLAG_IDS: [&str; 12] = [
     "prompt",
     "prompt_file",
     "templates",
@@ -769,7 +757,6 @@ const LAUNCH_FLAG_IDS: [&str; 13] = [
     "model",
     "effort",
     "permissions",
-    "trust",
     "command",
     "yolo",
     "no_yolo",
@@ -819,9 +806,6 @@ struct LaunchFlags {
     /// and OpenCode default to YOLO.
     #[arg(long, value_name = "MODE", value_parser = parse_permissions)]
     permissions: Option<Choice<farhelm_proto::LaunchPermission>>,
-    /// Workspace trust for an agent launch: true, false, or default.
-    #[arg(long, value_name = "BOOL", value_parser = parse_trust)]
-    trust: Option<Choice<bool>>,
     /// Make this a command launch running this command line, as written.
     /// Needs --yolo or --no-yolo.
     #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
@@ -853,7 +837,6 @@ impl LaunchFlags {
             || self.model.is_some()
             || self.effort.is_some()
             || self.permissions.is_some()
-            || self.trust.is_some()
             || self.command.is_some()
             || self.yolo
             || self.no_yolo
@@ -883,7 +866,9 @@ impl LaunchFlags {
                 .map(|model| (model != "default").then(|| model.clone())),
             effort: self.effort.map(|choice| choice.0),
             permissions: self.permissions.map(|choice| choice.0),
-            workspace_trust: self.trust.map(|choice| choice.0),
+            // The helm derives trust from Settings and the resolved destination.
+            // Keep the wire field absent so CLI launches cannot request it.
+            workspace_trust: None,
             command: self.command.clone(),
             yolo: if self.yolo {
                 Some(true)
@@ -1998,6 +1983,26 @@ async fn stdio_proxy(state_dir: &std::path::Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// Trust is a managed-checkout setting, so every CLI launch-writing
+    /// surface must reject the retired flag instead of accepting an inert edit.
+    #[test]
+    fn launch_and_template_commands_reject_per_launch_trust() {
+        for prefix in [
+            vec!["farhelm", "agent", "create", "--cwd", "/work"],
+            vec!["farhelm", "spawn", "--cwd", "/work"],
+            vec!["farhelm", "agent", "template", "create", "review"],
+            vec!["farhelm", "agent", "template", "edit", "review"],
+        ] {
+            let mut args = prefix;
+            args.extend(["--agent", "codex", "--trust", "true"]);
+            let Err(error) = Cli::try_parse_from(args) else {
+                panic!("--trust was removed");
+            };
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+            assert!(error.to_string().contains("--trust"));
+        }
+    }
+
     /// The CLI has no custom-flags text field. Accepting the enum's wire word
     /// here would create an incomplete selection; templates remain the supported
     /// CLI path for a complete Custom choice.

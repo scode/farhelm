@@ -92,53 +92,54 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
   }
 });
 
-/**
- * Workspace trust is a separate draft choice from Pi's YOLO tool mode. Search
- * and buttons must agree across Pi and Codex. Changing to Claude must clear
- * the choice before a later launch can submit it. Muse must also explain that
- * false cannot reverse the trust implied by YOLO.
- */
-test("workspace trust stays explicit and scoped to supported harnesses", async ({ page, request }) => {
-  await patchPreferences(request, { remembered_workspace_trust: false });
-  try {
+/** Historical trust memory must not restore a control, a keyboard action or
+ * an ordinary-folder launch override. Controlled refusals expose the submitted
+ * requests without starting agents; permission modes still follow the harness. */
+for (const rememberedTrust of [true, false]) {
+  test(`workspace trust is absent despite old remembered value ${rememberedTrust}`, async ({ page, request }) => {
+    const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"];
+    expect(build, "controlled refusals retain the live helm identity").toBeTruthy();
+    let seeded = false;
+    await page.route("**/api/preferences", async route => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const response = await route.fetch();
+      const json = await response.json();
+      json.remembered_workspace_trust = rememberedTrust;
+      await route.fulfill({ response, json });
+      seeded = true;
+    });
+    const bodies: { launch: Record<string, unknown> }[] = [];
+    await page.route("**/api/sessions", async route => {
+      if (route.request().method() !== "POST") return route.fallback();
+      bodies.push(route.request().postDataJSON());
+      await route.fulfill({ status: 400, headers: { "x-farhelm-build": build }, body: `trust fixture refused create ${bodies.length}` });
+    });
     await page.goto("/");
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await expect.poll(() => seeded, { message: "the page received the historical preference" }).toBe(true);
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
     const harnesses = form.locator(".launch-composer-harness-choice");
-    const trust = form.locator(".launch-composer-trust-choice");
     const permissions = form.locator(".launch-composer-permissions-choice");
-
-    await harnesses.getByRole("button", { name: "Pi", exact: true }).click();
-    await expect(trust.getByRole("button", { name: "false", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
-
     const search = form.locator('.launch-composer-search input[role="combobox"]');
-    await search.fill("trust:true");
-    await form.getByRole("option", { name: "Trust workspace: true", exact: true }).click();
-    await expect(search).toHaveValue("");
-    await expect(trust.getByRole("button", { name: "true", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
-
-    await harnesses.getByRole("button", { name: "Codex", exact: true }).click();
-    await expect(trust.getByRole("button", { name: "true", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(trust.locator(".launch-composer-choice-help")).toContainText("false runs it as untrusted");
-    await search.fill("trust:false");
-    await form.getByRole("option", { name: "Trust workspace: false", exact: true }).click();
-    await expect(trust.getByRole("button", { name: "false", exact: true })).toHaveAttribute("aria-pressed", "true");
-
-    await harnesses.getByRole("button", { name: "Claude", exact: true }).click();
-    await expect(trust).toHaveCount(0);
-    await search.fill("trust:false");
-    await expect(form.getByRole("option", { name: "Trust workspace: false", exact: true })).toHaveCount(0);
-
-    await harnesses.getByRole("button", { name: "Muse", exact: true }).click();
-    await expect(trust.getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await trust.getByRole("button", { name: "false", exact: true }).click();
-    await expect(trust.getByRole("button", { name: "false", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(trust.locator(".launch-composer-choice-help")).toContainText(
-      "YOLO or vendor settings may still trust this workspace",
-    );
-  } finally {
-    await patchPreferences(request, { remembered_workspace_trust: null });
-  }
-});
+    for (const [label, harness] of [["Pi", "pi"], ["Codex", "codex"], ["Claude", "claude"], ["Muse", "muse"]]) {
+      await harnesses.getByRole("button", { name: label, exact: true }).click();
+      await expect(harnesses.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
+      if (harness === "pi") await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
+      else await permissions.getByRole("button", { name: "guarded", exact: true }).click();
+      for (const query of ["trust:", "trust:true", "trust:false"]) {
+        await search.fill(query);
+        await expect(form.getByRole("option", { name: /^Trust workspace:/ })).toHaveCount(0);
+      }
+      await search.fill("");
+      const count = bodies.length + 1;
+      await form.locator(".create-session-submit").click();
+      await expect(form.locator(".launch-composer-refusal")).toContainText(`trust fixture refused create ${count}`);
+      expect(bodies).toHaveLength(count);
+      expect(bodies[count - 1].launch).toMatchObject({ harness });
+      expect(bodies[count - 1].launch).not.toHaveProperty("workspace_trust");
+    }
+  });
+}

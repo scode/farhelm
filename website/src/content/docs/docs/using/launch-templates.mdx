@@ -43,6 +43,9 @@ chosen with the same **folder** and **managed checkout** control as the launcher
 gets its own checkout and that its directory moves to the trash when its last session is deleted. A model or a
 destination can stand on its own: another template can supply the agent or host.
 
+Workspace trust comes from [managed-checkout settings](/docs/using/start-a-session/#trust-in-managed-checkouts). A trust
+choice saved in an older template is ignored and is removed when you save that template again.
+
 Templates belong to the helm, the program that shows you every host's sessions
 ([The pieces](/docs/how-it-works/the-pieces/)), so every window and every host sees the same ones. A template that sets
 a command still needs that command to exist on the host you launch on.
@@ -116,8 +119,8 @@ When you have set up a launch in **new** or **clone**, choose **save as template
   alt="The save as template panel with a name typed and the agent and effort checked, with the name, checkboxes, and save explained."
 />
 
-Agent, model and effort choices are checked when set, as are command choices. Approvals and
-workspace trust are checked when you chose them; a host, directory and session name only when you picked or typed them.
+Agent, model and effort choices are checked when set, as are command choices. Approvals
+are checked when you chose them; a host, directory and session name only when you picked or typed them.
 A selected managed checkout's repository is checked too; unselected repository text is left out. Remembered defaults and
 a cloned session's host and directory stay available, but unchecked.
 

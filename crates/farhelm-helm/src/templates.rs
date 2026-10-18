@@ -47,8 +47,11 @@ pub(crate) async fn list_templates(State(state): State<Arc<AppState>>) -> impl I
 pub(crate) async fn put_template(
     State(state): State<Arc<AppState>>,
     AxPath(name): AxPath<String>,
-    axum::Json(fields): axum::Json<TemplateFields>,
+    axum::Json(mut fields): axum::Json<TemplateFields>,
 ) -> impl IntoResponse {
+    // The reply describes the saved definition, including retirement of an
+    // old client's trust field, rather than echoing unsaved request content.
+    fields.workspace_trust = None;
     let template = LaunchTemplate { name, fields };
     match store_template(&state, template.clone(), Precondition::None).await {
         Ok(_) => axum::Json(template).into_response(),
@@ -76,12 +79,15 @@ pub(crate) enum Precondition {
 ///
 /// The shape is checked first, and a bad one is the API's typed 400. The write
 /// and its change hint run in a detached task, so a request dropped after the
-/// commit still bumps the hint, like every other helm write.
+/// commit still bumps the hint, like every other helm write. Retired trust
+/// is removed only from the new definition; an approval's raw precondition
+/// must still match the exact older stored definition.
 pub(crate) async fn store_template(
     state: &Arc<AppState>,
-    template: LaunchTemplate,
+    mut template: LaunchTemplate,
     precondition: Precondition,
 ) -> anyhow::Result<bool> {
+    template.fields.workspace_trust = None;
     check_template_shape(&template).map_err(|message| {
         anyhow::Error::new(crate::SupervisorError {
             origin: crate::client::ErrorOrigin::Helm,
@@ -166,6 +172,99 @@ pub(crate) async fn remove_template(
 mod tests {
     use crate::rest_harness;
     use tower::ServiceExt;
+
+    /// A GUI or old client's whole-template PUT still accepts true, false and
+    /// null, but neither its reply nor persisted definition may revive trust.
+    #[farhelm_testtrace::test]
+    async fn template_saves_drop_legacy_trust_from_reply_and_storage() {
+        let harness = rest_harness::idle_helm().await;
+        for trust in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::Value::Null,
+        ] {
+            let fields = serde_json::json!({"kind":"command","command":"echo review","yolo":false,"workspace_trust":trust});
+            let parsed: farhelm_proto::launcher::TemplateFields =
+                serde_json::from_value(fields.clone()).unwrap();
+            assert_eq!(parsed.workspace_trust, Some(trust.as_bool()));
+            let (status, body) =
+                request(&harness, "PUT", "/api/templates/old-client", Some(fields)).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+            let expected =
+                serde_json::json!({"kind":"command","command":"echo review","yolo":false});
+            assert_eq!(body["fields"], expected);
+            let stored = harness.store.launch_templates().await.unwrap();
+            assert_eq!(serde_json::to_value(&stored[0].fields).unwrap(), expected);
+        }
+    }
+
+    /// Approval preconditions describe raw historical data. Normalizing that
+    /// expectation would either refuse a legitimate edit or overlook a change
+    /// made while approval waited; only the replacement loses retired trust.
+    #[farhelm_testtrace::test]
+    async fn conditional_template_save_keeps_raw_legacy_precondition() {
+        use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
+        let harness = rest_harness::idle_helm().await;
+        for trust in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::Value::Null,
+        ] {
+            let old: TemplateFields = serde_json::from_value(
+                serde_json::json!({"command":"echo old","yolo":false,"workspace_trust":trust}),
+            )
+            .unwrap();
+            harness
+                .store
+                .put_launch_template(LaunchTemplate {
+                    name: "legacy".into(),
+                    fields: old.clone(),
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                harness.store.launch_templates().await.unwrap()[0].fields,
+                old,
+                "premise: stored legacy definition still carries trust"
+            );
+            let replacement = LaunchTemplate {
+                name: "legacy".into(),
+                fields: TemplateFields {
+                    name: Some("review".into()),
+                    ..old.clone()
+                },
+            };
+            let mut stale = old.clone();
+            stale.workspace_trust = None;
+            assert!(
+                !super::store_template(
+                    &harness.state,
+                    replacement.clone(),
+                    super::Precondition::Unchanged(Some(Box::new(stale)))
+                )
+                .await
+                .unwrap(),
+                "a precondition differing only in retired trust is still stale"
+            );
+            assert_eq!(
+                harness.store.launch_templates().await.unwrap()[0].fields,
+                old
+            );
+            assert!(
+                super::store_template(
+                    &harness.state,
+                    replacement,
+                    super::Precondition::Unchanged(Some(Box::new(old)))
+                )
+                .await
+                .unwrap()
+            );
+            let stored = harness.store.launch_templates().await.unwrap();
+            assert_eq!(stored[0].fields.workspace_trust, None);
+            assert_eq!(stored[0].fields.name.as_deref(), Some("review"));
+            assert_eq!(stored[0].fields.command.as_deref(), Some("echo old"));
+        }
+    }
 
     /// One request against the real router: its status and JSON body.
     async fn request(

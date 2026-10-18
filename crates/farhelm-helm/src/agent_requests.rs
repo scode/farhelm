@@ -2123,10 +2123,13 @@ async fn delete_template_for_agent(
 ///
 /// Explicit kinds stay explicit, and mixed choices are still refused by the
 /// caller. This inference runs only on create: an edit must keep the stored
-/// template's kind, and no existing template is migrated.
+/// template's kind, and no existing template is migrated. Retired trust is
+/// discarded before inference so an old client cannot pin a trust-only
+/// template to the agent tab or put the discarded choice on an approval card.
 fn with_launch_kind(
     mut fields: farhelm_proto::launcher::TemplateFields,
 ) -> farhelm_proto::launcher::TemplateFields {
+    fields.workspace_trust = None;
     fields.kind = fields.kind.or(fields.implied_kind());
     fields
 }
@@ -2148,7 +2151,9 @@ fn mixes_launch_kinds(fields: &farhelm_proto::launcher::TemplateFields) -> bool 
 
 /// `existing` with every field `edits` sets replaced, and every other field
 /// left as it was. `None` in `edits` means "not given", never "unset": an
-/// edit has no way to remove a field (SPEC.md).
+/// edit has no way to remove a field (SPEC.md). Retired trust is always dropped
+/// from the outgoing definition; callers retain the raw old fields separately
+/// as the approval's compare-and-swap precondition.
 fn merge_template_fields(
     existing: farhelm_proto::launcher::TemplateFields,
     edits: farhelm_proto::launcher::TemplateFields,
@@ -2161,7 +2166,7 @@ fn merge_template_fields(
         effort,
         permissions,
         permission_flags,
-        workspace_trust,
+        workspace_trust: _,
         command,
         yolo,
         resume_command,
@@ -2183,7 +2188,7 @@ fn merge_template_fields(
         } else {
             permission_flags.or(existing.permission_flags)
         },
-        workspace_trust: workspace_trust.or(existing.workspace_trust),
+        workspace_trust: None,
         command: command.or(existing.command),
         yolo: yolo.or(existing.yolo),
         resume_command: resume_command.or(existing.resume_command),
@@ -8681,6 +8686,142 @@ mod tests {
         assert_eq!(with_launch_kind(placement.clone()), placement);
     }
 
+    /// Old trust values must not create a launch-kind constraint or survive
+    /// an agent's sparse edit. The old definition remains available unchanged
+    /// for the approval precondition while only the outgoing fields lose trust.
+    #[test]
+    fn agent_template_helpers_drop_legacy_trust_before_kind_checks() {
+        use farhelm_proto::launcher::{LauncherKind, TemplateFields};
+        for trust in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::Value::Null,
+        ] {
+            let legacy: TemplateFields =
+                serde_json::from_value(serde_json::json!({"workspace_trust":trust})).unwrap();
+            assert_eq!(legacy.workspace_trust, Some(trust.as_bool()));
+            assert_eq!(with_launch_kind(legacy.clone()), TemplateFields::default());
+            let command = TemplateFields {
+                command: Some("echo review".into()),
+                yolo: Some(false),
+                ..legacy.clone()
+            };
+            let normalized = with_launch_kind(command.clone());
+            assert_eq!(normalized.workspace_trust, None);
+            assert_eq!(normalized.kind, Some(LauncherKind::Command));
+            assert!(!mixes_launch_kinds(&normalized));
+            let edited = merge_template_fields(
+                command.clone(),
+                TemplateFields {
+                    name: Some("review".into()),
+                    ..legacy
+                },
+            );
+            assert_eq!(edited.workspace_trust, None);
+            assert_eq!(edited.name.as_deref(), Some("review"));
+            assert_eq!(edited.command, command.command);
+            assert!(!mixes_launch_kinds(&edited));
+            assert_eq!(
+                command.workspace_trust,
+                Some(trust.as_bool()),
+                "the raw old value is still suitable for the conditional write"
+            );
+        }
+    }
+
+    /// Both agent write verbs accept the old wire grammar without reviving
+    /// trust. Editing a historical command template must also pass kind
+    /// validation and compare against its unnormalized stored definition.
+    #[farhelm_testtrace::test]
+    async fn agent_template_writes_accept_and_drop_legacy_trust() {
+        use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
+        let (h, local, _remote) = two_host_fleet().await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        for (index, trust) in [
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::Value::Null,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let fields: TemplateFields = serde_json::from_value(serde_json::json!({
+                "command":"echo historical", "yolo":false, "workspace_trust":trust
+            }))
+            .unwrap();
+            assert_eq!(fields.workspace_trust, Some(trust.as_bool()));
+            let created_name = format!("created-{index}");
+            let created = handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::TemplateCreate {
+                        name: created_name.clone(),
+                        fields: fields.clone(),
+                        host: None,
+                    },
+                )
+                .await;
+            match created {
+                AgentOutcome::Ok {
+                    reply: AgentReply::TemplateWritten { template },
+                } => assert_eq!(template.fields.workspace_trust, None),
+                other => panic!("legacy create accepted, got {other:?}"),
+            }
+            let old_name = format!("historical-{index}");
+            h.store
+                .put_launch_template(LaunchTemplate {
+                    name: old_name.clone(),
+                    fields: fields.clone(),
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                h.store
+                    .launch_templates()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|t| t.name == old_name)
+                    .unwrap()
+                    .fields,
+                fields,
+                "premise: old stored data still contains trust"
+            );
+            let edited = handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::TemplateEdit {
+                        name: old_name.clone(),
+                        fields: TemplateFields {
+                            name: Some("review".into()),
+                            ..Default::default()
+                        },
+                        host: None,
+                    },
+                )
+                .await;
+            match edited {
+                AgentOutcome::Ok {
+                    reply: AgentReply::TemplateWritten { template },
+                } => assert_eq!(template.fields.workspace_trust, None),
+                other => panic!("legacy edit accepted, got {other:?}"),
+            }
+            let saved = h.store.launch_templates().await.unwrap();
+            for name in [&created_name, &old_name] {
+                let fields = &saved
+                    .iter()
+                    .find(|template| &template.name == name)
+                    .unwrap()
+                    .fields;
+                assert_eq!(fields.workspace_trust, None);
+                assert_eq!(fields.command.as_deref(), Some("echo historical"));
+            }
+        }
+    }
+
     /// Spec: `template create` stores the template with its host written as
     /// that host's install identity and refuses a taken name; `template edit`
     /// sets only the fields it is given, keeping the command text the agent
@@ -8961,14 +9102,19 @@ mod tests {
     ///
     /// Why: a template's command line may later run on any host, and the
     /// agent never saw it (the listing withholds it); the card is the one
-    /// place the user can see what the write would leave behind.
+    /// place the user can see what the write would leave behind. Historical
+    /// trust remains in a denied edit's stored data, but never appears as an
+    /// active choice on the proposed replacement's card.
     #[farhelm_testtrace::test]
     async fn a_template_write_card_shows_the_whole_template() {
         let (h, local, _remote) = two_host_fleet().await;
         h.store
             .put_launch_template(farhelm_proto::launcher::LaunchTemplate {
                 name: "t".to_string(),
-                fields: template_fields("hidden-command --flag"),
+                fields: farhelm_proto::launcher::TemplateFields {
+                    workspace_trust: Some(Some(true)),
+                    ..template_fields("hidden-command --flag")
+                },
             })
             .await
             .unwrap();
@@ -8989,6 +9135,7 @@ mod tests {
                         name: "t".to_string(),
                         fields: farhelm_proto::launcher::TemplateFields {
                             name: Some("new title".to_string()),
+                            workspace_trust: Some(Some(false)),
                             ..Default::default()
                         },
                         host: None,
@@ -9008,6 +9155,10 @@ mod tests {
                 assert!(replaces_existing);
                 assert_eq!(fields.command.as_deref(), Some("hidden-command --flag"));
                 assert_eq!(fields.name.as_deref(), Some("new title"));
+                assert_eq!(
+                    fields.workspace_trust, None,
+                    "the card shows only choices that will be saved"
+                );
             }
             other => panic!("a template card, got {other:?}"),
         }
@@ -9025,6 +9176,13 @@ mod tests {
             h.store.launch_templates().await.unwrap()[0].fields.name,
             None,
             "a denied edit writes nothing"
+        );
+        assert_eq!(
+            h.store.launch_templates().await.unwrap()[0]
+                .fields
+                .workspace_trust,
+            Some(Some(true)),
+            "a denied edit preserves historical raw data"
         );
     }
 

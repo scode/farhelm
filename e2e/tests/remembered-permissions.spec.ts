@@ -3,6 +3,8 @@
 // preselects the segment on every client's next "New" open, "reset choices"
 // returns to that remembered value rather than to "default", and a
 // following structured launch with default permissions clears it again.
+// A historical workspace-trust value is injected on read: new writes no
+// longer remember it, and it must not affect a fresh dialog or its requests.
 //
 // This is a fresh spec file rather than an addition to sidebar.spec.ts or
 // clone.spec.ts on purpose: those files' composer tests intentionally
@@ -31,14 +33,25 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     // real yolo launch (clone.spec.ts makes one) may already be remembered
     // here. Clear the memory BEFORE the page loads — the client reads the
     // preference row once, at load — then confirm the very first "New"
-    // open, before this test has launched anything, preselects "default".
+    // open, before this test has launched anything, preselects guarded.
     await patchPreferences(request, { remembered_permissions: null });
+    let historicalPreferenceSent = false;
+    await page.route("**/api/preferences", async route => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const response = await route.fetch();
+      const json = await response.json();
+      json.remembered_workspace_trust = true;
+      await route.fulfill({ response, json });
+      historicalPreferenceSent = true;
+    });
     await page.goto("/");
     const form = page.locator(".create-session-form");
     const permissions = () => form.locator(".launch-composer-permissions-choice");
 
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
+    await expect.poll(() => historicalPreferenceSent).toBe(true);
+    await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
     expect(
       (await readPreferences(request)).remembered_permissions,
       "the fixture premise: nothing remembered before this test's first launch",
@@ -62,6 +75,8 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     const yoloSession = await yoloResponse.json();
     created.push(yoloSession.id);
     expect(yoloSession.launch.selection).toMatchObject({ harness: "codex", permissions: "yolo" });
+    expect(yoloResponse.request().postDataJSON().launch).not.toHaveProperty("workspace_trust");
+    expect(yoloSession.launch.selection).not.toHaveProperty("workspace_trust");
     await expect(form, "a successful launch closes the composer").toHaveCount(0);
     await expect
       .poll(async () => (await readPreferences(request)).remembered_permissions, {
@@ -85,6 +100,7 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     // feature), so choosing Codex AFTER reset is what proves the segment's
     // own remembered value survived that same reset independently.
     await form.getByRole("button", { name: "reset choices", exact: true }).click();
+    await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
     await expect(permissions().getByRole("button", { name: "yolo", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -109,6 +125,8 @@ test("the remembered structured-launch permissions mode survives an open, a rese
     const defaultSession = await defaultResponse.json();
     created.push(defaultSession.id);
     expect(defaultSession.launch.selection).toMatchObject({ harness: "codex", permissions: "guarded" });
+    expect(defaultResponse.request().postDataJSON().launch).not.toHaveProperty("workspace_trust");
+    expect(defaultSession.launch.selection).not.toHaveProperty("workspace_trust");
     await expect(form, "a successful launch closes the composer").toHaveCount(0);
     await expect
       .poll(async () => (await readPreferences(request)).remembered_permissions, {
@@ -184,10 +202,13 @@ test("a create reply claiming yolo does not change what the next New dialog pres
     await form.getByLabel("folder", { exact: true }).fill(cwd);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await permissions().getByRole("button", { name: "guarded", exact: true }).click();
-    expect((await submit()).launch).toMatchObject({ harness: "codex", permissions: "guarded" });
+    const submitted = (await submit()).launch;
+    expect(submitted).toMatchObject({ harness: "codex", permissions: "guarded" });
+    expect(submitted).not.toHaveProperty("workspace_trust");
 
     await page.locator(".new-session-button").click();
     await expect(form).toBeVisible();
+    await expect(form.locator(".launch-composer-trust-choice")).toHaveCount(0);
     await expect(
       permissions().getByRole("button", { name: "guarded", exact: true }),
       "the reply's yolo must not become this page's preselection",

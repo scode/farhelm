@@ -338,7 +338,6 @@ pub(super) enum Field {
     Model,
     Effort,
     Permissions,
-    Trust,
     Command,
     Yolo,
     Resume,
@@ -350,14 +349,13 @@ pub(super) enum Field {
 impl Field {
     // Command-only fields lead when present; their absence keeps the agent
     // editor in its usual agent/model/effort order without a second ordering table.
-    pub(super) const ALL: [Self; 12] = [
+    pub(super) const ALL: [Self; 11] = [
         Self::Command,
         Self::Yolo,
         Self::Agent,
         Self::Model,
         Self::Effort,
         Self::Permissions,
-        Self::Trust,
         Self::Resume,
         Self::Prompt,
         Self::Host,
@@ -374,7 +372,6 @@ impl Field {
             Self::Model => "model",
             Self::Effort => "effort",
             Self::Permissions | Self::Yolo => "approvals",
-            Self::Trust => "workspace trust",
             Self::Command => "command",
             Self::Resume => "resume command",
             Self::Host => "host",
@@ -393,7 +390,6 @@ impl Field {
             Self::Effort => "effort",
             Self::Permissions => "permissions",
             Self::Yolo => "yolo",
-            Self::Trust => "trust",
             Self::Command => "command",
             Self::Resume => "resume",
             Self::Host => "host",
@@ -411,7 +407,6 @@ impl Field {
             Self::Model => f.model.is_some(),
             Self::Effort => f.effort.is_some(),
             Self::Permissions => f.permissions.is_some(),
-            Self::Trust => f.workspace_trust.is_some(),
             Self::Command => f.command.is_some(),
             Self::Yolo => f.yolo.is_some(),
             Self::Resume => f.resume_command.is_some(),
@@ -452,7 +447,7 @@ impl Field {
     }
 
     /// Add an editable value without choosing another field on the user's
-    /// behalf. In particular, model/effort/trust do not require an agent type.
+    /// behalf. In particular, model/effort do not require an agent type.
     fn add(self, f: &mut TemplateFields) {
         match self {
             Self::Prompt => f.prompt = Some(String::new()),
@@ -460,7 +455,6 @@ impl Field {
             Self::Model => f.model = Some(None),
             Self::Effort => f.effort = Some(None),
             Self::Permissions => f.permissions = Some(None),
-            Self::Trust => f.workspace_trust = Some(None),
             Self::Command => f.command = Some(String::new()),
             Self::Yolo => f.yolo = Some(false),
             Self::Resume => f.resume_command = Some(None),
@@ -482,7 +476,6 @@ impl Field {
                 f.permissions = None;
                 f.permission_flags = None;
             }
-            Self::Trust => f.workspace_trust = None,
             Self::Command => f.command = None,
             Self::Yolo => f.yolo = None,
             Self::Resume => f.resume_command = None,
@@ -514,10 +507,6 @@ impl Field {
             }
             Self::Permissions => {
                 f.kind == Some(LauncherKind::Agent) && f.agent.is_none_or(|a| !a.offers_only_yolo())
-            }
-            Self::Trust => {
-                f.kind == Some(LauncherKind::Agent)
-                    && f.agent.is_none_or(LaunchHarness::offers_workspace_trust)
             }
         }
     }
@@ -628,10 +617,14 @@ impl Default for Draft {
 }
 
 impl Draft {
-    /// Infer only in the editor. Comparing with the original baseline marks a
-    /// legacy switch as unsaved instead of migrating stored records on read.
+    /// Normalize legacy choices only in the editor's draft. Comparing with
+    /// the original baseline marks inferred kinds and dropped trust as unsaved;
+    /// opening the editor never migrates stored records.
     fn from_template(t: &LaunchTemplate) -> Self {
         let mut fields = t.fields.clone();
+        // Old templates decode their trust field, but Settings now owns it.
+        // Clearing it in the draft drops it on edit, duplicate, and save.
+        fields.workspace_trust = None;
         fields.kind = fields.kind.or(fields.implied_kind());
         Self {
             name: t.name.clone(),
@@ -756,7 +749,7 @@ pub(super) fn new_name_refusal(name: &str, templates: Option<&[LaunchTemplate]>)
 /// list: every field it sets, a reset shown as such. The command and resume
 /// text are left out (they can be long, and the edit form shows them).
 /// Model ids can originate on a host, so escape them before composing the
-/// approval and trust wording shared by the list and quick switcher.
+/// approval wording shared by the list and quick switcher.
 pub(super) fn template_summary(fields: &TemplateFields) -> String {
     let choice = |name: &str, value: Option<String>| match value {
         Some(value) => format!("{name} {value}"),
@@ -789,12 +782,6 @@ pub(super) fn template_summary(fields: &TemplateFields) -> String {
     }
     if let Some(words) = &fields.permission_flags {
         parts.push(crate::peer::display_peer(&shell_words::join(words)));
-    }
-    if let Some(trust) = fields.workspace_trust {
-        parts.push(choice(
-            "trust",
-            trust.map(|trust| if trust { "on" } else { "off" }.to_string()),
-        ));
     }
     if fields.command.is_some() {
         parts.push("command".to_string());
@@ -965,12 +952,6 @@ fn FieldEditor(
                         permission_flags_text.set(text);
                     },
                 }
-            }
-        },
-        Field::Trust => rsx! {
-            Choice { label, value: current.workspace_trust.flatten().map(|v| v.to_string()).unwrap_or_else(|| DEFAULT.into()),
-                options: vec![(DEFAULT.into(), "default".into()), ("true".into(), "trusted".into()), ("false".into(), "not trusted".into())], disabled,
-                on_change: move |v: String| draft.with_mut(|d| d.fields.workspace_trust = Some(v.parse().ok())),
             }
         },
         Field::Yolo => rsx! {
@@ -1540,9 +1521,11 @@ pub(super) fn TemplatesDialog(
         if busy() {
             return;
         }
-        let Some(value) = undo() else {
+        let Some(mut value) = undo() else {
             return;
         };
+        // Undo is a new save too; never restore a retired launch choice.
+        value.template.fields.workspace_trust = None;
         // Re-read names at undo time; the list after deletion alone cannot
         // see a name another client took during the ten-second window.
         let base = undo_base.clone();
@@ -2080,6 +2063,28 @@ mod tests {
                     },
                 kind.is_some()
             );
+        }
+    }
+
+    /// Opening a template leaves stored data readable but removes retired trust
+    /// from its editable draft, so both ordinary saves and duplicates drop it.
+    #[test]
+    fn legacy_trust_is_dropped_from_editor_drafts() {
+        for trust in [None, Some(false), Some(true)] {
+            let stored = LaunchTemplate {
+                name: "legacy trust".into(),
+                fields: TemplateFields {
+                    kind: Some(LauncherKind::Agent),
+                    agent: Some(LaunchHarness::Codex),
+                    workspace_trust: Some(trust),
+                    ..Default::default()
+                },
+            };
+            let draft = Draft::from_template(&stored);
+            assert_eq!(stored.fields.workspace_trust, Some(trust));
+            assert_eq!(draft.fields.workspace_trust, None);
+            assert_eq!(draft.fields.agent, stored.fields.agent);
+            assert!(!template_summary(&stored.fields).contains("trust"));
         }
     }
 

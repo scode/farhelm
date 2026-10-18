@@ -1048,8 +1048,8 @@ export async function readPreferences(request: APIRequestContext): Promise<Prefe
  * Write a sparse patch to the helm's shared preference: an absent field is
  * untouched, an explicit `null` clears it, a value replaces it.
  *
- * The remembered launch fields are accepted here for test-fixture convenience
- * (planting or clearing a known memory directly, without driving a real
+ * Remembered permissions are accepted here for test-fixture convenience
+ * (planting or clearing a known mode directly, without driving a real
  * structured launch through the UI) even though no shipped client ever
  * sends it: the route validates and merges it exactly like every other
  * field, so a direct PUT is a legitimate, if unusual, caller.
@@ -1062,7 +1062,6 @@ export async function patchPreferences(
     last_selected?: string | null;
     compact?: boolean | null;
     remembered_permissions?: string | null;
-    remembered_workspace_trust?: boolean | null;
     skip_host_remove_confirmation?: boolean | null;
     skip_host_setup_confirmation?: boolean | null;
     skip_session_confirmations?: boolean | null;
@@ -1087,11 +1086,9 @@ export async function patchPreferences(
  * the row in `beforeEach` rather than inherit the last test's answer.
  *
  * Welcome is restored to seen, because these tests are not first-open flows.
- * Every field `patchPreferences` accepts belongs in this reset. One left out
- * leaks across spec files without any test noticing locally: remembered
- * workspace trust was missing, so the quick switcher's `true` survived its
- * own `afterEach` and the sidebar's model-first composer test, which runs
- * later in a full-suite run, saw `trust: true` in both engines.
+ * Every active field `patchPreferences` accepts belongs in this reset, or a
+ * choice made by another spec can leak into an unrelated fixture. Retired
+ * trust memory is supplied only by controlled read responses in its own tests.
  */
 export async function resetPreferences(request: APIRequestContext): Promise<void> {
   await patchPreferences(request, {
@@ -1101,7 +1098,6 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
     last_selected: null,
     compact: null,
     remembered_permissions: null,
-    remembered_workspace_trust: null,
     skip_host_remove_confirmation: null,
     skip_host_setup_confirmation: null,
     skip_session_confirmations: null,

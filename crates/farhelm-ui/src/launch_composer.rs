@@ -220,17 +220,19 @@ pub(crate) fn permission_words(
 /// Older history rows stored an omitted permission while newer launches store
 /// the default explicitly for harnesses whose stock mode is YOLO. Treating
 /// those representations as equal keeps the recent-setups list from showing
-/// two buttons for one user-visible launch.
+/// two buttons for one user-visible launch. Retired trust values are ignored
+/// too, because a new destination gets trust from Settings.
 fn normalized_selection(selection: &LaunchSelection) -> LaunchSelection {
     let mut normalized = selection.clone();
     normalized.permissions = normalized_permissions(selection.harness, selection.permissions);
+    normalized.workspace_trust = None;
     normalized
 }
 
 /// Keep a trust choice only on harnesses with a supported launch mapping.
 ///
-/// A switch to an unsupported harness clears the current draft's choice;
-/// the helm's remembered default remains available for a new dialog.
+/// This checks stored selections too: old launches retain their trust mapping
+/// even though the current launcher no longer offers that choice.
 pub(crate) const fn normalized_workspace_trust(
     harness: LaunchHarness,
     trust: Option<bool>,
@@ -284,88 +286,6 @@ pub(crate) const HARNESS_PICKER_ORDER: [LaunchHarness; 9] = [
 ];
 const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_PICKER_ORDER));
 
-/// The help line the composer shows under a harness's workspace-trust choice,
-/// where the meaning of true and false needs saying.
-///
-/// Exhaustive so a new harness that offers the choice decides whether it
-/// needs a line; harnesses without the choice never show one.
-#[warn(clippy::wildcard_enum_match_arm)]
-pub(crate) const fn workspace_trust_help(harness: LaunchHarness) -> Option<&'static str> {
-    match harness {
-        LaunchHarness::Muse => Some(
-            "Muse false adds no trust flag; YOLO or vendor settings may still trust this workspace.",
-        ),
-        LaunchHarness::Codex => Some(
-            "Codex true trusts this directory for this launch; false runs it as untrusted. Default uses Codex's own setting or prompt.",
-        ),
-        LaunchHarness::Pi
-        | LaunchHarness::Cursor
-        | LaunchHarness::Claude
-        | LaunchHarness::Goose
-        | LaunchHarness::Omp
-        | LaunchHarness::OpenCode
-        | LaunchHarness::Grok => None,
-    }
-}
-
-/// Hover text for one workspace-trust choice (`None` is "default") with the
-/// selected harness, which decides what true and false actually do
-/// (SPEC.md, the launch composer's workspace-trust contract): Codex marks the
-/// launch's directory trusted or untrusted, Pi passes `--approve` or
-/// `--no-approve`, and Muse adds `--trust-workspace` for true and nothing for
-/// false, which cannot revoke trust YOLO or vendor settings already grant.
-#[warn(clippy::wildcard_enum_match_arm)]
-pub(crate) const fn workspace_trust_tooltip(
-    harness: Option<LaunchHarness>,
-    choice: Option<bool>,
-) -> &'static str {
-    match (harness, choice) {
-        (_, None) => "default: the agent's own workspace-trust setting or prompt applies",
-        (Some(LaunchHarness::Codex), Some(true)) => {
-            "true: run this launch with its folder marked trusted"
-        }
-        (Some(LaunchHarness::Codex), Some(false)) => {
-            "false: run this launch with its folder marked untrusted"
-        }
-        (Some(LaunchHarness::Pi), Some(true)) => {
-            "true: approve the project's resources for this launch (--approve)"
-        }
-        (Some(LaunchHarness::Pi), Some(false)) => {
-            "false: do not approve the project's resources for this launch (--no-approve)"
-        }
-        (Some(LaunchHarness::Muse), Some(true)) => {
-            "true: trust this workspace for this launch (--trust-workspace)"
-        }
-        (Some(LaunchHarness::Muse), Some(false)) => {
-            "false: add no trust flag; YOLO or vendor settings may still trust this workspace"
-        }
-        (
-            None
-            | Some(
-                LaunchHarness::Cursor
-                | LaunchHarness::Claude
-                | LaunchHarness::Goose
-                | LaunchHarness::Omp
-                | LaunchHarness::OpenCode
-                | LaunchHarness::Grok,
-            ),
-            Some(true),
-        ) => "true: trust the session's folder for this launch",
-        (
-            None
-            | Some(
-                LaunchHarness::Cursor
-                | LaunchHarness::Claude
-                | LaunchHarness::Goose
-                | LaunchHarness::Omp
-                | LaunchHarness::OpenCode
-                | LaunchHarness::Grok,
-            ),
-            Some(false),
-        ) => "false: do not trust the session's folder for this launch",
-    }
-}
-
 /// The short name a user sees for a harness. Every spelling of a structured
 /// harness in the composer, a session's menu header, and the restart-with
 /// dialog derives from this, the lowercase words included (see
@@ -415,7 +335,6 @@ pub(crate) struct ComposerFilter {
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<LaunchEffort>,
     pub(crate) permissions: Option<LaunchPermission>,
-    pub(crate) workspace_trust: Option<bool>,
 }
 
 /// One explicit choice shown by composer search.
@@ -439,8 +358,6 @@ pub(crate) enum ComposerSearchResult {
     },
     /// Apply one effort offered by the currently selected harness and model.
     Effort(LaunchEffort),
-    /// Apply an explicit per-launch workspace-trust choice.
-    Trust(bool),
     /// Apply a searched permission choice without changing
     /// any other structured launch field.
     Permissions(ComposerPermission),
@@ -681,7 +598,6 @@ pub(crate) enum ComposerSearchGroup {
     /// Reasoning-effort words valid for the selected harness and model.
     Efforts,
     Permissions,
-    Trust,
     Folders,
     Repositories,
     RecentSetups,
@@ -698,7 +614,6 @@ impl ComposerSearchGroup {
             Self::Models => "Models",
             Self::Efforts => "Efforts",
             Self::Permissions => "Permissions",
-            Self::Trust => "Workspace trust",
             Self::Folders => "Folders",
             Self::Repositories => "GitHub repositories",
             Self::RecentSetups => "Recent setups",
@@ -721,7 +636,6 @@ pub(crate) fn grouped_search_results(
     let mut models = Vec::new();
     let mut efforts = Vec::new();
     let mut permissions = Vec::new();
-    let mut trust = Vec::new();
     let mut folders = Vec::new();
     let mut repositories = Vec::new();
     let mut recents = Vec::new();
@@ -734,7 +648,6 @@ pub(crate) fn grouped_search_results(
             ComposerSearchResult::Model { .. } => models.push(result),
             ComposerSearchResult::Effort(_) => efforts.push(result),
             ComposerSearchResult::Permissions(_) => permissions.push(result),
-            ComposerSearchResult::Trust(_) => trust.push(result),
             ComposerSearchResult::UsePath(_)
             | ComposerSearchResult::BrowsePath(_)
             | ComposerSearchResult::Folder(_) => folders.push(result),
@@ -750,7 +663,6 @@ pub(crate) fn grouped_search_results(
         (ComposerSearchGroup::Models, models),
         (ComposerSearchGroup::Efforts, efforts),
         (ComposerSearchGroup::Permissions, permissions),
-        (ComposerSearchGroup::Trust, trust),
         (ComposerSearchGroup::Folders, folders),
         (ComposerSearchGroup::Repositories, repositories),
         (ComposerSearchGroup::RecentSetups, recents),
@@ -763,8 +675,8 @@ pub(crate) fn grouped_search_results(
 /// Render every choice a recent setup will apply before an interaction changes
 /// the form.
 ///
-/// Omitted model, effort, and permission fields are named as defaults, while
-/// trust is shown only when explicitly set. Pi is the compatibility exception: an omitted
+/// Omitted model, effort, and permission fields are named as defaults.
+/// Pi is the compatibility exception: an omitted
 /// permission from an older snapshot is presented as its mandatory YOLO mode.
 /// This is the complete accessible description; the compact row surface puts
 /// its harness in a separately styled leading span.
@@ -794,9 +706,6 @@ pub(crate) fn selection_summary_without_harness(selection: &LaunchSelection) -> 
             crate::peer::display_peer(&shell_words::join(words))
         ));
     }
-    if let Some(trust) = selection.workspace_trust {
-        summary.push_str(&format!(" · trust: {trust}"));
-    }
     summary
 }
 
@@ -825,7 +734,7 @@ pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) 
     )
 }
 
-/// Render the model, effort, and trust values a saved selection sets
+/// Render the model and effort values a saved selection sets
 /// explicitly, stopping before permission; empty when all are defaults.
 ///
 /// This is what the compact recent row shows. Three rows that each spelled
@@ -842,21 +751,18 @@ pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) 
 ///
 /// Permission is left out because the row spells it itself, so that it
 /// can color "yolo" as a warning without cutting the word back out of a
-/// formatted string. An explicit trust value remains visible in that row.
+/// formatted string. Trust is decided from Settings for the new destination.
 pub(crate) fn selection_explicit_before_permissions(selection: &LaunchSelection) -> Vec<String> {
     let model = selection
         .model
         .as_deref()
         .map(|model| format!("model: {model}"));
     let effort = selection.effort.map(|effort| format!("effort: {effort:?}"));
-    let trust = selection
-        .workspace_trust
-        .map(|value| format!("trust: {value}"));
-    model.into_iter().chain(effort).chain(trust).collect()
+    model.into_iter().chain(effort).collect()
 }
 
 /// The word a compact recent row shows when its setup sets nothing
-/// explicitly: no model, effort, or trust value, and the default permission.
+/// explicitly: no model or effort value, and the default permission.
 ///
 /// A word and not a blank, because a blank cell cannot be told apart from
 /// one that failed to render, and because saying so keeps the summary's
@@ -879,7 +785,6 @@ pub(crate) enum SearchScope {
     Model,
     Effort,
     Permissions,
-    Trust,
     Folder,
     Recent,
     Github,
@@ -910,8 +815,6 @@ pub(crate) fn scoped_query(query: &str) -> (SearchScope, &str) {
         SearchScope::Effort
     } else if label.eq_ignore_ascii_case("perms") {
         SearchScope::Permissions
-    } else if label.eq_ignore_ascii_case("trust") {
-        SearchScope::Trust
     } else if label.eq_ignore_ascii_case("folder") {
         SearchScope::Folder
     } else if label.eq_ignore_ascii_case("recent") {
@@ -1104,14 +1007,6 @@ pub(crate) fn search_results(
         }
     }
 
-    if scope == SearchScope::Trust && harness.is_some_and(LaunchHarness::offers_workspace_trust) {
-        for (word, value) in [("true", true), ("false", false)] {
-            if query.is_empty() || word.starts_with(&folded_query) {
-                results.push(ComposerSearchResult::Trust(value));
-            }
-        }
-    }
-
     if matches!(scope, SearchScope::All | SearchScope::Folder) {
         if is_path_query(query) {
             results.push(ComposerSearchResult::UsePath(query.to_string()));
@@ -1190,7 +1085,6 @@ pub(crate) fn default_search_index(
         SearchScope::Model => vec![ComposerSearchGroup::Models],
         SearchScope::Effort => vec![ComposerSearchGroup::Efforts],
         SearchScope::Permissions => vec![ComposerSearchGroup::Permissions],
-        SearchScope::Trust => vec![ComposerSearchGroup::Trust],
         SearchScope::Template => vec![ComposerSearchGroup::Templates],
         SearchScope::Folder | SearchScope::Recent | SearchScope::Github => Vec::new(),
     };
@@ -1208,7 +1102,7 @@ pub(crate) fn default_search_index(
 /// Return the group of a result whose visible word IS the (lowercase,
 /// trimmed) query, or `None` when the result is not an exact word match.
 ///
-/// Harness, model, effort, trust, and host rows have a deliberate matching
+/// Harness, model, effort, and host rows have a deliberate matching
 /// word; paths, folders, and recent setups are descriptions, and an exact
 /// match on those would be a coincidence rather than an intent. Each
 /// kind compares by the same spelling the search offered it under —
@@ -1249,9 +1143,6 @@ fn exact_word_group(
         {
             Some(ComposerSearchGroup::Permissions)
         }
-        ComposerSearchResult::Trust(value) if value.to_string() == folded_query => {
-            Some(ComposerSearchGroup::Trust)
-        }
         _ => None,
     }
 }
@@ -1288,9 +1179,6 @@ pub(crate) fn matches_filter(selection: &LaunchSelection, filter: &ComposerFilte
         && filter.permissions.is_none_or(|permissions| {
             normalized_permissions(selection.harness, selection.permissions) == Some(permissions)
         })
-        && filter
-            .workspace_trust
-            .is_none_or(|trust| selection.workspace_trust == Some(trust))
 }
 
 /// Rank every unique recent setup for the selected folder.
@@ -1443,10 +1331,15 @@ enum RecentDestination<'a> {
 /// Apply a recent setup as a complete explicit selection.
 ///
 /// This does not create a session, retain fields from the prior selection, or
-/// infer a default for a field the saved setup omitted. The component uses the
-/// returned value to update controls and waits for an explicit Launch click.
+/// infer a default for a field the saved setup omitted. Historical trust is
+/// dropped because the helm resolves it for the new destination. The component
+/// uses the returned value to update controls and waits for an explicit Launch click.
 pub(crate) fn select_recent(entry: &LaunchHistoryEntry) -> LaunchSelection {
-    entry.selection.clone()
+    let mut selection = entry.selection.clone();
+    // A saved launch cannot carry trust into a different destination. The
+    // helm composes it from Settings once the new destination is known.
+    selection.workspace_trust = None;
+    selection
 }
 
 /// Return whether a structured choice remains valid against the catalog the
@@ -1455,7 +1348,7 @@ pub(crate) fn select_recent(entry: &LaunchHistoryEntry) -> LaunchSelection {
 /// Unknown model IDs are valid custom IDs once the person has selected their
 /// owning harness. They cannot have model-specific effort constraints locally,
 /// so this applies the harness-wide vocabulary. It also rejects Goose-only
-/// permission modes on every other harness and hidden workspace-trust choices,
+/// permission modes on every other harness and unsupported historical trust values,
 /// while accepting an omitted default-YOLO permission as its older spelling and
 /// OMP's YOLO/Approve choices. The helm
 /// validates the final request again, including Zen provider syntax for
@@ -1770,35 +1663,19 @@ mod tests {
         assert!(name_host_search_results("host:missing", &hosts).is_empty());
     }
 
-    /// The typed trust action is available only where the UI can compile a
-    /// real per-launch workspace choice; unsupported harnesses cannot offer
-    /// an action that would be refused at submit.
+    /// Retired trust labels must remain ordinary text, with no action that
+    /// could restore a historical per-launch choice through the keyboard.
     #[test]
-    fn trust_search_actions_are_scoped_to_supported_harnesses() {
-        let history = LaunchHistory::default();
-        for harness in [LaunchHarness::Codex, LaunchHarness::Muse, LaunchHarness::Pi] {
-            let results = search_results(&history, &[], "trust:", Some(harness), None);
-            assert_eq!(
-                results,
-                vec![
-                    ComposerSearchResult::Trust(true),
-                    ComposerSearchResult::Trust(false)
-                ]
-            );
-            let grouped = grouped_search_results(results);
-            assert_eq!(default_search_index(&grouped, "trust:false"), 1);
+    fn trust_labels_no_longer_offer_launch_actions() {
+        for query in ["trust:", "trust:true", "trust:false"] {
+            assert_eq!(scoped_query(query), (SearchScope::All, query));
+            for &harness in LaunchHarness::ALL {
+                assert!(
+                    search_results(&LaunchHistory::default(), &[], query, Some(harness), None)
+                        .is_empty()
+                );
+            }
         }
-        assert!(
-            search_results(
-                &history,
-                &[],
-                "trust:true",
-                Some(LaunchHarness::Claude),
-                None
-            )
-            .is_empty()
-        );
-        assert!(search_results(&history, &[], "trust:false", None, None).is_empty());
     }
 
     /// Permission search exposes exactly the two settled shorthand words and
@@ -1858,9 +1735,9 @@ mod tests {
         assert_eq!(default_search_index(&groups, "yolo"), 0);
     }
 
-    /// Switching away from a supported harness clears a hidden trust flag;
-    /// the last explicit choice may still live in helm preferences for a
-    /// future fresh dialog.
+    /// Shared reconciliation must still clear historical trust values on an
+    /// unsupported harness. Compatibility callers can carry old selections
+    /// even though new launcher drafts never contain a trust choice.
     #[test]
     fn harness_reconciliation_clears_unsupported_workspace_trust() {
         let mut choice = selection(LaunchHarness::Muse, None, None);
@@ -1984,6 +1861,34 @@ mod tests {
             "{}",
             selection_summary(&selection)
         );
+    }
+
+    /// A saved trust answer must neither split otherwise identical recent
+    /// setups nor follow a recent into a new destination. Summaries describe
+    /// only reusable choices so they cannot promise that old trust applies.
+    #[test]
+    fn recent_trust_is_ignored_for_grouping_display_and_application() {
+        let mut entry = LaunchHistoryEntry {
+            host: HostId::default(),
+            github_repo: None,
+            cwd: "/work".into(),
+            canonical_cwd: Some("/work".into()),
+            selection: selection(LaunchHarness::Codex, None, None),
+            created_at: 1,
+            creation_seq: Some(1),
+        };
+        let without_trust = normalized_selection(&entry.selection);
+        for trust in [Some(false), Some(true)] {
+            entry.selection.workspace_trust = trust;
+            assert_eq!(normalized_selection(&entry.selection), without_trust);
+            assert_eq!(select_recent(&entry).workspace_trust, None);
+            assert!(!selection_summary(&entry.selection).contains("trust"));
+            assert!(selection_explicit_before_permissions(&entry.selection).is_empty());
+            assert_eq!(
+                entry.selection.workspace_trust, trust,
+                "reading does not rewrite history"
+            );
+        }
     }
 
     /// The compact row presents its harness separately and spells the
@@ -3431,8 +3336,8 @@ mod tests {
         assert_eq!(default_search_index(&groups, "partial"), 0);
     }
 
-    /// The fixed group order places permission actions beside efforts and
-    /// trust, so keyboard indexes stay stable as groups grow.
+    /// The fixed group order places permission actions beside efforts, so
+    /// keyboard indexes stay stable as groups grow.
     #[test]
     fn grouped_search_results_places_efforts_between_models_and_folders() {
         let groups = grouped_search_results(vec![

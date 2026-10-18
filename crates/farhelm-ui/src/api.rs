@@ -343,8 +343,8 @@ impl ListSort {
 
 /// The one client preference the helm remembers for every client at once
 /// (SPEC.md, Session list): the chosen list order, user-selected session,
-/// compact-row choice, and the remembered permissions and workspace-trust
-/// choices of successful structured launches, host confirmation choices,
+/// compact-row choice, and the remembered permissions of successful structured
+/// launches, independent trust-hint dismissals, host confirmation choices,
 /// terminal web-link click ownership, and the contact reused by Send feedback. The reply shape of
 /// `GET /api/preferences`.
 ///

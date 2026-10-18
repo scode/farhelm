@@ -20,8 +20,12 @@ specific to Codex.
   and [how to turn it off](/docs/how-it-works/agent-hook-injection/#turning-it-off).
 - **restart** becomes available only after you submit your first prompt. A Codex session you never prompted cannot be
   restarted; replace it instead.
-- Workspace trust in the session launcher applies to that one launch only: **true** trusts the session's directory and
-  **false** marks it untrusted, without changing what Codex has saved about that directory.
+- To skip Codex's directory-trust question in
+  [managed checkouts](/docs/using/start-a-session/#trust-in-managed-checkouts), enable its switch in **settings**. It is
+  off by default and applies across hosts when Farhelm starts a new launch in a directory it manages. Farhelm passes a
+  trust argument for that launch without changing Codex's saved configuration. Trust lets the repository's own hooks,
+  settings and commands run as if you had approved them. Directories outside managed checkouts keep Codex's own trust
+  behavior.
 - **restart** resumes the conversation Farhelm last learned of. After `/clear`, Farhelm learns of the new conversation
   when you send your next prompt, and restart can resume it once Codex has finished that reply. Restarting before you
   send that prompt can bring back the earlier conversation.

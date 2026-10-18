@@ -4354,8 +4354,7 @@ pub(crate) fn ListView(
 /// session's `launch` is the supervisor's reply, which a remote host writes,
 /// and SPEC.md allows only explicit GUI selections to shape GUI defaults.
 /// `None` (a command create) leaves the preferences alone, as the
-/// helm does. A harness that does not offer workspace trust, or a selection
-/// that leaves it unset, keeps the remembered trust choice.
+/// helm does. Workspace trust comes from Settings and never affects GUI defaults.
 fn mirror_submitted_launch(
     preferences: &mut crate::api::Preferences,
     submitted: Option<&farhelm_proto::LaunchSelection>,
@@ -4372,11 +4371,6 @@ fn mirror_submitted_launch(
         .filter(|permission| Some(*permission) != launch.harness.omitted_permission())
         .filter(|permission| *permission != crate::LaunchPermission::Custom)
         .map(|permission| permission.wire_word().to_string());
-    if launch.harness.offers_workspace_trust()
-        && let Some(trust) = launch.workspace_trust
-    {
-        preferences.remembered_workspace_trust = Some(trust);
-    }
 }
 
 /// The one open notification list (SPEC.md, Status), as `ListView` tracks it.
@@ -4590,18 +4584,13 @@ mod tests {
         });
     }
 
-    /// Only a complete fleet-wide listing may change rename availability.
-    ///
-    /// A partial or mutation-local listing cannot prove that an editor's
-    /// source left the fleet.
-    /// Spec: the local preference mirror after a create follows only the
-    /// launch the form submitted: a command create (no
-    /// submission) leaves the remembered choices alone, and a structured
-    /// submission sets them from itself.
+    /// A successful create mirrors only submitted permissions. Command launches
+    /// leave memory alone, and historical trust memory remains inert even if
+    /// the submitted selection carries a compatibility value.
     ///
     /// Why: the mirror used to copy the created session's `launch`, which is
     /// the supervisor's reply. A misbehaving remote host could make this
-    /// page's next New dialog preselect "yolo" with workspace trust for every
+    /// page's next New dialog preselect "yolo" for every
     /// host until reload, even with the helm's own stored defaults untouched.
     /// The helper takes no `Session` at all, so the reply cannot reach it.
     #[farhelm_testtrace::test]
@@ -4624,7 +4613,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
-            workspace_trust: None,
+            workspace_trust: Some(true),
         };
         mirror_submitted_launch(&mut preferences, Some(&submitted));
         assert_eq!(
@@ -4634,7 +4623,7 @@ mod tests {
         assert_eq!(
             preferences.remembered_workspace_trust,
             Some(false),
-            "a submission that leaves trust unset keeps the remembered trust"
+            "even a historical trust value must leave retired memory untouched"
         );
 
         let omitted_yolo_default = farhelm_proto::LaunchSelection {
