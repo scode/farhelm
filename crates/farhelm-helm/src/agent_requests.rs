@@ -2611,6 +2611,7 @@ fn merge_template_fields(
         host,
         destination,
         name,
+        name_kind,
     } = edits;
     farhelm_proto::launcher::TemplateFields {
         prompt: prompt.or(existing.prompt),
@@ -2634,6 +2635,9 @@ fn merge_template_fields(
         host: host.or(existing.host),
         destination: destination.or(existing.destination),
         name: name.or(existing.name),
+        // A title-only edit keeps a stored Fixed policy. Explicit Base is
+        // retained until the shared writer normalizes its persisted shape.
+        name_kind: name_kind.or(existing.name_kind),
     }
 }
 

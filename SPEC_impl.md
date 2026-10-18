@@ -707,15 +707,19 @@ browser, optional name, search, and submission remain shared; only the tab's own
 The prefill keeps the source's raw directory and title while separately carrying its repository, preferring checkout
 membership over launch provenance. Clone seeds that repository as a fresh destination; Replace with keeps the folder.
 The untouched Clone name is computed at every launch-related read, so display, preview, retry binding and submission
-agree without destroying the copied title needed when returning to a folder. Occupied-name previews advance only that
-default through `-clone`, then `-clone-2` through `-clone-50`; at the cap the conflict stays visible. Changing host
-installation or repository resets the search. The preview API classifies an unmarked 409 as occupied, separately from
-the helm's stale-precondition 409, transport errors and other refusals; new conflict responses must revisit that
-classification. The existing preview-authority generation checks reject late results before they can advance a name. A
-retained attempt matching the current intent and installation freezes its name for reconciliation; the occupied
-directory may be its own accepted allocation. Editing the launch while an ambiguous attempt is retained can advance the
-default away from that attempt, even if the edit is later undone; reselecting the repository restarts the search and
-restores the opportunity to reconcile its name. Re-preview never submits a launch by itself.
+agree without destroying the copied title needed when returning to a folder. One naming source is active at a time: the
+untouched Clone default or a template's base/fixed name. Applying a name template replaces the Clone series, and typing
+clears the template source. Occupied-name previews advance a Clone default through `-clone`, then `-clone-2` through
+`-clone-50`, or a template base through its raw base, then `-2` through `-50`; fixed names never advance. Snapshots
+retain the template's unnumbered base and kind while display, preview and submission use its resolved name. Folder
+destinations use the base unchanged. At the cap the conflict stays visible. Changing host installation or repository
+resets the search. The preview API classifies an unmarked 409 as occupied, separately from the helm's stale-precondition
+409, transport errors and other refusals; new conflict responses must revisit that classification. The existing
+preview-authority generation checks reject late results before they can advance a name. A retained attempt matching the
+current intent and installation freezes its name for reconciliation; the occupied directory may be its own accepted
+allocation. Editing the launch while an ambiguous attempt is retained can advance the default away from that attempt,
+even if the edit is later undone; reselecting the repository restarts the search and restores the opportunity to
+reconcile its name. Re-preview never submits a launch by itself.
 
 Search is the composer's one initial and post-selection focus target on both tabs. Its command-tab result set is built
 without the retained structured harness or model, so it can expose globally owned models but cannot offer an effort that
@@ -4864,16 +4868,22 @@ grow. A field a template leaves out is absent from the JSON; for the agent-launc
 effort, permissions) and for the resume command, an explicit `null` means "reset to the default", which is how a
 template can clear a choice rather than only set one. The wrapper prefix follows the same absent/set/null shape, but its
 `null` means no prefix, overriding a remembered one. The agent type, host, destination and session name have no reset: a
-template sets them or leaves them alone. A host is named by its recorded install identity. Unknown fields are refused on
-decode, so a misspelled field is an error rather than a silently ignored edit. The retired `workspace_trust` field
-remains readable in `TemplateFields`, but application ignores it and every save drops it. The editor clears it in its
-draft and on delete undo; Save as template never offers it. This keeps old records usable without letting their trust
-choices bypass managed-checkout Settings. The GUI's writes go through `PUT /api/templates/{name}` (create or replace,
-last write wins, no version check, as SPEC.md wants) and `DELETE /api/templates/{name}`; `GET /api/templates` lists them
-by name. The helm checks only the shape of a template the GUI writes (a non-empty name of at most 128 bytes with no
-surrounding spaces or control characters, and fields within the 64 KiB a create is held to); whether its fields apply is
-decided only when it is applied. An agent's template writes share the same store path but carry a precondition and a few
-refusals of their own (see "Permission prompts for agent actions").
+template sets them or leaves them alone. A session name's optional `name_kind` is `base` or `fixed`; absent means base.
+Writers validate that a kind has a name, then omit base from both storage and the save reply, preserving existing JSON
+without a database migration. Only fixed adds a stored field. The shared application function carries name and kind
+together, and a name-only agent edit keeps the previous kind. Protocol 61 adds this strict field: an older same-protocol
+supervisor would refuse a fixed-template reply during control-frame decoding and drop its helm connection, so the bump
+refuses it at hello instead. The normal update path remains available. A host is named by its recorded install identity.
+Unknown fields are refused on decode, so a misspelled field is an error rather than a silently ignored edit. The retired
+`workspace_trust` field remains readable in `TemplateFields`, but application ignores it and every save drops it. The
+editor clears it in its draft and on delete undo; Save as template never offers it. This keeps old records usable
+without letting their trust choices bypass managed-checkout Settings. The GUI's writes go through
+`PUT /api/templates/{name}` (create or replace, last write wins, no version check, as SPEC.md wants) and
+`DELETE /api/templates/{name}`; `GET /api/templates` lists them by name. The helm checks only the shape of a template
+the GUI writes (a non-empty name of at most 128 bytes with no surrounding spaces or control characters, and fields
+within the 64 KiB a create is held to); whether its fields apply is decided only when it is applied. An agent's template
+writes share the same store path but carry a precondition and a few refusals of their own (see "Permission prompts for
+agent actions").
 
 An agent's quick-launch and number-key edits travel separately from template fields in protocol 60: those bindings
 belong to fleet preferences, not to a template's composable choices. The helm and Templates editor share the ⚡

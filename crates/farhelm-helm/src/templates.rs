@@ -52,9 +52,15 @@ pub(crate) async fn put_template(
     // The reply describes the saved definition, including retirement of an
     // old client's trust field, rather than echoing unsaved request content.
     fields.workspace_trust = None;
-    let template = LaunchTemplate { name, fields };
+    let mut template = LaunchTemplate { name, fields };
     match store_template(&state, template.clone(), Precondition::None).await {
-        Ok(_) => axum::Json(template).into_response(),
+        Ok(_) => {
+            template.fields.name_kind = template
+                .fields
+                .name_kind
+                .filter(|kind| *kind == farhelm_proto::launcher::TemplateNameKind::Fixed);
+            axum::Json(template).into_response()
+        }
         Err(error) => http_error(error),
     }
 }
@@ -102,6 +108,12 @@ pub(crate) async fn store_template(
             message,
         })
     })?;
+    // Validate before erasing an explicit Base: a kind without a name must be
+    // refused, while valid base templates retain the old stored JSON shape.
+    template.fields.name_kind = template
+        .fields
+        .name_kind
+        .filter(|kind| *kind == farhelm_proto::launcher::TemplateNameKind::Fixed);
     let task_state = Arc::clone(state);
     tokio::spawn(async move {
         let wrote = match precondition {
@@ -197,6 +209,41 @@ pub(crate) async fn remove_template(
 mod tests {
     use crate::rest_harness;
     use tower::ServiceExt;
+
+    /// Base keeps the pre-feature stored shape, including after an explicit
+    /// agent edit back from Fixed. The PUT reply must match storage so the
+    /// editor does not report a just-saved definition as unsaved.
+    #[farhelm_testtrace::test]
+    async fn template_name_base_is_absent_in_reply_and_storage() {
+        let harness = rest_harness::idle_helm().await;
+        for kind in [Some("fixed"), Some("base"), None] {
+            let mut fields = serde_json::json!({"name":"review"});
+            if let Some(kind) = kind {
+                fields["name_kind"] = serde_json::json!(kind);
+            }
+            let (status, body) =
+                request(&harness, "PUT", "/api/templates/review", Some(fields)).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+            let expected = if kind == Some("fixed") {
+                serde_json::json!({"name":"review", "name_kind":"fixed"})
+            } else {
+                serde_json::json!({"name":"review"})
+            };
+            assert_eq!(body["fields"], expected);
+            let stored = harness.store.launch_templates().await.unwrap();
+            assert_eq!(serde_json::to_value(&stored[0].fields).unwrap(), expected);
+        }
+        for kind in ["base", "fixed"] {
+            let (status, _) = request(
+                &harness,
+                "PUT",
+                "/api/templates/orphan",
+                Some(serde_json::json!({"name_kind":kind})),
+            )
+            .await;
+            assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        }
+    }
 
     /// A GUI or old client's whole-template PUT still accepts true, false and
     /// null, but neither its reply nor persisted definition may revive trust.

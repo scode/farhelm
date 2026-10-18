@@ -192,6 +192,17 @@ pub enum TemplateDestination {
     Github(String),
 }
 
+/// Whether a template supplies a reusable checkout-name base or an exact name.
+/// Absence in stored fields means Base, so existing templates need no rewrite.
+/// Only managed-checkout allocation numbers a base; ordinary folders may keep
+/// duplicate session titles, and an explicit name typed by a caller stays exact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TemplateNameKind {
+    Base,
+    Fixed,
+}
+
 /// Deserialize a field where absent and `null` mean different things:
 /// absent leaves the launcher's value alone, `null` resets it to the agent
 /// type's default. Used with `#[serde(default)]`, which supplies the
@@ -281,6 +292,10 @@ pub struct TemplateFields {
     pub destination: Option<TemplateDestination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Travels with `name` when templates stack. Writers omit Base in storage;
+    /// an explicit Base remains decodable so agent edit can replace Fixed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_kind: Option<TemplateNameKind>,
 }
 
 /// Whether one saved template can carry the direct quick-launch mark.
@@ -384,6 +399,9 @@ pub struct LaunchTemplate {
 /// of naming a template, even when percent-encoded.
 /// Whether fields apply is decided against the launcher when applied.
 pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
+    if template.fields.name_kind.is_some() && template.fields.name.is_none() {
+        return Err("a session name kind needs a session name".into());
+    }
     if let Some(prompt) = &template.fields.prompt {
         check_initial_prompt(prompt)?;
     }
@@ -477,6 +495,10 @@ pub struct LauncherState {
     pub host: Option<String>,
     pub destination: Option<TemplateDestination>,
     pub name: Option<String>,
+    /// The source template's name policy, retained beside its unnumbered base.
+    /// A manually entered name has no template policy; callers choose its exact
+    /// launch behavior and the save-as-template default independently.
+    pub name_kind: Option<TemplateNameKind>,
 }
 
 /// What a template is applied against besides the launcher itself.
@@ -534,6 +556,8 @@ fn harness_word(harness: LaunchHarness) -> String {
 /// result is a launcher state, not a launch: a field the launch needs and no
 /// template set is still the user's (or the CLI flags') to fill. Historical
 /// workspace-trust values decode but have no effect: trust comes from Settings.
+/// A session name carries its template kind into the result; resolving a base
+/// against occupied checkout folders belongs to the caller's preview path.
 pub fn apply_template(
     state: &LauncherState,
     template: &LaunchTemplate,
@@ -546,6 +570,9 @@ pub fn apply_template(
         reason,
     };
     let mut next = state.clone();
+    if fields.name_kind.is_some() && fields.name.is_none() {
+        return Err(refuse("session name kind", "needs a session name".into()));
+    }
     crate::check_permission_flags(
         fields.permissions.flatten(),
         fields.permission_flags.as_deref(),
@@ -791,6 +818,7 @@ pub fn apply_template(
     }
     if let Some(name) = &fields.name {
         next.name = Some(name.clone());
+        next.name_kind = Some(fields.name_kind.unwrap_or(TemplateNameKind::Base));
     }
     Ok(next)
 }
@@ -812,6 +840,84 @@ pub fn apply_templates<'t>(
 
 #[cfg(test)]
 mod tests {
+    /// Existing named templates become bases without rewriting their JSON.
+    /// Stacking must keep name and policy together: a template that leaves the
+    /// name alone cannot turn a fixed name into a base or pin a base to Fixed.
+    #[test]
+    fn template_name_policy_defaults_and_stacks_with_the_name() {
+        let old: TemplateFields = serde_json::from_str(r#"{"name":"review"}"#).unwrap();
+        assert_eq!(old.name_kind, None);
+        assert_eq!(
+            serde_json::to_value(&old).unwrap(),
+            serde_json::json!({"name":"review"})
+        );
+        let context = TemplateContext {
+            catalog: &[],
+            known_hosts: &[],
+            host_fixed: false,
+        };
+        let base =
+            apply_template(&LauncherState::default(), &template("old", old), &context).unwrap();
+        assert_eq!(base.name.as_deref(), Some("review"));
+        assert_eq!(base.name_kind, Some(TemplateNameKind::Base));
+        let fixed = apply_template(
+            &base,
+            &template(
+                "exact",
+                TemplateFields {
+                    name: Some("exact".into()),
+                    name_kind: Some(TemplateNameKind::Fixed),
+                    ..Default::default()
+                },
+            ),
+            &context,
+        )
+        .unwrap();
+        assert_eq!(fixed.name.as_deref(), Some("exact"));
+        assert_eq!(fixed.name_kind, Some(TemplateNameKind::Fixed));
+        assert_eq!(
+            apply_template(
+                &fixed,
+                &template("nothing", TemplateFields::default()),
+                &context
+            )
+            .unwrap(),
+            fixed
+        );
+        let renamed = apply_template(
+            &fixed,
+            &template(
+                "new-base",
+                TemplateFields {
+                    name: Some("another".into()),
+                    ..Default::default()
+                },
+            ),
+            &context,
+        )
+        .unwrap();
+        assert_eq!(renamed.name.as_deref(), Some("another"));
+        assert_eq!(renamed.name_kind, Some(TemplateNameKind::Base));
+        for kind in [TemplateNameKind::Base, TemplateNameKind::Fixed] {
+            let orphan = template(
+                "orphan",
+                TemplateFields {
+                    name_kind: Some(kind),
+                    ..Default::default()
+                },
+            );
+            assert!(
+                check_template_shape(&orphan)
+                    .unwrap_err()
+                    .contains("needs a session name")
+            );
+            assert_eq!(
+                apply_template(&base, &orphan, &context).unwrap_err().field,
+                "session name kind"
+            );
+        }
+    }
+
     /// Old templates must decode without a message; a prompt-only template
     /// can fill an unfinished agent draft, but must never become command text.
     #[test]

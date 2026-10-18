@@ -965,6 +965,7 @@ impl LaunchFlags {
             host: None,
             destination: cwd.map(TemplateDestination::Folder),
             name: title,
+            name_kind: None,
         }
     }
 }

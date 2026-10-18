@@ -381,7 +381,8 @@ struct TemplateTargets {
     title: Signal<String>,
     title_raw_seed: Signal<Option<String>>,
     title_edited: Signal<bool>,
-    clone_checkout_naming: Signal<CloneCheckoutNaming>,
+    clone_checkout_naming: Signal<CheckoutNaming>,
+    preview_revision: Signal<u64>,
     template_error: Signal<Option<String>>,
     intent_key: Signal<Option<(String, IntentBinding)>>,
 }
@@ -515,6 +516,8 @@ fn active_prompt(
 /// Relayed editor text retains its original bytes until deliberately edited;
 /// destination and name are included so saving does not grow a second reader.
 /// Unselected repository text is omitted: it has not become a destination yet.
+/// A template source contributes its unnumbered base and kind; a resolved
+/// suffix belongs to one launch and must not become the next saved base.
 fn launcher_snapshot(
     t: TemplateTargets,
     hosts: &[HostOption],
@@ -581,13 +584,26 @@ fn launcher_snapshot(
                 repo.owner, repo.name
             ))),
         },
-        name: Some(effective_title(
-            &t.title.peek(),
-            *t.title_edited.peek(),
-            t.title_raw_seed.peek().as_deref(),
-            &t.destination.peek(),
-            &t.clone_checkout_naming.peek(),
-        )),
+        name: Some(
+            t.clone_checkout_naming
+                .peek()
+                .template_name()
+                .map(|(base, _)| base.to_string())
+                .unwrap_or_else(|| {
+                    effective_title(
+                        &t.title.peek(),
+                        *t.title_edited.peek(),
+                        t.title_raw_seed.peek().as_deref(),
+                        &t.destination.peek(),
+                        &t.clone_checkout_naming.peek(),
+                    )
+                }),
+        ),
+        name_kind: t
+            .clone_checkout_naming
+            .peek()
+            .template_name()
+            .map(|(_, kind)| kind),
     }
 }
 
@@ -812,7 +828,9 @@ fn template_edits(
             t.command_resume_edited.set(true);
         })));
     }
-    // 5. The destination and the name, through their own actions.
+    // 5. Destination uses its ordinary actions. A template name additionally
+    // retains its source policy; routing it through the hand-edit action would
+    // turn a Base into an exact name before the preview can number it.
     if let Some(identity) = &fields.host
         && let Some(host) = template_host(hosts, identity)
     {
@@ -835,7 +853,27 @@ fn template_edits(
         _ => {}
     }
     if let Some(name) = fields.name {
-        edits.push(TemplateEdit::Search(ComposerSearchResult::Name(name)));
+        let kind = applied
+            .name_kind
+            .expect("an applied name carries its template policy");
+        edits.push(TemplateEdit::Set(Box::new(move || {
+            t.title.set(name.clone());
+            t.title_raw_seed.set(None);
+            t.title_edited.set(true);
+            t.clone_checkout_naming.set(CheckoutNaming {
+                source: Some(CheckoutNameSource::Template {
+                    base: name.clone(),
+                    kind,
+                }),
+                ..Default::default()
+            });
+            // A name-only template can change Fixed to Base without changing
+            // the text. Re-preview that policy change instead of keeping an
+            // already-failed offer whose authority has the same title bytes.
+            t.preview_revision.with_mut(|revision| {
+                *revision = revision.checked_add(1).expect("preview revision exhausted")
+            });
+        })));
     }
     edits.push(TemplateEdit::Set(Box::new(move || {
         t.prompt.set(applied_prompt.clone());
@@ -860,6 +898,7 @@ fn apply_composer_search_result(
     result: crate::launch_composer::ComposerSearchResult,
     mut title: Signal<String>,
     mut title_edited: Signal<bool>,
+    mut clone_checkout_naming: Signal<CheckoutNaming>,
     mut chosen_host: Signal<Option<HostId>>,
     hosts: &[HostOption],
     mut clone_host_state: Signal<CloneHostState>,
@@ -920,6 +959,7 @@ fn apply_composer_search_result(
             unreachable!("template_edits expands every template result")
         }
         ComposerSearchResult::Name(name) => {
+            clone_checkout_naming.set(CheckoutNaming::default());
             title.set(name);
             // A cloned title may have an escaped display seed. This action
             // is the user's new text, so submit and checkout preview must
@@ -2169,46 +2209,101 @@ fn copied_title_ignored(edited: bool, seed: Option<&str>, fresh_checkout: bool) 
     fresh_checkout && !edited && seed.is_some()
 }
 
-/// A Clone's untouched checkout name, scoped to the current host and repository.
-///
-/// Only the UI's default may advance after an occupied-name refusal. Explicit
-/// edits, Replace with, and a different repository keep their existing rules.
-/// The bound prevents a peer from driving an unlimited sequence of previews.
+/// One bounded name series, shared by Clone defaults and template bases.
+/// The first candidate is the base itself, then -2 through -50. A retained
+/// ambiguous create freezes the sequence because its own directory may be the
+/// collision. Host and repository ownership stay with the enclosing source.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct CloneCheckoutNaming {
-    source_repo: Option<GithubRepo>,
-    target: Option<(Option<CreateTarget>, Option<GithubRepo>)>,
+struct CheckoutNameSequence {
     suffix: u32,
 }
 
-impl CloneCheckoutNaming {
+impl CheckoutNameSequence {
+    /// Keep the unnumbered base until a real occupied preview advances it.
+    fn name(&self, base: &str) -> String {
+        if self.suffix == 0 {
+            base.to_string()
+        } else {
+            format!("{base}-{}", self.suffix)
+        }
+    }
+
+    /// Refuse unlimited peer-driven preview searches and ambiguous retries.
+    fn advance(&mut self, reconciling: bool) -> bool {
+        if reconciling || self.suffix >= 50 {
+            return false;
+        }
+        self.suffix = if self.suffix == 0 { 2 } else { self.suffix + 1 };
+        true
+    }
+}
+
+/// The one source currently entitled to supply a checkout-name policy.
+/// Keeping Fixed here preserves its template kind for Save as template, even
+/// though it never contributes an automatically numbered candidate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CheckoutNameSource {
+    Clone(GithubRepo),
+    Template {
+        base: String,
+        kind: farhelm_proto::launcher::TemplateNameKind,
+    },
+}
+
+/// A default or template name scoped to the current host and repository.
+/// A hand edit replaces this source; a template replaces any Clone series.
+/// Destination changes restart occupancy search without losing the source name
+/// needed when switching back to an ordinary folder or saving a template.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CheckoutNaming {
+    source: Option<CheckoutNameSource>,
+    target: Option<(Option<CreateTarget>, Option<GithubRepo>)>,
+    sequence: CheckoutNameSequence,
+}
+
+impl CheckoutNaming {
     /// Occupancy belongs to one host installation and repository. Returning
     /// to a prior target starts its search over, rather than caching names.
     fn retarget(&mut self, host: Option<CreateTarget>, repo: Option<GithubRepo>) {
         let target = Some((host, repo));
         if self.target != target {
             self.target = target;
-            self.suffix = 0;
+            self.sequence = CheckoutNameSequence::default();
         }
     }
 
-    /// Preserve the source title's raw spelling until the person edits it.
-    /// An empty source title remains an unnamed checkout, as ordinary New does.
+    /// Preserve a template's base and policy across snapshots and destination
+    /// changes. Saving the displayed suffix would pin the next launch to a name
+    /// that this series has already occupied.
+    fn template_name(&self) -> Option<(&str, farhelm_proto::launcher::TemplateNameKind)> {
+        match &self.source {
+            Some(CheckoutNameSource::Template { base, kind }) => Some((base, *kind)),
+            _ => None,
+        }
+    }
+
+    /// Only a source default or template Base may advance on occupied names.
+    /// Fixed names and manually typed names remain exact; ordinary folders use
+    /// the raw title and permit duplicate session names as before.
     fn default_title(
         &self,
         edited: bool,
         seed: Option<&str>,
         repo: Option<&GithubRepo>,
     ) -> Option<String> {
-        if edited || self.source_repo.is_none() || self.source_repo.as_ref() != repo {
-            return None;
+        match &self.source {
+            Some(CheckoutNameSource::Clone(source_repo))
+                if !edited && Some(source_repo) == repo =>
+            {
+                let seed = seed.filter(|seed| !seed.is_empty())?;
+                Some(self.sequence.name(&format!("{seed}-clone")))
+            }
+            Some(CheckoutNameSource::Template {
+                base,
+                kind: farhelm_proto::launcher::TemplateNameKind::Base,
+            }) if repo.is_some() => Some(self.sequence.name(base)),
+            _ => None,
         }
-        let seed = seed.filter(|seed| !seed.is_empty())?;
-        Some(if self.suffix == 0 {
-            format!("{seed}-clone")
-        } else {
-            format!("{seed}-clone-{}", self.suffix)
-        })
     }
 
     /// Try the next suffix only after the current authoritative preview says
@@ -2216,11 +2311,7 @@ impl CloneCheckoutNaming {
     /// own accepted directory may be the collision. At the cap, retain the
     /// visible conflict for a manual edit.
     fn advance(&mut self, reconciling: bool) -> bool {
-        if reconciling || self.suffix >= 50 {
-            return false;
-        }
-        self.suffix = if self.suffix == 0 { 2 } else { self.suffix + 1 };
-        true
+        self.sequence.advance(reconciling)
     }
 }
 
@@ -2319,15 +2410,16 @@ fn submitted_title(
     }
 }
 
-/// Read the name the launcher actually offers, including Clone's free suffix.
-/// Template snapshots and launches must share this decision: saving the source
-/// title instead would pin a name that this checkout deliberately avoids.
+/// Read the resolved name that display, preview and submission must share.
+/// Clone defaults and template bases use the same bounded suffix series.
+/// `launcher_snapshot` separately preserves a template's base and kind so
+/// saving a setup does not capture a suffix belonging to this one allocation.
 fn effective_title(
     text: &str,
     edited: bool,
     seed: Option<&str>,
     destination: &DestinationDraft,
-    naming: &CloneCheckoutNaming,
+    naming: &CheckoutNaming,
 ) -> String {
     let default = naming.default_title(edited, seed, destination.repo());
     submitted_title(
@@ -2637,7 +2729,7 @@ pub(super) fn CreateSessionForm(
             scroll_repository_result(repository_index());
         }
     });
-    let mut clone_checkout_naming = use_signal(CloneCheckoutNaming::default);
+    let mut clone_checkout_naming = use_signal(CheckoutNaming::default);
     let mut github_attempt = use_signal(|| None::<(IntentBinding, GithubAttempt)>);
     // A Replace-with deletes its source, whose notice the session list shows.
     let delete_notice = use_context::<super::DeleteNotice>();
@@ -3118,8 +3210,8 @@ pub(super) fn CreateSessionForm(
                     .repo
                     .clone()
                     .filter(|_| prefill.replace_source.is_none());
-                clone_checkout_naming.set(CloneCheckoutNaming {
-                    source_repo: source_repo.clone(),
+                clone_checkout_naming.set(CheckoutNaming {
+                    source: source_repo.clone().map(CheckoutNameSource::Clone),
                     ..Default::default()
                 });
                 if let Some(repo) = source_repo {
@@ -3762,6 +3854,21 @@ pub(super) fn CreateSessionForm(
     } else {
         String::new()
     };
+    // A template keeps its base even while the field shows a resolved suffix.
+    // This source marker disappears as soon as a hand edit takes over.
+    let template_base = checkout_mode
+        .then(|| {
+            clone_checkout_naming()
+                .template_name()
+                .filter(|(_, kind)| *kind == farhelm_proto::launcher::TemplateNameKind::Base)
+                .map(|(base, _)| {
+                    (
+                        base.to_string(),
+                        clone_checkout_naming().sequence.suffix > 0,
+                    )
+                })
+        })
+        .flatten();
     let summary_model = structured_model()
         .map(|model| display_peer(&model))
         .unwrap_or_else(|| "default".to_string());
@@ -3911,6 +4018,7 @@ pub(super) fn CreateSessionForm(
         title_raw_seed,
         title_edited,
         clone_checkout_naming,
+        preview_revision,
         template_error,
         intent_key,
     };
@@ -4364,6 +4472,7 @@ pub(super) fn CreateSessionForm(
                             result,
                             title,
                             title_edited,
+                            clone_checkout_naming,
                             chosen_host,
                             &action_hosts,
                             clone_host_state,
@@ -6707,7 +6816,12 @@ pub(super) fn CreateSessionForm(
                                 // The label stays the accessible wrapper; only its
                                 // text takes the section-label caps, so the styling
                                 // cannot inherit into what the person types.
-                                span { class: "launch-composer-section-label", "name (optional)" }
+                                span { class: "launch-composer-name-caption",
+                                    span { class: "launch-composer-section-label", "name (optional)" }
+                                    if template_base.is_some() {
+                                        span { class: "launch-composer-name-policy", "data-tooltip": "this template supplies a base name; Farhelm adds a number when its managed-checkout folder is already taken", "from template · numbered if taken" }
+                                    }
+                                }
                                 input {
                                     r#type: "text",
                                     autocomplete: "off",
@@ -6720,6 +6834,7 @@ pub(super) fn CreateSessionForm(
                                     // checkout can hide that seed; see
                                     // `title_field_value`.
                                     dir: "ltr",
+                                    aria_label: "name (optional)",
                                     value: "{title_field_value}",
                                     placeholder: "{title_placeholder}",
                                     disabled: busy,
@@ -6729,6 +6844,7 @@ pub(super) fn CreateSessionForm(
                                         }
                                         title.set(evt.value());
                                         title_edited.set(true);
+                                        clone_checkout_naming.set(CheckoutNaming::default());
                                         // An edit makes the next submit a DIFFERENT
                                         // intent, so the key the last one used stops
                                         // applying here (this component's docs carry
@@ -6736,6 +6852,9 @@ pub(super) fn CreateSessionForm(
                                         // rule).
                                         intent_key.set(None);
                                     },
+                                }
+                                if let Some((base, true)) = &template_base {
+                                    span { class: "launch-composer-name-taken", "data-tooltip": "the template's base checkout name is already taken; this launch uses the first available numbered name", "(" bdi { dir: "ltr", "{display_peer(base)}" } " is taken)" }
                                 }
                             }
                         }
@@ -8132,8 +8251,8 @@ mod tests {
         let folder = DestinationDraft::Existing {
             cwd: "/work".into(),
         };
-        let mut naming = CloneCheckoutNaming {
-            source_repo: Some(repo),
+        let mut naming = CheckoutNaming {
+            source: Some(CheckoutNameSource::Clone(repo)),
             ..Default::default()
         };
         let raw = "source\tname";
@@ -8141,7 +8260,7 @@ mod tests {
             effective_title("escaped", false, Some(raw), &source, &naming),
             "source\tname-clone"
         );
-        naming.suffix = 2;
+        naming.sequence.suffix = 2;
         assert_eq!(
             effective_title("escaped", false, Some(raw), &source, &naming),
             "source\tname-clone-2"
@@ -8160,7 +8279,70 @@ mod tests {
         );
     }
 
-    /// Clone's default alone may search for a free checkout name. Switching
+    /// Template bases share Clone's bounded search, while fixed names keep
+    /// their exact title. Folder destinations do not number names, and the
+    /// source base survives a resolved suffix for Save as template.
+    #[test]
+    fn template_base_names_number_only_for_managed_destinations() {
+        use farhelm_proto::launcher::TemplateNameKind;
+        let repo = GithubRepo::parse("acme/web").unwrap();
+        let checkout = DestinationDraft::github(repo.clone());
+        let folder = DestinationDraft::Existing {
+            cwd: "/work".into(),
+        };
+        let mut naming = CheckoutNaming {
+            source: Some(CheckoutNameSource::Template {
+                base: "app-review".into(),
+                kind: TemplateNameKind::Base,
+            }),
+            ..Default::default()
+        };
+        naming.retarget(
+            Some(CreateTarget::new(1, "install-a".into())),
+            Some(repo.clone()),
+        );
+        assert_eq!(
+            effective_title("app-review", true, None, &checkout, &naming),
+            "app-review"
+        );
+        assert!(
+            !naming.advance(true),
+            "an unresolved create must keep its displayed name"
+        );
+        assert!(naming.advance(false));
+        assert_eq!(
+            effective_title("app-review", true, None, &checkout, &naming),
+            "app-review-2"
+        );
+        assert_eq!(
+            naming.template_name(),
+            Some(("app-review", TemplateNameKind::Base))
+        );
+        assert_eq!(
+            effective_title("app-review", true, None, &folder, &naming),
+            "app-review"
+        );
+        naming.retarget(Some(CreateTarget::new(2, "install-b".into())), Some(repo));
+        assert_eq!(
+            effective_title("app-review", true, None, &checkout, &naming),
+            "app-review"
+        );
+        naming.source = Some(CheckoutNameSource::Template {
+            base: "exact".into(),
+            kind: TemplateNameKind::Fixed,
+        });
+        assert_eq!(
+            effective_title("exact", true, None, &checkout, &naming),
+            "exact"
+        );
+        assert!(naming.default_title(true, None, checkout.repo()).is_none());
+        assert_eq!(
+            naming.template_name(),
+            Some(("exact", TemplateNameKind::Fixed))
+        );
+    }
+
+    /// Clone's default may search for a free checkout name. Switching
     /// hosts or repositories restarts that search; explicit edits, unnamed
     /// sources and Replace with must never acquire an automatic suffix.
     #[test]
@@ -8168,8 +8350,8 @@ mod tests {
         let repo = GithubRepo::parse("acme/bar").unwrap();
         let other = GithubRepo::parse("acme/other").unwrap();
         let host = Some(CreateTarget::new(1, "install-a".into()));
-        let mut naming = CloneCheckoutNaming {
-            source_repo: Some(repo.clone()),
+        let mut naming = CheckoutNaming {
+            source: Some(CheckoutNameSource::Clone(repo.clone())),
             ..Default::default()
         };
         naming.retarget(host.clone(), Some(repo.clone()));
@@ -8185,7 +8367,7 @@ mod tests {
             !naming.advance(true),
             "a retained request must keep its original name"
         );
-        assert_eq!(naming.suffix, 0);
+        assert_eq!(naming.sequence.suffix, 0);
         assert!(naming.advance(false));
         assert_eq!(
             naming
@@ -8194,12 +8376,18 @@ mod tests {
             Some("bar-3-clone-2")
         );
         naming.retarget(host.clone(), Some(repo.clone()));
-        assert_eq!(naming.suffix, 2, "same destination keeps its search");
+        assert_eq!(
+            naming.sequence.suffix, 2,
+            "same destination keeps its search"
+        );
         naming.retarget(
             Some(CreateTarget::new(2, "install-b".into())),
             Some(repo.clone()),
         );
-        assert_eq!(naming.suffix, 0, "new host searches from the base name");
+        assert_eq!(
+            naming.sequence.suffix, 0,
+            "new host searches from the base name"
+        );
         assert!(
             naming
                 .default_title(true, Some("bar-3"), Some(&repo))
@@ -8214,8 +8402,11 @@ mod tests {
         );
         naming.advance(false);
         naming.retarget(host, Some(other));
-        assert_eq!(naming.suffix, 0, "repository changes reset the counter");
-        naming.source_repo = None;
+        assert_eq!(
+            naming.sequence.suffix, 0,
+            "repository changes reset the counter"
+        );
+        naming.source = None;
         assert!(
             naming
                 .default_title(false, Some("bar-3"), Some(&repo))
@@ -8224,7 +8415,7 @@ mod tests {
         for _ in 0..49 {
             assert!(naming.advance(false));
         }
-        assert_eq!(naming.suffix, 50);
+        assert_eq!(naming.sequence.suffix, 50);
         assert!(
             !naming.advance(false),
             "cap leaves a conflict for the person to fix"

@@ -671,19 +671,26 @@ agent choice is independent of that destination:
   agent-launch fields and command-launch fields apply to the launch kind active once its own launch kind, if any, is
   applied. A template may set any launcher field: launch kind, agent type, model, effort, permissions (including custom
   and its words together), wrapper prefix, initial prompt, command, YOLO assertion, resume command, host, destination (a
-  folder or a managed checkout), and session name. Fields a template leaves out keep whatever the launcher already
-  holds, so templates stack: applying `my-codex` and then `myproject-webbuilder` applies both, the later one winning
-  where they overlap. A wrapper-prefix field has three states: absent leaves the current prefix, including a remembered
-  one; present with words replaces it; present with no prefix clears it. Quick launch applies those same edits before
-  starting the agent. A template whose field does not apply to what the launcher holds when it is applied, such as a
-  model while the launch kind is command or a model the chosen agent type does not offer, is refused with a message
-  naming the field, and nothing from it is applied. So is a template that sets a field the current dialog holds fixed,
-  such as the host in Replace with; Restart with does not offer templates. A template names its host by the host's
-  recorded install identity, exactly like the host default below, so a registry row retargeted to another install makes
-  the template's host field inapplicable rather than silently aiming at the successor. A launch made after applying
-  templates is, for remembered defaults, recent setups, and managed-checkout previews, exactly the launch the same hand
-  edits would have made: the resulting choices count as the user's explicit selection, and a template that changes host,
-  installation, destination, title, or agent invalidates a pending checkout preview as the equivalent hand edit does.
+  folder or a managed checkout), and session name. A template's session name is a base name by default, including names
+  in existing templates: for a managed checkout it is used as-is when free, otherwise numbered `-2` through `-50` until
+  a free folder is found. The session title and checkout folder use the same number. A fixed name keeps its exact
+  spelling and reports a clash. Ordinary folder destinations use a base name as-is without numbering. Fields a template
+  leaves out keep whatever the launcher already holds, so templates stack: applying `my-codex` and then
+  `myproject-webbuilder` applies both, the later one winning where they overlap. A wrapper-prefix field has three
+  states: absent leaves the current prefix, including a remembered one; present with words replaces it; present with no
+  prefix clears it. Quick launch applies those same edits before starting the agent. A template whose field does not
+  apply to what the launcher holds when it is applied, such as a model while the launch kind is command or a model the
+  chosen agent type does not offer, is refused with a message naming the field, and nothing from it is applied. So is a
+  template that sets a field the current dialog holds fixed, such as the host in Replace with; Restart with does not
+  offer templates. A template names its host by the host's recorded install identity, exactly like the host default
+  below, so a registry row retargeted to another install makes the template's host field inapplicable rather than
+  silently aiming at the successor. A launch made after applying templates is, for remembered defaults and recent
+  setups, exactly the launch the same hand edits would have made; managed-checkout previews additionally apply a
+  template base name's numbering policy. The resulting choices count as the user's explicit selection, and a template
+  that changes host, installation, destination, title, or agent invalidates a pending checkout preview as the equivalent
+  hand edit does. The last template setting a name decides both its text and kind. In a managed checkout the Name field
+  shows the resolved name and a "from template · numbered if taken" pill; an advanced name also shows "(<base> is
+  taken)". Typing in Name or accepting `name:` makes it the user's exact name, removes the pill and disables numbering.
   Because a template pins only what it contains, a field the launch requires and no template set still has to be filled
   in by hand; that friction is accepted. New and Clone also offer "save as template": an inline name field and checklist
   capture the current tab's choices, host, destination, and session name. Agent type, model and effort are checked
@@ -948,12 +955,14 @@ repeat that prefix. An empty slug or a component over 200 bytes is refused, and 
 archive later (the archive location adds up to 82 bytes to it, and the whole must stay within the system's path limit:
 4096 bytes on Linux, 1024 on macOS). Existing files, directories and symlinks all occupy a name. If another create wins
 the displayed path, Launch reports the conflict and obtains a new preview; it never submits automatically or silently
-chooses another directory. An explicit name remains a conflict rather than gaining a suffix. For Clone into the source's
-repository, an untouched nonempty copied title defaults to `<source title>-clone`, then the lowest free
-`<source title>-clone-N` for N ≥ 2. The name field shows the effective name, and preview and launch use it alike.
-Changing hosts or repositories restarts the suffix search; editing the name makes it explicit and disables automatic
-suffixes. A lost-race launch re-previews and may advance the default name, but still needs another click on Launch for
-the newly shown path.
+chooses another directory. A typed name or a template's fixed name remains a conflict rather than gaining a suffix. A
+template base name uses its first free candidate, from the base itself through `-2` to `-50`; the cap leaves the
+conflict visible. A lost-race base-name launch obtains a new preview and may advance, but requires another Launch click.
+For Clone into the source's repository, an untouched nonempty copied title defaults to `<source title>-clone`, then the
+lowest free `<source title>-clone-N` for N ≥ 2. The name field shows the effective name, and preview and launch use it
+alike. Changing hosts or repositories restarts the suffix search; editing the name makes it explicit and disables
+automatic suffixes. A lost-race launch re-previews and may advance the default name, but still needs another click on
+Launch for the newly shown path.
 
 Replace with into a managed checkout, Clone into a different repository, and Clone of a source with no repository ignore
 an untouched copied title: the session is unnamed and gets the lowest available `repo-N`. An empty source title also
