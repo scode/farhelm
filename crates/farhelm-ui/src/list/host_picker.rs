@@ -29,13 +29,33 @@ fn typeahead_query(prefix: &str, key: &str) -> (String, bool) {
     (query, repeated)
 }
 
+/// Let an outside pointer press dismiss the open list even on inert padding.
+///
+/// Browsers do not blur a focused button when the pointer lands on a plain
+/// container. The picker's Rust blur handler already discards provisional
+/// browsing, so the document listener gives that handler the missing blur
+/// without owning a second close path. It is installed once per document;
+/// the launcher can unmount without leaving a reference to its component.
+fn install_outside_blur() {
+    document::eval(
+        r#"if (!window.__farhelmHostPickerOutsideBlur) {
+            window.__farhelmHostPickerOutsideBlur = true;
+            document.addEventListener('pointerdown', (event) => {
+                const host = document.querySelector('.launcher-host-picker > .create-session-host[aria-expanded="true"]');
+                if (host && !host.parentElement.contains(event.target)) host.blur();
+            }, true);
+        }"#,
+    );
+}
+
 /// A transient menu cannot outlive its launcher or the busy round trip.
 ///
 /// The button owns keyboard focus and names its active option. Option rows
 /// are not Tab stops; preventing pointer focus transfer preserves their click
-/// until it commits. Blur and Escape discard browsing, while closed Enter
-/// retains the launcher's ordinary primary action. Repeated letters cycle
-/// matching names; a pause starts a new prefix without a timer or extra task.
+/// until it commits. Blur, an outside pointer press, and Escape discard
+/// browsing, while closed Enter retains the launcher's ordinary primary
+/// action. Repeated letters cycle matching names; a pause starts a new prefix
+/// without a timer or extra task.
 #[component]
 pub(super) fn HostPicker(
     hosts: Vec<HostOption>,
@@ -48,6 +68,7 @@ pub(super) fn HostPicker(
     let mut active = use_signal(|| 0_usize);
     let mut prefix = use_signal(String::new);
     let mut typed_at = use_signal(|| None::<Instant>);
+    use_hook(install_outside_blur);
     use_effect(use_reactive!(|(busy,)| {
         if busy {
             open.set(false);
