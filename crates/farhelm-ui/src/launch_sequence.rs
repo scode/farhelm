@@ -8,7 +8,8 @@
 use crate::list::SharedPreferences;
 use crate::peer::display_peer;
 use dioxus::prelude::*;
-use serde::Serialize;
+use farhelm_proto::launcher::LaunchTemplate;
+use serde::{Deserialize, Serialize};
 
 /// Select which client fact chooses a shortcut's modifier alternative.
 #[derive(Clone, Copy, Serialize)]
@@ -224,11 +225,67 @@ pub(crate) const TEMPLATE_SHORTCUTS: TemplateShortcutDefinition = TemplateShortc
     },
 };
 
-/// `None` is idle, an empty vector is an accepted prefix, and each queued
-/// reference is a digit or (`None`) the bolt. Repetition and ordering matter:
-/// composing the same template twice is still two applications.
+/// A shortcut names a binding, not a template captured when its key was pressed.
+/// The dispatcher resolves this against one fresh read so renamed or deleted
+/// templates never inherit stale authority from a rendered hint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TemplateReference {
+    /// The helm-wide ⚡ mark, read at dispatch time.
+    Bolt,
+    /// A physical number key's stored value, resolved against fresh bindings.
+    Number(String),
+}
+
+/// One synchronous JS observation of dialog ownership and its opening epoch.
+///
+/// A modal can appear between separate awaited evaluations, including a
+/// programmatic dialog that does not increment Farhelm's epoch. Keep the
+/// context and epoch together while Rust crosses the JS boundary.
+#[derive(Deserialize)]
+pub(crate) struct ShortcutContextSnapshot {
+    pub(crate) context: String,
+    pub(crate) modal_opening: u64,
+}
+
+/// Ask the installed listener's one DOM rule before and after a fresh read.
+/// A missing installer or failed evaluation grants no shortcut authority.
+pub(crate) async fn shortcut_context_snapshot() -> Option<ShortcutContextSnapshot> {
+    document::eval(
+        "return { context: window.farhelmTemplateShortcutContext?.() || 'yield', modal_opening: window.__farhelmModalOpening || 0 }",
+    )
+    .join::<ShortcutContextSnapshot>()
+    .await
+    .ok()
+}
+
+/// Resolve an entire press or sequence from the same preference/template pair.
+///
+/// A missing binding or deleted template refuses the whole sequence. The
+/// returned definitions retain order and duplicates for stacking on a draft.
+pub(crate) fn resolve_template_references(
+    references: &[TemplateReference],
+    preferences: &crate::api::Preferences,
+    templates: &[LaunchTemplate],
+) -> Option<Vec<LaunchTemplate>> {
+    references
+        .iter()
+        .map(|reference| {
+            let name = match reference {
+                TemplateReference::Bolt => preferences.quick_launch_template.as_ref(),
+                TemplateReference::Number(key) => preferences.template_shortcuts.get(key),
+            }?;
+            templates
+                .iter()
+                .find(|template| &template.name == name)
+                .cloned()
+        })
+        .collect()
+}
+
+/// `None` is idle; an empty vector is an accepted prefix. Repetition and
+/// ordering matter: composing the same template twice is two applications.
 #[derive(Clone, Copy)]
-pub(crate) struct LaunchSequence(pub Signal<Option<Vec<Option<String>>>>);
+pub(crate) struct LaunchSequence(pub Signal<Option<Vec<TemplateReference>>>);
 
 /// Explain a pending sequence without taking focus or changing pane layout.
 /// This lives above the selected session so navigation and an empty fleet do
@@ -245,12 +302,12 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
         .map(|reference| {
             let preferences = preferences.0.read();
             match reference {
-                Some(key) => preferences
+                TemplateReference::Number(key) => preferences
                     .template_shortcuts
                     .get(key)
                     .map(|name| display_peer(name))
                     .unwrap_or_else(|| format!("unbound key {key}")),
-                None => preferences
+                TemplateReference::Bolt => preferences
                     .quick_launch_template
                     .as_ref()
                     .map(|name| display_peer(name))
@@ -310,5 +367,46 @@ mod tests {
             );
             assert_eq!(definition.number_chord("1"), format!("{number_modifier}A"));
         }
+    }
+
+    /// A sequence is one request: a stale middle binding must not launch the
+    /// prefix or suffix, while repeated references must keep their order.
+    #[test]
+    fn resolver_keeps_sequence_atomic_and_ordered() {
+        use farhelm_proto::launcher::TemplateFields;
+
+        let template = |name: &str| LaunchTemplate {
+            name: name.into(),
+            fields: TemplateFields::default(),
+        };
+        let templates = vec![template("first"), template("second")];
+        let mut preferences = crate::api::Preferences {
+            quick_launch_template: Some("second".into()),
+            ..Default::default()
+        };
+        preferences
+            .template_shortcuts
+            .insert("1".into(), "first".into());
+        preferences
+            .template_shortcuts
+            .insert("2".into(), "gone".into());
+        let number = |key: &str| TemplateReference::Number(key.into());
+        let order = [number("1"), TemplateReference::Bolt, number("1")];
+        assert_eq!(
+            resolve_template_references(&order, &preferences, &templates)
+                .unwrap()
+                .iter()
+                .map(|template| template.name.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second", "first"]
+        );
+        assert!(
+            resolve_template_references(
+                &[number("1"), number("2"), TemplateReference::Bolt],
+                &preferences,
+                &templates,
+            )
+            .is_none()
+        );
     }
 }
