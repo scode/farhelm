@@ -48,3 +48,30 @@ Run: `20261010-0414-bd8d5d7-722d`. Correctness and security only, nofix. This is
 Originating reviewers, passes, and local finding identifiers: `cli_installation_02_cor:p1:F1`.
 
 - `cli_installation_02_cor:p1:F1`: confidence as filed: definite; suggested bucket as filed: high.
+
+## Additional conditional trigger: services already exist elsewhere
+
+Reviewed commit: `5e1f1cfffe38f41e450ab70d440ca8fabac8be36`.
+
+An eligible Linux flat installation can also leave pre-existing enabled services pointing at its removed CLI, without
+concurrent setup. When the user manager cannot answer, `crates/farhelm/src/setup.rs:303–326` accepts an empty service
+plan if the caller's configuration directory has no known units. Existing setup-generated units in another manager
+configuration directory are then missed. The locked recheck in `uninstall.rs:250–348` repeats that assumption, and
+`uninstall/removal.rs:76` removes the CLI. Shared exclusion alone cannot discover those pre-existing services.
+
+Confidence: **conditional**, with the control flow confirmed by inspection and supported historical reachability
+unresolved. Suggested bucket: **high if reachable**; no additional security or user-process loss is established.
+`uninstall/ownership.rs:108–165` requires an exact four-field installation receipt whose digest matches the running CLI.
+Current `scripts/install.sh:729–739` refuses Linux, and current setup does not create that receipt. A fabricated receipt
+is not evidence of a supported trigger. Establish which historical binary/receipt sequence reaches removal before
+treating this as a reproduced defect.
+
+Possible cover: the existing ledger entry at `TRIAGE_OUTCOMES.md:11511–11536` mentions differing configuration roots
+while analyzing overlapping first-ever setup; this adds a conditional pre-existing-service case. The filter “Upgrades
+from older releases combined with another rare condition” may cover it, but a legacy receipt alone does not establish
+that state was carried across an upgrade. If that premise is established, intentional uninstall leaving service remnants
+has no demonstrated exception for bricking, database corruption or security. Supported legacy removal in SPEC.md does
+not itself override that review-time filter. Retained because the exact match is unresolved.
+
+Proposed drop: unresolved pending that historical premise. No runtime reproduction. Provenance:
+`cli-install-and-removal-1/f5` (third-turn synthesis) and `provisioning-lifecycle-1/f4`.
