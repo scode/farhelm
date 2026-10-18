@@ -44,6 +44,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Show host uninstall refusals in a dialog.** When Uninstall is refused because the host was set up manually or
+  Farhelm cannot safely remove it, the reason currently appears as red text in the host sidebar. Show the refusal in a
+  proper dialog, consistent with other host actions. Audit similar refusal and error paths for legacy sidebar text and
+  bring any outliers into the current UI convention.
+
+- **Render host setup and uninstall plans as GUI steps.** The setup and uninstall confirmation dialogs currently show
+  the planned actions in a plain text box. Present the actions as distinct items in the dialog so the user can scan what
+  will happen before deciding, while keeping the paths and other details the plans currently show.
+
 - **Select Guarded by typing in the launcher.** Make bare `guarded` offer and preselect the Guarded permission choice,
   as bare `yolo` does today, while keeping `perms:guarded` available. During planning, audit every choice in the New,
   Clone, and Replace with launcher dialog for whether it can be set through typing alone (in search or a text field),
