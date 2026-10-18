@@ -44,6 +44,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
+  indicates that one of those models is being used anyway.
+
 - **Show host uninstall refusals in a dialog.** When Uninstall is refused because the host was set up manually or
   Farhelm cannot safely remove it, the reason currently appears as red text in the host sidebar. Show the refusal in a
   proper dialog, consistent with other host actions. Audit similar refusal and error paths for legacy sidebar text and
