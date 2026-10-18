@@ -3829,21 +3829,23 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration.
   Version 6 adds the templates listing; nothing earlier changed meaning. The templates listing carries each template's
   fields except a command line or resume command, which appear only as `sets_command` and `sets_resume_command` (in the
-  table, `command (set)`), and names the host a template's install identity currently resolves to. Version 3 is the
-  restart-only-resumes change: `restart_offer` lost `fresh_only` and `fallback_template`, while `resume` kept its
-  spelling and meaning. Version 4 is the profile removal: a session's `agent` is always its agent type's word or
-  `custom`, never a profile name, and the profiles listing is gone. Version 5 is launch kinds: `restart_offer` gained
-  `no_resume_command`, for a command launch with no resume command. `farhelm agent profiles` is still parsed, hidden,
-  only so it can be refused with a message saying profiles were removed and naming `farhelm agent templates`. A session
-  row's non-secret `OFFER` cell is `resume` when restart can resume the session's conversation, otherwise the reason it
-  cannot (`not-captured`, `no-reporting`, `no-resume-command`; `not_captured`, `no_conversation_reporting` and
-  `no_resume_command` in JSON); it does not disclose the template, captured conversation locator, or a live-stop
-  recommendation. Every dynamic table cell is escaped to one printable line and every non-final column is capped at 48
-  characters: these values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row, an
-  ESC drives the terminal, and one long title would otherwise be padded onto every other row. A cut listing prints its
-  rows on stdout and one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no
-  timeout of its own: the supervisor bounds the relay and is the only party that can distinguish its two failures (see
-  the transport section's version-20 paragraph).
+  table, `command (set)`), and names the host a template's install identity currently resolves to. Named templates show
+  their effective `name_kind` explicitly in JSON, including `base` when the wire reply omits it; the table labels the
+  quoted title as a base or fixed name. This additive discovery default leaves schema version 6 unchanged. It does not
+  change the normalized storage or write replies, which omit Base. Version 3 is the restart-only-resumes change:
+  `restart_offer` lost `fresh_only` and `fallback_template`, while `resume` kept its spelling and meaning. Version 4 is
+  the profile removal: a session's `agent` is always its agent type's word or `custom`, never a profile name, and the
+  profiles listing is gone. Version 5 is launch kinds: `restart_offer` gained `no_resume_command`, for a command launch
+  with no resume command. `farhelm agent profiles` is still parsed, hidden, only so it can be refused with a message
+  saying profiles were removed and naming `farhelm agent templates`. A session row's non-secret `OFFER` cell is `resume`
+  when restart can resume the session's conversation, otherwise the reason it cannot (`not-captured`, `no-reporting`,
+  `no-resume-command`; `not_captured`, `no_conversation_reporting` and `no_resume_command` in JSON); it does not
+  disclose the template, captured conversation locator, or a live-stop recommendation. Every dynamic table cell is
+  escaped to one printable line and every non-final column is capped at 48 characters: these values are fleet-wide user
+  text printed straight to a terminal, so a raw newline forges a row, an ESC drives the terminal, and one long title
+  would otherwise be padded onto every other row. A cut listing prints its rows on stdout and one warning on stderr, so
+  a script capturing stdout still gets nothing but the table. It has no timeout of its own: the supervisor bounds the
+  relay and is the only party that can distinguish its two failures (see the transport section's version-20 paragraph).
 - `farhelm agent delete --session <id> [--stop-if-running]` — removes an explicitly named session, refusing self-delete.
   Success prints `deleted <id>` on stdout and any checkout notice on stderr. The relay and helm both refuse self-delete;
   the helm derives a delete guard from the target state shown on its approval card and passes it unchanged to the
@@ -3892,16 +3894,18 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   set, and an unknown one is refused listing them all), because every one of these values is judged downstream — by the
   registry, by the target filesystem — and every one of them may legally begin with `-`; refusing such a value locally
   would be this CLI declining to carry a name the far end would have explained.
-- `farhelm agent template create <name> [--cwd <dir>] [--title ...] [--host <name>] <launch flags>`,
+- `farhelm agent template create <name> [--cwd <dir>] [--title ...] [--title-kind base|fixed] [--host <name>] <launch flags>`,
   `farhelm agent template edit <name> ...` with the same flags, and `farhelm agent template delete <name>` — an agent's
   template writes (SPEC.md, Agent-spawned sessions). The launch flags are `farhelm agent create`'s; `--template` is
   parsed, hidden, only so it can be refused, since a template written from other templates would copy command text the
   agent never saw. `--host` names a host by the name `farhelm agent hosts` prints and is resolved to that host's install
   when the template is written. Create records the agent launch kind for agent-launch choices, including an agent type
   alone; command fields record the command kind. Placement and title alone leave the kind absent, and existing kindless
-  templates are not migrated. An edit sends only the fields given. Each write is relayed to the helm and waits for the
-  user's approval (see "Permission prompts for agent actions"); stdout gets one confirmation line naming the template,
-  as the lifecycle verbs confirm on stdout.
+  templates are not migrated. An edit sends only the fields given: omitted name kind keeps the saved kind, while
+  explicit Base replaces Fixed before the shared writer normalizes Base out. A kind-only edit merges before shape
+  validation so it can use an existing name; a kind without a name after merging is refused. Each write is relayed to
+  the helm and waits for the user's approval (see "Permission prompts for agent actions"); stdout gets one confirmation
+  line naming the template, as the lifecycle verbs confirm on stdout.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
   instructions pointer") locally, generated by walking this same `AgentCmd` definition. Neither spelling touches the
   supervisor, the helm, or the session credential: both must work for an agent that has just been handed the pointer

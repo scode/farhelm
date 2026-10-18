@@ -236,7 +236,11 @@ pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> Str
         None => {}
     }
     if let Some(name) = &fields.name {
-        parts.push(format!("title {}", quoted(name)));
+        let kind = match fields.name_kind {
+            Some(farhelm_proto::launcher::TemplateNameKind::Fixed) => "fixed name",
+            None | Some(farhelm_proto::launcher::TemplateNameKind::Base) => "base name",
+        };
+        parts.push(format!("title {} ({kind})", quoted(name)));
     }
     if template.quick_launch {
         parts.push("quick launch".to_string());
@@ -513,7 +517,8 @@ mod tests {
     /// Spec: a template's SETS cell lists what it sets in application
     /// order with the values the flags take, `default` for a reset, the
     /// command texts only as set, a host that no longer resolves as such,
-    /// and free text quoted; a template setting nothing says so.
+    /// and free text quoted; session names carry their effective base/fixed
+    /// policy, and a template setting nothing says so.
     ///
     /// Why: this cell is the only place an agent reads what a template will
     /// do, including its YOLO answer, so a title like `x, yolo` must not
@@ -546,7 +551,18 @@ mod tests {
                 None,
             ),
             "agent open_code, model \"big\", effort default, host (no longer registered), \
-             title \"x, yolo\""
+             title \"x, yolo\" (base name)"
+        );
+        assert_eq!(
+            cell(
+                TemplateFields {
+                    name: Some("review".into()),
+                    name_kind: Some(farhelm_proto::launcher::TemplateNameKind::Fixed),
+                    ..Default::default()
+                },
+                None
+            ),
+            "title \"review\" (fixed name)"
         );
         let command = cell(
             TemplateFields {

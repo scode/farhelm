@@ -334,84 +334,107 @@ fn hosts_json_has_the_exact_discovery_envelope() {
 /// prints the versioned envelope with each template's name, its fields
 /// without command text, the `sets_*` flags, shortcut assignments and the
 /// host name; the table form lists the same template by name with what it
-/// sets and which shortcuts select it.
+/// sets and which shortcuts select it. A named template shows its effective
+/// policy even when the wire reply omits the default Base.
 ///
 /// Why: the listing is an agent's only view of templates, read as JSON when
 /// exact names matter; the envelope is a public schema like the hosts one.
 #[farhelm_testtrace::test]
 fn templates_json_and_table_list_what_each_template_sets() {
-    let reply = || {
-        Some(AgentReply::Templates {
-            caller_host_id: "host-local".to_string(),
-            templates: vec![farhelm_proto::AgentTemplate {
-                name: "my-codex".to_string(),
-                fields: farhelm_proto::launcher::TemplateFields {
-                    agent: Some(farhelm_proto::LaunchHarness::Codex),
-                    ..Default::default()
-                },
-                sets_command: false,
-                sets_resume_command: false,
-                host_name: None,
-                quick_launch: true,
-                key: Some("3".to_string()),
-            }],
-        })
-    };
-    let run = |args: &[&str]| {
-        let temp = farhelm_teststate::tempdir().unwrap();
-        let socket = temp.path().join("supervisor.sock");
-        let (done, thread) = mock_supervisor(&socket, move |request| {
-            let ControlMsg::AgentRequest {
-                req_id, request, ..
-            } = request
-            else {
-                panic!("farhelm agent must send an AgentRequest, got {request:?}");
-            };
-            assert_eq!(request, AgentVerb::Templates {});
-            Some(ControlMsg::AgentResponse {
-                req_id,
-                outcome: AgentOutcome::Ok {
-                    reply: reply().expect("a reply"),
-                },
+    use farhelm_proto::launcher::TemplateNameKind;
+    for (title, kind) in [
+        (None, None),
+        (Some("review"), None),
+        (Some("review"), Some(TemplateNameKind::Fixed)),
+    ] {
+        let reply = move || {
+            Some(AgentReply::Templates {
+                caller_host_id: "host-local".to_string(),
+                templates: vec![farhelm_proto::AgentTemplate {
+                    name: "my-codex".to_string(),
+                    fields: farhelm_proto::launcher::TemplateFields {
+                        agent: Some(farhelm_proto::LaunchHarness::Codex),
+                        name: title.map(str::to_string),
+                        name_kind: kind,
+                        ..Default::default()
+                    },
+                    sets_command: false,
+                    sets_resume_command: false,
+                    host_name: None,
+                    quick_launch: true,
+                    key: Some("3".to_string()),
+                }],
             })
-        });
-        let output = output_with_timeout(agent_command_with_args(&socket, args));
-        finish_server(done, thread);
+        };
+        let run = |args: &[&str]| {
+            let temp = farhelm_teststate::tempdir().unwrap();
+            let socket = temp.path().join("supervisor.sock");
+            let (done, thread) = mock_supervisor(&socket, move |request| {
+                let ControlMsg::AgentRequest {
+                    req_id, request, ..
+                } = request
+                else {
+                    panic!("farhelm agent must send an AgentRequest, got {request:?}");
+                };
+                assert_eq!(request, AgentVerb::Templates {});
+                Some(ControlMsg::AgentResponse {
+                    req_id,
+                    outcome: AgentOutcome::Ok {
+                        reply: reply().expect("a reply"),
+                    },
+                })
+            });
+            let output = output_with_timeout(agent_command_with_args(&socket, args));
+            finish_server(done, thread);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        let value: serde_json::Value =
+            serde_json::from_slice(&run(&["templates", "--json"])).expect("JSON envelope");
+        let mut expected_fields = serde_json::json!({"agent": "codex"});
+        let policy = if kind == Some(TemplateNameKind::Fixed) {
+            "fixed"
+        } else {
+            "base"
+        };
+        if let Some(title) = title {
+            expected_fields["name"] = title.into();
+            expected_fields["name_kind"] = policy.into();
+        }
         assert_eq!(
-            output.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
+            value,
+            serde_json::json!({
+                "schema_version": 6,
+                "caller": {"session_id": "session-1", "host_id": "host-local"},
+                "reply": {
+                    "reply": "templates",
+                    "caller_host_id": "host-local",
+                    "templates": [{
+                        "name": "my-codex",
+                        "fields": expected_fields,
+                        "sets_command": false,
+                        "sets_resume_command": false,
+                        "host_name": null,
+                        "quick_launch": true,
+                        "key": "3"
+                    }]
+                }
+            })
         );
-        output.stdout
-    };
-    let value: serde_json::Value =
-        serde_json::from_slice(&run(&["templates", "--json"])).expect("JSON envelope");
-    assert_eq!(
-        value,
-        serde_json::json!({
-            "schema_version": 6,
-            "caller": {"session_id": "session-1", "host_id": "host-local"},
-            "reply": {
-                "reply": "templates",
-                "caller_host_id": "host-local",
-                "templates": [{
-                    "name": "my-codex",
-                    "fields": {"agent": "codex"},
-                    "sets_command": false,
-                    "sets_resume_command": false,
-                    "host_name": null,
-                    "quick_launch": true,
-                    "key": "3"
-                }]
-            }
-        })
-    );
-    let table = String::from_utf8(run(&["templates"])).expect("UTF-8");
-    assert_eq!(
-        table,
-        "NAME     SETS\nmy-codex agent codex, quick launch, number key 3\n"
-    );
+        let table = String::from_utf8(run(&["templates"])).expect("UTF-8");
+        let named = title
+            .map(|title| format!(", title \"{title}\" ({policy} name)"))
+            .unwrap_or_default();
+        assert_eq!(
+            table,
+            format!("NAME     SETS\nmy-codex agent codex{named}, quick launch, number key 3\n")
+        );
+    }
 }
 
 /// Spec: `farhelm agent sessions` sends the `Sessions` verb and renders the
@@ -2524,14 +2547,16 @@ fn a_session_reply_to_a_creating_verb_is_refused() {
 /// template; `--template` is refused before anything is sent.
 ///
 /// Why: SPEC.md gives template writes `farhelm agent create`'s flags plus
-/// `--cwd`, `--title` and `--host`, never `--template`: a template built
+/// `--cwd`, `--title`, `--title-kind` and `--host`, never `--template`: a template built
 /// from other templates would copy command text the agent never saw into
 /// one it wrote. The host travels by name so the helm, not the agent,
 /// decides which install it pins.
 #[farhelm_testtrace::test]
 fn a_template_create_sends_its_fields_and_refuses_template() {
     use farhelm_proto::AgentTemplate;
-    use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
+    use farhelm_proto::launcher::{
+        LauncherKind, TemplateDestination, TemplateFields, TemplateNameKind,
+    };
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let (done, thread) = mock_supervisor(&socket, |request| {
@@ -2547,6 +2572,7 @@ fn a_template_create_sends_its_fields_and_refuses_template() {
             yolo: Some(false),
             destination: Some(TemplateDestination::Folder("/srv/work".to_string())),
             name: Some("worker".to_string()),
+            name_kind: Some(TemplateNameKind::Fixed),
             ..Default::default()
         };
         assert_eq!(
@@ -2589,6 +2615,8 @@ fn a_template_create_sends_its_fields_and_refuses_template() {
             "/srv/work",
             "--title",
             "worker",
+            "--title-kind",
+            "fixed",
             "--host",
             "builder",
             "--quick-launch",
