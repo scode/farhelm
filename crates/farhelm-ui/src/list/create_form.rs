@@ -707,9 +707,9 @@ fn template_edits(
         None => {}
     }
     match fields.effort {
-        Some(Some(effort)) => {
-            edits.push(TemplateEdit::Search(ComposerSearchResult::Effort(effort)))
-        }
+        Some(Some(effort)) => edits.push(TemplateEdit::Search(ComposerSearchResult::Effort(Some(
+            effort,
+        )))),
         Some(None) => edits.push(TemplateEdit::Set(Box::new(move || {
             t.structured_effort.set(None)
         }))),
@@ -1037,13 +1037,15 @@ fn apply_composer_search_result(
             custom_model_harness.set(owner);
         }
         crate::launch_composer::ComposerSearchResult::Effort(effort) => {
-            // Only the effort moves. Harness and model stay, so no
-            // reconciliation runs and `composer_reset_reason` is deliberately
-            // left as it was — the same as clicking the effort segment, which
-            // is what this result is a keyboard spelling of. The shared
-            // `intent_key.set(None)` below still applies: a changed effort is
-            // a changed create.
-            structured_effort.set(Some(effort));
+            // An unchanged choice is a retry gesture, just like pressing its
+            // button again. Preserve the key after an ambiguous reply so that
+            // accepting effort:default cannot create a second session. A real
+            // edit reaches the shared key reset below; harness and model stay
+            // put, so no reconciliation runs.
+            if *structured_effort.peek() == effort {
+                return None;
+            }
+            structured_effort.set(effort);
         }
         crate::launch_composer::ComposerSearchResult::Permissions(permission) => {
             if permission != crate::launch_composer::ComposerPermission::Custom {
@@ -2189,7 +2191,12 @@ fn search_result_tooltip(
             "start in a managed checkout of this repository".to_string()
         }
         ComposerSearchResult::Model { .. } => "use this model for the session".to_string(),
-        ComposerSearchResult::Effort(_) => "use this reasoning effort for the session".to_string(),
+        ComposerSearchResult::Effort(Some(_)) => {
+            "use this reasoning effort for the session".to_string()
+        }
+        ComposerSearchResult::Effort(None) => {
+            "use the agent's default reasoning effort".to_string()
+        }
         ComposerSearchResult::Permissions(ComposerPermission::Guarded) => {
             crate::launch_composer::permission_help(
                 harness.expect("a permission result needs a harness"),
@@ -6039,7 +6046,9 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::Template(name) => rsx! { "Template: {display_peer(name)}" },
                                                         crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Managed checkout: {repo.identifier()}" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({crate::launch_composer::harness_label(*harness)})" },
-                                                        crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! { "Effort: {crate::launch_composer::effort_value(*effort)}" },
+                                                        crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! {
+                                                            "Effort: {crate::launch_composer::effort_search_word(*effort)}"
+                                                        },
                                                         crate::launch_composer::ComposerSearchResult::Permissions(permission) => rsx! {
                                                             "Permissions: "
                                                             {match permission {

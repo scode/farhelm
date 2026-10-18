@@ -170,6 +170,69 @@ test("Enter on an unchanged permission retries a lost reply with one key and one
   }
 });
 
+/**
+ * Reapplying effort:default through search must keep an unresolved create's key.
+ *
+ * The first request succeeds on the server but its reply is lost. Choosing the
+ * already selected default is not a new launch intent, so the next submit
+ * must reconcile that session instead of creating a second one.
+ */
+test("searching for unchanged default effort preserves a lost reply's key", async ({ page, request }) => {
+  const title = `intent-effort-retry-${Date.now()}`;
+  const keys: string[] = [];
+  let firstStatus = 0;
+  let bodyFailed = false;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    keys.push(route.request().postDataJSON().intent_key);
+    if (keys.length === 1) {
+      firstStatus = (await route.fetch()).status();
+      await route.abort();
+    } else await route.continue();
+  });
+  try {
+    await page.goto("/");
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await form.getByRole("button", { name: "Codex", exact: true }).click();
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    await form.getByLabel("name (optional)").fill(title);
+    const defaultEffort = form.locator(".launch-composer-effort-choice")
+      .getByRole("button", { name: "default", exact: true });
+    await expect(defaultEffort).toHaveAttribute("aria-pressed", "true");
+
+    await form.locator(".create-session-submit").click();
+    await expect(form.locator(".create-session-error")).toBeVisible();
+    expect(firstStatus, "the dropped reply must follow an actual successful create").toBe(200);
+
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    await search.fill("effort:default");
+    await expect(form.getByRole("option", { name: "Effort: default", exact: true, selected: true })).toBeVisible();
+    await search.press("Enter");
+    await expect(defaultEffort).toHaveAttribute("aria-pressed", "true");
+    await form.locator(".create-session-submit").click();
+
+    const id = await sessionIdFor(rowByTitle(page, title));
+    await waitForSessionRevealed(page, id);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+    const listing = await (await request.get("/api/sessions")).json();
+    expect(listing.sessions.filter((session: any) => session.title === title)).toHaveLength(1);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      // A timed-out assertion can leave the admitted create in route.fetch().
+      // Settle it before looking up sessions so late success cannot escape cleanup.
+      ["pending creates", () => page.unrouteAll({ behavior: "wait" })],
+      ["sessions", () => cleanUpSessionsTitled(request, title)],
+    ]);
+  }
+});
+
 test("a create whose reply is lost is retried with the same key and yields one session", async ({
   page,
   request,

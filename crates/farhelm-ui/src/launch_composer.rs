@@ -74,6 +74,17 @@ pub(crate) const fn effort_value(effort: LaunchEffort) -> &'static str {
     }
 }
 
+/// Give the default search row and explicit effort rows their visible word.
+///
+/// The row label and exact-word selection must agree with the button, even
+/// though default has no explicit wire value.
+pub(crate) const fn effort_search_word(effort: Option<LaunchEffort>) -> &'static str {
+    match effort {
+        Some(effort) => effort_value(effort),
+        None => "default",
+    }
+}
+
 /// Return the lowercase phrase used for a permission in visible summaries.
 ///
 /// The wire spelling for `SmartApprove` uses an underscore, while people see
@@ -356,8 +367,12 @@ pub(crate) enum ComposerSearchResult {
         id: String,
         harness: LaunchHarness,
     },
-    /// Apply one effort offered by the currently selected harness and model.
-    Effort(LaunchEffort),
+    /// Apply an explicit offered effort, or clear it to use the agent's default.
+    ///
+    /// `None` is a search action only under `effort:` with an effort-capable
+    /// harness. It does not depend on the model catalog, which can be empty
+    /// while the default button is still usable.
+    Effort(Option<LaunchEffort>),
     /// Apply a searched permission choice without changing
     /// any other structured launch field.
     Permissions(ComposerPermission),
@@ -991,9 +1006,18 @@ pub(crate) fn search_results(
     if matches!(scope, SearchScope::All | SearchScope::Effort) {
         // Without a harness there is no safe effort vocabulary to offer.
         if let Some(harness) = harness {
+            // Default means no explicit level and remains available before
+            // the model catalog arrives. Keep it scoped so common unlabelled
+            // queries never change reasoning effort.
+            if scope == SearchScope::Effort
+                && harness.offers_effort()
+                && (query.is_empty() || effort_search_word(None).contains(&folded_query))
+            {
+                results.push(ComposerSearchResult::Effort(None));
+            }
             for effort in compatible_efforts(harness, model, catalog) {
                 if query.is_empty() || effort_value(effort).contains(&folded_query) {
-                    results.push(ComposerSearchResult::Effort(effort));
+                    results.push(ComposerSearchResult::Effort(Some(effort)));
                 }
             }
         }
@@ -1143,7 +1167,7 @@ pub(crate) fn default_search_index(
 /// word; paths, folders, and recent setups are descriptions, and an exact
 /// match on those would be a coincidence rather than an intent. Each
 /// kind compares by the same spelling the search offered it under —
-/// [`harness_word`], the model id, [`effort_value`] — so a row that matched
+/// [`harness_word`], the model id, [`effort_search_word`] — so a row that matched
 /// as a substring can always also match exactly.
 /// Templates compare Unicode-lowercased names; the scoped caller supplies the
 /// same folding for their query.
@@ -1167,7 +1191,7 @@ fn exact_word_group(
         ComposerSearchResult::Model { id, .. } if id.eq_ignore_ascii_case(folded_query) => {
             Some(ComposerSearchGroup::Models)
         }
-        ComposerSearchResult::Effort(effort) if effort_value(*effort) == folded_query => {
+        ComposerSearchResult::Effort(effort) if effort_search_word(*effort) == folded_query => {
             Some(ComposerSearchGroup::Efforts)
         }
         ComposerSearchResult::Permissions(permission)
@@ -3334,7 +3358,7 @@ mod tests {
                 Some(LaunchHarness::Claude),
                 Some("claude-fable"),
             )
-            .contains(&ComposerSearchResult::Effort(LaunchEffort::Medium))
+            .contains(&ComposerSearchResult::Effort(Some(LaunchEffort::Medium)))
         );
         assert!(
             !search_results(
@@ -3375,7 +3399,7 @@ mod tests {
                 Some(LaunchHarness::Claude),
                 Some("claude-custom"),
             )
-            .contains(&ComposerSearchResult::Effort(LaunchEffort::Medium))
+            .contains(&ComposerSearchResult::Effort(Some(LaunchEffort::Medium)))
         );
         assert!(
             !search_results(
@@ -3388,6 +3412,78 @@ mod tests {
             .iter()
             .any(|result| matches!(result, ComposerSearchResult::Effort(_)))
         );
+    }
+
+    /// Default is a scoped, catalog-independent effort choice whenever the
+    /// selected harness offers the default button. Exact typing must make it
+    /// the Enter target, including before any model efforts have loaded.
+    #[test]
+    fn scoped_default_effort_follows_harness_capability_without_a_catalog() {
+        let history = LaunchHistory::default();
+        let catalog = vec![LaunchCatalogModel {
+            id: "codex-basic".into(),
+            harness: LaunchHarness::Codex,
+            efforts: vec![LaunchEffort::Medium],
+        }];
+        let choices = search_results(
+            &history,
+            &catalog,
+            "effort:",
+            Some(LaunchHarness::Codex),
+            Some("codex-basic"),
+        );
+        assert_eq!(choices.first(), Some(&ComposerSearchResult::Effort(None)));
+        assert!(choices.contains(&ComposerSearchResult::Effort(Some(LaunchEffort::Medium))));
+
+        let exact = grouped_search_results(search_results(
+            &history,
+            &catalog,
+            "effort:default",
+            Some(LaunchHarness::Codex),
+            Some("codex-basic"),
+        ));
+        assert_eq!(default_search_index(&exact, "effort:default"), 0);
+        assert_eq!(exact[0].1, vec![ComposerSearchResult::Effort(None)]);
+        assert_eq!(
+            search_results(
+                &history,
+                &[],
+                "effort:def",
+                Some(LaunchHarness::Codex),
+                None
+            ),
+            vec![ComposerSearchResult::Effort(None)]
+        );
+        assert_eq!(
+            search_results(
+                &history,
+                &[],
+                "effort:default",
+                Some(LaunchHarness::Codex),
+                None
+            ),
+            vec![ComposerSearchResult::Effort(None)]
+        );
+        assert!(
+            !search_results(
+                &history,
+                &catalog,
+                "default",
+                Some(LaunchHarness::Codex),
+                None
+            )
+            .contains(&ComposerSearchResult::Effort(None))
+        );
+        assert!(
+            !search_results(&history, &[], "effort:default", None, None)
+                .contains(&ComposerSearchResult::Effort(None))
+        );
+
+        for &harness in LaunchHarness::ALL {
+            let offered = search_results(&history, &[], "effort:default", Some(harness), None)
+                .contains(&ComposerSearchResult::Effort(None));
+            assert_eq!(offered, harness.offers_effort(), "{harness:?}");
+        }
     }
 
     /// Selecting a harness narrows both released and custom-history model
@@ -3485,7 +3581,7 @@ mod tests {
                 id: "medium-context".into(),
                 harness: LaunchHarness::Claude,
             },
-            ComposerSearchResult::Effort(LaunchEffort::Medium),
+            ComposerSearchResult::Effort(Some(LaunchEffort::Medium)),
         ];
         let groups = grouped_search_results(results);
 
@@ -3500,7 +3596,7 @@ mod tests {
     fn grouped_search_results_places_efforts_between_models_and_folders() {
         let groups = grouped_search_results(vec![
             ComposerSearchResult::Folder("/work".into()),
-            ComposerSearchResult::Effort(LaunchEffort::High),
+            ComposerSearchResult::Effort(Some(LaunchEffort::High)),
             ComposerSearchResult::Permissions(ComposerPermission::Yolo),
             ComposerSearchResult::Model {
                 id: "model".into(),
@@ -3936,8 +4032,9 @@ mod tests {
             Some(LaunchHarness::Claude),
             Some("claude-v2"),
         );
-        assert_eq!(efforts.len(), 1);
-        assert!(efforts.contains(&ComposerSearchResult::Effort(LaunchEffort::Medium)));
+        assert_eq!(efforts.len(), 2);
+        assert_eq!(efforts[0], ComposerSearchResult::Effort(None));
+        assert!(efforts.contains(&ComposerSearchResult::Effort(Some(LaunchEffort::Medium))));
         assert!(
             efforts
                 .iter()
