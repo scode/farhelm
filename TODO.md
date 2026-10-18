@@ -231,13 +231,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   its signal and its marker. A cheap check of the mechanism is a PATH `curl` shim that delays the startup
   `POST /api/sessions` by 25 seconds.
 
-- **Shared-checkout browser timeout and fixture cleanup.** The Chromium test
+- **Shared-checkout browser timeout.** The Chromium test
   `borrowers retain the checkout until the final stopped session is deleted` in `e2e/tests/github-checkouts.spec.ts`
   exceeds its 60-second limit on the cache change and on rebuilt, clean main (FLAKES.md, 2026-10-08). Exact runs failed
   at both four and eight CPUs; traces show slow terminal typing after the clones finished, but the cause is unknown.
-  Diagnose that delay before changing the budget. Independently, a timeout can make session cleanup throw before the Git
-  fixture restores its URL mappings, causing later WebKit fixture premises to resolve to an earlier repository. Ensure
-  restoration runs even when session cleanup fails; that fixes the cascade, not necessarily the original timeout.
+  Per-character probe input has been replaced with one text insertion, preserving the real terminal echo and Enter.
+  Fixture restoration now attempts every step even when session or configuration cleanup fails, fixing the later-engine
+  Git URL mapping cascade. The original timeout's cause remains unproved; keep its existing deadline and sweep exclusion
+  until focused evidence supports removing them.
 
 ### Difficult deflake
 
