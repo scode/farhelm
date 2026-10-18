@@ -46,31 +46,36 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Consider moving session details to the bottom.** Consider moving the session name, host and related details from the
   top of the session view to the bottom. There appears to be room there, and it could help highlight which session and
-  host are active. Details TBD at planning time.
+  host are active. Details TBD at planning time. Plan: `plans/queue/session-details-bottom.md`.
 
 - **Stop Codex's folder-trust questions from returning.** Codex appears to be asking "trust this folder" again in
   Farhelm sessions. The maintainer recalls an earlier fix; investigate what changed and restore the intended behavior.
+  Plan: `plans/queue/codex-trust-prompts.md`.
 
-- **Per-host terminal background color.** Allow setting a terminal background color for each host.
+- **Per-host terminal background color.** Allow setting a terminal background color for each host. Plan:
+  `plans/queue/host-terminal-colors.md`.
 
 - **Fix launcher keyboard focus and Enter.** Clicking the background between fields clears the selection; clicking again
   appears to select the whole dialog. Enter does not launch in either state and seems to require a focused control. Make
-  Enter launch when the dialog is ready, including after clicking between fields.
+  Enter launch when the dialog is ready, including after clicking between fields. Plan:
+  `plans/queue/launcher-enter-focus.md`.
 
 - **Official support for agent wrappers.** Allow running an agent through a wrapper while treating it exactly like the
-  real agent. Details TBD; the maintainer knows what they want here. Ask before designing or implementing it.
+  real agent. Details TBD; the maintainer knows what they want here. Ask before designing or implementing it. Plan:
+  `plans/queue/agent-wrappers.md`.
 
 - **Restore deleted sessions.** Support undeleting a session that is in the trash. Consider supporting undelete for
   sessions without a managed checkout too, by retaining their metadata.
 
-- Follow up on the recent quick launch system so an agent can populate the templates.
+- Follow up on the recent quick launch system so an agent can populate the templates. Plan:
+  `plans/queue/agent-quick-launch-templates.md`.
 
 - **Send a prompt to a running agent from the `farhelm` command.** Let an agent (or a script) send a prompt into another
   session's agent that is already running, through the `farhelm` CLI, and document it in the agent instructions. This is
   the CLI and agent part of "Inject commands into agents" (Maybe later), which also covers a UI button. The
   initial-prompt plan (`agent-delete-and-prompt`) only covers a prompt given at creation, on the agent's command line; a
   running agent can only be reached through its terminal, which SPEC.md says needs reliable detection that the agent is
-  ready for input.
+  ready for input. Plan: `plans/queue/prompt-running-agent.md`.
 
 - **Mark a session suspended.** A "mark suspended" action, or similar, so a known, named session can be kept without
   keeping it running. A suspended session is greyed out in the list but can still be reached by name, for example from
@@ -142,7 +147,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   mode turns the shield YOLO, and a later recognized non-YOLO mode restores the launch shield (SPEC.md, Session list,
   the paragraph on reading the permission mode from the status line). The intent was that this reading only ever moves
   the shield toward YOLO, for safety. Discuss the details first, including Claude's plan mode (which keeps the last
-  reading) and Cursor (which shows no label when its mode is off), then decide whether to make it one-way.
+  reading) and Cursor (which shows no label when its mode is off), then decide whether to make it one-way. Plan:
+  `plans/queue/one-way-yolo-shield.md`.
 
 - **Consider an upstream xterm.js API for links spanning agent-drawn rows.** Farhelm's `linkHoverText` in
   `crates/farhelm-ui/assets/terminal-links.js` reads the undocumented `extended.urlId` from the cell returned by
@@ -156,7 +162,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   xterm.js unmodified, so an upstream fix arrives only with a stable release.
 
 - **Cheaper clones from the repository cache.** Look into whether a managed checkout's clone from the host's repository
-  cache can skip most of the compression and delta work git does today, so the clone stage finishes sooner.
+  cache can skip most of the compression and delta work git does today, so the clone stage finishes sooner. Plan:
+  `plans/queue/cheaper-cache-clones.md`.
 
 ## Doc todo
 
@@ -952,3 +959,15 @@ are large mostly because of their tests.
   replay-after-takeover and dimension handoff have no tests; (4) SPEC.md and SPEC_impl.md would need to state the
   supported model. Same-version helms look like a small step; mixed versions are the real work. First action when
   returning: run the untested case with two same-version helms and record what the displaced side shows.
+
+- **Check whether Codex sessions run their commands outside the session.** An unverified finding from planning
+  `prompt-running-agent` (2026-10-17). Since Codex 0.157, Codex's terminal app starts or attaches to one shared
+  background server per machine and runs its conversation there, unless it is launched with `--no-daemon`; Farhelm does
+  not pass that flag. Other tools that run Codex report that its tool commands then execute in that shared server's
+  environment rather than in the terminal they launched Codex from, which broke their per-session identity
+  (automatis-tools/agents-can-communicate#224, mvschwarz/openrig#69). If that holds for Farhelm, commands a Codex
+  session runs may not see the environment Farhelm sets up for the session (such as what the `farhelm` command inside a
+  session relies on to know which session is asking) and may run outside the session's processes, which Farhelm uses to
+  tell which session a process belongs to. Start by checking, on the installed Codex, whether a command run by a Codex
+  session that Farhelm launched sees the session's environment and runs under the session's processes, with and without
+  `--no-daemon`; then decide whether Farhelm should pass `--no-daemon` or otherwise adapt.
