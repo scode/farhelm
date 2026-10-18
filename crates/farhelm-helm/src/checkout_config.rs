@@ -25,13 +25,14 @@
 //!   the global `revision`, in the same transaction as the change. Writing
 //!   the value that is already there bumps nothing, so the revision is a
 //!   cheap changed-only signal for future readers.
-//!   The separate Claude trust opt-in changes no path and leaves previews valid.
+//!   The separate per-agent trust opt-ins change no path and leave previews valid.
 //! - Overrides are config for the REGISTRY ROW: a retarget or adoption of
 //!   that row leaves them in place (they say nothing about the machine that
 //!   used to be behind it), while removing the host cascades them away.
 
 use crate::store::{HelmStore, HostId, HostRow};
 use anyhow::Context;
+use farhelm_proto::LaunchHarness;
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
 
@@ -47,6 +48,98 @@ pub(crate) struct ClaudeTrustBody {
 struct ClaudeTrustState {
     enabled: bool,
     hint_dismissed: bool,
+}
+
+/// The supported trust settings share a wire grammar, but each harness owns
+/// its own switch and hint dismissal. Unknown path words fail during extraction;
+/// known harnesses without a switch are refused before touching storage.
+pub(crate) async fn get_agent_trust(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+    axum::extract::Path(harness): axum::extract::Path<LaunchHarness>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if trust_column(harness).is_err() {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    let result = async {
+        let snapshot = state.store.checkout_config_snapshot(None).await?;
+        let preferences = state.store.preferences().await?;
+        agent_trust_state(harness, &snapshot, &preferences)
+    }
+    .await;
+    match result {
+        Ok(value) => axum::Json(value).into_response(),
+        Err(error) => crate::http_error(error),
+    }
+}
+
+/// An explicit boolean changes only the selected harness's global opt-in.
+/// The legacy Claude route remains available with exactly the same grammar.
+pub(crate) async fn put_agent_trust(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+    axum::extract::Path(harness): axum::extract::Path<LaunchHarness>,
+    axum::Json(body): axum::Json<ClaudeTrustBody>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if trust_column(harness).is_err() {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    }
+    match state.store.set_agent_trust(harness, body.enabled).await {
+        Ok(()) => {
+            state.manager.events().bump();
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => crate::http_error(error),
+    }
+}
+
+/// SQL identifiers come only from this exhaustive capability map. A new
+/// harness must explicitly choose whether it supports a managed trust setting.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn trust_column(harness: LaunchHarness) -> anyhow::Result<&'static str> {
+    match harness {
+        LaunchHarness::Claude => Ok("claude_trust"),
+        LaunchHarness::Codex => Ok("codex_trust"),
+        LaunchHarness::Muse => Ok("muse_trust"),
+        LaunchHarness::Pi => Ok("pi_trust"),
+        LaunchHarness::Cursor
+        | LaunchHarness::Goose
+        | LaunchHarness::Omp
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Grok => {
+            anyhow::bail!("this harness has no managed-checkout trust setting")
+        }
+    }
+}
+
+/// Pair each opt-in with its own shared dismissal; another agent's hint
+/// must never inherit Claude's persisted answer.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn agent_trust_state(
+    harness: LaunchHarness,
+    snapshot: &CheckoutConfigSnapshot,
+    preferences: &crate::store::Preferences,
+) -> anyhow::Result<ClaudeTrustState> {
+    let (enabled, dismissed) = match harness {
+        LaunchHarness::Claude => (
+            snapshot.claude_trust,
+            preferences.claude_trust_hint_dismissed,
+        ),
+        LaunchHarness::Codex => (snapshot.codex_trust, preferences.codex_trust_hint_dismissed),
+        LaunchHarness::Muse => (snapshot.muse_trust, preferences.muse_trust_hint_dismissed),
+        LaunchHarness::Pi => (snapshot.pi_trust, preferences.pi_trust_hint_dismissed),
+        LaunchHarness::Cursor
+        | LaunchHarness::Goose
+        | LaunchHarness::Omp
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Grok => {
+            anyhow::bail!("this harness has no managed-checkout trust setting")
+        }
+    };
+    Ok(ClaudeTrustState {
+        enabled,
+        hint_dismissed: dismissed == Some(true),
+    })
 }
 
 /// Read the all-hosts trust choice independently of executable hook text.
@@ -91,6 +184,245 @@ mod claude_trust_tests {
         http::{Request, StatusCode},
     };
     use tower::ServiceExt;
+
+    /// Construct the generic route through its public path grammar; storage
+    /// assertions alone cannot catch a missing route or a permissive JSON body.
+    fn agent_request(method: &str, harness: &str, body: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(format!("/api/checkout-agent-trust/{harness}"))
+            .header("host", "127.0.0.1:7433")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// Each route names exactly one switch. The old Claude route and the
+    /// generic Claude route must see the same state, without broadening PUT.
+    #[farhelm_testtrace::test]
+    async fn agent_trust_routes_are_independent_and_keep_claude_compatibility() {
+        let harness = rest_harness::idle_helm().await;
+        let revision = harness
+            .store
+            .checkout_config_snapshot(None)
+            .await
+            .unwrap()
+            .revision;
+        for agent in ["claude", "codex", "muse", "pi"] {
+            let response = harness
+                .router()
+                .oneshot(agent_request("GET", agent, serde_json::Value::Null))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), 1024)
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+                serde_json::json!({"enabled":false,"hint_dismissed":false})
+            );
+        }
+        for agent in ["claude", "codex", "muse", "pi"] {
+            let response = harness
+                .router()
+                .oneshot(agent_request(
+                    "PUT",
+                    agent,
+                    serde_json::json!({"enabled":true}),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            for invalid in [
+                serde_json::json!({}),
+                serde_json::json!({"enabled":null}),
+                serde_json::json!({"enabled":"true"}),
+                serde_json::json!({"enabled":false,"hint_dismissed":true}),
+            ] {
+                let response = harness
+                    .router()
+                    .oneshot(agent_request("PUT", agent, invalid))
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            }
+        }
+        harness
+            .store
+            .update_preferences(crate::store::PreferencePatch {
+                codex_trust_hint_dismissed: Some(Some(true)),
+                pi_trust_hint_dismissed: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        for (agent, dismissed) in [
+            ("claude", false),
+            ("codex", true),
+            ("muse", false),
+            ("pi", true),
+        ] {
+            let response = harness
+                .router()
+                .oneshot(agent_request("GET", agent, serde_json::Value::Null))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), 1024)
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+                serde_json::json!({"enabled":true,"hint_dismissed":dismissed})
+            );
+        }
+        let response = harness
+            .router()
+            .oneshot(request("PUT", serde_json::json!({"enabled":false})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let snapshot = harness.store.checkout_config_snapshot(None).await.unwrap();
+        assert!(!snapshot.claude_trust);
+        assert!(snapshot.codex_trust && snapshot.muse_trust && snapshot.pi_trust);
+        assert_eq!(snapshot.revision, revision);
+        for agent in ["cursor", "goose", "omp", "open_code", "grok", "unknown"] {
+            for method in ["GET", "PUT"] {
+                let response = harness
+                    .router()
+                    .oneshot(agent_request(
+                        method,
+                        agent,
+                        serde_json::json!({"enabled":true}),
+                    ))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    StatusCode::BAD_REQUEST,
+                    "{method} {agent}"
+                );
+            }
+        }
+        assert_eq!(
+            harness.store.checkout_config_snapshot(None).await.unwrap(),
+            snapshot
+        );
+    }
+
+    /// A real schema-56 upgrade has none of the six columns. Old launcher
+    /// memory must not opt anyone in; a version-only rewind must not erase a
+    /// later explicit choice. Reopening also checks durable sparse dismissals.
+    #[farhelm_testtrace::test]
+    async fn agent_trust_schema_upgrade_persists_and_tolerates_rewound_fixtures() {
+        use farhelm_proto::LaunchHarness;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        store.set_claude_trust(true).await.unwrap();
+        store
+            .update_preferences(crate::store::PreferencePatch {
+                compact: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        drop(store);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE checkout_config DROP COLUMN codex_trust;
+            ALTER TABLE checkout_config DROP COLUMN muse_trust;
+            ALTER TABLE checkout_config DROP COLUMN pi_trust;
+            ALTER TABLE preferences DROP COLUMN codex_trust_hint_dismissed;
+            ALTER TABLE preferences DROP COLUMN muse_trust_hint_dismissed;
+            ALTER TABLE preferences DROP COLUMN pi_trust_hint_dismissed;
+            UPDATE preferences SET remembered_workspace_trust = 1;
+            PRAGMA user_version = 56;",
+        )
+        .unwrap();
+        assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('checkout_config') WHERE name IN ('codex_trust','muse_trust','pi_trust')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(conn.query_row("SELECT count(*) FROM pragma_table_info('preferences') WHERE name IN ('codex_trust_hint_dismissed','muse_trust_hint_dismissed','pi_trust_hint_dismissed')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let snapshot = store.checkout_config_snapshot(None).await.unwrap();
+        assert!(snapshot.claude_trust);
+        assert!(!snapshot.codex_trust && !snapshot.muse_trust && !snapshot.pi_trust);
+        assert_eq!(
+            store.preferences().await.unwrap(),
+            crate::store::Preferences {
+                compact: Some(true),
+                ..Default::default()
+            }
+        );
+        for agent in [LaunchHarness::Codex, LaunchHarness::Muse, LaunchHarness::Pi] {
+            store.set_agent_trust(agent, true).await.unwrap();
+        }
+        assert!(
+            store
+                .set_agent_trust(LaunchHarness::Goose, true)
+                .await
+                .is_err()
+        );
+        store
+            .update_preferences(
+                serde_json::from_value(serde_json::json!({
+                    "codex_trust_hint_dismissed": true, "muse_trust_hint_dismissed": true,
+                    "pi_trust_hint_dismissed": true, "remembered_workspace_trust": false
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        store
+            .update_preferences(
+                serde_json::from_value(serde_json::json!({"muse_trust_hint_dismissed":null}))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        drop(store);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        assert!(
+            conn.query_row(
+                "SELECT remembered_workspace_trust FROM preferences WHERE singleton = 1",
+                [],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap(),
+            "retired writes leave historical data untouched"
+        );
+        conn.execute_batch("PRAGMA user_version = 56;").unwrap();
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let resolved = store.resolve_checkout_config(None).await.unwrap();
+        assert!(
+            resolved.claude_trust
+                && resolved.codex_trust
+                && resolved.muse_trust
+                && resolved.pi_trust
+        );
+        assert_eq!(resolved.config_revision, snapshot.revision);
+        assert_eq!(
+            store.preferences().await.unwrap(),
+            crate::store::Preferences {
+                compact: Some(true),
+                codex_trust_hint_dismissed: Some(true),
+                pi_trust_hint_dismissed: Some(true),
+                ..Default::default()
+            }
+        );
+        store
+            .update_preferences(
+                serde_json::from_value(serde_json::json!({"codex_trust_hint_dismissed":false}))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let preferences = store.preferences().await.unwrap();
+        assert_eq!(preferences.codex_trust_hint_dismissed, Some(false));
+        assert_eq!(preferences.pi_trust_hint_dismissed, Some(true));
+    }
 
     /// Exercise the protected route's boolean grammar; an omitted opt-in
     /// must never become an accepted no-op or implicit enable.
@@ -395,6 +727,12 @@ pub const MAX_POST_CLONE_BYTES: usize = 16 * 1024;
 pub struct ResolvedCheckoutConfig {
     /// Global opt-in, frozen on create without invalidating path previews.
     pub claude_trust: bool,
+    /// Codex's per-launch opt-in; never authorizes a user-picked folder.
+    pub codex_trust: bool,
+    /// Muse's per-launch opt-in, independent of its tool-permission mode.
+    pub muse_trust: bool,
+    /// Pi's per-launch project-resource approval for managed checkouts only.
+    pub pi_trust: bool,
     /// Where fresh checkouts are created. Stored unexpanded — `~` and
     /// `~/...` are expanded by the target supervisor, never here.
     pub root: Option<String>,
@@ -414,6 +752,12 @@ pub struct ResolvedCheckoutConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckoutConfigSnapshot {
     pub claude_trust: bool,
+    /// Global switches, independent of host root and hook inheritance.
+    pub codex_trust: bool,
+    /// Muse's global trust switch, independent of the root/hook override.
+    pub muse_trust: bool,
+    /// Pi's global resource approval, independent of the root/hook override.
+    pub pi_trust: bool,
     pub global_root: Option<String>,
     pub global_post_clone: Option<String>,
     pub revision: i64,
@@ -451,16 +795,27 @@ impl HelmStore {
     /// This opt-in does not change the preview's destination or ownership.
     /// Keeping its write outside revision bumps preserves open path previews.
     pub async fn set_claude_trust(&self, enabled: bool) -> anyhow::Result<()> {
+        self.set_agent_trust(LaunchHarness::Claude, enabled).await
+    }
+
+    /// Save one global opt-in without invalidating path previews. Unsupported
+    /// harnesses fail before any write; accepted creates retain their snapshot.
+    pub async fn set_agent_trust(
+        &self,
+        harness: LaunchHarness,
+        enabled: bool,
+    ) -> anyhow::Result<()> {
+        let column = trust_column(harness)?;
         let conn = self.conn();
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             conn.lock().execute(
-                "UPDATE checkout_config SET claude_trust = ?1 WHERE singleton = 1",
+                &format!("UPDATE checkout_config SET {column} = ?1 WHERE singleton = 1"),
                 [enabled],
             )?;
             Ok(())
         })
         .await
-        .context("Claude trust setting write task panicked")?
+        .context("agent trust setting write task panicked")?
     }
     /// Read everything stored for one scope in one database snapshot. No
     /// caching: every call re-reads, so a value is never served stale
@@ -677,15 +1032,15 @@ fn read_snapshot(
     let _tx = conn
         .unchecked_transaction()
         .context("opening the checkout config snapshot transaction")?;
-    let (global_root, global_post_clone, revision, claude_trust): (Option<String>, Option<String>, i64, bool) = conn
+    let (global_root, global_post_clone, revision, claude_trust, codex_trust, muse_trust, pi_trust): (Option<String>, Option<String>, i64, bool, bool, bool, bool) = conn
         .query_row(
-            "SELECT root, post_clone, revision, claude_trust FROM checkout_config WHERE singleton = 1",
+            "SELECT root, post_clone, revision, claude_trust, codex_trust, muse_trust, pi_trust FROM checkout_config WHERE singleton = 1",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
         )
         .optional()
         .context("reading the global checkout config")?
-        .unwrap_or((None, None, 0, false));
+        .unwrap_or((None, None, 0, false, false, false, false));
     let host_override = match host {
         Some(host) => conn
             .query_row(
@@ -704,6 +1059,9 @@ fn read_snapshot(
     };
     Ok(CheckoutConfigSnapshot {
         claude_trust,
+        codex_trust,
+        muse_trust,
+        pi_trust,
         global_root,
         global_post_clone,
         revision,
@@ -722,6 +1080,9 @@ fn resolve_snapshot(snapshot: &CheckoutConfigSnapshot) -> ResolvedCheckoutConfig
         .or_else(|| snapshot.global_post_clone.clone());
     ResolvedCheckoutConfig {
         claude_trust: snapshot.claude_trust,
+        codex_trust: snapshot.codex_trust,
+        muse_trust: snapshot.muse_trust,
+        pi_trust: snapshot.pi_trust,
         root: snapshot
             .host_override
             .as_ref()
@@ -1600,6 +1961,7 @@ mod tests {
         SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             id: id.into(),
             parent: None,
@@ -1633,6 +1995,9 @@ mod tests {
             store.resolve_checkout_config(None).await.unwrap(),
             ResolvedCheckoutConfig {
                 claude_trust: false,
+                codex_trust: false,
+                muse_trust: false,
+                pi_trust: false,
                 root: None,
                 post_clone: None,
                 config_revision: 0

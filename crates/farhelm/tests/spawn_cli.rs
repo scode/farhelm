@@ -74,6 +74,7 @@ fn child_session(cwd: String) -> SessionInfo {
     SessionInfo {
         screen_yolo: false,
         claude_trust_prompt: false,
+        workspace_trust_prompt: false,
         agent_kind: farhelm_proto::AgentKind::Generic,
         id: "child-123".to_string(),
         parent: Some("parent-123".to_string()),

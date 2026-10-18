@@ -1317,7 +1317,7 @@ async fn create_for_agent(
         ),
         None => None,
     };
-    let resolved = resolve_agent_create(state, origin, &edits).await?;
+    let mut resolved = resolve_agent_create(state, origin, &edits).await?;
     if resolved.resolution.github_repo.is_some() {
         // Only the helm turns session-authenticated repository intent into
         // a checkout payload. Recovery must precede preview and the card:
@@ -1344,6 +1344,31 @@ async fn create_for_agent(
                 error
             }
         });
+    }
+    let mut composition_incarnation = None;
+    if !edits
+        .spawn
+        .as_ref()
+        .is_some_and(|placement| placement.inherit_agent)
+        && resolved
+            .resolution
+            .launch
+            .agent_selection()
+            .is_some_and(|selection| selection.harness.offers_workspace_trust())
+    {
+        // Resolve trust before the card. The same launch is carried through
+        // approval and dispatch, so a Settings change while the card waits
+        // cannot silently change what the user approved.
+        let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
+        composition_incarnation = Some(claim.incarnation);
+        resolved.resolution.launch = crate::sessions::normalize_launch_workspace_trust(
+            state,
+            &client,
+            resolved.resolution.launch,
+            &mut resolved.resolution.cwd,
+            false,
+        )
+        .await?;
     }
     let verb = match &edits.spawn {
         Some(placement) if placement.inherit_agent => LaunchVerb::SpawnInherited,
@@ -1377,6 +1402,7 @@ async fn create_for_agent(
             parent,
             spawned,
             request_fingerprint,
+            composition_incarnation,
         },
     )
     .await
@@ -1401,11 +1427,19 @@ async fn create_checkout_for_agent(
     ) {
         return Err(error);
     }
-    let resolution = resolved.resolution;
+    let mut resolution = resolved.resolution;
     let repo = resolution
         .github_repo
         .clone()
         .expect("managed destination selected");
+    resolution.launch = crate::sessions::normalize_launch_workspace_trust(
+        state,
+        &client,
+        resolution.launch,
+        &mut resolution.cwd,
+        true,
+    )
+    .await?;
     crate::yolo_guard::check_agent(state, claim.host, &resolution.launch).await?;
     // Unkeyed requests never reconcile; their identity still has to satisfy
     // the supervisor's nonempty checkout identity contract.
@@ -1795,6 +1829,9 @@ struct AgentCreateDispatch {
     /// What the target matches a keyed retry by; see
     /// [`LaunchEditsRequest::request_fingerprint`].
     request_fingerprint: Option<String>,
+    /// Destination ownership was read on this connection before approval.
+    /// A replacement connection cannot inherit its trust decision.
+    composition_incarnation: Option<u64>,
 }
 
 /// The refusal for a create whose host came from a template, when the
@@ -1838,6 +1875,7 @@ async fn dispatch_agent_create(
     // write the create goes on to make revalidate against the connection it
     // was actually sent on (see `sessions::host_client`).
     let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
+    crate::precondition::incarnation_holds(&claim, dispatch.composition_incarnation)?;
     let host_name = resolved.host_name.as_str();
     if let Some(refusal) =
         template_host_moved(resolved.template_identity.as_deref(), &claim, host_name)
@@ -2238,11 +2276,13 @@ async fn template_listing(state: &AppState, caller: HostId) -> anyhow::Result<Ag
 ///
 /// ## Agent resolution
 ///
-/// Copied by `sessions::mode_from_source`, as plain Replace copies it: an
-/// agent or command launch is copied whole as stored (choices, composed or
-/// written commands, YOLO answer, declared type, resume command), and a
-/// legacy source (created before launch kinds) is refused with a remedy,
-/// because its launch carries no YOLO answer to copy.
+/// Snapshotted by `sessions::mode_from_source`. Agent launches retain every
+/// historical word except the compiler-owned workspace-trust segment,
+/// which follows Settings and the target's managed-checkout ownership. The
+/// original source passes the YOLO guard before that edit, so normalization
+/// cannot erase a forged command/selection mismatch. Command launches stay
+/// exact. A legacy source (created before launch kinds) is refused with a
+/// remedy, because its launch carries no YOLO answer to copy.
 ///
 /// ## What is copied and what can be overridden
 ///
@@ -2308,7 +2348,15 @@ async fn clone_for_agent(
         "the user can start a copy with Clone or Replace with, which choose a launch",
     )?;
     let (host, host_name) = resolve_host(state, origin, request.host).await?;
-    let cwd = request.cwd.unwrap_or(source.cwd);
+    let mut cwd = request.cwd.unwrap_or(source.cwd);
+    let (claim, client) = crate::sessions::host_client(state, host)?;
+    // The source's words must be vouched for before changing any of them.
+    // Otherwise normalization could erase the mismatch a forged source
+    // relies on to smuggle a different command under safe-looking choices.
+    crate::yolo_guard::check_agent(state, host, &mode).await?;
+    let mode =
+        crate::sessions::normalize_launch_workspace_trust(state, &client, mode, &mut cwd, false)
+            .await?;
     // The source's title is copied VERBATIM, empty string included: a clone
     // that let the target derive a title from the directory would silently
     // rename the copy, which is the one thing a user reading two rows side by
@@ -2346,7 +2394,8 @@ async fn clone_for_agent(
             message: "the source session's owner changed while it was being read; run discovery again before retrying the clone".to_string(),
         }));
     }
-    let (claim, client) = crate::sessions::host_client(state, host)?;
+    let (current_claim, _) = crate::sessions::host_client(state, host)?;
+    crate::precondition::incarnation_holds(&current_claim, Some(claim.incarnation))?;
     // See `create_for_agent`'s own note on why both logged values are safe.
     info!(
         asking = asking_session,
@@ -2927,6 +2976,7 @@ mod tests {
         SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             // Matches the `claude` invocation below, as a supervisor's
             // basename recognition would have recorded it.
             agent_kind: farhelm_proto::AgentKind::Claude,
@@ -5201,11 +5251,30 @@ mod tests {
         refusal: Option<String>,
         reply_cwd: Option<String>,
     ) -> std::sync::Arc<std::sync::Mutex<Vec<SeenCreate>>> {
+        spawn_create_responder_with_membership(peer, refusal, reply_cwd, false).0
+    }
+
+    /// Requests observed independently of the peer's mutable reply script.
+    type RecordedCreates = std::sync::Arc<std::sync::Mutex<Vec<SeenCreate>>>;
+    /// Ownership reads observed before a create, including the no-read case.
+    type RecordedBrowses = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+    /// The existing create peer with a controlled destination-ownership
+    /// answer. Recording browses distinguishes a skipped query from an
+    /// unmanaged answer without timing or a second mock transport.
+    fn spawn_create_responder_with_membership(
+        peer: tokio::io::DuplexStream,
+        refusal: Option<String>,
+        reply_cwd: Option<String>,
+        managed_checkout: bool,
+    ) -> (RecordedCreates, RecordedBrowses) {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded = std::sync::Arc::clone(&seen);
+        let browsed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded_browses = std::sync::Arc::clone(&browsed);
         tokio::spawn(async move {
             let (r, w) = tokio::io::split(peer);
             let mut reader = FrameReader::new(r);
@@ -5216,6 +5285,25 @@ mod tests {
             let mut created = 0usize;
             while let Ok(Some(frame)) = reader.read_frame().await {
                 let reply = match parse_control(&frame).expect("decode request") {
+                    ControlMsg::BrowseDirectory {
+                        req_id,
+                        cwd,
+                        membership_only,
+                    } => {
+                        assert!(
+                            membership_only,
+                            "launch composition must not enumerate directory contents"
+                        );
+                        recorded_browses.lock().unwrap().push(cwd.clone());
+                        ControlMsg::DirectoryListing {
+                            req_id,
+                            cwd,
+                            parent: Some("/".into()),
+                            children: vec![],
+                            truncated: false,
+                            managed_checkout,
+                        }
+                    }
                     ControlMsg::CreateSession {
                         prompt,
                         named_start: None,
@@ -5273,7 +5361,7 @@ mod tests {
                 }
             }
         });
-        seen
+        (seen, browsed)
     }
 
     /// A two-host fleet whose SSH host is scripted by
@@ -5834,6 +5922,7 @@ mod tests {
             parent: None,
             spawned: false,
             request_fingerprint: None,
+            composition_incarnation: None,
         };
         let before = resolve().await;
         let held = resolve().await;
@@ -6292,6 +6381,297 @@ mod tests {
                 "the target stores the key scoped to the registry, asking host and session"
             );
         }
+    }
+
+    /// A copied managed source cannot authorize trust at another destination.
+    /// The real clone path must preserve the remaining launch words, query
+    /// only the selected target when needed, and ignore the source trust bit.
+    #[farhelm_testtrace::test]
+    async fn agent_clone_normalizes_trust_for_the_target_before_dispatch() {
+        use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
+        for (enabled, managed, source_trust) in [
+            (false, false, Some(true)),
+            (false, true, Some(true)),
+            (true, false, Some(true)),
+            (true, true, Some(false)),
+        ] {
+            let selection = LaunchSelection {
+                harness: LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: Some(LaunchPermission::Guarded),
+                permission_flags: None,
+                workspace_trust: source_trust,
+            };
+            let source_launch = crate::launches::compile(selection.clone()).unwrap();
+            let mut expected_selection = selection;
+            expected_selection.workspace_trust = (enabled && managed).then_some(true);
+            let expected = crate::launches::compile(expected_selection).unwrap();
+            let mut source = session("source", 1);
+            source.cwd = "/source-checkout".into();
+            source.invocation = source_launch.display_command();
+            source.launch = source_launch;
+            source.agent_kind = farhelm_proto::AgentKind::Codex;
+            source.working_copy = Some(farhelm_proto::WorkingCopyInfo {
+                id: "source-working-copy".into(),
+                repo: farhelm_proto::parse_github_repo("acme/repo").unwrap(),
+                canonical_path: source.cwd.clone(),
+                origin_session_id: source.id.clone(),
+            });
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let (seen, browsed) = spawn_create_responder_with_membership(peer, None, None, managed);
+            let (h, local, remote) = creating_fleet(client_side, vec![source]).await;
+            h.store
+                .set_agent_trust(LaunchHarness::Codex, enabled)
+                .await
+                .unwrap();
+            h.store
+                .set_yolo_without_asking(remote, false)
+                .await
+                .unwrap();
+            assert_eq!(
+                h.store
+                    .resolve_checkout_config(None)
+                    .await
+                    .unwrap()
+                    .codex_trust,
+                enabled
+            );
+            assert!(seen.lock().unwrap().is_empty());
+            assert!(browsed.lock().unwrap().is_empty());
+            let outcome = HelmAgentRequests::for_state(&h.state)
+                .handle(
+                    origin_of(&h, local),
+                    "asker",
+                    AgentVerb::Clone {
+                        source_session_id: Some("source".into()),
+                        host: Some("user@builder".into()),
+                        cwd: Some("/target-directory".into()),
+                        title: None,
+                        intent_key: None,
+                        confirm_yolo: false,
+                    },
+                )
+                .await;
+            assert!(
+                matches!(
+                    outcome,
+                    AgentOutcome::Ok {
+                        reply: AgentReply::Created { .. }
+                    }
+                ),
+                "{outcome:?}"
+            );
+            let creates = seen.lock().unwrap();
+            assert_eq!(creates.len(), 1);
+            assert_eq!(creates[0].cwd, "/target-directory");
+            assert_eq!(creates[0].launch.as_ref(), Some(&expected));
+            assert_eq!(
+                *browsed.lock().unwrap(),
+                if enabled {
+                    vec!["/target-directory".to_string()]
+                } else {
+                    vec![]
+                }
+            );
+        }
+    }
+
+    /// Approval covers the composed launch as shown. A switch flipped while
+    /// the card waits applies to the next composition, not this approved
+    /// clone; dispatch must not silently re-read and replace the trust choice.
+    #[farhelm_testtrace::test]
+    async fn agent_clone_keeps_the_trust_choice_shown_before_approval() {
+        use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::Guarded),
+            permission_flags: None,
+            workspace_trust: None,
+        };
+        let source_launch = crate::launches::compile(selection.clone()).unwrap();
+        let mut expected_selection = selection;
+        expected_selection.workspace_trust = Some(true);
+        let expected = crate::launches::compile(expected_selection).unwrap();
+        let source = SessionInfo {
+            invocation: source_launch.display_command(),
+            agent_kind: farhelm_proto::AgentKind::Codex,
+            launch: source_launch,
+            ..session("source", 1)
+        };
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let (seen, browsed) = spawn_create_responder_with_membership(peer, None, None, true);
+        let (h, local, remote) = creating_fleet(client_side, vec![source]).await;
+        h.store
+            .set_agent_trust(LaunchHarness::Codex, true)
+            .await
+            .unwrap();
+        h.store
+            .set_yolo_without_asking(remote, false)
+            .await
+            .unwrap();
+        h.store
+            .set_commands_without_asking(local, false)
+            .await
+            .unwrap();
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Clone {
+                        source_session_id: Some("source".into()),
+                        host: Some("user@builder".into()),
+                        cwd: Some("/target-directory".into()),
+                        title: None,
+                        intent_key: None,
+                        confirm_yolo: false,
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        let ApprovalAction::Launch { launch, .. } = card.action else {
+            panic!("clone approval")
+        };
+        assert_eq!(
+            launch, expected,
+            "premise: approval shows the normalized trusted launch"
+        );
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "approval must precede dispatch"
+        );
+        h.store
+            .set_agent_trust(LaunchHarness::Codex, false)
+            .await
+            .unwrap();
+        assert!(
+            !h.store
+                .resolve_checkout_config(None)
+                .await
+                .unwrap()
+                .codex_trust
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Ok {
+                    reply: AgentReply::Created { .. }
+                }
+            ),
+            "{outcome:?}"
+        );
+        let creates = seen.lock().unwrap();
+        assert_eq!(creates.len(), 1);
+        assert_eq!(creates[0].launch.as_ref(), Some(&expected));
+        assert_eq!(
+            *browsed.lock().unwrap(),
+            vec!["/target-directory".to_string()],
+            "dispatch must retain the original ownership observation"
+        );
+    }
+
+    /// Trust normalization must not launder a forged source into a vouched
+    /// launch. The original guard refuses before even destination discovery;
+    /// otherwise this source would reach the trust-boundary edit and fail as
+    /// a different error, or a full recompilation would hide its forged argv.
+    #[farhelm_testtrace::test]
+    async fn agent_clone_checks_forged_source_before_trust_normalization() {
+        use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch};
+        let mut launch = crate::launches::compile(LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::Guarded),
+            permission_flags: None,
+            workspace_trust: Some(true),
+        })
+        .unwrap();
+        let SessionLaunch::Agent { start, .. } = &mut launch else {
+            panic!("agent")
+        };
+        *start = vec![
+            "codex".into(),
+            "--dangerously-bypass-approvals-and-sandbox".into(),
+            "{farhelm_args}".into(),
+        ];
+        assert_ne!(
+            crate::launches::compile(launch.agent_selection().unwrap().clone()).unwrap(),
+            launch,
+            "premise: safe-looking selection does not prove the source argv"
+        );
+        let source = SessionInfo {
+            launch,
+            ..session("source", 1)
+        };
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let (seen, browsed) = spawn_create_responder_with_membership(peer, None, None, false);
+        let (h, local, remote) = creating_fleet(client_side, vec![source]).await;
+        h.store
+            .set_agent_trust(LaunchHarness::Codex, true)
+            .await
+            .unwrap();
+        h.store
+            .set_yolo_without_asking(remote, false)
+            .await
+            .unwrap();
+        assert!(
+            !h.store
+                .list_hosts()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|host| host.id == remote)
+                .unwrap()
+                .yolo_without_asking
+        );
+        let outcome = HelmAgentRequests::for_state(&h.state)
+            .handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Clone {
+                    source_session_id: Some("source".into()),
+                    host: Some("user@builder".into()),
+                    cwd: Some("/target-directory".into()),
+                    title: None,
+                    intent_key: None,
+                    confirm_yolo: false,
+                },
+            )
+            .await;
+        assert!(
+            matches!(
+                outcome,
+                AgentOutcome::Err {
+                    kind: ErrorKind::Unauthorized,
+                    ..
+                }
+            ),
+            "original source must fail the host guard: {outcome:?}"
+        );
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "a forged source must not dispatch"
+        );
+        assert!(
+            browsed.lock().unwrap().is_empty(),
+            "the guard must precede trust normalization"
+        );
+        assert!(h.state.approvals.list().is_empty());
     }
 
     /// Spec: a keyed clone retried with the same source, host and overrides
@@ -7043,6 +7423,465 @@ mod tests {
         .await
         .expect("a card or an ending within the bound");
         card.unwrap_or_else(|| panic!("the request ended without a card"))
+    }
+
+    /// Ordinary agent create and spawn both compose choices rather than
+    /// inheriting a stored launch. Approval and dispatch must receive the
+    /// same destination-normalized trust, including when an old client's
+    /// trust bit disagrees with the setting or the target is unmanaged.
+    /// A switch flip while that card waits must not change its dispatch.
+    #[farhelm_testtrace::test]
+    async fn ordinary_agent_create_and_spawn_normalize_trust_before_approval_and_dispatch() {
+        use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
+        use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection, SpawnPlacement};
+
+        for spawned in [false, true] {
+            for (enabled, managed, incoming_trust) in [
+                (true, true, false),
+                (true, false, true),
+                (false, true, true),
+            ] {
+                let (client_side, peer) = tokio::io::duplex(64 * 1024);
+                let (seen, browsed) =
+                    spawn_create_responder_with_membership(peer, None, None, managed);
+                let (h, local, remote) =
+                    creating_fleet(client_side, vec![session("asker", 1)]).await;
+                let origin_host = if spawned { remote } else { local };
+                h.store
+                    .set_agent_trust(LaunchHarness::Codex, enabled)
+                    .await
+                    .unwrap();
+                h.store
+                    .set_yolo_without_asking(remote, false)
+                    .await
+                    .unwrap();
+                h.store
+                    .set_commands_without_asking(origin_host, false)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    h.store
+                        .resolve_checkout_config(None)
+                        .await
+                        .unwrap()
+                        .codex_trust,
+                    enabled
+                );
+                let target_before = h.manager.status(remote).unwrap();
+                let target_connection = target_before.client.as_ref().unwrap().connection_id();
+                assert!(seen.lock().unwrap().is_empty());
+                assert!(browsed.lock().unwrap().is_empty());
+                let expected = crate::launches::compile(LaunchSelection {
+                    harness: LaunchHarness::Codex,
+                    model: None,
+                    effort: None,
+                    permissions: Some(LaunchPermission::Guarded),
+                    permission_flags: None,
+                    workspace_trust: (enabled && managed).then_some(true),
+                })
+                .unwrap();
+                let request = AgentVerb::Create {
+                    host: (!spawned).then(|| "user@builder".to_string()),
+                    templates: vec![],
+                    edits: TemplateFields {
+                        kind: Some(LauncherKind::Agent),
+                        agent: Some(LaunchHarness::Codex),
+                        permissions: Some(Some(LaunchPermission::Guarded)),
+                        workspace_trust: Some(Some(incoming_trust)),
+                        destination: Some(TemplateDestination::Folder("/target-directory".into())),
+                        ..Default::default()
+                    },
+                    intent_key: None,
+                    confirm_yolo: false,
+                    spawn: spawned.then(|| SpawnPlacement {
+                        parent: Some("asker".into()),
+                        ..Default::default()
+                    }),
+                };
+                let _gui = h.manager.events().admit(1).unwrap();
+                let handler = HelmAgentRequests::for_state(&h.state);
+                let origin = origin_of(&h, origin_host);
+                let task =
+                    tokio::spawn(async move { handler.handle(origin, "asker", request).await });
+                let card = await_card(&h, &task).await;
+                let ApprovalAction::Launch {
+                    verb,
+                    host_name,
+                    cwd,
+                    launch,
+                    ..
+                } = card.action
+                else {
+                    panic!("ordinary composition must show its launch card");
+                };
+                assert_eq!(
+                    verb,
+                    if spawned {
+                        LaunchVerb::Spawn
+                    } else {
+                        LaunchVerb::Create
+                    }
+                );
+                assert_eq!(host_name, "user@builder");
+                assert_eq!(cwd, "/target-directory");
+                assert_eq!(
+                    launch, expected,
+                    "spawned {spawned}, setting {enabled}, managed {managed}"
+                );
+                assert!(
+                    seen.lock().unwrap().is_empty(),
+                    "approval must precede target dispatch"
+                );
+                h.store
+                    .set_agent_trust(LaunchHarness::Codex, !enabled)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    h.store
+                        .resolve_checkout_config(None)
+                        .await
+                        .unwrap()
+                        .codex_trust,
+                    !enabled,
+                    "premise: the setting changed while the normalized card waited",
+                );
+                assert_eq!(
+                    answer_card(&h, "allow").await,
+                    axum::http::StatusCode::NO_CONTENT
+                );
+                let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+                    .await
+                    .expect("ordinary approved composition must settle")
+                    .unwrap();
+                assert!(
+                    matches!(
+                        outcome,
+                        AgentOutcome::Ok {
+                            reply: AgentReply::Created { .. }
+                        }
+                    ),
+                    "{outcome:?}"
+                );
+                let target_after = h.manager.status(remote).unwrap();
+                assert_eq!(target_after.incarnation, target_before.incarnation);
+                assert_eq!(
+                    target_after.client.as_ref().unwrap().connection_id(),
+                    target_connection
+                );
+                let creates = seen.lock().unwrap();
+                assert_eq!(creates.len(), 1);
+                assert_eq!(creates[0].launch.as_ref(), Some(&expected));
+                assert_eq!(creates[0].cwd, "/target-directory");
+                assert_eq!(creates[0].parent.as_deref(), spawned.then_some("asker"));
+                assert_eq!(
+                    *browsed.lock().unwrap(),
+                    if enabled {
+                        vec!["/target-directory".to_string()]
+                    } else {
+                        vec![]
+                    }
+                );
+            }
+        }
+    }
+
+    /// Destination ownership belongs to the connection that answered the
+    /// composition read. Test the final dispatch boundary separately from
+    /// approval's reconnect check: even a previously approved launch must
+    /// refuse a successor connection rather than reuse the old trust answer.
+    #[farhelm_testtrace::test]
+    async fn ordinary_agent_create_dispatch_rechecks_the_composition_incarnation() {
+        use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
+        use farhelm_proto::{LaunchHarness, LaunchPermission};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let (seen, browsed) = spawn_create_responder_with_membership(peer, None, None, true);
+        let (h, local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .set_agent_trust(LaunchHarness::Codex, true)
+            .await
+            .unwrap();
+        let origin = origin_of(&h, local);
+        let request = LaunchEditsRequest {
+            host: Some("user@builder".into()),
+            templates: vec![],
+            edits: TemplateFields {
+                kind: Some(LauncherKind::Agent),
+                agent: Some(LaunchHarness::Codex),
+                permissions: Some(Some(LaunchPermission::Guarded)),
+                destination: Some(TemplateDestination::Folder("/target-directory".into())),
+                ..Default::default()
+            },
+            spawn: None,
+        };
+        let mut resolved = resolve_agent_create(&h.state, origin, &request)
+            .await
+            .unwrap();
+        let (claim, client) = crate::sessions::host_client(&h.state, resolved.host).unwrap();
+        resolved.resolution.launch = crate::sessions::normalize_launch_workspace_trust(
+            &h.state,
+            &client,
+            resolved.resolution.launch,
+            &mut resolved.resolution.cwd,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resolved
+                .resolution
+                .launch
+                .agent_selection()
+                .unwrap()
+                .workspace_trust,
+            Some(true)
+        );
+        assert_eq!(
+            *browsed.lock().unwrap(),
+            vec!["/target-directory".to_string()]
+        );
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "premise: composition did not dispatch"
+        );
+        h.fleet.kill_connection(remote);
+        h.await_refreshed_after(remote, claim.incarnation).await;
+        let current = h.manager.status(remote).unwrap();
+        assert_ne!(
+            current.incarnation, claim.incarnation,
+            "premise: destination reconnected"
+        );
+        assert_ne!(
+            current.client.as_ref().unwrap().connection_id(),
+            client.connection_id()
+        );
+        let refused = dispatch_agent_create(
+            &h.state,
+            origin,
+            "asker",
+            resolved,
+            AgentCreateDispatch {
+                intent_key: None,
+                parent: None,
+                spawned: false,
+                request_fingerprint: None,
+                composition_incarnation: Some(claim.incarnation),
+            },
+        )
+        .await
+        .expect_err("a composed launch must not reach a successor destination connection");
+        assert!(
+            crate::precondition::is_stale(&refused),
+            "the final incarnation check must cause the refusal: {refused:#}"
+        );
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "neither destination may receive a create"
+        );
+    }
+
+    /// Trust follows the canonical managed directory that justified it,
+    /// not a symlink's meaning at some later approval. A real owned alias
+    /// is repointed while the card waits; both create and clone must still
+    /// dispatch the original canonical target and the shown trusted launch.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn trusted_agent_create_and_clone_pin_the_managed_alias_before_approval() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
+        use farhelm_proto::{ControlMsg, LaunchHarness, LaunchPermission, LaunchSelection};
+
+        for cloning in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let managed = directory.path().join("managed");
+            let ordinary = directory.path().join("ordinary");
+            let alias = directory.path().join("selected-alias");
+            std::fs::create_dir(&managed).unwrap();
+            std::fs::create_dir(&ordinary).unwrap();
+            std::os::unix::fs::symlink(&managed, &alias).unwrap();
+            let canonical = std::fs::canonicalize(&managed).unwrap();
+            let canonical_ordinary = std::fs::canonicalize(&ordinary).unwrap();
+            assert_eq!(std::fs::canonicalize(&alias).unwrap(), canonical);
+            let selected = alias.to_str().unwrap().to_string();
+            let canonical_text = canonical.to_str().unwrap().to_string();
+            let mut selection = LaunchSelection {
+                harness: LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: Some(LaunchPermission::Guarded),
+                permission_flags: None,
+                workspace_trust: None,
+            };
+            let source_launch = crate::launches::compile(selection.clone()).unwrap();
+            selection.workspace_trust = Some(true);
+            let expected = crate::launches::compile(selection).unwrap();
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let peer_alias = alias.clone();
+            let peer_selected = selected.clone();
+            let peer_canonical = canonical_text.clone();
+            let expected_dispatch = expected.clone();
+            let responder = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::BrowseDirectory {
+                    req_id,
+                    cwd,
+                    membership_only: true,
+                } = message
+                else {
+                    panic!("trust composition must request ownership only: {message:?}");
+                };
+                assert_eq!(cwd, peer_selected);
+                assert_eq!(
+                    std::fs::canonicalize(&cwd).unwrap().to_str().unwrap(),
+                    peer_canonical
+                );
+                writer
+                    .write_control(&ControlMsg::DirectoryListing {
+                        req_id,
+                        cwd: peer_canonical.clone(),
+                        parent: None,
+                        children: vec![],
+                        truncated: false,
+                        managed_checkout: true,
+                    })
+                    .await
+                    .unwrap();
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::CreateSession {
+                    req_id,
+                    cwd,
+                    launch: Some(launch),
+                    named_start: None,
+                    ..
+                } = message
+                else {
+                    panic!(
+                        "approval must dispatch the frozen canonical destination without another lookup: {message:?}"
+                    );
+                };
+                assert_eq!(
+                    std::fs::canonicalize(&peer_alias).unwrap(),
+                    canonical_ordinary,
+                    "premise: the original alias now points outside the managed checkout"
+                );
+                assert_eq!(
+                    cwd, peer_canonical,
+                    "never attach trusted argv to the repointed alias"
+                );
+                assert_eq!(launch, expected_dispatch);
+                writer
+                    .write_control(&ControlMsg::SessionCreated {
+                        req_id,
+                        session: SessionInfo {
+                            cwd,
+                            invocation: launch.display_command(),
+                            launch,
+                            ..session("alias-pinned-child", 2)
+                        },
+                    })
+                    .await
+                    .unwrap();
+            });
+            let source = SessionInfo {
+                invocation: source_launch.display_command(),
+                agent_kind: farhelm_proto::AgentKind::Codex,
+                launch: source_launch,
+                ..session("source", 1)
+            };
+            let (h, local, remote) = creating_fleet(client_side, vec![source]).await;
+            h.store
+                .set_agent_trust(LaunchHarness::Codex, true)
+                .await
+                .unwrap();
+            h.store
+                .set_yolo_without_asking(remote, false)
+                .await
+                .unwrap();
+            h.store
+                .set_commands_without_asking(local, false)
+                .await
+                .unwrap();
+            assert!(
+                h.store
+                    .resolve_checkout_config(None)
+                    .await
+                    .unwrap()
+                    .codex_trust
+            );
+            let request = if cloning {
+                AgentVerb::Clone {
+                    source_session_id: Some("source".into()),
+                    host: Some("user@builder".into()),
+                    cwd: Some(selected),
+                    title: None,
+                    intent_key: None,
+                    confirm_yolo: false,
+                }
+            } else {
+                AgentVerb::Create {
+                    host: Some("user@builder".into()),
+                    templates: vec![],
+                    edits: TemplateFields {
+                        kind: Some(LauncherKind::Agent),
+                        agent: Some(LaunchHarness::Codex),
+                        permissions: Some(Some(LaunchPermission::Guarded)),
+                        destination: Some(TemplateDestination::Folder(selected)),
+                        ..Default::default()
+                    },
+                    intent_key: None,
+                    confirm_yolo: false,
+                    spawn: None,
+                }
+            };
+            let _gui = h.manager.events().admit(1).unwrap();
+            let handler = HelmAgentRequests::for_state(&h.state);
+            let origin = origin_of(&h, local);
+            let task = tokio::spawn(async move { handler.handle(origin, "asker", request).await });
+            let card = await_card(&h, &task).await;
+            let ApprovalAction::Launch { cwd, launch, .. } = card.action else {
+                panic!("launch approval")
+            };
+            assert_eq!(
+                cwd, canonical_text,
+                "approval must name the checked managed directory"
+            );
+            assert_eq!(launch, expected);
+            assert!(!task.is_finished());
+            assert!(
+                !responder.is_finished(),
+                "the peer must still be waiting for approval's mutation"
+            );
+            std::fs::remove_file(&alias).unwrap();
+            std::os::unix::fs::symlink(&ordinary, &alias).unwrap();
+            assert_eq!(
+                std::fs::canonicalize(&alias).unwrap(),
+                std::fs::canonicalize(&ordinary).unwrap()
+            );
+            assert_eq!(
+                answer_card(&h, "allow").await,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+                .await
+                .expect("the approved canonical create must settle")
+                .unwrap();
+            assert!(
+                matches!(
+                    outcome,
+                    AgentOutcome::Ok {
+                        reply: AgentReply::Created { .. }
+                    }
+                ),
+                "{outcome:?}"
+            );
+            join_responder(responder, &outcome).await;
+        }
     }
 
     /// Spec: with the requesting host's "run farhelm commands without asking"

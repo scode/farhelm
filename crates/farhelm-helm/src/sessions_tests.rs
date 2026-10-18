@@ -167,6 +167,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
                 session: SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
@@ -281,6 +282,7 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
                     session: SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         agent_kind: farhelm_proto::AgentKind::Codex,
                         parent: None,
                         id: id.into(),
@@ -496,6 +498,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                     session: SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         parent: None,
                         id: "structured-tilde".into(),
@@ -670,6 +673,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     session: SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         parent: None,
                         id: id.into(),
@@ -931,6 +935,7 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
                 session: SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
@@ -2568,6 +2573,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         let created = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -2774,6 +2780,7 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
                 session: SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
@@ -3070,6 +3077,7 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
         let created = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -3208,6 +3216,7 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
         let created = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -3363,6 +3372,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
         let created = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -3580,6 +3590,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         let created = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -3709,6 +3720,7 @@ async fn a_replace_with_body_forwards_its_initial_prompt_to_the_create() {
         let created = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -3924,6 +3936,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
         let created = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-2".into(),
@@ -4157,6 +4170,7 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
                 session: SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
@@ -4350,6 +4364,7 @@ async fn get_session_passes_a_non_empty_tabs_list_through() {
     let harness = rest_harness::helm_listing(vec![farhelm_proto::SessionInfo {
         screen_yolo: false,
         claude_trust_prompt: false,
+        workspace_trust_prompt: false,
         tabs: vec![
             farhelm_proto::TabInfo { id: "tab-1".into() },
             farhelm_proto::TabInfo { id: "tab-2".into() },
@@ -4679,6 +4694,7 @@ async fn restart_session_passes_consent_through_and_returns_the_session() {
                 session: farhelm_proto::SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-1".into(),
@@ -4796,6 +4812,250 @@ async fn restart_with_compiles_and_forwards_structured_launch_bundle() {
         axum::http::StatusCode::OK
     );
     peer.await.unwrap();
+}
+
+/// The three REST surfaces share a destination policy but have different
+/// dispatches. This fixture keeps their request boundaries explicit.
+#[derive(Clone, Copy, Debug)]
+enum TrustComposeSurface {
+    Create,
+    RestartWith,
+    ReplaceWith,
+}
+
+/// Exercise the real route against a pinned peer, asserting both reusable
+/// and named-start argv. The splice serves live session reads itself, so
+/// the peer sees only ownership lookup and the mutation under test. Returning
+/// a different canonical path proves that granted trust pins its destination,
+/// while an unmanaged reply leaves the caller's spelling alone.
+async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, LaunchHarness, LaunchPermission, LaunchSelection};
+
+    for (enabled, managed, incoming_trust) in [
+        (false, false, Some(true)),
+        (false, true, Some(true)),
+        (true, false, Some(true)),
+        (true, true, Some(false)),
+    ] {
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::Guarded),
+            permission_flags: None,
+            workspace_trust: incoming_trust,
+        };
+        let mut final_selection = selection.clone();
+        final_selection.workspace_trust = (enabled && managed).then_some(true);
+        let expected = crate::launches::compile(final_selection).unwrap();
+        let expected_named =
+            crate::launches::named_start(&expected, "named-target".into()).unwrap();
+        let destination = if enabled && managed {
+            "/managed-canonical"
+        } else {
+            "/destination"
+        };
+        let mut source = rest_harness::session("source", 1);
+        source.launch = crate::launches::compile(selection.clone()).unwrap();
+        source.invocation = source.launch.display_command();
+        source.agent_kind = farhelm_proto::AgentKind::Codex;
+        source.restart_offer = farhelm_proto::RestartOffer::Resume;
+        if managed {
+            source.working_copy = Some(farhelm_proto::WorkingCopyInfo {
+                id: "managed-root".into(),
+                repo: farhelm_proto::parse_github_repo("acme/repo").unwrap(),
+                canonical_path: source.cwd.clone(),
+                origin_session_id: source.id.clone(),
+            });
+        }
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+        let fleet = harness.fleet.clone();
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            if enabled && !matches!(surface, TrustComposeSurface::RestartWith) {
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::BrowseDirectory {
+                    req_id,
+                    cwd,
+                    membership_only,
+                } = message
+                else {
+                    panic!("enabled setting must resolve destination ownership first: {message:?}");
+                };
+                assert_eq!(cwd, "/destination");
+                assert!(
+                    membership_only,
+                    "composition must request ownership without enumeration"
+                );
+                writer
+                    .write_control(&ControlMsg::DirectoryListing {
+                        req_id,
+                        cwd: if managed {
+                            "/managed-canonical"
+                        } else {
+                            "/ordinary-canonical"
+                        }
+                        .into(),
+                        parent: Some("/".into()),
+                        children: vec![],
+                        truncated: false,
+                        managed_checkout: managed,
+                    })
+                    .await
+                    .unwrap();
+            }
+            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let (req_id, launch, named_start, restarting) = match message {
+                ControlMsg::CreateSession {
+                    req_id,
+                    launch: Some(launch),
+                    named_start,
+                    cwd,
+                    ..
+                } if !matches!(surface, TrustComposeSurface::RestartWith) => {
+                    assert_eq!(
+                        cwd, destination,
+                        "only granted trust pins the canonical destination"
+                    );
+                    (req_id, launch, named_start, false)
+                }
+                ControlMsg::RestartSession {
+                    req_id,
+                    with: Some(launch),
+                    named_start,
+                    session_id,
+                    ..
+                } if matches!(surface, TrustComposeSurface::RestartWith) => {
+                    assert_eq!(session_id, "source");
+                    (req_id, launch, named_start, true)
+                }
+                other => panic!(
+                    "expected {surface:?} dispatch, not an extra browse or another mutation: {other:?}"
+                ),
+            };
+            assert_eq!(
+                launch, expected,
+                "{surface:?}, enabled {enabled}, managed {managed}"
+            );
+            assert_eq!(
+                named_start,
+                Some(expected_named),
+                "named starts need the same final trust argv"
+            );
+            let mut result =
+                rest_harness::session(if restarting { "source" } else { "created" }, 2);
+            result.cwd = if restarting { "/source" } else { destination }.into();
+            result.invocation = launch.display_command();
+            result.launch = launch;
+            fleet.edit(local, |script| {
+                script.sessions.retain(|session| session.id != result.id);
+                script.sessions.push(result.clone());
+            });
+            writer
+                .write_control(&if restarting {
+                    ControlMsg::SessionRestarted {
+                        req_id,
+                        session: result,
+                    }
+                } else {
+                    ControlMsg::SessionCreated {
+                        req_id,
+                        session: result,
+                    }
+                })
+                .await
+                .unwrap();
+            if matches!(surface, TrustComposeSurface::ReplaceWith) {
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::DeleteSession {
+                    req_id, session_id, ..
+                } = message
+                else {
+                    panic!("replacement must delete only after the normalized create: {message:?}");
+                };
+                assert_eq!(session_id, "source");
+                fleet.edit(local, |script| {
+                    script.sessions.retain(|session| session.id != "source")
+                });
+                writer
+                    .write_control(&ControlMsg::SessionDeleted {
+                        req_id,
+                        archived: false,
+                        notice: None,
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+        harness.await_refreshed(local).await;
+        harness
+            .store
+            .set_agent_trust(LaunchHarness::Codex, enabled)
+            .await
+            .unwrap();
+        assert_eq!(
+            harness
+                .store
+                .resolve_checkout_config(None)
+                .await
+                .unwrap()
+                .codex_trust,
+            enabled
+        );
+        let live = harness.manager.status(local).unwrap();
+        assert!(
+            live.client.is_some(),
+            "fixture requires a connected destination"
+        );
+        let create = serde_json::json!({
+            "cwd": "/destination", "launch": selection, "conversation": "named-target"
+        });
+        let (route, body) = match surface {
+            TrustComposeSurface::Create => ("/api/sessions", create),
+            TrustComposeSurface::RestartWith => (
+                "/api/sessions/source/restart",
+                serde_json::json!({"with": selection, "conversation": "named-target"}),
+            ),
+            TrustComposeSurface::ReplaceWith => (
+                "/api/sessions/source/replace",
+                serde_json::json!({"with": create}),
+            ),
+        };
+        let (status, text) = post_text(&harness, route, body).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{surface:?}: {text}");
+        tokio::time::timeout(Duration::from_secs(10), peer)
+            .await
+            .expect("the destination peer must finish after the acknowledged dispatch")
+            .unwrap();
+    }
+}
+
+/// Old-client trust cannot grant trust to an ordinary folder or revoke
+/// the managed-checkout setting on a new create, including GUI Clone.
+#[farhelm_testtrace::test]
+async fn create_normalizes_workspace_trust_at_destination_dispatch() {
+    assert_codex_trust_dispatch(TrustComposeSurface::Create).await;
+}
+
+/// Restart with composes fresh choices for the source's fixed folder.
+/// Its live membership, not the edited client's trust bit, controls trust.
+#[farhelm_testtrace::test]
+async fn restart_with_normalizes_workspace_trust_before_named_resume() {
+    assert_codex_trust_dispatch(TrustComposeSurface::RestartWith).await;
+}
+
+/// Replace with may change folders, so only the new destination's ownership
+/// can supply trust; source deletion still follows successful admission.
+#[farhelm_testtrace::test]
+async fn replace_with_normalizes_workspace_trust_before_create_and_delete() {
+    assert_codex_trust_dispatch(TrustComposeSurface::ReplaceWith).await;
 }
 
 /// POST a JSON body to `uri` through the router, returning the status, the
@@ -5093,6 +5353,7 @@ async fn rename_session_forwards_the_title_verbatim() {
         let expected_session = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: farhelm_proto::AgentKind::Generic,
             parent: None,
             id: "sess-1".into(),
@@ -5272,6 +5533,7 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
                     session: farhelm_proto::SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         parent: None,
                         id: "sess-1".into(),
@@ -5702,6 +5964,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
                 session: SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     agent_kind: farhelm_proto::AgentKind::Generic,
                     parent: None,
                     id: "sess-new".into(),
@@ -5785,10 +6048,19 @@ async fn a_browse_prepared_against_a_replaced_connection_reaches_no_supervisor()
             .await
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::BrowseDirectory { req_id, cwd } = request else {
+        let ControlMsg::BrowseDirectory {
+            req_id,
+            cwd,
+            membership_only,
+        } = request
+        else {
             panic!("expected the current browse request, got {request:?}");
         };
         assert_eq!(cwd, "/work");
+        assert!(
+            !membership_only,
+            "ordinary folder browsing still lists children"
+        );
         writer
             .write_frame(&Frame::control(&ControlMsg::DirectoryListing {
                 req_id,
@@ -5796,6 +6068,7 @@ async fn a_browse_prepared_against_a_replaced_connection_reaches_no_supervisor()
                 parent: Some("/".to_string()),
                 children: Vec::new(),
                 truncated: false,
+                managed_checkout: false,
             }))
             .await
             .unwrap();
@@ -6514,10 +6787,19 @@ async fn browse_directory_routes_to_the_named_host_and_preserves_its_reply() {
             .await
             .unwrap();
         let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::BrowseDirectory { req_id, cwd } = request else {
+        let ControlMsg::BrowseDirectory {
+            req_id,
+            cwd,
+            membership_only,
+        } = request
+        else {
             panic!("expected BrowseDirectory, got {request:?}");
         };
         assert_eq!(cwd, "~/project");
+        assert!(
+            !membership_only,
+            "ordinary folder browsing still lists children"
+        );
         writer
             .write_frame(&Frame::control(&ControlMsg::DirectoryListing {
                 req_id,
@@ -6525,6 +6807,7 @@ async fn browse_directory_routes_to_the_named_host_and_preserves_its_reply() {
                 parent: Some("/remote/home".to_string()),
                 children: vec!["/remote/home/project/src".to_string()],
                 truncated: false,
+                managed_checkout: false,
             }))
             .await
             .unwrap();
@@ -8023,6 +8306,7 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
                 sessions: vec![farhelm_proto::SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     title: "the work in progress".to_string(),
                     cwd: "/home/user/project".to_string(),
                     canonical_cwd: None,
@@ -8100,6 +8384,7 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
                 farhelm_proto::SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
+                    workspace_trust_prompt: false,
                     parent: Some("root-session".to_string()),
                     ..filterable(
                         "local-running",
@@ -8135,6 +8420,7 @@ async fn filterable_fleet() -> (rest_harness::Harness, store::HostId, store::Hos
                     farhelm_proto::SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         parent: Some("root-session".to_string()),
                         ..filterable(
                             "alpha-exited",
@@ -9195,7 +9481,9 @@ async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
 /// The first reaches CreateSession under the original settings; a latch then
 /// changes configuration before the second resolves locally. Atomic refusal
 /// must return the accepted winner, including on replacement, without
-/// another create or a false non-acceptance marker.
+/// another create or a false non-acceptance marker. Codex's managed trust
+/// setting also flips after dispatch; recovery must retain the approved
+/// launch rather than inheriting the retry's current setting.
 #[farhelm_testtrace::test]
 async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -9237,6 +9525,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
                 named_start: None,
                 req_id: create_id,
                 github_checkout: Some(checkout),
+                launch: Some(launch),
                 ..
             } = message
             else {
@@ -9244,9 +9533,24 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
             };
             assert_eq!(checkout.root, "/original-root");
             assert_eq!(checkout.client_identity, client_identity);
+            let expected = crate::launches::compile(farhelm_proto::LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: Some(farhelm_proto::LaunchPermission::Guarded),
+                permission_flags: None,
+                workspace_trust: Some(true),
+            })
+            .unwrap();
+            assert_eq!(
+                launch, expected,
+                "first dispatch must use Settings, not the client's false trust bit"
+            );
             let mut winner = rest_harness::session("concurrent-winner", 13);
             winner.cwd = checkout.preview.cwd;
             winner.canonical_cwd = Some(winner.cwd.clone());
+            winner.invocation = launch.display_command();
+            winner.launch = launch;
             create_seen_tx.send(()).unwrap();
             let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
             let ControlMsg::ReconcileGithubCheckout {
@@ -9330,10 +9634,19 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
             .set_checkout_root(None, "/original-root")
             .await
             .unwrap();
+        harness
+            .store
+            .set_agent_trust(farhelm_proto::LaunchHarness::Codex, true)
+            .await
+            .unwrap();
         let config = harness.store.resolve_checkout_config(None).await.unwrap();
+        assert!(
+            config.codex_trust,
+            "the first composed launch must start with trust enabled"
+        );
         let (claim, _) = super::create_target(&harness.state, None).unwrap();
         let mut request = serde_json::json!({
-            "cwd": "", "command": {"command": "agent", "yolo": false},
+            "cwd": "", "launch": {"harness": "codex", "permissions": "guarded", "workspace_trust": false},
             "github_checkout": {"repo": "acme/bar", "preview": {
                 "canonical_root": "/original-root", "basename": "bar-1", "cwd": "/original-root/bar-1",
                 "config_revision": config.config_revision, "host": claim.host.to_string(),
@@ -9354,6 +9667,19 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
             create_seen_rx
                 .await
                 .expect("first request must reach dispatch before settings change");
+            harness
+                .store
+                .set_agent_trust(farhelm_proto::LaunchHarness::Codex, false)
+                .await
+                .unwrap();
+            assert!(
+                !harness
+                    .store
+                    .resolve_checkout_config(None)
+                    .await
+                    .unwrap()
+                    .codex_trust
+            );
             harness
                 .store
                 .set_checkout_root(None, "/changed-root")
@@ -9388,6 +9714,13 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
             assert!(text.contains("concurrent-winner"), "{text}");
             if replacing {
                 assert!(text.contains("both sessions still exist"), "{text}");
+            } else {
+                let recovered: farhelm_proto::SessionInfo = serde_json::from_str(text).unwrap();
+                assert_eq!(
+                    recovered.launch.agent_selection().unwrap().workspace_trust,
+                    Some(true),
+                    "both replies must retain the accepted first launch after Settings changes"
+                );
             }
         }
         assert_eq!(

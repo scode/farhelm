@@ -205,7 +205,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_54` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_55` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -216,7 +216,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 54;
+pub const PROTOCOL_VERSION: u32 = 55;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -872,8 +872,14 @@ impl SessionStatus {
 /// (SPEC.md); the helm never invents or mutates these fields.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionInfo {
+    /// Current workspace-trust question for the session's harness. This is an
+    /// informational managed-checkout hint, never permission authority. Missing
+    /// screen evidence and older stored rows mean false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub workspace_trust_prompt: bool,
     /// Current sampled Claude trust dialog, used only for an informational
-    /// managed-checkout hint. Missing evidence and older stored rows mean false.
+    /// managed-checkout hint. This stays Claude-only for older UIs that do not
+    /// check the harness. Missing evidence and older stored rows mean false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub claude_trust_prompt: bool,
     /// Advisory permission-footer evidence from the current agent run. False
@@ -2788,17 +2794,30 @@ pub enum ControlMsg {
     /// `cwd` may use the same `~` spelling as a create request. The
     /// supervisor expands and validates it; neither the helm nor the browser
     /// is allowed to substitute its own home directory.
-    BrowseDirectory { req_id: u64, cwd: String },
+    BrowseDirectory {
+        req_id: u64,
+        cwd: String,
+        /// Launch composition needs canonical ownership without enumerating
+        /// unrelated children. This mode accepts the same paths as admission,
+        /// including control characters that the visual picker cannot render.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        membership_only: bool,
+    },
     /// A bounded directory-browser reply. `cwd` is the usable expanded path,
     /// `parent` is absent only at the filesystem root, and `children` names
     /// immediate directories only. `truncated` says that additional entries
-    /// existed beyond the fixed scan bound.
+    /// existed beyond the fixed scan bound. `managed_checkout` is the
+    /// supervisor registry's membership snapshot for this canonical cwd;
+    /// A membership-only answer omits parent and children. Launch composition
+    /// uses ownership rather than inferring it from
+    /// configured roots or the session list's incomplete display projection.
     DirectoryListing {
         req_id: u64,
         cwd: String,
         parent: Option<String>,
         children: Vec<String>,
         truncated: bool,
+        managed_checkout: bool,
     },
     /// Read only recorded retired archives on this host. Size measurement is
     /// optional because the sidebar count must not traverse checkout trees.
@@ -4514,6 +4533,7 @@ mod tests {
         let info = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -4680,6 +4700,7 @@ mod tests {
         let mut info = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -4916,8 +4937,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_54() {
-        assert_eq!(PROTOCOL_VERSION, 54);
+    fn protocol_version_is_pinned_at_55() {
+        assert_eq!(PROTOCOL_VERSION, 55);
     }
 
     /// The relay's open fixes the binary channel's bidirectional meaning.
@@ -5905,6 +5926,58 @@ mod tests {
         );
     }
 
+    /// Ordinary browse requests keep their old meaning when the focused
+    /// ownership selector is absent. The new selector must survive framing
+    /// explicitly, so the supervisor does not enumerate unrelated children.
+    #[farhelm_testtrace::test]
+    fn directory_membership_mode_is_explicit_and_defaults_to_browsing() {
+        let old =
+            serde_json::json!({"type":"browse_directory","req_id":7,"cwd":"/workspace/project"});
+        let mut request: ControlMsg = serde_json::from_value(old).unwrap();
+        let ControlMsg::BrowseDirectory {
+            membership_only, ..
+        } = &mut request
+        else {
+            panic!("browse request changed variant");
+        };
+        assert!(!*membership_only);
+        *membership_only = true;
+        let encoded = serde_json::to_value(&request).unwrap();
+        assert_eq!(encoded["membership_only"], true);
+        assert_eq!(
+            serde_json::from_value::<ControlMsg>(encoded).unwrap(),
+            request
+        );
+    }
+
+    /// Trust hints default off in old cached rows, and the neutral signal
+    /// never implicitly enables the Claude-only compatibility flag. Omitting
+    /// false values keeps ordinary session rows unchanged on the wire.
+    #[farhelm_testtrace::test]
+    fn workspace_trust_hint_defaults_off_and_roundtrips_independently() {
+        let old = serde_json::json!({
+            "id": "s1",
+            "title": "demo",
+            "cwd": "/workspace/project",
+            "invocation": "agent",
+            "launch": {"kind": "command", "command": "agent", "yolo": false, "agent": null, "resume": null}
+        });
+        let mut info: SessionInfo = serde_json::from_value(old).unwrap();
+        assert!(!info.workspace_trust_prompt);
+        assert!(!info.claude_trust_prompt);
+        let absent = serde_json::to_value(&info).unwrap();
+        assert!(absent.get("workspace_trust_prompt").is_none());
+        assert!(absent.get("claude_trust_prompt").is_none());
+        info.workspace_trust_prompt = true;
+        let present = serde_json::to_value(&info).unwrap();
+        assert_eq!(present["workspace_trust_prompt"], true);
+        assert!(present.get("claude_trust_prompt").is_none());
+        assert_eq!(
+            serde_json::from_value::<SessionInfo>(present).unwrap(),
+            info
+        );
+    }
+
     /// Spec: `SessionInfo::agent_kind` serializes as the kind's snake_case
     /// word, and a sender that predates the field (an older supervisor, or a
     /// row the helm cached before it existed) decodes as `generic`.
@@ -5917,6 +5990,7 @@ mod tests {
         let info = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             parent: None,
             id: "s1".to_string(),
             title: "demo".to_string(),
@@ -5976,6 +6050,7 @@ mod tests {
         let bare = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -6127,6 +6202,7 @@ mod tests {
         let at = |created_at: i64, last_activity_at: i64| SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             id: "s1".to_string(),
             parent: None,
@@ -6171,6 +6247,7 @@ mod tests {
         let mut info = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             id: "s1".to_string(),
             parent: None,
@@ -6218,6 +6295,7 @@ mod tests {
         let info = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
+            workspace_trust_prompt: false,
             agent_kind: crate::AgentKind::Generic,
             parent: None,
             id: "s1".to_string(),
@@ -6855,6 +6933,7 @@ mod tests {
             session: SessionInfo {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
@@ -6994,6 +7073,7 @@ mod tests {
             session: SessionInfo {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),
@@ -7137,6 +7217,7 @@ mod tests {
                     session: SessionInfo {
                         screen_yolo: false,
                         claude_trust_prompt: false,
+                        workspace_trust_prompt: false,
                         agent_kind: crate::AgentKind::Generic,
                         parent: None,
                         id: "s1".to_string(),
@@ -7745,6 +7826,7 @@ mod tests {
             sessions: vec![SessionInfo {
                 screen_yolo: false,
                 claude_trust_prompt: false,
+                workspace_trust_prompt: false,
                 agent_kind: crate::AgentKind::Generic,
                 parent: None,
                 id: "s1".to_string(),

@@ -359,11 +359,11 @@ impl ListSort {
 /// because the queue sends sparse patches and the seed is read after
 /// authentication. Feedback contact is also a client write, and a successful
 /// send can explicitly clear it (`PreferenceValue::FeedbackContact(None)`).
-/// The remembered launch choices are never this client's OWN writes — no
+/// The remembered permission choice is never this client's OWN write — no
 /// [`PreferenceValue`] variant exists for them. The helm sets them as a side
 /// effect of a successful user structured launch (this client's or another
 /// client's), and this client only mirrors its own launch's result
-/// into these fields directly (`list::view`'s `on_created` handler), the same
+/// into that field directly (`list::view`'s `on_created` handler), the same
 /// "update the local copy without a PUT" shortcut a server-observed fact
 /// gets everywhere else in this codebase.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
@@ -374,6 +374,15 @@ pub(crate) struct Preferences {
     /// Shared dismissal of the managed-checkout Claude trust hint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) claude_trust_hint_dismissed: Option<bool>,
+    /// Each agent's hint dismissal is independent and shared across clients.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) codex_trust_hint_dismissed: Option<bool>,
+    /// Muse's opt-out does not suppress Codex's or Claude's discovery hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) muse_trust_hint_dismissed: Option<bool>,
+    /// Kept on the shared wire even though Pi has no recognized trust question.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pi_trust_hint_dismissed: Option<bool>,
     /// Shared first-open dismissal; unset and false both mean unseen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) welcome_seen: Option<bool>,
@@ -385,6 +394,7 @@ pub(crate) struct Preferences {
     pub(crate) compact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) remembered_permissions: Option<String>,
+    /// Legacy compatibility only; workspace trust now comes from Settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) remembered_workspace_trust: Option<bool>,
     /// Whether host removal can proceed without opening its confirmation.
@@ -607,21 +617,21 @@ pub(crate) fn save_checkout_post_clone(
 
 /// Current shared trust setting and hint opt-out, including local dirty intent.
 #[derive(Clone, Deserialize)]
-pub(crate) struct ClaudeTrustState {
+pub(crate) struct CheckoutTrustState {
     pub enabled: bool,
     pub hint_dismissed: bool,
 }
 
 /// Re-read on invalidation, overlaying an unacknowledged local dismissal so
 /// an older GET cannot undo the user's click while its sparse PUT is queued.
-pub(crate) async fn fetch_claude_trust(base: &str) -> Result<ClaudeTrustState, String> {
+pub(crate) async fn fetch_claude_trust(base: &str) -> Result<CheckoutTrustState, String> {
     let url = format!("{base}/api/checkout-claude-trust");
     let resp = send(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
     let mut state = resp
-        .json::<ClaudeTrustState>()
+        .json::<CheckoutTrustState>()
         .await
         .map_err(|error| error.to_string())?;
     if let Some(PreferenceValue::ClaudeTrustHintDismissed(value)) =
@@ -653,6 +663,54 @@ pub(crate) fn save_claude_trust(
     }
 }
 
+/// Read a command-line trust switch without letting an older response undo
+/// this client's queued dismissal. Reads share the configuration-save fence.
+pub(crate) async fn fetch_agent_trust(
+    base: &str,
+    agent: crate::workspace_trust::TrustAgent,
+) -> Result<CheckoutTrustState, String> {
+    let url = format!("{base}/api/checkout-agent-trust/{}", agent.key());
+    let resp = send(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    let mut state = resp
+        .json::<CheckoutTrustState>()
+        .await
+        .map_err(|error| error.to_string())?;
+    if let Some(
+        PreferenceValue::CodexTrustHintDismissed(value)
+        | PreferenceValue::MuseTrustHintDismissed(value)
+        | PreferenceValue::PiTrustHintDismissed(value),
+    ) = preference_writes().dirty(agent.dismissal(false).field())
+    {
+        state.hint_dismissed = value;
+    }
+    Ok(state)
+}
+
+/// Register the explicit configuration save before returning its future, so
+/// reopening Settings cannot read past a still-pending opt-in. Refusals stay visible.
+pub(crate) fn save_agent_trust(
+    base: &str,
+    agent: crate::workspace_trust::TrustAgent,
+    enabled: bool,
+) -> impl Future<Output = Result<(), String>> + use<> {
+    let url = format!("{base}/api/checkout-agent-trust/{}", agent.key());
+    let sending = send_save(
+        client()
+            .put(&url)
+            .json(&serde_json::json!({"enabled": enabled})),
+    );
+    async move {
+        let resp = sending.await?;
+        if !resp.status().is_success() {
+            return Err(refusal_text("PUT", &url, resp).await);
+        }
+        Ok(())
+    }
+}
+
 /// Which field of the shared preference a writer owns.
 ///
 /// The write queue below serializes writes PER FIELD: each field is
@@ -663,6 +721,9 @@ pub(crate) fn save_claude_trust(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PreferenceField {
     ClaudeTrustHintDismissed,
+    CodexTrustHintDismissed,
+    MuseTrustHintDismissed,
+    PiTrustHintDismissed,
     WelcomeSeen,
     Sort,
     Selected,
@@ -689,6 +750,9 @@ impl PreferenceField {
         match self {
             PreferenceField::WelcomeSeen => "welcome_seen",
             PreferenceField::ClaudeTrustHintDismissed => "claude_trust_hint_dismissed",
+            PreferenceField::CodexTrustHintDismissed => "codex_trust_hint_dismissed",
+            PreferenceField::MuseTrustHintDismissed => "muse_trust_hint_dismissed",
+            PreferenceField::PiTrustHintDismissed => "pi_trust_hint_dismissed",
             PreferenceField::Sort => "list_sort",
             PreferenceField::Selected => "last_selected",
             PreferenceField::Compact => "compact",
@@ -713,6 +777,9 @@ impl PreferenceField {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PreferenceValue {
     ClaudeTrustHintDismissed(bool),
+    CodexTrustHintDismissed(bool),
+    MuseTrustHintDismissed(bool),
+    PiTrustHintDismissed(bool),
     /// Dismissing the first-open card is a best-effort shared preference write.
     WelcomeSeen(bool),
     Sort(String),
@@ -747,6 +814,9 @@ impl PreferenceValue {
         match self {
             Self::WelcomeSeen(_) => PreferenceField::WelcomeSeen,
             Self::ClaudeTrustHintDismissed(_) => PreferenceField::ClaudeTrustHintDismissed,
+            Self::CodexTrustHintDismissed(_) => PreferenceField::CodexTrustHintDismissed,
+            Self::MuseTrustHintDismissed(_) => PreferenceField::MuseTrustHintDismissed,
+            Self::PiTrustHintDismissed(_) => PreferenceField::PiTrustHintDismissed,
             Self::Sort(_) => PreferenceField::Sort,
             Self::Selected(_) => PreferenceField::Selected,
             Self::Compact(_) => PreferenceField::Compact,
@@ -772,6 +842,9 @@ impl PreferenceValue {
             Self::TemplateShortcuts(value) => serde_json::json!(value),
             Self::WelcomeSeen(value)
             | Self::ClaudeTrustHintDismissed(value)
+            | Self::CodexTrustHintDismissed(value)
+            | Self::MuseTrustHintDismissed(value)
+            | Self::PiTrustHintDismissed(value)
             | Self::Compact(value)
             | Self::HostRemoveConfirmation(value)
             | Self::SessionConfirmations(value)
@@ -787,6 +860,9 @@ impl PreferenceValue {
             Self::ClaudeTrustHintDismissed(value) => {
                 seed.claude_trust_hint_dismissed = Some(*value)
             }
+            Self::CodexTrustHintDismissed(value) => seed.codex_trust_hint_dismissed = Some(*value),
+            Self::MuseTrustHintDismissed(value) => seed.muse_trust_hint_dismissed = Some(*value),
+            Self::PiTrustHintDismissed(value) => seed.pi_trust_hint_dismissed = Some(*value),
             Self::Sort(value) => seed.list_sort = Some(value.clone()),
             Self::Selected(value) => seed.last_selected = Some(value.clone()),
             Self::Compact(value) => seed.compact = Some(*value),
@@ -874,6 +950,9 @@ struct PreferenceCompletion {
 #[derive(Default)]
 struct PreferenceWrites {
     claude_trust_hint_dismissed: FieldWrite,
+    codex_trust_hint_dismissed: FieldWrite,
+    muse_trust_hint_dismissed: FieldWrite,
+    pi_trust_hint_dismissed: FieldWrite,
     saves: save_order::Saves,
     welcome_seen: FieldWrite,
     sort: FieldWrite,
@@ -894,6 +973,9 @@ impl PreferenceWrites {
         match field {
             PreferenceField::WelcomeSeen => &mut self.welcome_seen,
             PreferenceField::ClaudeTrustHintDismissed => &mut self.claude_trust_hint_dismissed,
+            PreferenceField::CodexTrustHintDismissed => &mut self.codex_trust_hint_dismissed,
+            PreferenceField::MuseTrustHintDismissed => &mut self.muse_trust_hint_dismissed,
+            PreferenceField::PiTrustHintDismissed => &mut self.pi_trust_hint_dismissed,
             PreferenceField::Sort => &mut self.sort,
             PreferenceField::Selected => &mut self.selected,
             PreferenceField::Compact => &mut self.compact,
@@ -1045,6 +1127,9 @@ impl PreferenceWrites {
         let slot = match field {
             PreferenceField::WelcomeSeen => &self.welcome_seen,
             PreferenceField::ClaudeTrustHintDismissed => &self.claude_trust_hint_dismissed,
+            PreferenceField::CodexTrustHintDismissed => &self.codex_trust_hint_dismissed,
+            PreferenceField::MuseTrustHintDismissed => &self.muse_trust_hint_dismissed,
+            PreferenceField::PiTrustHintDismissed => &self.pi_trust_hint_dismissed,
             PreferenceField::Sort => &self.sort,
             PreferenceField::Selected => &self.selected,
             PreferenceField::Compact => &self.compact,
@@ -1151,6 +1236,9 @@ pub(crate) fn seed_with_local_changes(base: &str, mut seed: Preferences) -> Pref
     for field in [
         PreferenceField::WelcomeSeen,
         PreferenceField::ClaudeTrustHintDismissed,
+        PreferenceField::CodexTrustHintDismissed,
+        PreferenceField::MuseTrustHintDismissed,
+        PreferenceField::PiTrustHintDismissed,
         PreferenceField::Sort,
         PreferenceField::Selected,
         PreferenceField::Compact,
@@ -5525,6 +5613,49 @@ mod preference_write_tests {
         PreferenceCompletion, PreferenceField, PreferenceValue, PreferenceWrites, Preferences,
         TerminalLinkClick,
     };
+
+    /// Independent dismissals must survive failed writes and credential replay
+    /// without borrowing an acknowledgment from another agent's queue slot.
+    #[farhelm_testtrace::test]
+    fn agent_trust_dismissals_keep_independent_dirty_intent() {
+        let mut queue = PreferenceWrites::default();
+        let values = [
+            PreferenceValue::ClaudeTrustHintDismissed(true),
+            PreferenceValue::CodexTrustHintDismissed(true),
+            PreferenceValue::MuseTrustHintDismissed(true),
+            PreferenceValue::PiTrustHintDismissed(true),
+        ];
+        for (value, key) in values.iter().zip([
+            "claude_trust_hint_dismissed",
+            "codex_trust_hint_dismissed",
+            "muse_trust_hint_dismissed",
+            "pi_trust_hint_dismissed",
+        ]) {
+            assert_eq!(value.field().key(), key);
+            assert_eq!(value.wire_value(), serde_json::json!(true));
+            assert!(queue.record(value.clone()));
+            assert_eq!(queue.next_to_send(value.field()), Some(value.clone()));
+        }
+        let codex = &values[1];
+        assert!(!queue.finished(codex.field(), codex, true));
+        let mut seed = Preferences::default();
+        for value in [&values[0], &values[2], &values[3]] {
+            assert!(!queue.finished(value.field(), value, false));
+            let dirty = queue
+                .dirty(value.field())
+                .expect("failed dismissal stays dirty");
+            dirty.overlay(&mut seed);
+            assert_eq!(queue.begin_replay(value.field()), Some(value.clone()));
+            assert!(!queue.finished(value.field(), value, true));
+            assert_eq!(queue.dirty(value.field()), None);
+        }
+        assert_eq!(seed.claude_trust_hint_dismissed, Some(true));
+        assert_eq!(seed.codex_trust_hint_dismissed, None);
+        assert_eq!(seed.muse_trust_hint_dismissed, Some(true));
+        assert_eq!(seed.pi_trust_hint_dismissed, Some(true));
+        assert_eq!(queue.dirty(codex.field()), None);
+        assert_eq!(queue.begin_replay(codex.field()), None);
+    }
 
     /// Dismissal uses the ordinary independent queue slot. A failed write
     /// remains local intent across credential recovery, rather than reopening

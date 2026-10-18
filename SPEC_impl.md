@@ -2061,6 +2061,34 @@ listing and rename read the same sample cell. The UI visibility predicate also r
 tab, a successfully read disabled setting, and neither dismissal. The band stays mounted while hidden so a local × lasts
 until the question actually leaves the screen; its flow row lets the existing terminal resize observer fit it.
 
+Helm schema 57 adds independent `codex_trust`, `muse_trust` and `pi_trust` checkout settings, with nullable per-agent
+hint dismissals in preferences. Each switch defaults off and leaves the path-preview revision unchanged. The protected
+`GET`/`PUT /api/checkout-agent-trust/{harness}` exposes one switch and its dismissal; the original Claude route retains
+its exact body and reply. Configuration writes use the existing save-order funnel, and dismissals use the sparse
+per-field preference queue, including dirty-intent overlays and credential-recovery replay.
+
+The helm resolves these settings into an agent selection before compilation. The compiler remains pure so the YOLO guard
+can still reproduce a launch exactly. Fresh checkout intent already proves managed ownership and freezes the whole
+resolved launch in its existing create fingerprint. For an existing directory, enabled trust uses the pinned target
+host's bounded `BrowseDirectory` reply in its default-off `membership_only` mode. Protocol 55 adds that mode and its
+required `managed_checkout` reply boolean: the supervisor canonicalizes the accepted cwd and reads allocated registry
+ancestors using the same component predicate as admission. The focused mode skips child enumeration and the picker's
+printable-label restriction, preserving ordinary launch support for unreadable directory listings and control-character
+paths. When trust is granted, the helm carries that canonical cwd through approval, dispatch and history; a submitted
+symlink cannot redirect the trusted launch during an approval wait. Disabled and unmanaged destinations keep their
+submitted spelling. Plain Restart and Replace retain their stored launch behavior. The session list is not an ownership
+inventory, since nested memberships project only their innermost checkout. The read grants no lease; ordinary create
+admission still validates the destination. A missing ownership field would silently change trust behavior, so protocol
+skew refuses the peer until its ordinary supervisor update rather than treating an old reply as unmanaged. The normal
+skew-aware update path remains unchanged.
+
+`SessionInfo.workspace_trust_prompt` is separate from the retained Claude-only flag. The ticker reads Claude and Codex
+through their integration readers and Muse through the exhaustive launch-harness seam, because Muse shares Generic's
+activity kind. The flag defaults false in older cached snapshots, resets with the run or failed capture, and shares the
+existing activity cell across renames. Codex recognition uses its captured 0.159.0 folder-access menu; Muse uses a
+captured 1.4.10-R6427.1 startup trust menu. Both require the dialog's choices and current footer instead of matching
+isolated transcript words. Pi has no trust recognizer; its setting still supplies its project-resource approval flag.
+
 Each host caches repository objects at `<state_dir>/repo-cache/<owner>/<name>.git`, derived from the validated,
 lowercased repository pair. The supervisor passes that absolute path in the preparation's `repo_cache_path`; it is not
 request input and does not change the frozen fingerprints. Old launch specs deserialize with an empty path, then refuse

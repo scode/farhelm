@@ -366,9 +366,11 @@ pub(crate) struct ActivitySample {
     /// switch back to bypass must not leave a reassuring shield. Replacement or
     /// reload resets it; it never participates in admission or inheritance.
     pub(crate) screen_yolo: bool,
+    /// Claude-only compatibility signal for UIs predating harness-neutral hints.
+    pub(crate) claude_trust_prompt: bool,
     /// Current trust question, cleared on failed capture as well as when the
     /// dialog leaves the screen. A rename shares this run's sample cell.
-    pub(crate) claude_trust_prompt: bool,
+    pub(crate) workspace_trust_prompt: bool,
     /// A reloaded pane has no process-local screen history yet. While this
     /// is true, the list reply leaves its status provisional so the helm
     /// can keep the last cached answer until this process sees real evidence.
@@ -458,6 +460,24 @@ pub(crate) struct ActivitySample {
 }
 
 impl ActivitySample {
+    /// Replace both trust hints together from one current screen. The legacy
+    /// signal stays Claude-only even when another reader recognizes trust.
+    fn observe_trust(
+        &mut self,
+        harness: Option<farhelm_proto::LaunchHarness>,
+        reader: &dyn ScreenReader,
+        text: &str,
+    ) -> bool {
+        let claude = reader.claude_trust_prompt(text);
+        let workspace =
+            crate::agent_kind::screen_reader::workspace_trust_prompt(harness, reader, text);
+        let changed =
+            self.claude_trust_prompt != claude || self.workspace_trust_prompt != workspace;
+        self.claude_trust_prompt = claude;
+        self.workspace_trust_prompt = workspace;
+        changed
+    }
+
     /// Latch bypass evidence for this run and notify clients only on its first sighting.
     ///
     /// A non-bypass footer is still a valid parser result, but cannot make the
@@ -715,6 +735,7 @@ impl ActivitySample {
     /// key that does not.
     pub(crate) fn forget_tail(&mut self) {
         self.claude_trust_prompt = false;
+        self.workspace_trust_prompt = false;
         self.comparison = None;
         self.reading = generic_reading(self.counts());
         self.transition_ready = false;
@@ -1209,7 +1230,7 @@ fn forget_tail_hinted(sup: &Supervisor, entry: &SessionEntry) {
     let status_before = super::status::live_status(entry);
     let trust_changed = {
         let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
-        let was_trust = activity.claude_trust_prompt;
+        let was_trust = activity.claude_trust_prompt || activity.workspace_trust_prompt;
         activity.forget_tail();
         was_trust
     };
@@ -1608,9 +1629,8 @@ async fn sample_pass(
         let status_before = super::status::live_status(entry);
         let (observation, report_fallback, permission_changed) = {
             let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
-            let trust_prompt = reader.trust_prompt(&tail);
-            let trust_changed = activity.claude_trust_prompt != trust_prompt;
-            activity.claude_trust_prompt = trust_prompt;
+            let trust_changed =
+                activity.observe_trust(entry.info.launch.agent_type(), reader, &tail);
             let permission_changed =
                 trust_changed | activity.observe_permission(entry.info.launch.agent_type(), &tail);
             let observation = activity.observe_screen(reader, &tail, &title);
@@ -1937,6 +1957,74 @@ async fn reap_dead_tabs(
 
 #[cfg(test)]
 mod tests {
+    /// Trust questions reach live replies, clear as soon as their screen is
+    /// lost, and belong only to one run. Non-Claude dialogs must never set
+    /// the compatibility flag consumed by older UIs without a harness check.
+    #[test]
+    fn trust_evidence_reaches_replies_and_resets_with_the_run() {
+        use crate::tmux::PaneState;
+        use farhelm_proto::LaunchHarness;
+        let cases = [
+            (
+                AgentKind::Claude,
+                LaunchHarness::Claude,
+                include_str!("../../tests/fixtures/screens/claude/2.1.296/waiting-trust.txt"),
+                true,
+            ),
+            (
+                AgentKind::Codex,
+                LaunchHarness::Codex,
+                include_str!("../../tests/fixtures/screens/codex/0.159.0/waiting-trust.txt"),
+                false,
+            ),
+            (
+                AgentKind::Generic,
+                LaunchHarness::Muse,
+                include_str!(
+                    "../../tests/fixtures/screens/muse/1.4.10-R6427.1/waiting-trust-derived-workspace.txt"
+                ),
+                false,
+            ),
+        ];
+        for (kind, harness, trust, legacy) in cases {
+            let mut entry = entry_with(Some(a_terminal()), LastOutcome::Running);
+            let live = HashMap::from([("%0".to_string(), PaneState::for_test("fh-1", "%0", "@0"))]);
+            let reader = reader_for(kind);
+            {
+                let mut sample = entry.run.activity.lock().unwrap();
+                assert!(sample.observe_trust(Some(harness), reader, trust));
+                assert!(!sample.observe_trust(Some(harness), reader, trust));
+            }
+            let reply = super::super::status::entry_info(&entry, &live, &Default::default());
+            assert!(reply.workspace_trust_prompt, "{harness:?}");
+            assert_eq!(reply.claude_trust_prompt, legacy, "{harness:?}");
+            assert!(
+                !super::super::status::entry_info(&entry, &Default::default(), &Default::default())
+                    .workspace_trust_prompt,
+                "an absent pane cannot advertise its last question"
+            );
+            {
+                let mut sample = entry.run.activity.lock().unwrap();
+                assert!(sample.observe_trust(Some(harness), reader, "ordinary screen"));
+                assert!(!sample.workspace_trust_prompt);
+                assert!(!sample.claude_trust_prompt);
+                assert!(sample.observe_trust(Some(harness), reader, trust));
+                sample.forget_tail();
+                assert!(!sample.workspace_trust_prompt);
+                assert!(!sample.claude_trust_prompt);
+                assert!(sample.observe_trust(Some(harness), reader, trust));
+            }
+            entry.run.activity = ActivitySample::replacement(&entry.run.activity);
+            let replaced = super::super::status::entry_info(&entry, &live, &Default::default());
+            assert!(!replaced.workspace_trust_prompt);
+            assert!(!replaced.claude_trust_prompt);
+        }
+        let reloaded = ActivitySample::reloaded();
+        let reloaded = reloaded.lock().unwrap();
+        assert!(!reloaded.workspace_trust_prompt);
+        assert!(!reloaded.claude_trust_prompt);
+    }
+
     /// Once bypass reaches replies, neither a manual footer nor an unreadable
     /// screen can withdraw it during the run. Repeated evidence sends no change
     /// hint; replacement and reload reset it so a new process inherits no evidence.

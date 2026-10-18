@@ -416,6 +416,7 @@ pub(crate) fn entry_info(
     let activity = entry.run.activity.lock().expect("activity mutex poisoned");
     info.screen_yolo = activity.screen_yolo;
     info.claude_trust_prompt = activity.claude_trust_prompt;
+    info.workspace_trust_prompt = activity.workspace_trust_prompt;
     drop(activity);
     info.restart_offer = session_restart_offer(entry);
     // The entry's `info` froze this at build time (creation, reload, or
@@ -501,6 +502,7 @@ pub(crate) fn entry_info(
     // A dead pane can retain its last rendered question. It is no longer a
     // live opportunity to answer, so do not advertise the checkout setting.
     info.claude_trust_prompt &= info.status.is_live();
+    info.workspace_trust_prompt &= info.status.is_live();
     info
 }
 

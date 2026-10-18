@@ -87,6 +87,64 @@ pub(crate) fn status_line_yolo(harness: farhelm_proto::LaunchHarness, text: &str
     }
 }
 
+/// Read workspace trust using the launch harness when activity kinds lose that identity.
+///
+/// Muse shares Generic's activity reader, so only a declared Muse launch can
+/// advertise its dialog. Command and legacy launches retain their kind's reader;
+/// unrelated Generic command output must never become Muse trust evidence.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub(crate) fn workspace_trust_prompt(
+    harness: Option<farhelm_proto::LaunchHarness>,
+    reader: &dyn ScreenReader,
+    text: &str,
+) -> bool {
+    use farhelm_proto::LaunchHarness;
+    match harness {
+        Some(LaunchHarness::Muse) => muse_trust_prompt(text),
+        Some(
+            LaunchHarness::Claude
+            | LaunchHarness::Codex
+            | LaunchHarness::Goose
+            | LaunchHarness::Grok
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp
+            | LaunchHarness::Cursor
+            | LaunchHarness::OpenCode,
+        )
+        | None => reader.trust_prompt(text),
+    }
+}
+
+/// Muse's startup trust menu ends in its own input instructions, without a composer.
+/// Requiring the question, workspace, both choices and final footer keeps quoted
+/// phrases and a completed dialog followed by ordinary output from becoming hints.
+fn muse_trust_prompt(text: &str) -> bool {
+    // capture-pane retains physical word wraps. Normalize them before checking
+    // the dialog. Muse clips its footer at narrow widths, so require its
+    // specific key hints and accept only a prefix of the remaining sentence.
+    // The caution, selected menu and footer must stay contiguous at the end:
+    // transcript text after a completed dialog still withdraws the hint.
+    let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let Some((menu, footer_tail)) = joined.rsplit_once("Use Up/Down or 1/2, then") else {
+        return false;
+    };
+    if !" Enter. Esc quits.".starts_with(footer_tail) {
+        return false;
+    }
+    let menu = menu.trim_end();
+    let Some(caution) = menu
+        .strip_suffix("⟩ 1 Trust and continue 2 Quit")
+        .or_else(|| menu.strip_suffix("1 Trust and continue ⟩ 2 Quit"))
+    else {
+        return false;
+    };
+    caution
+        .trim_end()
+        .ends_with("Only trust this workspace when you trust its contents.")
+        && joined.contains("Do you trust this workspace?")
+        && joined.contains("Workspace: ")
+}
+
 /// Claude's mode follows its composer and custom status line; dialogs may hide it.
 ///
 /// Plan mode is deliberately not a non-YOLO reading: Claude says a session
@@ -269,8 +327,12 @@ pub(crate) struct Screen<'a> {
 /// with no dedicated reader is simply one that overrides nothing.
 pub(crate) trait ScreenReader: Sync {
     /// A current workspace-trust question, never transcript text or a draft.
-    /// Only Claude advertises the corresponding managed-checkout setting.
     fn trust_prompt(&self, _text: &str) -> bool {
+        false
+    }
+    /// The legacy wire flag is Claude-only: older UIs use it without checking
+    /// the session's harness and would otherwise show Claude's settings hint.
+    fn claude_trust_prompt(&self, _text: &str) -> bool {
         false
     }
     /// Whether the sampler should fetch the pane title for this reader. A
@@ -401,6 +463,10 @@ const CLAUDE_FOOTER_LINES: usize = 2;
 const CLAUDE_SPINNER_LINES_ABOVE_BOX: usize = 6;
 
 impl ScreenReader for ClaudeReader {
+    fn claude_trust_prompt(&self, text: &str) -> bool {
+        self.trust_prompt(text)
+    }
+
     fn trust_prompt(&self, text: &str) -> bool {
         let lines = content_lines(text);
         // capture-pane preserves physical wraps. The same dialog must be
@@ -558,6 +624,23 @@ const CODEX_QUEUED_QUESTION_LINES: usize = 8;
 const CODEX_ACTION_REQUIRED_TITLES: [&str; 2] = ["[ ! ] Action Required", "[ . ] Action Required"];
 
 impl ScreenReader for CodexReader {
+    fn trust_prompt(&self, text: &str) -> bool {
+        let lines = content_lines(text);
+        let joined = lines
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        codex_dialog_may_be_open(&lines, text)
+            // This menu's footer must end the screen. Merely finding it in
+            // the last two rows would retain a hint after a transcript reply.
+            && joined.ends_with("enter continue · esc back")
+            && joined.contains("Folder access")
+            && joined.contains("Trust this folder?")
+            && joined.contains("1. Trust and continue")
+            && joined.contains("2. Back to Agent Command Center")
+    }
+
     fn wants_title(&self) -> bool {
         true
     }
@@ -712,6 +795,7 @@ mod tests {
             include_str!("../../tests/fixtures/screens/claude/2.1.296/waiting-trust.txt"),
         ] {
             assert!(reader.trust_prompt(trust));
+            assert!(reader.claude_trust_prompt(trust));
             let wrapped = trust
                 .replace("project you created", "project you\ncreated")
                 .replace("trust this folder", "trust this\nfolder");
@@ -727,6 +811,161 @@ mod tests {
                 "Do you want to proceed?\n❯ Yes\nNo\nEnter to confirm · Esc to cancel"
             )
         );
+    }
+
+    /// Codex's trust hint needs its actual menu and footer. Dialog words in
+    /// ordinary transcript output or an unsent composer must not suggest that
+    /// changing the managed-checkout setting would answer a current question.
+    #[test]
+    fn codex_trust_prompt_matches_captured_dialog_only() {
+        let reader = reader_for(AgentKind::Codex);
+        let trust = include_str!("../../tests/fixtures/screens/codex/0.159.0/waiting-trust.txt");
+        assert!(reader.trust_prompt(trust));
+        let wrapped = trust.replace("Trust this folder?", "Trust this\nfolder?");
+        assert_ne!(wrapped, trust, "fixture premise: the question exists");
+        assert!(reader.trust_prompt(&wrapped));
+        let selected_back = trust.replace(
+            "› 1. Trust and continue\n  2. Back to Agent Command Center",
+            "  1. Trust and continue\n› 2. Back to Agent Command Center",
+        );
+        assert_ne!(selected_back, trust, "fixture premise: both choices exist");
+        assert!(reader.trust_prompt(&selected_back));
+        assert!(!reader.claude_trust_prompt(trust));
+        assert!(!reader_for(AgentKind::Claude).trust_prompt(trust));
+        assert!(!reader_for(AgentKind::Generic).trust_prompt(trust));
+        for suffix in [
+            "\n\n› quoted trust dialog\n\n  ? for shortcuts",
+            "\n• That was the trust dialog.",
+        ] {
+            assert!(!reader.trust_prompt(&format!("{trust}{suffix}")));
+        }
+        let approval =
+            include_str!("../../tests/fixtures/screens/codex/0.159.0/waiting-permission.txt");
+        assert!(!reader.trust_prompt(approval));
+    }
+
+    /// Muse has no dedicated activity kind, so the same captured dialog can
+    /// produce a hint only for an explicitly declared Muse launch. Its footer
+    /// must remain current; echoing the dialog above subsequent output is not
+    /// evidence of a question waiting to be answered.
+    #[test]
+    fn muse_trust_prompt_requires_its_launch_harness_and_current_dialog() {
+        use farhelm_proto::LaunchHarness;
+        let reader = reader_for(AgentKind::Generic);
+        let trust = include_str!(
+            "../../tests/fixtures/screens/muse/1.4.10-R6427.1/waiting-trust-derived-workspace.txt"
+        );
+        assert!(workspace_trust_prompt(
+            Some(LaunchHarness::Muse),
+            reader,
+            trust
+        ));
+        let selected_quit = trust.replace(
+            "⟩ 1  Trust and continue\n  2  Quit",
+            "  1  Trust and continue\n⟩ 2  Quit",
+        );
+        assert_ne!(
+            selected_quit, trust,
+            "fixture premise: initial selected choice exists"
+        );
+        assert!(workspace_trust_prompt(
+            Some(LaunchHarness::Muse),
+            reader,
+            &selected_quit
+        ));
+        assert!(!workspace_trust_prompt(None, reader, trust));
+        assert!(!workspace_trust_prompt(
+            Some(LaunchHarness::Pi),
+            reader,
+            trust
+        ));
+        assert!(!reader.claude_trust_prompt(trust));
+        for suffix in [
+            "\n> quoted trust dialog",
+            "\nAssistant: That was the trust dialog.",
+        ] {
+            assert!(!workspace_trust_prompt(
+                Some(LaunchHarness::Muse),
+                reader,
+                &format!("{trust}{suffix}")
+            ));
+        }
+    }
+
+    /// Actual narrow Muse screens wrap the question and caution but clip the
+    /// footer. The captured menu remains recognizable without reconstructing
+    /// terminal geometry; a different footer or subsequent output must reject it.
+    #[test]
+    fn muse_trust_prompt_matches_captured_clipped_footers() {
+        use farhelm_proto::LaunchHarness;
+        let reader = reader_for(AgentKind::Generic);
+        for (trust, footer) in [
+            (
+                include_str!(
+                    "../../tests/fixtures/screens/muse/1.4.10-R6427.1/waiting-trust-derived-narrow-24.txt"
+                ),
+                "Use Up/Down or 1/2, then",
+            ),
+            (
+                include_str!(
+                    "../../tests/fixtures/screens/muse/1.4.10-R6427.1/waiting-trust-derived-narrow-40.txt"
+                ),
+                "Use Up/Down or 1/2, then Enter. Esc quit",
+            ),
+        ] {
+            assert_eq!(
+                trust.trim_end().lines().last(),
+                Some(footer),
+                "fixture premise: the actual footer is clipped, not wrapped"
+            );
+            assert!(
+                !trust.contains("Only trust this workspace when you trust its contents."),
+                "fixture premise: the captured caution wraps"
+            );
+            let recognizes =
+                |text: &str| workspace_trust_prompt(Some(LaunchHarness::Muse), reader, text);
+            assert!(recognizes(trust));
+            assert!(!workspace_trust_prompt(None, reader, trust));
+            assert!(!workspace_trust_prompt(
+                Some(LaunchHarness::Pi),
+                reader,
+                trust
+            ));
+            assert!(!recognizes(&format!(
+                "{trust}\nAssistant: That was the trust dialog."
+            )));
+            let missing_choice = trust.replace("Quit", "");
+            assert_ne!(missing_choice, trust, "fixture premise: Quit choice exists");
+            assert!(!recognizes(&missing_choice));
+            assert!(
+                !recognizes(&trust.replace('⟩', "")),
+                "the selected menu is required"
+            );
+            assert!(
+                !recognizes(&trust.replace("Only trust", "Earlier trust")),
+                "the full caution remains required"
+            );
+            assert!(
+                !recognizes(&trust.replace("Do you trust this", "An earlier question")),
+                "the full question remains required"
+            );
+            assert!(
+                !recognizes(&trust.replace("Workspace:", "Location:")),
+                "the workspace label remains required"
+            );
+            assert!(
+                !recognizes(&trust.replace(footer, "")),
+                "footer is required"
+            );
+            assert!(
+                !recognizes(&trust.replace(footer, "Use Up/Down or 1/2,")),
+                "shorter key hints do not meet the minimum footer anchor"
+            );
+            assert!(
+                !recognizes(&trust.replace(footer, "Use Up/Down or 1/2, then run another command")),
+                "the observed footer must be a prefix of the known sentence"
+            );
+        }
     }
 
     fn counts(samples: u64, unchanged_streak: u64) -> SampleCounts {
