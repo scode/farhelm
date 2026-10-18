@@ -332,8 +332,9 @@ fn hosts_json_has_the_exact_discovery_envelope() {
 
 /// Spec: `farhelm agent templates --json` sends the `Templates` verb and
 /// prints the versioned envelope with each template's name, its fields
-/// without command text, the `sets_*` flags and the host name; the table
-/// form lists the same template by name with what it sets.
+/// without command text, the `sets_*` flags, shortcut assignments and the
+/// host name; the table form lists the same template by name with what it
+/// sets and which shortcuts select it.
 ///
 /// Why: the listing is an agent's only view of templates, read as JSON when
 /// exact names matter; the envelope is a public schema like the hosts one.
@@ -351,8 +352,8 @@ fn templates_json_and_table_list_what_each_template_sets() {
                 sets_command: false,
                 sets_resume_command: false,
                 host_name: None,
-                quick_launch: false,
-                key: None,
+                quick_launch: true,
+                key: Some("3".to_string()),
             }],
         })
     };
@@ -399,13 +400,18 @@ fn templates_json_and_table_list_what_each_template_sets() {
                     "fields": {"agent": "codex"},
                     "sets_command": false,
                     "sets_resume_command": false,
-                    "host_name": null
+                    "host_name": null,
+                    "quick_launch": true,
+                    "key": "3"
                 }]
             }
         })
     );
     let table = String::from_utf8(run(&["templates"])).expect("UTF-8");
-    assert_eq!(table, "NAME     SETS\nmy-codex agent codex\n");
+    assert_eq!(
+        table,
+        "NAME     SETS\nmy-codex agent codex, quick launch, number key 3\n"
+    );
 }
 
 /// Spec: `farhelm agent sessions` sends the `Sessions` verb and renders the
@@ -2507,7 +2513,7 @@ fn a_session_reply_to_a_creating_verb_is_refused() {
 }
 
 /// Spec: `farhelm agent template create NAME` sends one `TemplateCreate`
-/// carrying create's flags as the template's fields, `--host` by name
+/// carrying create's flags as the template's fields and shortcuts, `--host` by name
 /// rather than as a field, and prints one confirmation line naming the
 /// template; `--template` is refused before anything is sent.
 ///
@@ -2540,10 +2546,13 @@ fn a_template_create_sends_its_fields_and_refuses_template() {
         assert_eq!(
             request,
             AgentVerb::TemplateCreate {
+                shortcuts: farhelm_proto::TemplateShortcutEdit {
+                    quick_launch: Some(true),
+                    key: Some(farhelm_proto::TemplateKeyEdit::Set("0".into())),
+                },
                 name: "my-template".to_string(),
                 fields: fields.clone(),
                 host: Some("builder".to_string()),
-                shortcuts: Default::default(),
             }
         );
         Some(ControlMsg::AgentResponse {
@@ -2576,6 +2585,9 @@ fn a_template_create_sends_its_fields_and_refuses_template() {
             "worker",
             "--host",
             "builder",
+            "--quick-launch",
+            "--key",
+            "0",
         ],
     ));
     finish_server(done, thread);
@@ -2630,10 +2642,10 @@ fn template_edit_and_delete_send_their_verbs() {
         assert_eq!(
             request,
             AgentVerb::TemplateEdit {
+                shortcuts: Default::default(),
                 name: "my-template".to_string(),
                 fields: fields.clone(),
                 host: None,
-                shortcuts: Default::default(),
             }
         );
         Some(ControlMsg::AgentResponse {
@@ -2708,4 +2720,77 @@ fn template_edit_and_delete_send_their_verbs() {
             .contains("\"my-template\""),
         "the confirmation names the template"
     );
+}
+
+/// Shortcut-only edits must reach the helm with no template field, whether
+/// assigning or clearing. The CLI rejects keys outside the ten physical
+/// digits before it can send an approval request.
+#[farhelm_testtrace::test]
+fn template_shortcut_only_edits_send_their_flags() {
+    use farhelm_proto::{TemplateKeyEdit, TemplateShortcutEdit};
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let cases = [
+        (
+            vec!["template", "edit", "fast", "--quick-launch", "--key", "3"],
+            TemplateShortcutEdit {
+                quick_launch: Some(true),
+                key: Some(TemplateKeyEdit::Set("3".into())),
+            },
+        ),
+        (
+            vec!["template", "edit", "fast", "--no-quick-launch", "--no-key"],
+            TemplateShortcutEdit {
+                quick_launch: Some(false),
+                key: Some(TemplateKeyEdit::Clear),
+            },
+        ),
+    ];
+    for (index, (args, expected)) in cases.into_iter().enumerate() {
+        let socket = temp.path().join(format!("supervisor-{index}.sock"));
+        let (done, thread) = mock_supervisor(&socket, move |request| {
+            let ControlMsg::AgentRequest {
+                req_id, request, ..
+            } = request
+            else {
+                panic!("farhelm agent must send an AgentRequest, got {request:?}");
+            };
+            assert_eq!(
+                request,
+                AgentVerb::TemplateEdit {
+                    name: "fast".into(),
+                    fields: Default::default(),
+                    host: None,
+                    shortcuts: expected.clone(),
+                }
+            );
+            Some(ControlMsg::AgentResponse {
+                req_id,
+                outcome: AgentOutcome::Ok {
+                    reply: AgentReply::TemplateWritten {
+                        template: Box::new(farhelm_proto::AgentTemplate::listed(
+                            &farhelm_proto::launcher::LaunchTemplate {
+                                name: "fast".into(),
+                                fields: Default::default(),
+                            },
+                            None,
+                        )),
+                    },
+                },
+            })
+        });
+        let output = output_with_timeout(agent_command_with_args(&socket, &args));
+        finish_server(done, thread);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let refused = output_with_timeout(agent_command_with_args(
+        &temp.path().join("unused.sock"),
+        &["template", "edit", "fast", "--key", "10"],
+    ));
+    assert_ne!(refused.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("one digit"));
 }
