@@ -13,9 +13,11 @@ they work, and what is and is not supported, may change.
 :::
 
 The session launcher's **command** tab runs any command line as a session. Use it for an agent Farhelm does not know, or
-for one it does know when you want to start it your own way: through a wrapper, with flags the **agent** tab does not
-offer, or from a different install. What Farhelm can then do for the session depends on what you tell it, and the
-**Command** column of the [support matrix](/docs/agents/) sums that up.
+for one it does know when you want to start it your own way: through a wrapper that needs a directory argument or a
+different resume command, with flags the **agent** tab does not offer, or from a different install. For a wrapper that
+only needs to run Farhelm's agent command, use the [agent tab's wrapper prefix](/docs/agents/agent-wrappers/) instead.
+What Farhelm can then do for a custom-command session depends on what you tell it, and the **Command** column of the
+[support matrix](/docs/agents/) sums that up.
 
 ## The fields
 

@@ -795,9 +795,9 @@ mod tests {
             "farhelm agent create [--cwd <DIR>] [--gh <REPO>] [--host <NAME>] \
              [--prompt <TEXT>] [--prompt-file <PATH>] [--template <NAME>] \
              [--agent <TYPE>] [--model <ID>] [--effort <LEVEL>] [--permissions <MODE>] \
-             [--command <CMD>] [--yolo] [--no-yolo] [--resume-command <CMD>] \
-             [--no-resume-command] [--title <TITLE>] [--idempotency-key <KEY>]  \
-             Create a session on any host; prints its id",
+             [--wrapper <COMMAND>] [--command <CMD>] [--yolo] [--no-yolo] \
+             [--resume-command <CMD>] [--no-resume-command] [--title <TITLE>] \
+             [--idempotency-key <KEY>]  Create a session on any host; prints its id",
             "farhelm agent clone --source-session <SOURCE_SESSION> --host <NAME> [--cwd <DIR>] \
              [--title <TITLE>] [--idempotency-key <KEY>]  \
              Copy an explicitly named session onto any host; prints the new id",

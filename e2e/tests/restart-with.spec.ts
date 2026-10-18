@@ -115,6 +115,22 @@ test("Restart with escapes and isolates peer refusal text", async ({ page }) => 
 });
 
 /**
+ * A stored prefix may have come from another host. Restart with must expose
+ * its direction-changing bytes without letting the escaped display spelling
+ * turn into new launch words; clearing the choice makes the field editable.
+ */
+test("restart with shows an unsafe stored wrapper prefix without editing its escape text", async ({ page }) => {
+  await injectSession(page, { ...BASELINE, wrapper_prefix: ["wrapper\u202e", "--"] }, "resume");
+  const dialog = await openInjectedDialog(page);
+  const wrapper = dialog.locator(".launch-composer-wrapper");
+  await expect(wrapper).toHaveValue(/wrapper<U\+202E>/);
+  await expect(wrapper).toHaveJSProperty("readOnly", true);
+  await dialog.getByRole("button", { name: "clear wrapper prefix" }).click();
+  await expect(wrapper).toHaveValue("");
+  await expect(wrapper).toHaveJSProperty("readOnly", false);
+});
+
+/**
  * Publish one controlled row through the real listing response.
  *
  * Copying the stack's existing row keeps host and transport metadata valid;

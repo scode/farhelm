@@ -18,10 +18,11 @@ specific to Claude.
   opt into answering it for future [managed checkouts](/docs/using/start-a-session/#start-from-a-managed-checkout). That
   setting is off by default: it edits Claude's own settings file and comes with caveats. A hint above the question opens
   the setting and its explanation. Directories you choose yourself still get Claude's question.
-- If you start Claude through a script or wrapper of your own (a [custom command](/docs/agents/custom-commands/)),
-  Farhelm can follow its conversation, and so restart it, only when Claude is the program the session started or one
-  level below it. A deeper chain of wrappers still runs Claude normally, but **restart** stays greyed out.
-  [Agent wrappers](/docs/agents/agent-wrappers/) shows how to write a wrapper that keeps tracking working.
+- If you start Claude through a [wrapper prefix](/docs/agents/agent-wrappers/) or a
+  [custom command](/docs/agents/custom-commands/), Farhelm can follow its conversation, and so restart it, only when
+  Claude is the program the session started or one level below it. A deeper chain of wrappers still runs Claude
+  normally, but **restart** stays greyed out. [Agent wrappers](/docs/agents/agent-wrappers/) shows how to write a
+  wrapper that keeps tracking working.
 - On a Linux host, Claude's own way of opening links does not reach your browser through Farhelm. Ask it to run
   `farhelm agent open-url -- <url>` instead
   ([Open links from a remote session](/docs/using/approve-agent-requests/#open-links-from-a-remote-session)).

@@ -25,7 +25,7 @@ terminal opens. You can type your first prompt there, or supply it in the launch
 />
 
 **cancel**, Escape, or a click outside the launcher closes it and forgets your choices. **reset choices** clears the
-agent, model, and effort, and puts permissions back to the mode the launcher remembers (see the note below);
+agent, model, and effort, and puts permissions and the wrapper prefix back to what the launcher remembers;
 it keeps the host, directory, and name.
 
 ## Choose where it runs
@@ -65,9 +65,13 @@ each agent offers. To answer directory-trust questions automatically for directo
 of these agents, switch the launcher to its **command**
 tab, covered in [Custom commands](/docs/agents/custom-commands/).
 
-NOTE: The launcher remembers the permissions of your last launch from its **agent** tab, in any Farhelm
-window. After one YOLO launch, the next launcher opens on **yolo** too. Launches your agents start, custom commands, and
-plain **replace** do not change what it remembers.
+To start a known agent through another command, enter a **wrapper prefix** on the **agent** tab. Farhelm places it
+before the command it builds for that agent; [Agent wrappers](/docs/agents/agent-wrappers/) explains what the wrapper
+must pass through and when to use a custom command instead.
+
+NOTE: The launcher remembers the permissions of your last launch from its **agent** tab and the last wrapper prefix
+used with each agent, in any Farhelm window. After one YOLO launch, the next launcher opens on **yolo** too. Launches
+your agents start, custom commands, and plain **replace** do not change what it remembers.
 
 ## Continue a conversation you know
 
@@ -126,7 +130,7 @@ them.
   alt="The recent setups list under the launcher's search box, showing three setups for the chosen directory."
 />
 
-A setup is the agent, model, effort, permissions, and directory of a launch you made on the launcher's **agent**
+A setup is the agent, model, effort, permissions, wrapper prefix, and directory of a launch you made on the launcher's **agent**
 tab, however you filled it in.
 Farhelm keeps them separately for each host, and shows up to three; type `recent:` in the search box to find older ones.
 

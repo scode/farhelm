@@ -48,6 +48,7 @@ fn submitted_structured_selection(
     effort: Option<LaunchEffort>,
     permissions: Option<LaunchPermission>,
     permission_flags: &str,
+    wrapper_prefix: Option<Vec<String>>,
 ) -> LaunchSelection {
     LaunchSelection {
         harness,
@@ -55,9 +56,29 @@ fn submitted_structured_selection(
         effort,
         permissions: crate::launch_composer::normalized_permissions(harness, permissions),
         permission_flags: crate::launch_composer::permission_words(permissions, permission_flags),
-        wrapper_prefix: None,
+        wrapper_prefix,
         workspace_trust: None,
     }
+}
+
+/// An empty field means no prefix; every nonempty draft must parse before a
+/// launch or template save so an unfinished quote cannot silently disappear.
+fn wrapper_words(text: &str) -> Result<Option<Vec<String>>, String> {
+    if text.is_empty() {
+        Ok(None)
+    } else {
+        farhelm_proto::split_wrapper_prefix(text).map(Some)
+    }
+}
+
+/// Recover this agent's last successful user choice from the shared helm row.
+/// Switching agent type discards the prior type's draft rather than carrying
+/// its command prefix into a different agent invocation.
+fn remembered_wrapper(preferences: &api::Preferences, harness: Option<LaunchHarness>) -> String {
+    harness
+        .and_then(|harness| preferences.remembered_wrapper_prefixes.get(&harness))
+        .map(shell_words::join)
+        .unwrap_or_default()
 }
 
 /// The first unmet launch prerequisite, shared by the button and its refusal.
@@ -75,6 +96,7 @@ struct LaunchPrerequisites {
     remembered_destination_valid: bool,
     needs_harness: bool,
     incompatible_choice: bool,
+    invalid_wrapper: bool,
 }
 
 impl LaunchPrerequisites {
@@ -99,6 +121,8 @@ impl LaunchPrerequisites {
             Some(
                 "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
             )
+        } else if self.invalid_wrapper {
+            Some("correct the wrapper prefix before launching")
         } else {
             None
         }
@@ -325,6 +349,8 @@ struct TemplateTargets {
     structured_effort: Signal<Option<LaunchEffort>>,
     structured_permissions: Signal<Option<LaunchPermission>>,
     structured_permission_flags: Signal<String>,
+    structured_wrapper: Signal<String>,
+    wrapper_is_explicit: Signal<bool>,
     structured_permissions_is_explicit: Signal<bool>,
     invocation: Signal<String>,
     invocation_raw_seed: Signal<Option<String>>,
@@ -415,6 +441,7 @@ fn capture_permission_switch(targets: PermissionUndoTargets) -> PermissionSwitch
         prompt, launch_tab, structured_harness, structured_model, structured_model_raw_seed,
         structured_model_edited, custom_model_harness, composer_reset_reason,
         structured_effort, structured_permissions, structured_permission_flags,
+        structured_wrapper, wrapper_is_explicit,
         structured_permissions_is_explicit, invocation, invocation_raw_seed,
         invocation_edited, command_yolo, command_agent, command_resume_on,
         command_resume, command_resume_raw_seed, command_resume_edited, chosen_host,
@@ -504,7 +531,7 @@ fn launcher_snapshot(
             *t.structured_permissions.peek(),
             &t.structured_permission_flags.peek(),
         ),
-        wrapper_prefix: None,
+        wrapper_prefix: wrapper_words(&t.structured_wrapper.peek()).ok().flatten(),
         workspace_trust: None,
         command: submitted_field(
             &t.invocation.peek(),
@@ -709,6 +736,13 @@ fn template_edits(
         }))),
         None => {}
     }
+    if let Some(prefix) = fields.wrapper_prefix {
+        edits.push(TemplateEdit::Set(Box::new(move || {
+            t.structured_wrapper
+                .set(prefix.as_ref().map(shell_words::join).unwrap_or_default());
+            t.wrapper_is_explicit.set(true);
+        })));
+    }
     // 4. The command launch's fields, typed text the user owns from here.
     if let Some(command) = fields.command {
         edits.push(TemplateEdit::Set(Box::new(move || {
@@ -800,6 +834,9 @@ fn apply_composer_search_result(
     mut structured_effort: Signal<Option<LaunchEffort>>,
     mut structured_permissions: Signal<Option<LaunchPermission>>,
     mut structured_permission_flags: Signal<String>,
+    mut structured_wrapper: Signal<String>,
+    mut wrapper_is_explicit: Signal<bool>,
+    preferences: SharedPreferences,
     mut structured_permissions_is_explicit: Signal<bool>,
     mut composer_reset_reason: Signal<Option<String>>,
     // `None` while the catalog read is pending or failed; see
@@ -887,16 +924,17 @@ fn apply_composer_search_result(
         }
         crate::launch_composer::ComposerSearchResult::Harness(harness) => {
             launch_tab.set(LaunchTab::Agent);
+            let old_harness = *structured_harness.peek();
             let before = LaunchSelection {
                 permission_flags: crate::launch_composer::permission_words(
                     structured_permissions(),
                     &structured_permission_flags(),
                 ),
+                wrapper_prefix: wrapper_words(&structured_wrapper()).ok().flatten(),
                 harness: structured_harness().unwrap_or(harness),
                 model: structured_model(),
                 effort: structured_effort(),
                 permissions: structured_permissions(),
-                wrapper_prefix: None,
                 workspace_trust: None,
             };
             let (selection, owner) = crate::launch_composer::reconcile_harness_for_catalog_read(
@@ -916,6 +954,13 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            if old_harness != Some(selection.harness) {
+                structured_wrapper.set(remembered_wrapper(
+                    &preferences.0.peek(),
+                    Some(selection.harness),
+                ));
+                wrapper_is_explicit.set(false);
+            }
             // Parsed words cannot preserve an unfinished quote or the user's
             // spacing. Only replacing their owner or permission choice may
             // reseed this editable text; reselecting the owner must keep it.
@@ -935,16 +980,17 @@ fn apply_composer_search_result(
             // an explicit return to structured mode rather than leaving a
             // structured draft hidden behind command controls.
             launch_tab.set(LaunchTab::Agent);
+            let old_harness = *structured_harness.peek();
             let before = LaunchSelection {
                 permission_flags: crate::launch_composer::permission_words(
                     structured_permissions(),
                     &structured_permission_flags(),
                 ),
+                wrapper_prefix: wrapper_words(&structured_wrapper()).ok().flatten(),
                 harness: structured_harness().unwrap_or(harness),
                 model: structured_model(),
                 effort: structured_effort(),
                 permissions: structured_permissions(),
-                wrapper_prefix: None,
                 workspace_trust: None,
             };
             // Retain the source harness until reconciliation has removed its
@@ -970,6 +1016,13 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            if old_harness != Some(selection.harness) {
+                structured_wrapper.set(remembered_wrapper(
+                    &preferences.0.peek(),
+                    Some(selection.harness),
+                ));
+                wrapper_is_explicit.set(false);
+            }
             // A same-agent model choice leaves the custom editor's raw draft
             // intact, including malformed quotes that the person can repair.
             if selection.harness != before.harness || selection.permissions != before.permissions {
@@ -1038,6 +1091,14 @@ fn apply_composer_search_result(
                     .map(shell_words::join)
                     .unwrap_or_default(),
             );
+            structured_wrapper.set(
+                selection
+                    .wrapper_prefix
+                    .as_ref()
+                    .map(shell_words::join)
+                    .unwrap_or_default(),
+            );
+            wrapper_is_explicit.set(true);
             // A search-applied recent replaces the whole draft with a real
             // choice, not a passive default — see
             // `structured_permissions_is_explicit`'s own doc.
@@ -2543,6 +2604,13 @@ pub(super) fn CreateSessionForm(
     let mut structured_permissions_is_explicit = use_signal(|| false);
     // Raw text remains editable through quote errors; only split words reach a launch.
     let mut structured_permission_flags = use_signal(String::new);
+    // New starts without an agent type. Selecting one loads only that type's
+    // remembered prefix; Clone and Replace with use their source instead.
+    let mut structured_wrapper = use_signal(String::new);
+    // A remembered prefix is visible but is not a template edit by itself.
+    // Source launches, recents, templates and direct edits set this bit so
+    // Save as template can offer only a choice the user actually made here.
+    let mut wrapper_is_explicit = use_signal(|| false);
     // Never seed from a source, history or template: every dialog starts fresh.
     let mut conversation = use_signal(String::new);
     // A message belongs to this opening, not its reusable launch. Keep the
@@ -3035,6 +3103,14 @@ pub(super) fn CreateSessionForm(
                             .map(shell_words::join)
                             .unwrap_or_default(),
                     );
+                    structured_wrapper.set(
+                        launch
+                            .wrapper_prefix
+                            .as_ref()
+                            .map(shell_words::join)
+                            .unwrap_or_default(),
+                    );
+                    wrapper_is_explicit.set(true);
                     structured_permissions.set(crate::launch_composer::normalized_permissions(
                         launch.harness,
                         launch.permissions,
@@ -3053,6 +3129,8 @@ pub(super) fn CreateSessionForm(
                     structured_effort.set(None);
                     structured_permissions.set(None);
                     structured_permission_flags.set(String::new());
+                    structured_wrapper.set(String::new());
+                    wrapper_is_explicit.set(false);
                     structured_permissions_is_explicit.set(true);
                 }
                 // A prefill is as fresh an intent as any manual edit —
@@ -3138,12 +3216,13 @@ pub(super) fn CreateSessionForm(
 
     let preview_agent_now = move || {
         format!(
-            "{:?}:{:?}:{:?}:{:?}:{:?}:{}",
+            "{:?}:{:?}:{:?}:{:?}:{:?}:{:?}:{}",
             launch_tab(),
             structured_harness(),
             structured_model(),
             structured_effort(),
             structured_permissions(),
+            structured_wrapper(),
             submitted_field(
                 &invocation(),
                 invocation_edited(),
@@ -3334,11 +3413,11 @@ pub(super) fn CreateSessionForm(
     let structured_choice_error = structured_harness().and_then(|harness| {
         let selection = LaunchSelection {
             permission_flags: crate::launch_composer::permission_words(structured_permissions(), &structured_permission_flags()),
+            wrapper_prefix: wrapper_words(&structured_wrapper()).ok().flatten(),
             harness,
             model: structured_model(),
             effort: structured_effort(),
             permissions: structured_permissions(),
-            wrapper_prefix: None,
             workspace_trust: None,
         };
         (!crate::launch_composer::selection_fits_catalog(&selection, catalog_answer.as_deref())).then_some(
@@ -3382,6 +3461,7 @@ pub(super) fn CreateSessionForm(
                     structured_permissions(),
                     &structured_permission_flags(),
                 ),
+                wrapper_prefix: wrapper_words(&structured_wrapper()).ok().flatten(),
                 harness,
                 model: structured_model(),
                 effort: structured_effort(),
@@ -3389,7 +3469,6 @@ pub(super) fn CreateSessionForm(
                     harness,
                     structured_permissions(),
                 ),
-                wrapper_prefix: None,
                 workspace_trust: None,
             })
         })
@@ -3508,6 +3587,8 @@ pub(super) fn CreateSessionForm(
         incompatible_choice: retry_binding.is_none()
             && launch_tab() == LaunchTab::Agent
             && structured_choice_error.is_some(),
+        invalid_wrapper: launch_tab() == LaunchTab::Agent
+            && wrapper_words(&structured_wrapper()).is_err(),
     }
     .refusal();
     let displayed_preview = retry_binding
@@ -3654,6 +3735,14 @@ pub(super) fn CreateSessionForm(
                     .map(shell_words::join)
                     .unwrap_or_default(),
             );
+            structured_wrapper.set(
+                selection
+                    .wrapper_prefix
+                    .as_ref()
+                    .map(shell_words::join)
+                    .unwrap_or_default(),
+            );
+            wrapper_is_explicit.set(true);
             // Applying a recent is a deliberate whole-draft replacement, not
             // a passive default — its permissions choice must filter
             // further recents exactly as it always has.
@@ -3704,6 +3793,8 @@ pub(super) fn CreateSessionForm(
         structured_permissions,
         structured_permissions_is_explicit,
         structured_permission_flags,
+        structured_wrapper,
+        wrapper_is_explicit,
         invocation,
         invocation_raw_seed,
         invocation_edited,
@@ -3875,6 +3966,9 @@ pub(super) fn CreateSessionForm(
                                 .map(shell_words::join)
                                 .unwrap_or_default(),
                         );
+                        structured_wrapper
+                            .set(remembered_wrapper(&preferences.0.peek(), Some(harness)));
+                        wrapper_is_explicit.set(false);
                         custom_model_harness.set(owner);
                     }
                     note_permission_switch.call((switch_before, true));
@@ -4191,6 +4285,9 @@ pub(super) fn CreateSessionForm(
                             structured_effort,
                             structured_permissions,
                             structured_permission_flags,
+                            structured_wrapper,
+                            wrapper_is_explicit,
+                            preferences,
                             structured_permissions_is_explicit,
                             composer_reset_reason,
                             action_catalog.as_deref(),
@@ -4311,6 +4408,7 @@ pub(super) fn CreateSessionForm(
                 return;
             }
             partial_template_hint.set(false);
+            let old_harness = *structured_harness.peek();
             let switch_before = capture_permission_switch(undo_targets);
             promote_fetched_history_snapshot(offered_history, create_target, fetched_history);
             let selection = LaunchSelection {
@@ -4367,6 +4465,10 @@ pub(super) fn CreateSessionForm(
                     .map(shell_words::join)
                     .unwrap_or_default(),
             );
+            if old_harness != Some(harness) {
+                structured_wrapper.set(remembered_wrapper(&preferences.0.peek(), Some(harness)));
+                wrapper_is_explicit.set(false);
+            }
             custom_model_harness.set(owner);
             launch_tab.set(LaunchTab::Agent);
             note_permission_switch.call((switch_before, true));
@@ -4731,12 +4833,21 @@ pub(super) fn CreateSessionForm(
                         ops.release();
                         return;
                     };
+                    let wrapper_prefix = match wrapper_words(&structured_wrapper()) {
+                        Ok(prefix) => prefix,
+                        Err(reason) => {
+                            error.set(Some(reason));
+                            ops.release();
+                            return;
+                        }
+                    };
                     let selection = submitted_structured_selection(
                         harness,
                         structured_model.peek().clone(),
                         *structured_effort.peek(),
                         *structured_permissions.peek(),
                         &structured_permission_flags(),
+                        wrapper_prefix,
                     );
                     LaunchIntent::Structured(selection)
                 } else {
@@ -5074,12 +5185,21 @@ pub(super) fn CreateSessionForm(
                                 ops.release();
                                 return;
                             };
+                            let wrapper_prefix = match wrapper_words(&structured_wrapper()) {
+                                Ok(prefix) => prefix,
+                                Err(reason) => {
+                                    error.set(Some(reason));
+                                    ops.release();
+                                    return;
+                                }
+                            };
                             let selection = submitted_structured_selection(
                                 harness,
                                 structured_model.peek().clone(),
                                 *structured_effort.peek(),
                                 *structured_permissions.peek(),
                                 &structured_permission_flags(),
+                                wrapper_prefix,
                             );
                             if *launch_tab.peek() != LaunchTab::Agent
                                 || !crate::launch_composer::selection_fits_catalog(
@@ -5476,7 +5596,7 @@ pub(super) fn CreateSessionForm(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral launch-composer-reset",
-                        "data-tooltip": "reset choices: clear the agent, model and effort, and go back to your remembered permissions",
+                        "data-tooltip": "reset choices: clear the agent, model and effort; remember permissions and the next agent's wrapper prefix",
                         disabled: busy,
                         onclick: move |_| {
                             if !draft_transition_allowed(ops) {
@@ -5508,6 +5628,8 @@ pub(super) fn CreateSessionForm(
                             // filtering recents either (see
                             // `structured_permissions_is_explicit`).
                             structured_permissions_is_explicit.set(false);
+                            structured_wrapper.set(String::new());
+                            wrapper_is_explicit.set(false);
                             composer_reset_reason.set(None);
                             promote_fetched_history_snapshot(
                                 offered_history, create_target, fetched_history,
@@ -5527,12 +5649,20 @@ pub(super) fn CreateSessionForm(
                             // Reopening an already mounted panel would replace
                             // its candidate while retaining its checkbox draft.
                             if !draft_transition_allowed(ops) || template_saving() || template_panel().is_some() { return; }
+                            // The command tab retains the agent draft for a
+                            // later switch, but does not save any of it.
+                            if *launch_tab.peek() == LaunchTab::Agent
+                                && let Err(reason) = wrapper_words(&structured_wrapper()) {
+                                error.set(Some(reason));
+                                return;
+                            }
                             let state = launcher_snapshot(template_targets, &hosts_for_template_save, selected);
                             template_panel.set(Some((super::save_template::Candidate::from_state(&state,
                                 super::save_template::ExplicitChoices {
                                     host: chosen_host().is_some() && clone_host_state() != CloneHostState::Bound,
                                     folder: folder_is_explicit(), name: title_edited(),
                                     permissions: structured_permissions_is_explicit(),
+                                    wrapper: wrapper_is_explicit(),
                                 }), host_label_for_template_save.clone())));
                         }, "save as template"
                     }
@@ -6534,6 +6664,13 @@ pub(super) fn CreateSessionForm(
                                 effort: structured_effort(),
                                 permissions: structured_permissions(),
                                 permission_flags: structured_permission_flags(),
+                                wrapper_prefix: structured_wrapper(),
+                                on_wrapper_prefix: move |text| {
+                                    if !draft_transition_allowed(ops) { return; }
+                                    structured_wrapper.set(text);
+                                    wrapper_is_explicit.set(true);
+                                    intent_key.set(None);
+                                },
                                 on_permission_flags: move |text| { structured_permission_flags.set(text); intent_key.set(None); structured_permissions_is_explicit.set(true); },
                                 catalog: catalog_models.clone(),
                                 busy,
@@ -6952,6 +7089,31 @@ pub(super) fn CreateSessionForm(
 
 #[cfg(test)]
 mod tests {
+    /// A remembered prefix belongs to one agent type. Editing invalid shell
+    /// text must stay visible and refuse launch instead of submitting none.
+    #[test]
+    fn wrapper_draft_parses_and_reads_only_its_agent_memory() {
+        use super::*;
+        let mut preferences = api::Preferences::default();
+        preferences
+            .remembered_wrapper_prefixes
+            .insert(LaunchHarness::Codex, vec!["wrapper".into(), "--".into()]);
+        assert_eq!(
+            remembered_wrapper(&preferences, Some(LaunchHarness::Codex)),
+            "wrapper --"
+        );
+        assert_eq!(
+            remembered_wrapper(&preferences, Some(LaunchHarness::Claude)),
+            ""
+        );
+        assert_eq!(wrapper_words(""), Ok(None));
+        assert_eq!(
+            wrapper_words("wrapper --"),
+            Ok(Some(vec!["wrapper".into(), "--".into()]))
+        );
+        assert!(wrapper_words("'unfinished").is_err());
+    }
+
     /// A quick origin is insufficient after New became visible. A successful
     /// retry after refusal or consent has already offered the name field and
     /// must not be followed by a second naming prompt.

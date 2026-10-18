@@ -102,6 +102,10 @@ details.</p>
 
 ## Permission modes
 
+The session launcher's **agent** tab also accepts a **wrapper prefix** for every agent here. Farhelm keeps composing the
+agent's command and runs it through those words; see [Agent wrappers](/docs/agents/agent-wrappers/) for the wrapper's
+requirements. The prefix does not change which permission mode you chose.
+
 Choose **custom** to supply your own permission flags for Claude, Codex, Grok, Muse, Cursor or OMP. They replace
 Farhelm's permission flags; you are responsible for making sure they only change permissions. Farhelm does not check
 what they do, so the session gets the amber YOLO shield and hosts that ask before YOLO launches still ask.

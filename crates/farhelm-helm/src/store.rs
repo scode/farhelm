@@ -2236,7 +2236,6 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  last_selected          TEXT,
                  compact                INTEGER CHECK (compact IN (0, 1)),
                  remembered_permissions TEXT,
-                 remembered_wrapper_prefixes TEXT NOT NULL DEFAULT '{{}}',
                  remembered_workspace_trust INTEGER CHECK (remembered_workspace_trust IN (0, 1)),
                  skip_host_remove_confirmation INTEGER CHECK (skip_host_remove_confirmation IN (0, 1)),
                  skip_host_setup_confirmation INTEGER CHECK (skip_host_setup_confirmation IN (0, 1)),
@@ -2252,7 +2251,10 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  codex_trust_hint_dismissed INTEGER CHECK (codex_trust_hint_dismissed IN (0, 1)),
                  muse_trust_hint_dismissed INTEGER CHECK (muse_trust_hint_dismissed IN (0, 1)),
                  pi_trust_hint_dismissed INTEGER CHECK (pi_trust_hint_dismissed IN (0, 1)),
-                 color_terminal_frames INTEGER CHECK (color_terminal_frames IN (0, 1))
+                 color_terminal_frames INTEGER CHECK (color_terminal_frames IN (0, 1)),
+                 -- Appended, like every column added since this table was
+                 -- created, so a fresh database matches a migrated one.
+                 remembered_wrapper_prefixes TEXT NOT NULL DEFAULT '{{}}'
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -8245,6 +8247,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN muse_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN pi_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN color_terminal_frames;
+                 ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
@@ -12141,6 +12144,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN muse_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN pi_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN color_terminal_frames;
+                 ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;

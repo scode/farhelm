@@ -194,7 +194,18 @@ impl ApprovalAction {
             Self::TemplateWrite { fields, .. } => {
                 matches!(&fields.wrapper_prefix, Some(Some(_)))
             }
-            _ => false,
+            // Listed rather than caught by a wildcard: a new card kind that
+            // can carry a wrapper prefix must decide here whether it forces
+            // the visible Allow, instead of silently inheriting `false`.
+            Self::OpenUrl { .. }
+            | Self::Launch { .. }
+            | Self::LaunchWithPrompt { .. }
+            | Self::Rename { .. }
+            | Self::Stop { .. }
+            | Self::Prompt { .. }
+            | Self::Delete { .. }
+            | Self::Restart { .. }
+            | Self::TemplateDelete { .. } => false,
         }
     }
 }

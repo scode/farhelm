@@ -164,30 +164,35 @@ Helm schema 59 adds nullable `preferences.color_terminal_frames`. Unset and fals
 fresh and upgraded helms. The Settings switch under Sessions writes through the same sparse preference queue: a null
 restores the off default, and an omitted key preserves another client's choice. Older helms refuse this schema.
 
+Helm schema 60 adds `preferences.remembered_wrapper_prefixes` as an empty JSON map on upgrade. Each accepted user agent
+launch replaces or clears its own agent type's entry in the same transaction that records the launch; agent requests do
+not change it. An older helm refuses this schema.
+
 The session list's chosen ORDER, last-selected session, compact-row choice, and the launch composer's remembered
 permissions, host confirmation choices, and remembered feedback contact are one preference the HELM keeps, in a
 singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`, `remembered_permissions`,
 `remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`, `feedback_contact`,
-`terminal_link_click`, `skip_session_confirmations`, `name_session_on_quick_launch`, `color_terminal_frames`,
-`quick_launch_template`, `template_shortcuts`, `welcome_seen`) behind `GET`/`PUT /api/preferences`, device-authenticated
-like every other route. The remembered permission field is written by the helm after a successful user structured
-launch; no shipped client PUTs it. The `remembered_workspace_trust` column remains for upgrade compatibility but is
-neither read nor written. Remembered permissions describe accepted launches rather than one client's claim. Both clients
-read the row once after authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the
-read lands, so the sort control and the auto-select effect see the remembered values on their first run and no frame
-shows a default that is then corrected. On desktop the IPC authentication gate already holds the tree and the read is
-one loopback hop, so nothing is visible; in the browser the first paint deliberately waits on that one round trip to the
-helm — a page with a valid credential used to paint its sidebar synchronously from localStorage — so the list never
-appears in an order that then changes. A write is a sparse patch naming only the field the user changed, merged
-per-field by the helm (an absent field is untouched, an explicit `null` clears one), so two clients changing different
-fields at nearly the same time cannot clobber each other; the signal in the page is updated before the request leaves,
-which is what keeps the choice in force when the write fails. Same-field writes are serialized latest-wins in the
-client, so a burst of changes cannot land on the helm in reverse order; the write queue is process state outside the
-remounted tree, and after the browser's credential recovery the gate overlays and replays any local choice whose write
-never got through, so reauthentication cannot roll the current client back to the helm's older row. The desktop app
-never signs in again, so nothing remounts its tree. The seed read runs under a seconds-scale deadline of its own and
-expiry reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty
-seconds.
+`remembered_wrapper_prefixes`, `terminal_link_click`, `skip_session_confirmations`, `name_session_on_quick_launch`,
+`color_terminal_frames`, `quick_launch_template`, `template_shortcuts`, `welcome_seen`) behind
+`GET`/`PUT /api/preferences`, device-authenticated like every other route. The remembered permission field and per-agent
+wrapper-prefix map are written by the helm after a successful user agent launch; no client PUTs them. A launch without a
+prefix removes that agent type's entry. Agent-origin launches and command launches leave the map alone. The
+`remembered_workspace_trust` column remains for upgrade compatibility but is neither read nor written. Remembered
+permissions describe accepted launches rather than one client's claim. Both clients read the row once after
+authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the sort
+control and the auto-select effect see the remembered values on their first run and no frame shows a default that is
+then corrected. On desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so
+nothing is visible; in the browser the first paint deliberately waits on that one round trip to the helm — a page with a
+valid credential used to paint its sidebar synchronously from localStorage — so the list never appears in an order that
+then changes. A write is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent
+field is untouched, an explicit `null` clears one), so two clients changing different fields at nearly the same time
+cannot clobber each other; the signal in the page is updated before the request leaves, which is what keeps the choice
+in force when the write fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot
+land on the helm in reverse order; the write queue is process state outside the remounted tree, and after the browser's
+credential recovery the gate overlays and replays any local choice whose write never got through, so reauthentication
+cannot roll the current client back to the helm's older row. The desktop app never signs in again, so nothing remounts
+its tree. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a
+stalled preference endpoint cannot blank the page for the funnel's full sixty seconds.
 
 The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
 number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
@@ -4778,9 +4783,10 @@ the JSON of `farhelm_proto::launcher::TemplateFields`. The fields stay one JSON 
 a template is applied whole and never queried by field, and because the set of launcher fields is the wire crate's to
 grow. A field a template leaves out is absent from the JSON; for the agent-launch choices that have a default (model,
 effort, permissions) and for the resume command, an explicit `null` means "reset to the default", which is how a
-template can clear a choice rather than only set one. The agent type, host, destination and session name have no reset:
-a template sets them or leaves them alone. A host is named by its recorded install identity. Unknown fields are refused
-on decode, so a misspelled field is an error rather than a silently ignored edit. The retired `workspace_trust` field
+template can clear a choice rather than only set one. The wrapper prefix follows the same absent/set/null shape, but its
+`null` means no prefix, overriding a remembered one. The agent type, host, destination and session name have no reset: a
+template sets them or leaves them alone. A host is named by its recorded install identity. Unknown fields are refused on
+decode, so a misspelled field is an error rather than a silently ignored edit. The retired `workspace_trust` field
 remains readable in `TemplateFields`, but application ignores it and every save drops it. The editor clears it in its
 draft and on delete undo; Save as template never offers it. This keeps old records usable without letting their trust
 choices bypass managed-checkout Settings. The GUI's writes go through `PUT /api/templates/{name}` (create or replace,
@@ -4811,6 +4817,14 @@ the editor's field identities, validates through its compatibility rules and `ch
 list before the existing last-write-wins PUT. This refuses ordinary collisions, not a concurrent write after the read;
 there is no new endpoint or version check. The parent guards cancellation and session submission while saving, and a
 successful save hands the actual template to the Templates dialog's initial editor state without waiting for its list.
+
+The wrapper input is a raw shell-style draft beside the agent choices, while `LauncherState` and template snapshots hold
+parsed words. Invalid text remains in the input and prevents a launch or save instead of silently becoming no prefix.
+Switching agent types loads that type's remembered words; Clone, Replace with and recents use the prefix stored in their
+selection. A template with no prefix edit leaves the current draft alone, while explicit null empties it. Save as
+template offers the current prefix but checks it only when the user explicitly changed or cleared it, so a passive
+remembered value does not become a template edit. Quick launch uses the same snapshot and submit path as New. Restart
+with keeps its own raw input and updates its selection only after parsing succeeds; an invalid edit cannot be sent.
 
 The launcher's initial prompt is a separate optional draft signal. The agent tab's template snapshot retains it when the
 agent is unset or supported; a request requires a selected supported agent. Recent setups leave the draft alone and

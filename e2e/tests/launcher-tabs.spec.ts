@@ -65,6 +65,112 @@ test("New opens on the agent tab, and each tab keeps its own fields and draft", 
 });
 
 /**
+ * Spec: a prefix is parsed into literal words in the submitted agent selection;
+ * an unfinished quote remains visible and prevents a create request.
+ *
+ * Why: dropping invalid text would silently run the agent without the wrapper
+ * the user thought they had chosen.
+ */
+test("agent wrapper input refuses unfinished text and submits parsed words", async ({ page, request }) => {
+  const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"];
+  expect(build, "the controlled refusal must retain the live helm's build identity").toBeTruthy();
+  const bodies: Record<string, any>[] = [];
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    bodies.push(route.request().postDataJSON());
+    await route.fulfill({
+      status: 400,
+      headers: { "x-farhelm-build": build, "content-type": "text/plain" },
+      body: "wrapper fixture refused create",
+    });
+  });
+
+  const form = await openNew(page);
+  await form.getByRole("button", { name: "Codex", exact: true }).click();
+  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  const wrapper = form.locator(".launch-composer-wrapper");
+  await expect(wrapper).toBeVisible();
+  await wrapper.fill("with-endpoint 'unfinished");
+  await expect(wrapper).toHaveAttribute("aria-invalid", "true");
+  await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "true");
+  await form.locator(".create-session-submit").click({ force: true });
+  await expect(form.locator(".launch-composer-refusal")).toContainText("invalid wrapper prefix: missing closing quote");
+  expect(bodies, "invalid wrapper text must not become a create").toHaveLength(0);
+
+  await wrapper.fill("with-endpoint --profile 'work profile' --");
+  await expect(wrapper).toHaveAttribute("aria-invalid", "false");
+  await expect(form.locator(".create-session-submit")).toHaveAttribute("aria-disabled", "false");
+  await form.locator(".create-session-submit").click();
+  await expect(form.locator(".create-session-error")).toContainText("wrapper fixture refused create");
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0]).toMatchObject({
+    launch: { harness: "codex", wrapper_prefix: ["with-endpoint", "--profile", "work profile", "--"] },
+  });
+});
+
+/**
+ * Spec: saving the command tab projects only command choices. A malformed
+ * wrapper draft waits on the agent tab and cannot veto an unrelated save.
+ *
+ * Why: the two tabs retain independent drafts, so a hidden validation error
+ * must not make the visible command setup impossible to save.
+ */
+test("a dormant invalid wrapper does not block saving a command template", async ({ page }) => {
+  const form = await openNew(page);
+  await form.getByRole("button", { name: "Codex", exact: true }).click();
+  await form.locator(".launch-composer-wrapper").fill("with-endpoint 'unfinished");
+  await form.getByRole("tab", { name: "command", exact: true }).click();
+  await form.getByLabel("agent command").fill("printf hello");
+  await form.locator(".launch-composer-save-template").click();
+  const panel = form.locator(".save-template-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('[data-field="command"]')).toBeChecked();
+  await expect(panel.locator('[data-field="wrapper"]')).toHaveCount(0);
+});
+
+/**
+ * Spec: each agent type has its own remembered prefix, restored on selection;
+ * unsafe stored bytes are visible but cannot be edited as escaped text.
+ *
+ * Why: switching agents must not run another agent's wrapper, and a prefix
+ * stored by a host or template must not disguise direction-changing bytes.
+ * The preference reply is the fixture premise; the helm's persistence path is
+ * covered separately from this browser projection.
+ */
+test("agent switch loads that agent's remembered wrapper prefix", async ({ page }) => {
+  let seededReads = 0;
+  await page.route("**/api/preferences", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    expect(response.ok(), "the fixture needs a real preference row").toBe(true);
+    const preferences = await response.json();
+    const remembered_wrapper_prefixes = {
+      codex: ["with-endpoint", "--profile", "codex", "--"],
+      claude: ["env", "CLAUDE_PROFILE=work\u202e"],
+    };
+    expect(remembered_wrapper_prefixes.codex).not.toEqual(remembered_wrapper_prefixes.claude);
+    seededReads++;
+    await route.fulfill({ response, json: { ...preferences, remembered_wrapper_prefixes } });
+  });
+
+  const form = await openNew(page);
+  await expect.poll(() => seededReads, { message: "the remembered-prefix fixture was read" }).toBeGreaterThan(0);
+  const wrapper = form.locator(".launch-composer-wrapper");
+  const harness = form.locator(".launch-composer-harness-choice");
+  await harness.getByRole("button", { name: "Codex", exact: true }).click();
+  await expect(wrapper).toHaveValue("with-endpoint --profile codex --");
+  await wrapper.fill("temporary --");
+  await harness.getByRole("button", { name: "Claude", exact: true }).click();
+  await expect(wrapper).toHaveValue("env 'CLAUDE_PROFILE=work<U+202E>'");
+  await expect(wrapper).toHaveJSProperty("readOnly", true);
+  await form.getByRole("button", { name: "clear wrapper prefix" }).click();
+  await expect(wrapper).toHaveValue("");
+  await expect(wrapper).toHaveJSProperty("readOnly", false);
+  await harness.getByRole("button", { name: "Codex", exact: true }).click();
+  await expect(wrapper).toHaveValue("with-endpoint --profile codex --");
+});
+
+/**
  * Spec: on the command tab, accepting an agent type from search switches to
  * the agent tab with that type chosen, while accepting a folder or a name
  * keeps the command tab and the command being written.

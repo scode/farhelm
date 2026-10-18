@@ -2,4 +2,4 @@
 kind: added
 ---
 
-You can now put a command prefix in an agent launch or template to run the agent through your own wrapper while keeping Farhelm's agent controls, conversation capture, and Restart. The same choice is available to agents through `--wrapper`; on hosts that ask before YOLO launches, an agent-chosen prefix needs your approval.
+You can now put a wrapper prefix in the session launcher or a launch template (including quick launch) and keep Farhelm's agent status, conversation tracking, and Restart. Agents can use `--wrapper` too; on hosts that ask before YOLO launches, an agent-supplied prefix needs your approval.

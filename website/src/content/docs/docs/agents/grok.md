@@ -63,7 +63,9 @@ restart Grok. The hooks do nothing for a Grok you start outside Farhelm.
   always-approve. Your own allow rules and later mode switches can still loosen it; see
   [Permission modes](/docs/agents/#permission-modes). Farhelm also tries to notice **always-approve** on Grok's status
   line and show a YOLO shield; this is best effort, not a check of your allow rules.
-- Starting Grok through a wrapper, a package-manager launcher, or a renamed binary runs it normally, but Farhelm cannot
-  follow its conversation, so **restart** stays greyed out.
+- Grok works through a [wrapper prefix](/docs/agents/agent-wrappers/) that `exec`s it or stays as its one parent
+  process, as long as the wrapper passes through its arguments and environment. A deeper chain of resident wrappers, a
+  package-manager launcher, or a renamed binary runs it normally, but Farhelm cannot follow its conversation, so
+  **restart** stays greyed out.
 - Grok is not told about `$farhelm` requests, because Farhelm's hooks for it are the ones you install.
 - Tested on Linux with Grok Build 1.0.40 and 1.0.50; not yet on a Mac.

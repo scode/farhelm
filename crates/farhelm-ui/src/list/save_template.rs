@@ -21,6 +21,7 @@ pub(super) struct ExplicitChoices {
     pub folder: bool,
     pub name: bool,
     pub permissions: bool,
+    pub wrapper: bool,
 }
 
 /// All values offered when the panel opens, plus the default selection.
@@ -55,6 +56,7 @@ impl Candidate {
                 fields.permissions = (state.permissions.is_some() || explicit.permissions)
                     .then_some(state.permissions);
                 fields.permission_flags = state.permission_flags.clone();
+                fields.wrapper_prefix = Some(state.wrapper_prefix.clone());
                 // Clone and recents mark their launch choices explicit even
                 // when this agent has no corresponding control. A forced mode
                 // or unsupported reset is not a choice the launcher can save.
@@ -78,6 +80,7 @@ impl Candidate {
                 field.is_set(&fields)
                     && match field {
                         Field::Permissions => explicit.permissions,
+                        Field::Wrapper => explicit.wrapper,
                         Field::Host => explicit.host,
                         Field::Destination => {
                             explicit.folder
@@ -131,6 +134,14 @@ fn choice_text(field: Field, fields: &TemplateFields, host_label: &str) -> Strin
                 .map(|words| format!(" · {}", shell_words::join(words)))
                 .unwrap_or_default(),
         )),
+        Field::Wrapper => Some(
+            fields
+                .wrapper_prefix
+                .as_ref()
+                .and_then(|prefix| prefix.as_ref())
+                .map(shell_words::join)
+                .unwrap_or_else(|| "none".into()),
+        ),
         Field::Command => fields.command.clone(),
         Field::Yolo => fields
             .yolo
@@ -280,6 +291,45 @@ mod tests {
     use farhelm_proto::launcher::{TemplateContext, apply_template};
     use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
 
+    /// Remembered prefixes appear in the save panel without silently becoming
+    /// template edits. A deliberate empty choice remains a checked null reset.
+    #[test]
+    fn wrapper_save_choice_requires_explicit_provenance() {
+        let state = LauncherState {
+            kind: Some(LauncherKind::Agent),
+            harness: Some(LaunchHarness::Codex),
+            wrapper_prefix: Some(vec!["wrapper".into(), "--".into()]),
+            ..Default::default()
+        };
+        let passive = Candidate::from_state(&state, ExplicitChoices::default());
+        assert_eq!(
+            passive.fields.wrapper_prefix,
+            Some(state.wrapper_prefix.clone())
+        );
+        assert!(!passive.checked.contains(&Field::Wrapper));
+        assert_eq!(passive.selected(&passive.checked).wrapper_prefix, None);
+
+        let explicit = Candidate::from_state(
+            &LauncherState {
+                wrapper_prefix: None,
+                ..state
+            },
+            ExplicitChoices {
+                wrapper: true,
+                ..Default::default()
+            },
+        );
+        assert!(explicit.checked.contains(&Field::Wrapper));
+        assert_eq!(
+            explicit.selected(&explicit.checked).wrapper_prefix,
+            Some(None)
+        );
+        assert_eq!(
+            choice_text(Field::Wrapper, &explicit.fields, "host"),
+            "none"
+        );
+    }
+
     /// A typed first message is checked by default and keeps its full raw
     /// text when saved; the checklist shows only its escaped first line.
     /// Dormant or unsupported prompts must not leak into another launch kind.
@@ -410,6 +460,7 @@ mod tests {
                 folder: true,
                 name: true,
                 permissions: true,
+                wrapper: false,
             },
         );
         assert_eq!(deliberate.checked.len(), 7);

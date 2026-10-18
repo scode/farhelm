@@ -2579,6 +2579,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN muse_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN pi_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN color_terminal_frames;
+                 ALTER TABLE preferences DROP COLUMN remembered_wrapper_prefixes;
                  ALTER TABLE preferences DROP COLUMN template_shortcuts;
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
