@@ -26,12 +26,19 @@ you have unpushed changes. The target must contain `scripts/devbuild-mac.sh`; an
 script refuses a PR whose branch is not in `scode/farhelm`, and it takes no commit hashes. The line is the same every
 time, and rerunning it is always safe, so after another push the maintainer reruns the same line.
 
-NOTE: The build runs on the maintainer's real Farhelm state, and its supervisor applies any database migration the
-target adds. A release that predates the migration then refuses that database, and another unlanded migration with the
-same number can misread it. When the target changes a supervisor or helm database schema, say so plainly when handing
-out the line, and offer the variant that keeps the build on separate state, which the build remembers and the start
-command it prints uses. The directory is per target, because two targets' unlanded migrations can collide there just as
-on the real state:
+The build runs as a separate desktop app with its own state in `~/.local/state/farhelm-devbuild`: its own helm, host
+list, databases and local supervisor, never the installed app's. It can run beside the installed app, and remote hosts
+have to be added to it once. Remote hosts are still shared: Update from the devbuild puts the target's build on that
+host for the installed app too, which then shows the host as an older version and offers to update it back. This holds
+for a target whose own `devbuild-mac.sh` predates the devbuild state, too: `devbuild-github.sh` is always fetched from
+main and names that directory for the target's script.
+
+NOTE: Every devbuild shares that one devbuild state, and its supervisor and helm apply any database migration the target
+adds. A later devbuild of a target without the migration (main, say) then refuses that database, and another unlanded
+migration with the same number can misread it. When the target changes a supervisor or helm database schema, say so
+plainly when handing out the line, and offer the variant that keeps the build on state of its own, which the build
+remembers and the start command it prints uses. The directory is per target, because two targets' unlanded migrations
+can collide there just as in the shared devbuild state:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/devbuild-github.sh | FARHELM_DESKTOP_STATE_DIR=/tmp/farhelm-devbuild-state-<N> bash -s -- <N>

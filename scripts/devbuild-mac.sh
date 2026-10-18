@@ -28,10 +28,12 @@
 # `target/devbuild/tmux/`. Nothing is installed: no app bundle, no
 # ~/Applications, no ~/.local/bin. Outside the checkout, the build tools keep
 # their usual caches (cargo's registry under ~/.cargo, dx's and zig's own),
-# and the running app has its state: like any Farhelm desktop app it uses the default state
-# directory (or `FARHELM_DESKTOP_STATE_DIR`), so it sees the same hosts and the
-# same local supervisor as an installed app. Run one or the other, not both;
-# the script refuses to launch while another Farhelm app is running.
+# and the running app has its state, in a directory of its own:
+# `~/.local/state/farhelm-devbuild` (under XDG_STATE_HOME when that is set),
+# beside the installed app's `~/.local/state/farhelm`, which a devbuild never
+# opens unless FARHELM_DESKTOP_STATE_DIR names it. So a devbuild has its own
+# helm, host list, databases and local supervisor, and can run beside the
+# installed app; see "Which state the app uses" below.
 #
 # ## How remote Update works with this build
 #
@@ -126,37 +128,95 @@ if [ "$(uname -s)" != Darwin ]; then
   exit 1
 fi
 
-# --- A Farhelm that is already running --------------------------------------
+# --- Which state the app uses ---------------------------------------------------
 #
-# This build shares the default state directory with an installed Farhelm:
-# the same hosts, the same local supervisor, the same databases. Started
-# beside a running app, this one finds that app's local supervisor answering
-# and uses it instead of starting the `farhelm` just built, so the change
-# under test would not even be running locally (and its embedded helm would
-# then be refused the state directory the running app's helm holds). So
-# refuse to start while another one is running. It is best effort by design: it looks for a
-# `farhelm-desktop` process of this user's, which covers the installed app
-# and an earlier run of this script, and it fails open when `pgrep` is
-# missing or cannot list processes. An explicit FARHELM_DESKTOP_STATE_DIR
-# means the caller chose separate state, and two apps on separate state
-# directories coexist, so the check stands down.
+# The desktop app keeps everything in one state directory: the helm's
+# database and host list, its own settings and window files, and the local
+# supervisor it starts (socket, tmux server, session database). The
+# installed app uses the default one, `$XDG_STATE_HOME/farhelm` or
+# `~/.local/state/farhelm` (`farhelm_supervisor::default_state_dir`, whose
+# rule this repeats: an XDG_STATE_HOME that is empty or relative is ignored).
+#
+# A devbuild uses a fixed directory of its own beside it, `farhelm-devbuild`,
+# so by default it never opens the installed app's databases and never
+# applies a migration from the working copy to them. Separate state means a
+# separate helm with its own host list (remote hosts have to be added once in
+# the devbuild) and a separate local supervisor with its own local sessions.
+# The directory is fixed rather than per checkout so that the host list
+# survives `cargo clean` and is shared by every checkout and every PR
+# `scripts/devbuild-github.sh` builds. An explicit FARHELM_DESKTOP_STATE_DIR
+# still wins, for a per-PR directory or, deliberately, the real state.
+#
+# Remote hosts are the one thing a devbuild still shares with the installed
+# app, by design: Update on a host replaces the `farhelm` its supervisor
+# runs, whichever app drives it.
+
+if [ -n "${XDG_STATE_HOME:-}" ] && [ "${XDG_STATE_HOME#/}" != "$XDG_STATE_HOME" ]; then
+  state_home=$XDG_STATE_HOME
+else
+  state_home="$HOME/.local/state"
+fi
+installed_state="$state_home/farhelm"
+devbuild_state="$state_home/farhelm-devbuild"
+
+# A path with its symlinks resolved when it exists, and as given when it does
+# not yet, so that two spellings of one directory compare equal (macOS's /tmp
+# is a symlink to /private/tmp).
+canonical_dir() {
+  (cd "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"
+}
+
+# --- A Farhelm already running on the same state --------------------------------
+#
+# Two apps on one state directory do not work: the second finds the first's
+# local supervisor answering and uses it instead of starting the `farhelm`
+# just built, so the change under test would not even run locally, and its
+# embedded helm is refused the state the first app's helm holds. Two apps on
+# different state directories coexist, so the installed app and a devbuild
+# can run side by side.
+#
+# What state a running app uses is inferred, best effort, from where its
+# program lives. A devbuild launched by this script leaves `launch-state.<pid>`
+# beside its program, naming the state that launch used (`launch` writes it
+# under its own pid just before it execs the app, which keeps the pid). That
+# file is what is trusted, because `--run-only` may start a build on other
+# state than it was built for. A devbuild without one was launched by an
+# older version of this script; for it the STAGED stamp's second line is the
+# best guess, and an empty line there is a build from before devbuilds had
+# their own state, which ran on the installed app's. Anything else is taken
+# to be the installed app on the default state, which misjudges an installed
+# app started with a FARHELM_DESKTOP_STATE_DIR of its own. The check fails
+# open when `pgrep` is missing or cannot list processes.
 #
 # It runs before the build, so the answer comes before minutes of compiling,
-# and again just before the launch, because the installed app may have been
-# started while the build ran. `--build-only` launches nothing and skips it.
+# and again just before the launch, because another app may have been started
+# while the build ran. `--build-only` launches nothing and skips it.
 
-refuse_if_farhelm_running() {
-  [ -z "${FARHELM_DESKTOP_STATE_DIR:-}" ] || return 0
-  local pids
-  pids=$(pgrep -x -U "$(id -u)" farhelm-desktop 2>/dev/null) || return 0
-  cat >&2 <<EOF
-Farhelm is already running (farhelm-desktop, pid $(echo "$pids" | tr '\n' ' ' | sed 's/ $//')).
-This build uses the same state, hosts and local supervisor as an installed
-Farhelm, so quit that one first, then run this again. To run both side by
-side instead, give this one separate state:
+refuse_if_state_in_use() {
+  local wanted pid exe dir theirs
+  wanted=$(canonical_dir "$state")
+  for pid in $(pgrep -x -U "$(id -u)" farhelm-desktop 2>/dev/null); do
+    exe=$(ps -o comm= -p "$pid" 2>/dev/null) || continue
+    dir=$(dirname "$exe")
+    if [ -f "$dir/launch-state.$pid" ]; then
+      theirs=$(sed -n 1p "$dir/launch-state.$pid")
+    elif [ -f "$dir/STAGED" ]; then
+      theirs=$(sed -n 2p "$dir/STAGED")
+      [ -n "$theirs" ] || theirs=$installed_state
+    else
+      theirs=$installed_state
+    fi
+    if [ "$(canonical_dir "$theirs")" = "$wanted" ]; then
+      cat >&2 <<EOF
+Farhelm is already running on this build's state directory
+($state; farhelm-desktop, pid $pid at $exe).
+Quit that one first, then run this again. To run both side by side instead,
+give this one separate state:
   FARHELM_DESKTOP_STATE_DIR=<empty directory> $invocation
 EOF
-  exit 1
+      exit 1
+    fi
+  done
 }
 
 # A build restages `target/devbuild/payloads` from scratch, and a dev app
@@ -166,9 +226,8 @@ EOF
 # tell the two apart (both report the development version), or pull files
 # out from under an Update in progress. So every build refuses while a
 # `farhelm-desktop` from this checkout's `target/devbuild` is running, even
-# `--build-only`, and even with FARHELM_DESKTOP_STATE_DIR set, which turns off
-# only the shared-state check above. The comparison resolves symlinks on
-# both sides because macOS's /tmp is one.
+# `--build-only`, and whatever state either of them uses. The comparison
+# resolves symlinks on both sides because macOS's /tmp is one.
 refuse_if_this_devbuild_running() {
   local devbuild_real pid exe
   devbuild_real=$(cd "$repo/target/devbuild" 2>/dev/null && pwd -P) || return 0
@@ -202,21 +261,25 @@ payloads="$devbuild/payloads"
 # one, so its presence means `target/devbuild` holds one complete build. Its
 # first line names the commit that build came from, which `--run-only`
 # repeats, since the checkout may have moved on since (devbuild-github.sh
-# moves it). Its second line is the FARHELM_DESKTOP_STATE_DIR the build ran
-# with, usually empty.
+# moves it). Its second line is the state directory the build was made for,
+# which `--run-only` uses unless told otherwise, and which
+# `refuse_if_state_in_use` reads to tell what state a running devbuild has.
 stamp="$devbuild/STAGED"
 
-# A build made with a separate state directory, typically to keep a schema
-# migration away from the real state, must not be started on the real state
-# just because the start command was run without the variable. So when
-# `--run-only` gets no FARHELM_DESKTOP_STATE_DIR, it takes the build's. An
-# explicit one still wins: separate state is never less safe.
-if [ "$run_only" -eq 1 ] && [ -z "${FARHELM_DESKTOP_STATE_DIR:-}" ] && [ -f "$stamp" ]; then
-  recorded_state=$(sed -n 2p "$stamp")
-  if [ -n "$recorded_state" ]; then
-    export FARHELM_DESKTOP_STATE_DIR="$recorded_state"
-    echo "== using the state directory this build was made with: $recorded_state"
-  fi
+# The state this run uses: an explicit FARHELM_DESKTOP_STATE_DIR, else for
+# `--run-only` the one the build was made for, else the devbuild's own. A
+# build made with a per-PR directory, typically to keep a schema migration
+# away from other builds, must not be started on the shared devbuild state
+# just because the start command was run without the variable, hence the
+# stamp. An empty recorded line is a build from before devbuilds had their
+# own state; it gets the devbuild state, since separate state is never less
+# safe.
+if [ -n "${FARHELM_DESKTOP_STATE_DIR:-}" ]; then
+  state=$FARHELM_DESKTOP_STATE_DIR
+elif [ "$run_only" -eq 1 ] && [ -f "$stamp" ] && [ -n "$(sed -n 2p "$stamp")" ]; then
+  state=$(sed -n 2p "$stamp")
+else
+  state=$devbuild_state
 fi
 
 # Starting a second copy of a build does not restage anything, so only the
@@ -225,18 +288,31 @@ if [ "$run_only" -eq 0 ]; then
   refuse_if_this_devbuild_running
 fi
 if [ "$build_only" -eq 0 ]; then
-  refuse_if_farhelm_running
+  refuse_if_state_in_use
 fi
 
 # --- Run ------------------------------------------------------------------------
 #
 # In the foreground, so its log is this terminal and Ctrl-C quits it (taking the
 # supervisor it started with it). An ambient FARHELM_DESKTOP_FARHELM would point
-# the app at some other `farhelm` than the one just built, so it is removed.
+# the app at some other `farhelm` than the one just built, so it is removed. The
+# state directory is passed explicitly every time, because the app's own
+# default is the installed app's state. `exec` keeps this shell's pid for the
+# app, which is what lets `launch-state.$$` name the app's state for
+# `refuse_if_state_in_use`; files left by apps that have since exited are
+# removed first, since their pids may be reused.
 launch() {
-  refuse_if_farhelm_running
+  refuse_if_state_in_use
+  local old
+  for old in "$devbuild"/launch-state.*; do
+    [ -e "$old" ] || continue
+    kill -0 "${old##*.}" 2>/dev/null || rm -f "$old"
+  done
+  printf '%s\n' "$state" >"$devbuild/launch-state.$$"
   echo "== starting farhelm-desktop built from $(sed -n 1p "$stamp")"
-  exec env -u FARHELM_DESKTOP_FARHELM FARHELM_HELM_PAYLOAD_DIR="$payloads" "$devbuild/farhelm-desktop"
+  echo "   state: $state"
+  exec env -u FARHELM_DESKTOP_FARHELM FARHELM_DESKTOP_STATE_DIR="$state" \
+    FARHELM_HELM_PAYLOAD_DIR="$payloads" "$devbuild/farhelm-desktop"
 }
 
 # `--run-only` needs none of the build tools checked below, so it leaves
@@ -528,20 +604,21 @@ for arch in "${arches[@]}"; do
   chmod 0755 "$payloads/$name"
 done
 
-printf '%s\n%s\n' "$built_from" "${FARHELM_DESKTOP_STATE_DIR:-}" >"$stamp"
+printf '%s\n%s\n' "$built_from" "$state" >"$stamp"
 echo "== staged in $devbuild, built from $built_from"
 echo "   payloads for: ${arches[*]}"
+echo "   state: $state"
 
 # The start command is an absolute path, so it works from any directory, and
 # it is the last thing printed, so it is what a reader of a long build log
-# finds at the bottom. A separate state directory is spelled out in it, even
-# though `--run-only` would take it from the stamp anyway, so that the
-# command shows which state the app will use.
+# finds at the bottom. A state directory other than the devbuild's own is
+# spelled out in it, even though `--run-only` would take it from the stamp
+# anyway, so that the command shows which state the app will use.
 if [ "$build_only" -eq 1 ]; then
   echo
   echo "Run this to start farhelm:"
-  if [ -n "${FARHELM_DESKTOP_STATE_DIR:-}" ]; then
-    printf '  FARHELM_DESKTOP_STATE_DIR=%q %q --run-only\n' "$FARHELM_DESKTOP_STATE_DIR" "$repo/scripts/devbuild-mac.sh"
+  if [ "$state" != "$devbuild_state" ]; then
+    printf '  FARHELM_DESKTOP_STATE_DIR=%q %q --run-only\n' "$state" "$repo/scripts/devbuild-mac.sh"
   else
     printf '  %q --run-only\n' "$repo/scripts/devbuild-mac.sh"
   fi
