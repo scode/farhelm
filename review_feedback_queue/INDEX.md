@@ -8,6 +8,55 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
+- [`tunnel-error-notice-obscures-link-disclosure.md`](tunnel-error-notice-obscures-link-disclosure.md) — A terminal file
+  or hovered web link can remain clickable while a tunnel-error notice hides its destination.
+
+- [`pending-approval-can-cross-host-entries.md`](pending-approval-can-cross-host-entries.md) — Waiting approvals and GUI
+  Delete/Replace consent can act on another host entry after session ownership changes.
+
+- [`create-reply-foreign-id-bypasses-cache-refusal.md`](create-reply-foreign-id-bypasses-cache-refusal.md) — A hostile
+  Create reply can select another host's existing session through paths that bypass the ownership refusal.
+
+- [`installation-colon-splits-session-path.md`](installation-colon-splits-session-path.md) — A colon-bearing Mac
+  installation path introduces unintended command-search directories; practical exploitability is unverified.
+
+- [`payload-workers-outlive-state-lock.md`](payload-workers-outlive-state-lock.md) — Old payload work can overlap a
+  successor helm after releasing state ownership; the integrity consequence remains unresolved.
+
+- [`tunnel-never-pins-learned-identity.md`](tunnel-never-pins-learned-identity.md) — A tunnel opened before identity is
+  learned can keep following a host entry without binding the subsequently learned installation.
+
+- [`initial-launch-retains-uncanonicalized-path.md`](initial-launch-retains-uncanonicalized-path.md) — Initial launch
+  retains a path spelling that can change meaning after validation; accidental wrong-directory impact remains
+  unverified.
+
+- [`unusable-directory-launches-in-home.md`](unusable-directory-launches-in-home.md) — An existing but unsearchable
+  folder can make a session launch in the home directory instead.
+
+- [`restart-abort-admits-old-child-report.md`](restart-abort-admits-old-child-report.md) — An aborted Restart can admit
+  an old child conversation report into the restored run's Resume state.
+
+- [`orphan-git-outlives-cache-lock.md`](orphan-git-outlives-cache-lock.md) — Interrupted checkout preparation can leave
+  Git working after its repository-cache lock is released; completed-checkout damage is unverified.
+
+- [`cancelled-startup-loses-archive-location.md`](cancelled-startup-loses-archive-location.md) — A cancelled startup
+  worker can overwrite the recorded archive location after a successor moves the checkout.
+
+- [`capture-marker-collision-misframes-replay.md`](capture-marker-collision-misframes-replay.md) — Terminal text can
+  imitate capture delimiters, truncating replay or entering diagnostics; confidentiality impact is unverified.
+
+- [`terminal-recovery-steals-confirmation-focus.md`](terminal-recovery-steals-confirmation-focus.md) — Automatic
+  terminal recovery or tab fallback can take Enter intended for a header confirmation.
+
+- [`header-copy-warning-follows-refreshed-value.md`](header-copy-warning-follows-refreshed-value.md) — Refreshed session
+  metadata can remove the warning for hidden characters still on the clipboard; harmful subsequent use is unverified.
+
+- [`session-accessible-names-use-raw-titles.md`](session-accessible-names-use-raw-titles.md) — Session accessible names
+  retain raw title formatting; destructive-target confusion remains unverified and prior scope coverage is ambiguous.
+
+- [`approval-session-id-display-collision.md`](approval-session-id-display-collision.md) — Approval cards can display
+  distinct session IDs identically; mistaken authorization remains unverified.
+
 ## High priority: material UX degradation
 
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
@@ -18,10 +67,14 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   after another client forgets the host.
 
 - [`uninstall-race-first-time-service-setup.md`](uninstall-race-first-time-service-setup.md) — Concurrent setup and
-  uninstall can leave services pointing at a deleted executable.
+  uninstall can leave services pointing at a deleted executable; a conditional legacy path can miss existing services
+  too.
 
 - [`launcher-retries-ignore-settled-refusal-proof.md`](launcher-retries-ignore-settled-refusal-proof.md) — An unchanged
   New, Clone or Replace-with retry can keep replaying a missing-folder failure after the folder is restored.
+
+- [`auth-refusal-forgets-partial-replace.md`](auth-refusal-forgets-partial-replace.md) — An authentication refusal can
+  forget a partially successful Replace attempt, allowing its retry to create another replacement.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -100,5 +153,52 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`replace-yolo-questions-remain-separate.md`](replace-yolo-questions-remain-separate.md) — Equivalent Replace controls
   can leave separate YOLO questions, with cancellation reflected in only one surface.
 
-- [`archive-recovery-clears-reused-path-trust.md`](archive-recovery-clears-reused-path-trust.md) — Startup recovery of
-  an interrupted archive can erase the trust choice for a different directory subsequently placed at the old path.
+- [`archive-recovery-clears-reused-path-trust.md`](archive-recovery-clears-reused-path-trust.md) — Startup recovery or
+  Delete retry of an interrupted archive can erase the trust choice for a different directory subsequently placed at the
+  old path.
+
+- [`cancelled-upload-retains-admission-entry.md`](cancelled-upload-retains-admission-entry.md) — Abandoned upload
+  admission can accumulate pending requests until the host connection ends.
+
+- [`download-eof-cancellation-retains-route.md`](download-eof-cancellation-retains-route.md) — Cancellation during
+  successful download cleanup can retain completed-transfer bookkeeping.
+
+- [`approval-blank-lines-gain-empty-labels.md`](approval-blank-lines-gain-empty-labels.md) — Approval cards insert
+  empty-value labels into blank lines of displayed prompt text.
+
+- [`tab-attach-blocks-host-reader-during-stop.md`](tab-attach-blocks-host-reader-during-stop.md) — Attaching a tab
+  during Stop can temporarily block unrelated requests on the host connection.
+
+- [`stale-outcome-hides-successful-stop.md`](stale-outcome-hides-successful-stop.md) — A stale status publication can
+  hide a successfully recorded user Stop until another lifecycle operation or reload repairs it.
+
+- [`terminal-peer-failures-hide-format-controls.md`](terminal-peer-failures-hide-format-controls.md) — Terminal
+  connection and upload errors display peer formatting characters outside the terminal without escaping them.
+
+- [`automatic-notification-dismissal-loses-focus.md`](automatic-notification-dismissal-loses-focus.md) — Automatic
+  notification-list dismissal has no focus handoff to its session bell.
+
+- [`ssh-help-close-loses-replaced-opener-focus.md`](ssh-help-close-loses-replaced-opener-focus.md) — Closing SSH help
+  after a setup offer replaces its opener can lose immediate keyboard focus.
+
+- [`notification-popup-drifts-after-local-delete.md`](notification-popup-drifts-after-local-delete.md) — A notification
+  popup can remain at its former position after a session above it is deleted.
+
+- [`empty-initial-prompt-skipped-by-tab.md`](empty-initial-prompt-skipped-by-tab.md) — Tab traversal can wrap before
+  reaching the empty initial-prompt editor.
+
+- [`current-agent-chip-erases-custom-flags.md`](current-agent-chip-erases-custom-flags.md) — Reselecting the current
+  agent can erase permission flags with an unfinished quote.
+
+- [`incomplete-custom-flags-reset-compatible-effort.md`](incomplete-custom-flags-reset-compatible-effort.md) — Accepting
+  a custom model can reset compatible effort because permission flags are incomplete.
+
+- [`template-name-editor-conceals-formatting.md`](template-name-editor-conceals-formatting.md) — The template name
+  editor displays formatting characters raw although the list and approval card escape them.
+
+- [`template-table-omits-custom-permission-flags.md`](template-table-omits-custom-permission-flags.md) — The default
+  template table omits the words that its custom permission setting applies.
+
+- [`delayed-host-confirmation-conflicts-with-other-dialogs.md`](delayed-host-confirmation-conflicts-with-other-dialogs.md)
+  — A delayed host confirmation can disable another open dialog's clicks and normal keyboard interaction; Escape
+  recovers.
