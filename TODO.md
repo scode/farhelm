@@ -53,6 +53,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the planned actions in a plain text box. Present the actions as distinct items in the dialog so the user can scan what
   will happen before deciding, while keeping the paths and other details the plans currently show.
 
+- **Improve the post-uninstall host notice.** After uninstall, a large plain-text notice sits above the host rows in the
+  sidebar. It says Farhelm was removed, names the host and the path where its data remains, and has a separate Dismiss
+  button. The text wraps across several lines and dominates the narrow panel. Find a better way to present this result;
+  the design details are TBD.
+
 - **Select Guarded by typing in the launcher.** Make bare `guarded` offer and preselect the Guarded permission choice,
   as bare `yolo` does today, while keeping `perms:guarded` available. During planning, audit every choice in the New,
   Clone, and Replace with launcher dialog for whether it can be set through typing alone (in search or a text field),
