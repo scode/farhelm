@@ -2198,7 +2198,8 @@ pub(crate) fn SessionView(
             "data-workspace-trust-prompt": "{shown.workspace_trust_prompt}",
             // Tabs share the top row with actions; identity stays below the
             // terminal so a wider path never competes with a lifecycle control.
-            header { class: "session-topbar",
+            header { class: "session-topbar {crate::window_chrome::WINDOW_DRAG_SURFACE}",
+                onmousedown: crate::window_chrome::window_surface_press,
                 // Header questions share Escape cancellation, including their
                 // lifecycle admission. Once an answer has taken a claim, a
                 // queued Escape must leave the running operation alone.

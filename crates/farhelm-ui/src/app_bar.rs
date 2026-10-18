@@ -652,7 +652,8 @@ pub(crate) fn AppBar(layout_epoch: ReadSignal<u64>) -> Element {
     let update_updater = updater.clone();
 
     rsx! {
-        div { class: "app-bar",
+        div { class: "app-bar {crate::window_chrome::WINDOW_DRAG_SURFACE}",
+            onmousedown: crate::window_chrome::window_surface_press,
             // Trusted, compile-time markup from the repository's own brand
             // file, never peer data, which is what makes inner HTML safe here.
             span { class: "app-wordmark", dangerous_inner_html: WORDMARK_SVG }

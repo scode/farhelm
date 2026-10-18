@@ -1,50 +1,54 @@
-// The desktop window's click-count bridge (farhelm-ui/src/window_chrome.rs).
+// The desktop window's press bridge (farhelm-ui/src/window_chrome.rs).
 //
-// WHY THIS FILE EXISTS: the spacer that owns native window dragging learns
-// about presses through Dioxus's event transport, which serializes mouse
-// coordinates, buttons, and modifiers but NOT the press's click count
-// (dioxus-interpreter-js 0.7.10's serializeMouseEvent has no `detail`
-// field, and MouseData cannot recover what was never sent). AppKit is
-// assumed to have classified the press — NSEvent.clickCount — and WebKit
-// copies that classification onto every DOM mousedown's `detail` (see
-// window_chrome.rs for the conversion chain with sources, and for why the
-// AppKit half of that sentence is an assumption pending native validation
-// rather than a proved guarantee). This file carries that one number
-// across the transport gap: a capture-phase listener reads `event.detail`
-// on spacer presses and synchronously POSTs it to a Rust asset-handler
-// route, ahead of the interpreter's own event send for the same press.
-// The Rust spacer handler then pairs the two by ORDER — the POST's
-// response necessarily precedes the interpreter's send because both are
-// synchronous XHRs on this one JS thread — and decides drag versus
-// maximize-toggle from AppKit's count, with no timing heuristic.
+// WHY THIS FILE EXISTS: the macOS window's title band is made of drag
+// surfaces (the sidebar's app bar, the session top row, and a stand-in
+// strip when no session is open), each with one Rust onmousedown that drags
+// or zooms the window. That handler learns about presses through Dioxus's
+// event transport, which serializes mouse coordinates, buttons, and
+// modifiers but NOT the press's click count (dioxus-interpreter-js 0.7.10's
+// serializeMouseEvent has no `detail` field) and nothing about which
+// element was pressed. So it cannot tell a double-click, nor a press on
+// empty background from a press on a button inside the same surface. This
+// file carries both facts across the transport gap: a capture-phase
+// listener classifies every press inside a surface and synchronously POSTs
+// a report to a Rust asset-handler route, ahead of the interpreter's own
+// event send for the same press. The Rust handler then pairs the two by
+// ORDER — the POST's response necessarily precedes the interpreter's send
+// because both are synchronous XHRs on this one JS thread — and decides
+// drag, maximize-toggle or nothing, with no timing heuristic.
 //
-// The count alone does not earn a zoom: WebKit copies the platform count
-// without resetting it for a different DOM element, so a press on header
-// text followed by a fast spacer press can carry count 2. Every report
-// therefore carries an eligibility bit too: whether the immediately
-// preceding primary press landed on the same connected spacer node. An
-// intervening press elsewhere — or a non-primary press, or a spacer the
-// page has since replaced — clears eligibility, and the Rust side treats
-// an ineligible repeat as no action at all (no zoom AND no drag), while
-// an ordinary press still drags as before. The DECISION stays in the Rust
-// component's own onmousedown, which remains the single gesture owner.
+// The click count comes from AppKit: it is assumed to classify the press
+// (NSEvent.clickCount), and WebKit copies that onto every DOM mousedown's
+// `detail` (see window_chrome.rs for the conversion chain with sources, and
+// for why the AppKit half is an assumption pending native validation). The
+// count alone does not earn a zoom: WebKit does not reset it for a
+// different DOM element, so a press on header text followed by a fast
+// background press can carry count 2. Every report therefore carries an
+// eligibility bit: whether the immediately preceding primary press landed
+// on the background of the same connected surface. An intervening press
+// elsewhere, a control press, a non-primary press, or a surface the page
+// has since replaced clears it, and the Rust side treats an ineligible
+// repeat as no action at all (no zoom AND no drag). The third field says
+// whether this press landed on empty background (`classifyPress` below);
+// only those act. The DECISION stays in the Rust handler.
 //
 // WHAT THIS FILE DOES NOT DO: it never prevents default handling, never
-// stops propagation, and never acts on the press. It observes presses and
-// reports count plus eligibility; control presses only invalidate the
-// tracker and owe no POST (no Rust spacer event consumes one for them).
+// stops propagation, and never acts on the press. A press inside a surface
+// always POSTs, even on a control, because that surface's handler receives
+// it by bubbling and must consume a report of its own; a press outside
+// every surface only invalidates the tracker and owes no POST.
 //
 // INERTNESS: the script is rendered only in the desktop shell, and even
 // there it no-ops unless `window.interpreter` exists (set solely by the
-// desktop index template — the web build has no such global) AND the
-// press lands on `.window-drag-region` (hidden outside the macOS shell
-// class, so unreachable on Linux and in ordinary browsers). Browser
-// geometry tests that force the shell class onto production markup still
-// take the no-interpreter path. Every failure below is swallowed: a dead
-// bridge must degrade to missing reports — which the Rust side reads as
-// ordinary dragging — never break the page. That fail-safe covers missing
-// reports against an empty slot and stuck-at-1 counts; it is not a claim
-// about every partial transport failure (see window_chrome.rs).
+// desktop index template — the web build has no such global) AND the press
+// lands in a surface inside the macOS shell class (so nothing on Linux or
+// in ordinary browsers). Browser tests that force the shell class onto
+// production markup still take the no-interpreter path, and load this file
+// directly to run `classifyPress`. Every failure below is swallowed: a dead
+// bridge must degrade to missing reports, which the Rust side reads as no
+// action, never break the page. That covers missing reports against an
+// empty slot; it is not a claim about every partial transport failure (see
+// window_chrome.rs).
 (function () {
   var ROUTE = "fh-click-detail";
   var HEADER = "x-fh-click-detail";
@@ -66,33 +70,105 @@
     return base + "/" + ROUTE;
   }
 
-  // Render one bridge report: the press's DOM detail plus whether an
-  // eligible preceding primary press on the same connected spacer backs
-  // a repeat. One header value, so the two fields arrive atomically.
-  function reportFor(detail, eligible) {
-    return String(detail) + ":" + (eligible ? "1" : "0");
+  // Render one bridge report: the press's DOM detail, whether an eligible
+  // preceding primary press on the same connected surface backs a repeat,
+  // and whether this press landed on empty surface background (only those
+  // drag or zoom). One header value, so the fields arrive atomically.
+  function reportFor(detail, eligible, drag) {
+    return String(detail) + ":" + (eligible ? "1" : "0") + ":" + (drag ? "1" : "0");
+  }
+
+  // What inside a drag surface keeps its own interactions instead of moving
+  // the window: controls, anything focusable or with a role, and text. The
+  // wordmark is the exception, since it is the window's title; it is
+  // checked first because it is a span.
+  var NOT_BACKGROUND =
+    "button, input, textarea, select, a[href], label, summary, dialog, [contenteditable], " +
+    "[tabindex]:not([tabindex='-1']), [role], p, span, dt, dd, li, h1, h2, h3, h4, h5, h6";
+
+  // Whether a press at viewport point (x, y) on `target` inside `surface`
+  // landed on empty background. Two cases need the point, not just the
+  // target. A surface can lay out descendants beyond its own box, such as a
+  // session's confirmation panel hanging below the top row; only the band
+  // itself is a title bar, so a press outside the surface's box never
+  // drags. And hit testing skips `inert` elements (a stale session's tab
+  // strip), so a press over a visible but inert tab targets the surface
+  // behind it; such a press must stay inactive rather than move the window.
+  function isEmptyBackground(target, surface, x, y) {
+    if (typeof x !== "number" || typeof y !== "number") {
+      return false;
+    }
+    var within = function (box) {
+      return x >= box.left && x < box.right && y >= box.top && y < box.bottom;
+    };
+    if (!within(surface.getBoundingClientRect())) {
+      return false;
+    }
+    var inert = surface.querySelectorAll("[inert]");
+    for (var j = 0; j < inert.length; j++) {
+      if (within(inert[j].getBoundingClientRect())) {
+        return false;
+      }
+    }
+    // A popover a surface lays out over the band (a confirmation panel's top
+    // overlaps the row it hangs from) is not band background either: any
+    // absolutely or fixed positioned element between the target and the
+    // surface keeps its own interactions.
+    for (var node = target; node && node !== surface; node = node.parentElement) {
+      var position = getComputedStyle(node).position;
+      if (position === "absolute" || position === "fixed") {
+        return false;
+      }
+    }
+    if (target.closest(".app-wordmark")) {
+      return true;
+    }
+    var blocker = target.closest(NOT_BACKGROUND);
+    if (blocker && surface.contains(blocker)) {
+      return false;
+    }
+    for (var i = 0; i < target.childNodes.length; i++) {
+      var node = target.childNodes[i];
+      if (node.nodeType === 3 && /\S/.test(node.textContent)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Classify one press on `target` at viewport point (x, y): the drag
+  // surface it landed in (null outside every surface or outside the macOS
+  // shell, where nothing may drag), and whether it landed on that surface's
+  // empty background. The press listener and the browser test
+  // (e2e/tests/window-chrome.spec.ts) share this, so the test measures the
+  // page's real decision.
+  function classifyPress(target, x, y) {
+    var surface = target instanceof Element ? target.closest(".window-drag-surface") : null;
+    if (!surface || !surface.closest(".macos-window")) {
+      return { surface: null, drag: false };
+    }
+    return { surface: surface, drag: isEmptyBackground(target, surface, x, y) };
   }
 
   // Track whether the immediately preceding primary press landed on the
-  // spacer, so a cross-target pair can never borrow a repeat count.
+  // background of the same surface, so a cross-target pair can never borrow
+  // a repeat count.
   // Pure state machine over mousedowns in dispatch order; the listener
   // below feeds it every press, and js-tests drive it directly.
   function createPressEligibility() {
-    var lastSpacer = null;
-    // Observe one mousedown. `spacer` is the pressed spacer node, or
-    // null for a press elsewhere; `primary` is whether it used the
-    // primary button. Returns the eligibility to report for this press,
-    // or null when no report is owed: a press elsewhere only invalidates
-    // (no Rust spacer event will consume a report for it), while every
-    // spacer press POSTs — even an ineligible or non-primary one — so
-    // its report overwrites any stale slot instead of leaving it behind.
-    function observe(spacer, primary) {
-      if (!spacer || !primary) {
-        lastSpacer = null;
-        return spacer ? false : null;
+    var lastSurface = null;
+    // Observe one mousedown. `surface` is the surface whose background was
+    // pressed, or null for any other press (a control, text, or outside
+    // every surface); `primary` is whether it used the primary button.
+    // Returns this press's eligibility, or null for a press with no
+    // surface. The listener decides separately whether a report is owed.
+    function observe(surface, primary) {
+      if (!surface || !primary) {
+        lastSurface = null;
+        return surface ? false : null;
       }
-      var eligible = lastSpacer === spacer && spacer.isConnected;
-      lastSpacer = spacer;
+      var eligible = lastSurface === surface && surface.isConnected;
+      lastSurface = surface;
       return eligible;
     }
     return { observe: observe };
@@ -122,15 +198,18 @@
         "mousedown",
         function (event) {
           try {
-            var target = event.target;
-            // A press with no element target cannot be a spacer press;
-            // invalidate like any other press elsewhere.
-            var spacer = target instanceof Element ? target.closest(".window-drag-region") : null;
             var primary = event.button === 0;
-            var eligible = eligibility.observe(spacer, primary);
-            if (eligible === null) {
+            var press = classifyPress(event.target, event.clientX, event.clientY);
+            // A press outside every surface only invalidates: no surface
+            // handler will consume a report for it.
+            if (!press.surface) {
+              eligibility.observe(null, primary);
               return;
             }
+            // Every press inside a surface POSTs, because the surface's
+            // handler receives them all; only background presses may drag.
+            var drag = primary && press.drag;
+            var eligible = eligibility.observe(drag ? press.surface : null, primary) === true;
             var url = endpoint();
             if (!url) {
               return;
@@ -144,12 +223,12 @@
             // depend on one). No body is sent.
             var xhr = new XMLHttpRequest();
             xhr.open("POST", url, false);
-            xhr.setRequestHeader(HEADER, reportFor(event.detail, eligible));
+            xhr.setRequestHeader(HEADER, reportFor(event.detail, eligible, drag));
             xhr.send();
           } catch (error) {
             // A bridge failure degrades to a missing or unpaired report,
-            // which the Rust side reads as an ordinary drag against an
-            // empty slot. Never let reporting break the dispatch the
+            // which the Rust side reads as no action against an empty
+            // slot. Never let reporting break the dispatch the
             // press itself still needs.
           }
         },
@@ -164,6 +243,7 @@
       detailEndpointFor: detailEndpointFor,
       reportFor: reportFor,
       createPressEligibility: createPressEligibility,
+      classifyPress: classifyPress,
       route: ROUTE,
       header: HEADER,
     };

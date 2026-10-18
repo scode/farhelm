@@ -1882,10 +1882,15 @@ completed is best effort.
 The macOS desktop window integrates its native title bar with the app header: native traffic-light controls sit in the
 sidebar's top row beside the version readout, with no separate visible app-title strip. The Templates control sits
 beside New in the session list header. The merged row of terminal tabs and session actions continues the app's surface
-to the top edge, aligned with the sidebar's app bar at 48px high. Empty header space provides window dragging, and
-double-clicking it zooms the window (repeating the gesture restores the prior frame); a single click without movement
-never zooms. Controls and terminal text retain their own interactions. Browser and Linux window layouts retain their
-existing appearance and gain no drag or zoom behavior. In narrow macOS windows, the app-level row stays fixed above both
+to the top edge, aligned with the sidebar's app bar at 48px high. Together the two rows form the window's title band,
+which spans the whole width of the window and behaves like a classic title bar: pressing anywhere on its empty
+background and moving drags the window, and double-clicking there zooms it (repeating the gesture restores the prior
+frame); a single click without movement never zooms. Empty background is everything in the band except its controls
+(buttons, tabs, the version readout, the sidebar's resize edge) and its text; the wordmark counts as background, like a
+title, and so do the gaps between and around controls and the band's top and bottom edges. With no session open, the
+main pane's half of the band is empty background too. Every such press drags, whatever input device made it. Controls,
+text in the band, and the terminal retain their own interactions. Browser and Linux window layouts retain their existing
+appearance and gain no drag or zoom behavior. In narrow macOS windows, the app-level row stays fixed above both
 scrolling panes so horizontal scrolling cannot move application controls underneath native window buttons. Startup,
 authentication errors, and build-mismatch notices also keep their content clear of native controls.
 
