@@ -28,6 +28,7 @@
 
 
 import { expect, newObservedContext, test } from "./helpers/evidence";
+import { drainedRoute } from "./helpers/drained-route";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import { localHostId, stubFeed } from "./helpers/fleet";
 import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
@@ -2269,7 +2270,7 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
     "the helm stamps every reply; the check below is meaningless without it",
   ).toBeTruthy();
 
-  await page.route("**/api/**", async (route) => {
+  const stopStamping = await drainedRoute(page, "**/api/**", async (route) => {
     const response = await route.fetch();
     await route.fulfill({
       response,
@@ -2280,6 +2281,7 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
     });
   });
 
+  try {
   await page.goto("/");
   const notice = page.locator(".build-skew");
   await expect(notice).toBeVisible({ timeout: 15_000 });
@@ -2309,7 +2311,9 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
   // stage the latch: a page that stood its EXPLICIT reads down under skew
   // would hang here rather than fail an assertion, which is the shape this
   // exact regression took on WebKit. Two choices, two agreeing replies.
-  await page.unroute("**/api/**");
+  // Keep fetched replies owned until the rewrite finishes. Removing the
+  // route first can continue the browser request before fulfillment lands.
+  await stopStamping();
   for (let i = 0; i < 2; i++) {
     const landed = page.waitForResponse(
       (response) =>
@@ -2328,6 +2332,9 @@ test("client-helm-skew-prompts-reload", async ({ page, request }) => {
     notice,
     "a mismatch, once seen, survives until the page is actually reloaded",
   ).toBeVisible();
+  } finally {
+    await stopStamping();
+  }
 });
 
 // A helm that reports NO build stamp is skewed too — it predates the
