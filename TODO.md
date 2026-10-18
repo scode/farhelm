@@ -227,13 +227,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- **WebKit trash layout test sometimes sees no archive rows.** `overflowing trash keeps vertical margins at width 1000`
-  in `e2e/tests/modal-layout.spec.ts` expected 24 checkout trash entries but saw none for five seconds in WebKit browser
-  run `3727b704-5894-4a20-9fb6-1967d56fabb8`. Three isolated classification reruns passed
-  (`10fab11f-7891-459e-97e2-b1dac4713e2c`, `0bdfd389-b8ce-458f-a3d2-7c13038001ba`,
-  `d6719411-4c1d-42b7-b82d-04578ae8196c`). Determine why the trash listing was empty before changing the layout
-  assertion or timeout (FLAKES.md, 2026-10-18).
-
 - **WebKit SSH help menu click can stall before the long-command Copy check.**
   `long SSH commands wrap while Copy preserves their exact bytes` in `e2e/tests/keyboard-scroll.spec.ts` timed out after
   60 seconds in WebKit browser run `3727b704-5894-4a20-9fb6-1967d56fabb8`. The help menu item detached during
