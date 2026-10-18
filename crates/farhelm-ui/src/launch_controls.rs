@@ -591,7 +591,7 @@ pub(crate) fn LaunchControls(
                         "clear wrapper prefix"
                     }
                 }
-                p { "Farhelm runs these words before its agent command. Leave empty for no wrapper." }
+                p { "Runs before agent command; blank means none." }
                 if let Some(reason) = wrapper_error.as_ref() {
                     div { class: "launch-composer-choice-error", role: "status", "{reason}" }
                 }

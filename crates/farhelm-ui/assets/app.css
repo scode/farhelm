@@ -5467,10 +5467,11 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 /* Conversation and initial-prompt fields add sections to the choices side.
-   Keep the gaps and label spacing compact so workspace trust still fits in
-   the resting 900px-tall dialog, without hiding fields or shrinking controls. */
+   WebKit wraps their help text more readily than Chromium, so keep the
+   section rhythm compact enough for the populated 900px-tall dialog without
+   hiding fields or shrinking controls. */
 .launch-composer-column-choices {
-  gap: 8px;
+  gap: 5px;
 }
 .launch-composer-column-choices .launch-composer-choice {
   gap: 6px;
