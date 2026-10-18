@@ -94,3 +94,102 @@ could make the top row taller, and the interrupted-session card could push the b
 fixed and the reviewer confirmed them resolved. The same reviewer accepted the callback-drain correction with no new
 finding. Review included the complete test-authoring checklist. The commit and PR wording passed their separate cold
 read. The reviewer verified the integrated helper matches the tested candidate and accepted its flake bookkeeping.
+
+### Landing
+
+Landed on its own in round 89, as #2253, with two fixes made during the landing and one conflict resolved (below).
+
+#### What landed since the PR was based, and whether it interacted
+
+The executor had already rebased onto main after the refusal to open a terminal link whose hover an approval card covers
+(#2254, the report's "terminal-link refusal") landed and re-ran its browser tests against it. While this landing was
+being checked, five more changes reached main: a batch of recorded review findings (#2258, documentation only) and four
+test fixes (#2259 to #2262). One of them, #2259, independently fixed the same confirmation-test hang this PR also fixed,
+in the same test file, with its own flake-log entry, and removed the same TODO.md and sweep-exclusion lines. The rest
+merged without conflict, and none of the others uses a selector this PR removed.
+
+The landing monitor read the PR against what main holds, and a fresh-context reviewer did the same independently.
+Besides the problems fixed below, neither found an interaction:
+
+- That link refusal measures the approval cards where they are when the link is clicked, so it follows them to their new
+  place. In the steady state the cards still begin just below the terminal's top edge, as they did before, so the
+  refusal explanation overlaps the top of a card exactly as it did before this PR; the report reads as though that were
+  new.
+- The delete shortcut still finds the Delete button, Rename still works from the session list and its shortcut, and
+  Escape for the top row's questions moved with them. Naming after quick launch, the quick-launch keys, the menu focus
+  fix, the one-way YOLO shield and the sidebar's host and permission marks are unaffected; the bar's host label is the
+  session list's own.
+- The tunnel strip now sits directly above the terminal, as SPEC.md and the docs say.
+
+The changelog entry is a new "changed" entry; nothing it describes has shipped.
+
+#### Fixes made during the landing
+
+- **The bar showed the full home directory.** SPEC.md, the docs page and the plan's recorded decision ("home shown as
+  `~`") all say the directory in the bar abbreviates the home directory to `~`, but the bar showed the full path; the
+  old header never abbreviated it either, so the plan's "as today" was mistaken. The bar now uses the session list's
+  rule, so a directory reads the same in both places. The hover, the screen-reader description and the copied value keep
+  the full path. One exception keeps the full path visible: when the folded-away part of the path contains a hidden or
+  direction-changing character, because the copy warning says such characters are shown in the bar. A unit test covers
+  both cases.
+- **The quick-launch pill hid the new bar.** While a launch sequence is pending, its pill sits over the bottom of the
+  terminal; with the bar now at the bottom of the same pane, it covered the session name, host and age. It now sits just
+  above the bar when a session is open, and a browser test checks that it stays inside the terminal area and clear of
+  the bar.
+- **Conflict with #2259.** The confirmation test file takes main's fix together with this PR's two updated selectors,
+  and the flake log keeps main's entry for that hang; this PR's own entry, which described its now-superseded version of
+  the fix, was dropped.
+
+A fresh-context reviewer checked the two fixes and the new test, including the test-writing checklist, and its one
+correction (the hidden-character exception) is included.
+
+#### Things to keep in mind
+
+- The docs screenshots still show the old layout, as the report says. Two of their capture scripts will fail on the next
+  screenshot refresh, not just look stale: the "header" shot on the Work in a session page and the "header actions" shot
+  on the Stop, restart and resume page both wait for the old header element, which no longer exists. The screenshot
+  refresh is the place to rewrite them.
+- A few texts still describe the old layout: the hidden-characters warning says the characters are "shown above", though
+  the bar is now below its warning; some style-sheet comments; and the manual Mac checklist's mention of the session
+  header.
+- In a short window with tall notices, an approval card can now cover part of the bar, and in the Mac app the tunnel
+  error notice covers the bar's right end, where the command is shown. Neither was checked on a Mac.
+- The sidebar variant of the flaky Replace test
+  (`plain Replace keeps a newer same-source key after old sidebar YOLO cancellation`) fails the same way as the header
+  variant already on record, on main as well as with this PR (Checks, below). It has no flake-log entry, Deflake entry
+  or sweep exclusion yet, so the next deflake sweep will catch it again. Suggested follow-up: widen the header variant's
+  existing entries to cover both variants.
+- The codex-trust-prompts plan's open PR (#2255) now has a small textual conflict with this change in the session view
+  (both edit the same element; keep both), and no functional collision. Separately, that PR does not remove its own
+  TODO.md entry.
+
+#### Checks
+
+- Run now, on the PR with the landing fixes:
+  - `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+    `cargo check -p farhelm-ui --features desktop`, and the test-sleep check (303 delays, none without a reason).
+  - `cargo nextest run -p farhelm-ui --lib -E 'test(session_view::) | test(list::row::)'` through the test recorder,
+    four slots, no retries: 44 passed, run `35b14271-9dd0-4bca-b14f-02b76df6ca80`.
+  - `npx playwright test quick-launch.spec.ts` through the recorder with pinned tmux, one worker, no retries: 64 passed
+    in Chromium and WebKit, run `8f8f8b59-e4ce-401d-a107-73039f83cd8b`.
+  - Before the review's correction, the same Rust checks and `npx playwright test` on `quick-launch.spec.ts`,
+    `header.spec.ts`, `replace.spec.ts`, `restart-with.spec.ts`, `session-view-claims.spec.ts`,
+    `tooltip-coverage.spec.ts`, `modal-layout.spec.ts` and `terminal-scroll-freeze.spec.ts`, which include the session
+    view specs the executor had not run: 235 passed and one WebKit test failed, run
+    `280a0932-1db0-40e7-9c32-eca8eaebba8d`. The correction only changes the bar's directory text for paths under a home
+    directory, which these tests never use.
+  - After resolving the conflict with #2259,
+    `npx playwright test session-confirmations.spec.ts terminal-reconnect.spec.ts` on both engines: 60 passed, run
+    `dc754fb1-cca3-4da9-845b-5c75d5f959e5`.
+- The one failure, `plain Replace keeps a newer same-source key after old sidebar YOLO cancellation`, timed out waiting
+  for the source row's menu in WebKit. Run alone six times on each, it failed three of six times with this PR (run
+  `6328360c-ab06-4f40-884c-86b979f3a1a9`) and two of six on main without it (run
+  `18a485cb-d9da-40a4-9152-6e419dc34b65`). It is the sidebar twin of the open flake-log entry and Deflake TODO entry for
+  the header variant of the same test, with the same error; this PR did not cause it.
+- Reused: the executor's other runs listed in the report, at the revisions it gives. The landing fixes touch only the
+  bar's directory text and the pill's position, which those runs do not exercise.
+- Skipped: everything the report skipped, for the reasons it gives.
+
+Two things in the executor's report no longer hold. The confirmation-test fix and flake-log entry that landed are
+#2259's, not this PR's. The overlap between the link-refusal explanation and the approval cards is not new (above).
+Nothing else in it became untrue at landing.
