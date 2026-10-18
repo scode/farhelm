@@ -239,6 +239,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **WebKit SSH help menu click can stall before the long-command Copy check.**
+  `long SSH commands wrap while Copy preserves their exact bytes` in `e2e/tests/keyboard-scroll.spec.ts` timed out after
+  60 seconds in WebKit browser run `3727b704-5894-4a20-9fb6-1967d56fabb8`. The help menu item detached during
+  Playwright's click and the retry never completed. Three isolated classification reruns passed
+  (`6f590635-f235-4873-bcd2-72104c9ce912`, `8f5a6fb5-e23b-49d2-9e47-d197092d1454`,
+  `11c527c4-c92f-4b0f-b0ad-f3274afab9ca`). Inspect the retained trace for why the menu item disappeared before changing
+  the deadline or the command assertions (FLAKES.md, 2026-10-18).
+
 - **WebKit SSH help keyboard-scroll timeout with no hosts.** `SSH help remains keyboard-scrollable with no hosts` in
   `e2e/tests/keyboard-scroll.spec.ts` timed out after 60 seconds in WebKit during browser run
   `3727b704-5894-4a20-9fb6-1967d56fabb8` on clean main. Isolated classification reruns passed twice and timed out once

@@ -57,6 +57,37 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-10-18 — long SSH command Copy (e2e/tests/keyboard-scroll.spec.ts)
+
+`long SSH commands wrap while Copy preserves their exact bytes` timed out at 60 seconds in WebKit in browser run
+`3727b704-5894-4a20-9fb6-1967d56fabb8`. The click on the help menu's `ssh needs 2FA?` item saw the element detach and
+did not complete its retry, before the dialog or Copy assertions ran. Three isolated classification reruns passed
+(`6f590635-f235-4873-bcd2-72104c9ce912`, `8f5a6fb5-e23b-49d2-9e47-d197092d1454`,
+`11c527c4-c92f-4b0f-b0ad-f3274afab9ca`); the first took about 12 seconds for both engines. Chromium passed in all four
+runs. Why the menu item detached is unknown. Open in TODO.md and excluded from future sweeps.
+
+The tested tree was clean commit `c7d0058e9937fa897e388e606883637193e8689a` on Linux x86_64, kernel 6.8.0-146-generic.
+The full selection was `browser suite, both engines`; reruns selected this test in both engines. Each used one browser
+worker, zero retries, locale `C.UTF-8`, and recorded pinned tmux 3.7c executable SHA256
+`ee8c7d45ca8b15992f76871eba303c6921d2ad825f53f9aca2e1aa66725a6663`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. The full battery also failed the host
+picker, another SSH help test, tab lifecycle, launcher geometry, trash layout, and HTTP session lifecycle tests. Machine
+load and slot peers at this test's start were not recorded. The test and its scroll helper were last changed in #2222;
+no earlier entry for this test was found. Retained runs and the Playwright trace are under the local test-runs
+directory; their lifetime is the machine's temporary-file cleanup.
+
+```
+Error: locator.click: Test timeout of 60000ms exceeded.
+Call log:
+  - waiting for getByRole('menu', { name: 'help', exact: true }).locator('[data-bar-menu-item="ssh needs 2FA?"]')
+  - element was detached from the DOM, retrying
+```
+
+Class: unknown
+
+Cause: unknown
+
 ## 2026-10-18 — SSH help with no hosts (e2e/tests/keyboard-scroll.spec.ts)
 
 `SSH help remains keyboard-scrollable with no hosts` timed out after 60 seconds in WebKit during the full browser
