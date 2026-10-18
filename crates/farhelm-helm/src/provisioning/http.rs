@@ -1,7 +1,7 @@
 //! Discovery-first supervisor provisioning and its host-scoped REST state.
 
 use super::backend::BackendFailure;
-use super::plan::{ProvisioningOperation, ProvisioningPlan};
+use super::plan::{PlanStepPath, PlanSteps, ProvisioningOperation, ProvisioningPlan};
 use crate::store::HostId;
 use crate::{AppState, http_error};
 use axum::extract::{Path as AxPath, State};
@@ -67,6 +67,9 @@ pub(super) enum ProbeResponse {
         probe_id: String,
         plan: ProvisioningPlan,
         confirmation: String,
+        /// Indirection keeps discovery's small outcomes small in memory;
+        /// JSON still contains the same additive step list beside the plan.
+        steps: Box<PlanSteps>,
     },
     Manual {
         reason: String,
@@ -81,13 +84,15 @@ pub(crate) struct RunAccepted {
     pub(super) run_id: String,
 }
 
-/// A frozen UPDATE or UNINSTALL plan. Posting its opaque id back to the same
-/// host route consumes it exactly once and starts the run.
+/// A frozen UPDATE or UNINSTALL plan with the helm's step descriptions.
+/// Posting its opaque id back to the same host route consumes it exactly once
+/// and starts the run; the extra steps field does not change that authority.
 #[derive(Debug, Serialize)]
 pub(crate) struct HostPlanResponse {
     pub(super) probe_id: String,
     pub(super) plan: ProvisioningPlan,
     pub(super) confirmation: String,
+    pub(super) steps: PlanSteps,
 }
 
 /// One action's observable progress. Completed runs remain readable through
@@ -103,10 +108,14 @@ pub(super) enum StepStatus {
     Failed,
 }
 
-/// One action's retained status and bounded explanatory message.
+/// One action's retained status and bounded explanatory message. The helm
+/// carries its plan wording into progress; clients never name steps from ids.
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct StepView {
     pub(super) step: String,
+    pub(super) name: String,
+    pub(super) paths: Vec<PlanStepPath>,
+    pub(super) explanation: Option<String>,
     pub(super) status: StepStatus,
     pub(super) message: Option<String>,
 }
@@ -142,17 +151,23 @@ impl ProvisioningView {
         }
     }
 
+    /// Start progress from the plan's own descriptions so status updates keep
+    /// the names and paths the user saw before authorizing the run.
     pub(super) fn for_plan(host_id: HostId, run_id: String, plan: &ProvisioningPlan) -> Self {
+        let steps = plan.steps();
         Self {
             host_id,
             run_id: Some(run_id),
             operation: Some(plan.operation),
             status: RunStatus::Running,
-            steps: plan
-                .actions
-                .iter()
-                .map(|action| StepView {
-                    step: action.label().to_string(),
+            steps: steps
+                .steps
+                .into_iter()
+                .map(|step| StepView {
+                    step: step.id,
+                    name: step.name,
+                    paths: step.paths,
+                    explanation: step.explanation,
                     status: StepStatus::Pending,
                     message: None,
                 })

@@ -2,9 +2,10 @@
 //!
 //! Provisioning is a convergence operation, not an installer transaction.
 //! The confirmed [`plan::ProvisioningPlan`] is the only description of the work:
-//! the confirmation renderer walks its actions, and the executor walks the
-//! same actions after confirmation. A failed action leaves every completed
-//! action in place so rerunning can resume from content and hash comparisons.
+//! the helm describes each frozen action once for confirmation and progress,
+//! and the executor walks those same actions after confirmation. A failed
+//! action leaves completed work in place so rerunning can resume from content
+//! and hash comparisons.
 //!
 //! Transport is deliberately below that plan. Local setup executes and
 //! copies directly; remote setup uses the user's `ssh` for everything,
@@ -71,6 +72,23 @@ mod tests {
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use tower::ServiceExt;
+
+    /// A confirmation may only describe the run if progress preserves every
+    /// frozen action's identity, wording and paths in the same order.
+    fn assert_plan_progress_matches(plan: &ProvisioningPlan, steps: &PlanSteps) {
+        assert_eq!(steps.steps.len(), plan.actions.len());
+        let progress = ProvisioningView::for_plan(1, "test-run".to_string(), plan);
+        assert_eq!(progress.steps.len(), steps.steps.len());
+        for ((action, planned), running) in
+            plan.actions.iter().zip(&steps.steps).zip(&progress.steps)
+        {
+            assert_eq!(planned.id, action.label());
+            assert_eq!(running.step, planned.id);
+            assert_eq!(running.name, planned.name);
+            assert_eq!(running.paths, planned.paths);
+            assert_eq!(running.explanation, planned.explanation);
+        }
+    }
 
     /// A payload source whose bytes are irrelevant to the fake executor.
     #[derive(Debug)]
@@ -920,6 +938,8 @@ mod tests {
     /// overwriting the user's own tmux or shadowing the distribution's on
     /// their shell PATH. Spec: tmux goes to `~/.local/lib/farhelm/tmux`, which
     /// the plan ensures exists; the binary still goes to its registered path.
+    /// Both installation steps name their staging and destination paths, and
+    /// progress repeats the same list the plan asks the user to authorize.
     #[farhelm_testtrace::test]
     fn update_plan_keeps_the_private_tmux_out_of_the_binary_directory() {
         let root = tempfile::tempdir().unwrap();
@@ -986,6 +1006,132 @@ mod tests {
             "both the private directory and the binary's directory are ensured: {:?}",
             plan.actions
         );
+        let steps = plan.steps();
+        assert_eq!(steps.steps.len(), plan.actions.len());
+        assert_eq!(
+            steps.steps[0].paths.len(),
+            4,
+            "the shared binary directory is also named"
+        );
+        assert_eq!(steps.steps[0].paths[0].short, "~/.local/lib/farhelm");
+        assert_eq!(steps.steps[0].paths[1].short, "~/.local/bin");
+        assert_eq!(steps.steps[0].paths[2].short, "~/.local/state/farhelm");
+        assert_eq!(
+            steps.steps[0].paths[3].short,
+            root.path().join("units").display().to_string(),
+            "a path outside the host's home keeps its full spelling"
+        );
+        for (action, step) in plan.actions.iter().zip(&steps.steps) {
+            if let ProvisioningAction::InstallPayload {
+                payload,
+                destination,
+                temporary,
+                ..
+            } = action
+            {
+                assert_eq!(step.paths.len(), 2, "{payload:?} names both touched paths");
+                assert_eq!(step.paths[0].full, destination.display().to_string());
+                assert_eq!(step.paths[1].full, temporary.display().to_string());
+                assert_eq!(
+                    step.paths[0].short,
+                    format!("~/{}", destination.strip_prefix(&home).unwrap().display())
+                );
+                assert_eq!(
+                    step.paths[1].short,
+                    format!("~/{}", temporary.strip_prefix(&home).unwrap().display())
+                );
+            }
+        }
+        assert_eq!(steps.steps[3].id, "upload-tmux");
+        assert_eq!(steps.steps[3].name, "upload tmux");
+        assert_eq!(steps.steps[4].id, "install-tmux");
+        assert_eq!(steps.steps[4].name, "install tmux");
+        assert_plan_progress_matches(&plan, &steps);
+    }
+
+    /// An update click authorizes a plan without a second dialog, so its
+    /// copyable text must still name every action and preserve the host's
+    /// concrete paths if a client displays or records it.
+    #[farhelm_testtrace::test]
+    fn update_confirmation_names_every_run_step_exactly() {
+        let root = tempfile::tempdir().unwrap();
+        let reach = Reach {
+            home: root.path().to_path_buf(),
+            user_unit_dir: root.path().join("units"),
+            arch: PayloadArch::X86_64,
+            distro_id: "ubuntu".to_string(),
+            needs_tmux: false,
+            host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
+        };
+        let plan = layout(root.path())
+            .plan(
+                ProvisioningOperation::Update,
+                ProvisioningTarget::Ssh {
+                    destination: "user@updating".to_string(),
+                },
+                &reach,
+                "nonce",
+            )
+            .unwrap();
+        let ProvisioningAction::UploadPayload {
+            temporary: upload, ..
+        } = &plan.actions[1]
+        else {
+            panic!("the remote update stages its binary first")
+        };
+        let ProvisioningAction::WriteUnit {
+            unit,
+            temporary: unit_temp,
+            ..
+        } = &plan.actions[3]
+        else {
+            panic!("the update writes its user unit")
+        };
+        let unit_path = root.path().join("units").join(unit);
+        assert_eq!(
+            plan.confirmation(),
+            format!(
+                concat!(
+                    "Farhelm will set up user@updating (ubuntu, x86_64):\n",
+                    "- create directories\n",
+                    "  {}\n",
+                    "  {}\n",
+                    "  {}\n",
+                    "  Existing shared directories keep their permissions.\n",
+                    "- upload the farhelm binary\n",
+                    "  {}\n",
+                    "- install the farhelm binary\n",
+                    "  {}\n",
+                    "  {}\n",
+                    "- write the systemd user unit\n",
+                    "  {}\n",
+                    "  {}\n",
+                    "  Unit: {}\n",
+                    "- reload systemd user units\n",
+                    "- enable and start the supervisor\n",
+                    "  {}\n",
+                    "  the supervisor runs persistently under the systemd user manager\n",
+                    "- enable lingering, to start at boot\n",
+                    "  the supervisor starts at boot if linger succeeds; if lingering is refused, starts at login, not at boot\n",
+                    "- restart the supervisor\n",
+                    "- connect to the supervisor\n",
+                ),
+                root.path().join("lib").display(),
+                root.path().join("state").display(),
+                root.path().join("units").display(),
+                upload.display(),
+                root.path().join("lib/farhelm").display(),
+                upload.display(),
+                unit_path.display(),
+                unit_temp.display(),
+                unit,
+                unit_path.display(),
+            )
+        );
+        let steps = plan.steps();
+        assert_plan_progress_matches(&plan, &steps);
+        assert_eq!(steps.steps.last().unwrap().id, "attach-supervisor");
+        assert!(steps.kept.is_none());
     }
 
     /// The ssh probe finds a farhelm installed by the install script in
@@ -1322,37 +1468,78 @@ mod tests {
             probe_id: _probe_id,
             plan,
             confirmation,
+            steps,
         } = response
         else {
             panic!("positive absence must offer provisioning")
         };
         assert_eq!(harness.store.list_hosts().await.unwrap(), before);
         assert!(backend.operations.lock().unwrap().is_empty());
-        assert!(
-            confirmation.contains("start the supervisor at boot when user lingering is enabled")
-        );
-        assert!(confirmation.contains("if lingering is refused, start it at login instead"));
-        let ProvisioningAction::WriteUnit { unit, .. } = &plan.actions[3] else {
+        let ProvisioningAction::UploadPayload {
+            temporary: farhelm_temp,
+            ..
+        } = &plan.actions[1]
+        else {
+            panic!("the second action must stage the Farhelm binary")
+        };
+        let ProvisioningAction::WriteUnit {
+            unit,
+            temporary: unit_temp,
+            ..
+        } = &plan.actions[3]
+        else {
             panic!("the fourth action must write the unit")
         };
         let farhelm = root.path().join("lib/farhelm");
         let unit_path = root.path().join("units").join(unit);
         let expected = format!(
-            "Farhelm will set up user@absent (ubuntu, x86_64):\n\
-             - create or reuse directory {}\n\
-             - create or reuse directory {}\n\
-             - create or reuse directory {}\n\
-             - place Farhelm at {}\n\
-             - write user service {unit} at {}\n\
-             - enable and start {unit}; the supervisor runs persistently under the systemd user manager\n\
-             - start the supervisor at boot when user lingering is enabled; if lingering is refused, start it at login instead\n",
+            concat!(
+                "Farhelm will set up user@absent (ubuntu, x86_64):\n",
+                "- create directories\n",
+                "  {}\n",
+                "  {}\n",
+                "  {}\n",
+                "  Existing shared directories keep their permissions.\n",
+                "- upload the farhelm binary\n",
+                "  {}\n",
+                "- install the farhelm binary\n",
+                "  {}\n",
+                "  {}\n",
+                "- write the systemd user unit\n",
+                "  {}\n",
+                "  {}\n",
+                "  Unit: {}\n",
+                "- reload systemd user units\n",
+                "- enable and start the supervisor\n",
+                "  {}\n",
+                "  the supervisor runs persistently under the systemd user manager\n",
+                "- enable lingering, to start at boot\n",
+                "  the supervisor starts at boot if linger succeeds; if lingering is refused, starts at login, not at boot\n",
+                "- connect to the supervisor\n",
+            ),
             root.path().join("lib").display(),
             root.path().join("state").display(),
             root.path().join("units").display(),
+            farhelm_temp.display(),
             farhelm.display(),
+            farhelm_temp.display(),
+            unit_path.display(),
+            unit_temp.display(),
+            unit,
             unit_path.display(),
         );
         assert_eq!(confirmation, expected);
+        assert_eq!(
+            steps.lead,
+            "Farhelm will set up user@absent (ubuntu, x86_64):"
+        );
+        assert_plan_progress_matches(&plan, &steps);
+        assert_eq!(steps.steps[0].paths[0].short, "~/lib");
+        assert_eq!(
+            steps.steps[0].paths[0].full,
+            root.path().join("lib").display().to_string()
+        );
+        assert!(steps.kept.is_none());
     }
 
     /// Unsupported hosts stay on the manual-run path without retaining
@@ -3621,8 +3808,8 @@ mod tests {
     /// or the private fallback when none is available, and the host's socket. The confirmation names the unit, the unit file
     /// and the lib directory by their concrete paths, says it is an
     /// uninstall from that destination, and ends by naming the kept state
-    /// directory. Planning only inspects: the registry row is unchanged and
-    /// the backend saw no host action.
+    /// directory. The plan and progress entries also name the same ordered
+    /// actions; planning only inspects and leaves the host untouched.
     #[farhelm_testtrace::test]
     async fn uninstall_plans_the_removals_and_names_the_kept_data() {
         let (harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
@@ -3652,30 +3839,35 @@ mod tests {
             ),
             "the cleanup uses the accepted client and this host's frozen state socket"
         );
-        let confirmation = &preview.confirmation;
-        assert!(
-            confirmation.starts_with("Farhelm will uninstall from uninstall.example"),
-            "{confirmation}"
+        let ProvisioningAction::RemoveUnit {
+            destination: unit, ..
+        } = &preview.plan.actions[1]
+        else {
+            panic!("the second action removes the unit file")
+        };
+        assert_eq!(
+            preview.confirmation,
+            format!(
+                concat!(
+                    "Farhelm will uninstall from uninstall.example (ubuntu, x86_64):\n",
+                    "- disable the supervisor\n",
+                    "- remove the systemd user unit\n",
+                    "  {}\n",
+                    "- reload systemd user units\n",
+                    "- stop the supervisor and its tmux server\n",
+                    "- remove the install directory\n",
+                    "  {}\n",
+                    "  The Farhelm binary and any private tmux in it are removed.\n",
+                    "- remove the host from the list\n",
+                    "Kept: the host's Farhelm data in {}. Deleting that directory by hand removes the data too.\n",
+                ),
+                unit.display(),
+                lib.display(),
+                state.display(),
+            )
         );
-        assert!(
-            confirmation.contains(&lib.display().to_string()),
-            "{confirmation}"
-        );
-        assert!(
-            confirmation.contains(&root.path().join("units").display().to_string()),
-            "{confirmation}"
-        );
-        assert!(
-            confirmation.contains("and its private tmux server"),
-            "{confirmation}"
-        );
-        assert!(
-            confirmation.contains(&format!(
-                "Kept: the host's Farhelm data in {}",
-                state.display()
-            )),
-            "{confirmation}"
-        );
+        assert_plan_progress_matches(&preview.plan, &preview.steps);
+        assert!(!preview.confirmation.contains("place"));
         assert_eq!(preview.plan.state_dir, state);
         assert_eq!(harness.store.list_hosts().await.unwrap(), before);
         assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
