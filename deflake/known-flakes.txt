@@ -14,3 +14,4 @@ playwright github-checkouts.spec.ts borrowers retain the checkout until the fina
 nextest farhelm::e2e terminal_backpressure::shallow_pause_resumes_without_reset_or_replay  # shallow-pause-resets-under-load
 playwright terminal-reconnect.spec.ts view-changes-do-not-postpone-a-recovery  # reconnect-recovery-misses-its-window-under-load
 playwright replace.spec.ts plain Replace keeps a newer same-source key after old header YOLO cancellation  # same-source-replace-menu-after-yolo-cancellation
+playwright keyboard-scroll.spec.ts SSH help remains keyboard-scrollable with no hosts  # ssh-help-keyboard-scroll-timeout

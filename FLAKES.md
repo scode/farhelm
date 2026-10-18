@@ -57,6 +57,34 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
 
+## 2026-10-18 — SSH help with no hosts (e2e/tests/keyboard-scroll.spec.ts)
+
+`SSH help remains keyboard-scrollable with no hosts` timed out after 60 seconds in WebKit during the full browser
+battery, run `3727b704-5894-4a20-9fb6-1967d56fabb8`. Two isolated classification reruns passed in about three seconds
+(`84ec8315-ddda-47ad-8514-1b5a8d325ffd`, `839a11bb-abaa-464c-9267-74ec02a1a9b0`), and the third timed out at 60 seconds
+(`2b03f1ba-45f4-4c86-823c-90bd5bf0b4d9`); Chromium passed in all four runs. The timeout snapshot had no SSH help dialog,
+but the report does not identify which awaited step stalled. The later `page.unrouteAll` error was reported after the
+timeout, when the page had already closed. Cause unknown; open in TODO.md and excluded from future sweeps.
+
+The tested tree was clean commit `c7d0058e9937fa897e388e606883637193e8689a` on Linux x86_64, kernel 6.8.0-146-generic.
+The full selection was `browser suite, both engines`; reruns selected this test in both engines. Each used one browser
+worker, zero retries, locale `C.UTF-8`, and recorded pinned tmux 3.7c executable SHA256
+`ee8c7d45ca8b15992f76871eba303c6921d2ad825f53f9aca2e1aa66725a6663`. Ambient `FARHELM_AGENT_ID`, `FARHELM_SESSION_ID`,
+`FARHELM_SESSION_TOKEN`, `FARHELM_SUPERVISOR_SOCK`, and `FARHELM_TMUX` were scrubbed; only recorder-owned
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` reached the child. The full battery also failed the host
+picker, tab lifecycle, launcher geometry, long SSH command, trash layout, and HTTP session lifecycle tests. Machine load
+and slot peers at this test's start were not recorded. The test and its scroll helper were last changed in #2222; no
+earlier entry for this test was found. Retained runs and the Playwright trace are under the local test-runs directory;
+their lifetime is the machine's temporary-file cleanup.
+
+```
+Test timeout of 60000ms exceeded.
+```
+
+Class: unknown
+
+Cause: unknown
+
 ## 2026-09-29 — `a tab list past the island cap is listed in full but only partly attached` (e2e/tests/terminal-tabs.spec.ts)
 
 The deflake sweep's full browser battery failed this test in WebKit (`webkit-terminal-tabs`) in run
