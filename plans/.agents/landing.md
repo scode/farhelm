@@ -148,6 +148,12 @@ that makes it wake about every 110 minutes even when nothing changed. The execut
 the monitor does: it is how a claim that went quiet gets noticed, and how the review flow can tell the monitor is still
 alive.
 
+Before starting the watcher at the end of a round, measure the checkout with `du -sh` on its directory. If it reports
+more than 50 GB, run `cargo clean` in the checkout and delete the one-off outputs listed in
+`plans/.agents/close-reset.md`, "Pruning build leftovers", once nothing the round started is still building or testing,
+even though the next round's first build is then slower. The monitor builds and tests every plan it lands in this one
+checkout and, unlike an executor, prunes nothing between plans; its checkout reached 350 GB that way on 2026-10-18.
+
 - Start
   `scripts/plans-watch.sh --repo <OWNER/NAME> --baseline-from <commit> --wake-check <checkout>/scripts/plans-queue.py --wake-for lander --max-wait 6600`,
   where `<commit>` is the main commit id printed by a `queue status` run when the round has finished, not the one from
