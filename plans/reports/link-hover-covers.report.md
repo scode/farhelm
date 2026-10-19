@@ -77,3 +77,62 @@ Each PR passed a separate fresh-context gpt-6.1-sol review at high effort for co
 The first review also rechecked the browser fixture correction; the third covered the opening-offer fixture and
 documentation updates. No findings remain. Commit and PR wording passed fresh-context cold reads. The public report
 received its own required cold read before delivery.
+
+### Landing
+
+Landed as #2348, #2350 and #2351, merged bottom-up, unchanged from what the report describes. It landed in the same
+round as agent-spawned-session-rules, which merged just before it. The machine running the landing rebooted between the
+two plans' merges; nothing had merged for this plan at that point, and the landing carried on afterwards.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained agent-spawned-session-rules (blank messages to running agents are refused, plus two
+specification clarifications about agent-composed launches and prompt cards) and plan bookkeeping. A fresh-context
+reviewer and I read the two plans against each other: they edit different sections of SPEC.md, keep separate
+TRIAGE_OUTCOMES.md entries, and only this plan touches the UI. The only conflict was in the review feedback queue's
+index, where each plan removes its own entries; both removals are kept. The landed code is identical to what was tested.
+
+#### Fixes made during the landing
+
+None.
+
+#### Things the landing found
+
+- The tunnel-error notice used to sit above everything else in the Mac app. To keep the refusal readable, this plan
+  moves it to the same layer as approval cards. It is now drawn below hover help, the brief launch-sequence message near
+  the bottom of the terminal, and the tunnel permission dialog's dimmed background. It still sits above approval cards
+  where the two overlap, as before. Where these overlap, in a narrow window say, the notice can now be partly hidden;
+  nothing about what a click does changes. Found by reading the stylesheet, not seen in the app. I think this is
+  acceptable: the overlaps are brief or transient, and the alternative is a notice that can hide why a click was
+  refused. It is listed under follow-ups in case it looks wrong in the app.
+- The executor's browser run covered only the new tunnel-notice cases, which left one gap the report did not mention:
+  the plan also rewords the existing refusal for a link hidden by an approval card ("covered by another Farhelm
+  surface"). The landing's run of the whole link-click file closes that gap; it passed.
+
+#### Possible follow-ups
+
+- The two changelog drafts are worded for curation: the tunnel-notice one does not say the notice exists only in the Mac
+  app, and the file-opening one says "a modified click" where the 0.30.0 notes say "Cmd-click (Ctrl-click on Linux)".
+- If the tunnel-error notice looks wrong partly hidden behind hover help or the launch-sequence message in the Mac app,
+  give it its own layer between approval cards and the refusal message.
+
+#### Checks
+
+Run now, on this stack rebased onto main with agent-spawned-session-rules beneath it, which is the tree that landed
+apart from plan bookkeeping:
+
+- `node --test` in the UI's JavaScript test directory through the recorder: 311 passed, run
+  `2eb59d77-4530-4f5b-99c8-055a9a133d52`. The report's 310 was from before the opening-hint fix added its test.
+- After `cargo build` and the release web build,
+  `npx playwright test terminal-link-clicks.spec.ts approval-layout.spec.ts` through the recorder on Chromium and
+  WebKit, one worker, no retries: 50 passed, run `ece7b2c1-da21-4d50-893b-5480e5676e38`. These are the whole files that
+  exercise link refusals and the approval region, not only the new cases.
+- `dprint check` on every changed documentation, changelog, stylesheet, script and test file, and
+  `python3 releasing/check-changelog.py format`: passed. The Rust checks from the same run are in
+  agent-spawned-session-rules' landing notes; this plan changes no Rust code.
+- The machine rebooted after both runs had finished and been read; their records were lost then, so the results above
+  are from that reading.
+- Skipped: the native Mac app and physical Mac input, as in the report, and the rest of the browser suite, since the
+  plan changes only link refusals, their stacking and the desktop opening decision.
+
+Nothing in the executor's report became untrue at landing.
