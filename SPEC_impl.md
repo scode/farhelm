@@ -782,44 +782,56 @@ coordinates, and the root-mounted Wry webview retains the same inset because its
 desktop macOS shell class reserves matching space in the sticky sidebar app bar and aligns the session top row's height
 with it at 48px. In narrow windows, a fixed app row sits above both scrolling panes; the current sidebar width,
 main-pane floor, and horizontal scrolling remain intact without moving controls under the native buttons. The native
-window still has a title for system menus. A dedicated empty Dioxus element owns native window actions for
-primary-button presses; the press handler is not attached to a parent containing controls or text. Double-click
-zoom/restore is decided on the press's own mousedown, before any dragging for that press begins: a page script
-(`assets/click-detail.js`) reads the mousedown's DOM `detail` — which WebKit sets from the incoming native click count
-(`NSEvent.clickCount`, copied statelessly through `WebEventFactory::createWebMouseEvent`, `WebEventConversion`, and
+window still has a title for system menus. The title band's drag surfaces are the sidebar's app bar, the session top
+row, and, with no session open, an empty strip laid over the top of the main pane; each is a Dioxus element carrying the
+`window-drag-surface` class and one shared press handler, and surfaces never nest, so each press reaches exactly one
+handler. Because a surface also contains controls and text, and its handler receives their presses by bubbling, the
+handler never decides from the event alone: a page script (`assets/click-detail.js`) classifies every press inside a
+surface as empty background or not (controls, anything focusable or with a role, and text keep their own interactions;
+the wordmark counts as background) and reports that verdict with the press, and only background presses drag or zoom.
+Three cases need the press's position, not just its target. A press outside the surface's own box is never background,
+because a surface can lay descendants out beyond it, as a session's confirmation panels hang below the top row. A press
+on anything absolutely or fixed positioned between the target and the surface is not background either, because such a
+popover can overlap the band: those panels' top edges do. And a press over an `inert` descendant (a stale session's tab
+strip) is not background, because hit testing skips inert elements and would otherwise hand the press to the row behind
+a visible tab. The classifier is one exported function, which the browser suite runs over the whole band. Double-click
+zoom/restore is decided on the press's own mousedown, before any dragging for that press begins: the script reads the
+mousedown's DOM `detail` — which WebKit sets from the incoming native click count (`NSEvent.clickCount`, copied
+statelessly through `WebEventFactory::createWebMouseEvent`, `WebEventConversion`, and
 `EventHandler::handleMousePressEvent`'s per-press assignment) — and synchronously POSTs it, with an eligibility bit
-saying whether the preceding primary press landed on the same connected spacer, to a Rust asset-handler route ahead of
-the interpreter's own event send for the same press. That chain proves propagation of an incoming native count, not
-AppKit's classification itself: that the press after a drag-consumed release carries count 2 is an assumption,
-unobserved here, and native zoom/restore awaits the manual Mac checklist. A document-level capture listener runs
-strictly before the interpreter's delegated bubble listener, and both sends are synchronous XHRs on the page's one JS
-thread, so each POST is answered before its press's event send starts and the Rust side pairs the two by order. The
-spacer's handler then zooms exactly once for an eligible repeat press and never drags it, drags an ordinary press as
-before, or does nothing at all for a cross-target repeat (no zoom AND no drag); there is no `dblclick` handler. The
-first press's mouse-up may never reach the view once native dragging starts, and that is harmless here: the count is
-assigned fresh from each press's own platform event rather than accumulated across the release, and the
-release-dependent click/dblclick synthesis is on a path this design never uses. Fullscreen suppresses the toggle
-explicitly (`toggle_maximized`, unlike `drag`, has no fullscreen check of its own, and Tao defers a fullscreen maximize
-change until exit). The route is registered from the window root, which never unmounts, and the page listener survives
-component remounts; a missing report against an empty slot, or a count stuck at 1, degrades to ordinary dragging. That
-fail-safe does not cover complementary loss in both directions at once — report A arrives, event A never consumes it,
-report B fails to replace it, event B consumes A — which borrows the wrong press's report and stays a documented
-residual. Other builds keep that spacer hidden and inert, and receive no macOS shell class. Browser tests can apply the
-class to production markup to verify geometry, without enabling native actions.
+saying whether the preceding primary press landed on the same connected surface's background and the background verdict,
+to a Rust asset-handler route ahead of the interpreter's own event send for the same press. That chain proves
+propagation of an incoming native count, not AppKit's classification itself: that the press after a drag-consumed
+release carries count 2 is an assumption, unobserved here, and native zoom/restore awaits the manual Mac checklist. A
+document-level capture listener runs strictly before the interpreter's delegated bubble listener, and both sends are
+synchronous XHRs on the page's one JS thread, so each POST is answered before its press's event send starts and the Rust
+side pairs the two by order. Every press inside a surface POSTs, background or not, so the handler always consumes the
+report for its own press. The handler then zooms exactly once for an eligible repeat press and never drags it, drags an
+ordinary background press, and does nothing at all for a cross-target repeat (no zoom AND no drag), a press that is not
+on background, or a press whose report is missing: without a verdict a press cannot be told apart from a button press.
+There is no `dblclick` handler. The first press's mouse-up may never reach the view once native dragging starts, and
+that is harmless here: the count is assigned fresh from each press's own platform event rather than accumulated across
+the release, and the release-dependent click/dblclick synthesis is on a path this design never uses. Fullscreen
+suppresses both actions explicitly (`toggle_maximized` has no fullscreen check of its own, and Tao defers a fullscreen
+maximize change until exit). The route is registered from the window root, which never unmounts, and the page listener
+survives component remounts. Complementary loss in both directions at once — report A arrives, event A never consumes
+it, report B fails to replace it, event B consumes A — borrows the wrong press's report and stays a documented residual.
 
 The drag itself is started with `performWindowDragWithEvent:` on the window's own NSWindow, not through Tao's
-`drag_window` (which Dioxus's `drag` wraps). Tao hands AppKit `NSApp.currentEvent`, assuming the press is still current
-when the Dioxus handler runs. It often is not: on a Force Touch trackpad AppKit delivers pressure events while the
-button is down, and by the time a press has crossed the webview and the bridge, a pressure or mouse-dragged event is
-frequently current. AppKit silently ignores a drag started from anything but a mouse-down, so before this, many presses
-on the spacer did nothing (observed 2026-10: in one logged session three of eight presses found such an event current).
-When the current event is not a left mouse-down, the spacer builds one at the pointer's present location in the window,
-as Tao itself does for one other event type, and drags from that. Only the event's type is read from an arbitrary
-current event; AppKit throws when a pressure event is asked for a click count. The drag keeps Dioxus's fullscreen guard.
-Fullscreen, resizing, and button behavior remain AppKit-owned; actual native appearance and interactions require the
-manual Mac checklist. The window root installs native layout before authentication completes. Bootstrap and error pages
-reserve a top band without requiring the sidebar to mount. A build-mismatch notice stays below that band and above the
-scrolling shell, with the app bar pinned above it so the warning remains readable.
+`drag_window`. Tao hands AppKit `NSApp.currentEvent`, assuming the press is still current when the Dioxus handler runs.
+It often is not: on a Force Touch trackpad AppKit delivers pressure events while the button is down, and by the time a
+press has crossed the webview and the bridge, a pressure or mouse-dragged event is frequently current. AppKit silently
+ignores a drag started from anything but a mouse-down, so before this, many presses on the band did nothing (observed
+2026-10: in one logged session three of eight presses found such an event current). When the current event is not a left
+mouse-down, the handler builds one at the pointer's present location in the window, as Tao itself does for one other
+event type, and drags from that. Only the event's type is read from an arbitrary current event; AppKit throws when a
+pressure event is asked for a click count. Other builds keep the surfaces' handlers inert and receive no macOS shell
+class, and the script never POSTs outside that class. Browser tests can apply the class to production markup to verify
+geometry and the press classification, without enabling native actions. Fullscreen, resizing, and button behavior remain
+AppKit-owned; actual native appearance and interactions require the manual Mac checklist. The window root installs
+native layout before authentication completes. Bootstrap and error pages reserve a top band without requiring the
+sidebar to mount. A build-mismatch notice stays below that band and above the scrolling shell, with the app bar pinned
+above it so the warning remains readable.
 
 Hover help is Farhelm's own tooltip, `assets/tooltip.js`, not the browser's `title` tooltip. The native tooltip's delay
 belongs to the engine and cannot be shortened by any attribute, style or script, and WebKit, which the macOS desktop app

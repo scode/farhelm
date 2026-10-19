@@ -10,8 +10,11 @@ The initial implementation deliberately leaves these observations for the mainta
 
 - Confirm there is no separate gray app-title strip. Native traffic lights sit within the sidebar header without
   covering the version, and the session header and terminal tabs reach the window's top edge.
-- Drag the empty space beside the version. Confirm the window moves, while the New button in the session list header
-  opens the launcher and selecting header or terminal text does not move the window.
+- Drag from empty background all along the window's title band: beside the traffic lights, on the wordmark, beside the
+  version, the band's top and bottom edges, the gaps around the terminal tabs and before the session actions, and the
+  main pane's top with no session open. Confirm the window moves from every one, with a Force Touch trackpad as well as
+  a mouse, while the New button in the session list header opens the launcher and selecting header or terminal text does
+  not move the window.
 - Resize through ordinary and narrow widths, scroll the sidebar, and horizontally scroll a narrow window. Check that the
   traffic lights do not cover active controls, the version remains available, and the sticky header stays usable.
 - Enter and leave fullscreen using the native green button, reveal the fullscreen toolbar, and repeat resizing and
@@ -32,25 +35,27 @@ The initial implementation deliberately leaves these observations for the mainta
 - Check startup/error messages and any build-mismatch notice: all text remains below native controls. In a short
   authentication window, scroll to the last form control and confirm the native-button reservation stays fixed.
 
-Double-click maximize/restore on the same spacer:
+Double-click maximize/restore on the same title band:
 
-- Double-click the empty space beside the version: the window zooms; double-click again and it restores the prior frame
-  exactly. Repeat with a mouse and with a trackpad, and again after moving and resizing the window.
-- Single-click the spacer without moving: nothing zooms. Press and drag: the window moves immediately, with no
-  double-click-detection pause before the drag starts.
+- Double-click empty background in the sidebar's top bar and in the main pane's top row: the window zooms; double-click
+  again and it restores the prior frame exactly. Repeat with a mouse and with a trackpad, and again after moving and
+  resizing the window.
+- Single-click empty band background without moving: nothing zooms. Press and drag: the window moves immediately, with
+  no double-click-detection pause before the drag starts.
 - Exercise the awkward sequences: two slow separate clicks (no zoom), a triple click (zoom on press 2, restore on press
   3, no drag on either repeat), rapid repeated pairs, and a double-click with small accidental movement between the
   presses.
-- Probe the spacer's edges: press just beside the version; click the settings gear (or header text) and then the spacer
-  quickly, and the reverse — a cross-target pair must not zoom or move the window. Select header or terminal text, use
-  session actions, and switch and create terminal tabs: none of those may move or zoom the window.
+- Probe the edges of the band's controls: press just beside the version, a tab and a session action; click the settings
+  gear (or header text) and then empty background quickly, and the reverse — a cross-target pair must not zoom or move
+  the window. Select header or terminal text, use session actions, and switch and create terminal tabs: none of those
+  may move or zoom the window.
 - Repeat the zoom/restore cycle at narrow widths (including the fixed top-band layout), after scrolling the sidebar and
   horizontally scrolling a narrow window, and on a display with different scaling if one is available. Confirm
   traffic-light placement, resize edges, corners, and shadow are unchanged.
-- In fullscreen, try dragging and double-clicking the spacer, reveal the fullscreen toolbar, then exit fullscreen:
-  neither action may have changed the restored frame. Recheck close, minimize, and the green button afterward.
+- In fullscreen, try dragging and double-clicking the band, reveal the fullscreen toolbar, then exit fullscreen: neither
+  action may have changed the restored frame. Recheck close, minimize, and the green button afterward.
 - Check startup, authentication, error, and build-mismatch surfaces, plus remounts (sign out and back in, reload the
-  session list): pages without the spacer gain no drag target or zoom, and navigation leaves no duplicate or stale
+  session list): pages without the title band gain no drag target or zoom, and navigation leaves no duplicate or stale
   native action behind.
 
 Native external links from the terminal (the U6 plain-text URL work):

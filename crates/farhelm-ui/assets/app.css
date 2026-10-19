@@ -737,11 +737,30 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   min-height: 48px;
 }
 
-/* A dedicated empty element is the only HTML window-drag surface. Keep
-   native dragging away from controls, text, and the terminal; don't make
-   the whole webview or header draggable. */
+/* The flexible gap between the wordmark and the version. It is part of the
+   app bar's drag surface like the rest of the bar's empty background; it
+   exists for layout. Which presses drag is decided per press by
+   `assets/click-detail.js`, never by CSS. */
 .window-drag-region {
   display: none;
+}
+
+/* With no session open the main pane has no top row; this strip stands in
+   for it so the macOS title band spans the whole window. It overlays the
+   pane's top edge rather than taking layout space (`.app-main` is the
+   positioned ancestor), and exists only in the macOS shell. */
+.main-empty-titlebar {
+  display: none;
+}
+
+.macos-window .main-empty-titlebar {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  z-index: 1;
 }
 
 .macos-window .window-drag-region {
@@ -876,7 +895,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 }
 
 /* The gear owns fixed space; a long version gives way before either icon.
-   It stays outside the macOS drag spacer and the bar retains one row. */
+   As a control, a press on it never drags the macOS window, and the bar
+   retains one row. */
 .app-bar .app-settings-toggle,
 .app-bar .app-help-toggle {
   display: inline-flex;

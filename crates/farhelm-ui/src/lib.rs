@@ -1854,6 +1854,16 @@ fn AppBody() -> Element {
                     div { class: "app-main",
                         match &*current.read() {
                             None => rsx! {
+                                // With no session there is no top row, so the
+                                // macOS window's title band would end at the
+                                // sidebar. This strip, hidden outside the
+                                // macOS shell and laid over the pane's top
+                                // edge, keeps the whole band draggable.
+                                div {
+                                    class: "main-empty-titlebar {window_chrome::WINDOW_DRAG_SURFACE}",
+                                    aria_hidden: "true",
+                                    onmousedown: window_chrome::window_surface_press,
+                                }
                                 // Three honest states, not one claim: an empty
                                 // fleet may only be ANNOUNCED once a committed
                                 // listing proved it (`fleet_empty`); before
