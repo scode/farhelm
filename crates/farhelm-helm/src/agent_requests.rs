@@ -2503,6 +2503,13 @@ async fn write_template_for_agent(
     }
     let bindings = TemplateBindings::from_preferences(&state.store.preferences().await?);
     let mut listed = farhelm_proto::AgentTemplate::listed(&template, shown_host);
+    // The writer normalizes its owned clone; this reply must describe that
+    // saved definition too. Validate before normalizing so an orphan Base
+    // is refused rather than silently becoming an empty template.
+    listed.fields.name_kind = listed
+        .fields
+        .name_kind
+        .filter(|kind| *kind == farhelm_proto::launcher::TemplateNameKind::Fixed);
     listed.quick_launch = bindings.quick_launch.as_deref() == Some(template.name.as_str());
     listed.key = bindings
         .keys
@@ -10210,6 +10217,119 @@ mod tests {
                 assert_eq!(fields.command.as_deref(), Some("echo historical"));
             }
         }
+    }
+
+    /// A title-only edit preserves Fixed, while a kind-only edit changes an
+    /// existing name and Base normalizes out of storage and the write reply.
+    /// Validating after merge matters: an edit may rely on the saved name,
+    /// but a create or edit with no name must never store an orphan policy.
+    #[farhelm_testtrace::test]
+    async fn template_name_kind_edits_preserve_omission_and_validate_the_merged_name() {
+        use farhelm_proto::launcher::{TemplateFields, TemplateNameKind};
+        let (h, local, _remote) = two_host_fleet().await;
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let ask = |verb| {
+            let handler = Arc::clone(&handler);
+            async move { handler.handle(origin, "local-live", verb).await }
+        };
+        let created = ask(AgentVerb::TemplateCreate {
+            name: "named".into(),
+            fields: TemplateFields {
+                name: Some("review".into()),
+                name_kind: Some(TemplateNameKind::Fixed),
+                ..Default::default()
+            },
+            host: None,
+            shortcuts: Default::default(),
+        })
+        .await;
+        assert!(matches!(created, AgentOutcome::Ok { .. }), "{created:?}");
+        for (name, kind, expected_kind) in [
+            (Some("renamed"), None, Some(TemplateNameKind::Fixed)),
+            (None, Some(TemplateNameKind::Base), None),
+            (
+                None,
+                Some(TemplateNameKind::Fixed),
+                Some(TemplateNameKind::Fixed),
+            ),
+        ] {
+            let outcome = ask(AgentVerb::TemplateEdit {
+                name: "named".into(),
+                fields: TemplateFields {
+                    name: name.map(str::to_string),
+                    name_kind: kind,
+                    ..Default::default()
+                },
+                host: None,
+                shortcuts: Default::default(),
+            })
+            .await;
+            let AgentOutcome::Ok {
+                reply: AgentReply::TemplateWritten { template },
+            } = outcome
+            else {
+                panic!("edit: {outcome:?}")
+            };
+            assert_eq!(template.fields.name.as_deref(), Some("renamed"));
+            assert_eq!(template.fields.name_kind, expected_kind);
+            let saved = h.store.launch_templates().await.unwrap();
+            let saved = saved
+                .iter()
+                .find(|template| template.name == "named")
+                .unwrap();
+            assert_eq!(saved.fields.name.as_deref(), Some("renamed"));
+            assert_eq!(saved.fields.name_kind, expected_kind);
+        }
+
+        let nameless = ask(AgentVerb::TemplateCreate {
+            name: "nameless".into(),
+            fields: TemplateFields {
+                agent: Some(farhelm_proto::LaunchHarness::Codex),
+                ..Default::default()
+            },
+            host: None,
+            shortcuts: Default::default(),
+        })
+        .await;
+        assert!(matches!(nameless, AgentOutcome::Ok { .. }), "{nameless:?}");
+        for kind in [TemplateNameKind::Base, TemplateNameKind::Fixed] {
+            let fields = TemplateFields {
+                name_kind: Some(kind),
+                ..Default::default()
+            };
+            for verb in [
+                AgentVerb::TemplateCreate {
+                    name: "orphan".into(),
+                    fields: fields.clone(),
+                    host: None,
+                    shortcuts: Default::default(),
+                },
+                AgentVerb::TemplateEdit {
+                    name: "nameless".into(),
+                    fields,
+                    host: None,
+                    shortcuts: Default::default(),
+                },
+            ] {
+                let outcome = ask(verb).await;
+                assert!(
+                    matches!(&outcome, AgentOutcome::Err { kind: ErrorKind::InvalidRequest, message } if message.contains("name kind needs a session name")),
+                    "{outcome:?}"
+                );
+            }
+        }
+        let saved = h.store.launch_templates().await.unwrap();
+        assert_eq!(saved.len(), 2, "refused creates write nothing");
+        assert_eq!(
+            saved
+                .iter()
+                .find(|template| template.name == "nameless")
+                .unwrap()
+                .fields
+                .name_kind,
+            None
+        );
     }
 
     /// Spec: `template create` stores the template with its host written as

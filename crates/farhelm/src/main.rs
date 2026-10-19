@@ -492,6 +492,9 @@ struct TemplateFieldFlags {
     /// Session name sessions launched from the template get.
     #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
     title: Option<String>,
+    /// Reusable base name or exact fixed name; an edit without this keeps its kind.
+    #[arg(long, value_name = "base|fixed", value_parser = parse_template_title_kind)]
+    title_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
     /// Host the template launches on, by the name `farhelm agent hosts` shows.
     #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
     host: Option<String>,
@@ -501,7 +504,8 @@ struct TemplateFieldFlags {
 
 impl TemplateFieldFlags {
     /// The fields as the helm's template verbs carry them, or the refusal of
-    /// a `--template` (see [`TemplateCmd`]).
+    /// a `--template` (see [`TemplateCmd`]). Shape validation belongs after
+    /// the helm's merge: a kind-only edit can use the stored session name.
     fn fields(&self) -> anyhow::Result<farhelm_proto::launcher::TemplateFields> {
         if !self.launch.templates.is_empty() {
             anyhow::bail!(
@@ -510,6 +514,7 @@ impl TemplateFieldFlags {
             );
         }
         let mut fields = self.launch.edits(self.cwd.clone(), self.title.clone());
+        fields.name_kind = self.title_kind;
         if let Some(repo) = &self.gh {
             fields.destination = Some(farhelm_proto::launcher::TemplateDestination::Github(
                 repo.clone(),
@@ -634,6 +639,19 @@ fn parse_template_key(value: &str) -> Result<String, String> {
     )
     .then(|| value.to_string())
     .ok_or_else(|| "a template key must be one digit, 1–9 or 0".to_string())
+}
+
+/// Name policy belongs to template writes only. Parse the shared enum here
+/// so omission remains distinct from explicitly selecting Base on an edit.
+fn parse_template_title_kind(
+    value: &str,
+) -> Result<farhelm_proto::launcher::TemplateNameKind, String> {
+    use farhelm_proto::launcher::TemplateNameKind;
+    match value {
+        "base" => Ok(TemplateNameKind::Base),
+        "fixed" => Ok(TemplateNameKind::Fixed),
+        _ => Err("a template title kind must be base or fixed".into()),
+    }
 }
 
 /// Validate repository spellings with the launcher's parser while retaining
@@ -1857,12 +1875,12 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
 /// stderr to preserve the existing stdout table contract. A listing ends
 /// after printing and never enters the lifecycle mutation path.
 fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Result<()> {
-    let (asking, reply) = runtime()?.block_on(agent_request(&SessionEnv::from_env(), verb))?;
+    let (asking, mut reply) = runtime()?.block_on(agent_request(&SessionEnv::from_env(), verb))?;
     if json {
         let caller_host_id = match &reply {
             AgentReply::Hosts { caller_host_id, .. }
             | AgentReply::Sessions { caller_host_id, .. }
-            | AgentReply::Templates { caller_host_id, .. } => caller_host_id,
+            | AgentReply::Templates { caller_host_id, .. } => caller_host_id.clone(),
             _ => anyhow::bail!("only discovery replies can be printed as JSON"),
         };
         // Bumped whenever a value an agent reads changes meaning or
@@ -1874,6 +1892,19 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
         // `no_resume_command`, a command launch without a resume command.
         // 6: the templates listing, whose reply is new (nothing earlier
         // changed meaning).
+        // Spell out the default in this discovery view, where an agent needs
+        // to know what a named template does. Persistence and write replies
+        // still omit Base; changing their normalized shape would dirty editors.
+        if let AgentReply::Templates { templates, .. } = &mut reply {
+            for template in templates {
+                if template.fields.name.is_some() {
+                    template
+                        .fields
+                        .name_kind
+                        .get_or_insert(farhelm_proto::launcher::TemplateNameKind::Base);
+                }
+            }
+        }
         let envelope = serde_json::json!({
             "schema_version": 6,
             "caller": {
@@ -2703,6 +2734,73 @@ mod tests {
             );
         }
         assert!(Cli::try_parse_from(["farhelm", "agent", "create", "--gh", "not-a-repo"]).is_err());
+    }
+
+    /// Template edits must preserve omission: a title-only edit retains Fixed,
+    /// while an explicit Base can replace it. A kind-only edit needs the helm's
+    /// stored name, so the CLI carries it without requiring a new title.
+    /// Create and spawn keep their own titles exact and expose no policy flag.
+    #[farhelm_testtrace::test]
+    fn template_title_kind_is_optional_and_scoped_to_template_writes() {
+        use farhelm_proto::launcher::TemplateNameKind;
+        for verb in ["create", "edit"] {
+            for (extra, expected_name, expected_kind) in [
+                (vec!["--title", "review"], Some("review"), None),
+                (
+                    vec!["--title", "review", "--title-kind", "base"],
+                    Some("review"),
+                    Some(TemplateNameKind::Base),
+                ),
+                (
+                    vec!["--title", "review", "--title-kind", "fixed"],
+                    Some("review"),
+                    Some(TemplateNameKind::Fixed),
+                ),
+                (
+                    vec!["--title-kind", "base"],
+                    None,
+                    Some(TemplateNameKind::Base),
+                ),
+            ] {
+                let args = ["farhelm", "agent", "template", verb, "t"]
+                    .into_iter()
+                    .chain(extra)
+                    .collect::<Vec<_>>();
+                let Cmd::Agent {
+                    command: AgentCmd::Template(template),
+                } = Cli::try_parse_from(args).unwrap().command
+                else {
+                    panic!("template write")
+                };
+                let fields = match template {
+                    TemplateCmd::Create { fields, .. } | TemplateCmd::Edit { fields, .. } => {
+                        fields.fields().unwrap()
+                    }
+                    _ => panic!("template write"),
+                };
+                assert_eq!(fields.name.as_deref(), expected_name);
+                assert_eq!(fields.name_kind, expected_kind);
+            }
+            let error = Cli::try_parse_from([
+                "farhelm",
+                "agent",
+                "template",
+                verb,
+                "t",
+                "--title-kind",
+                "other",
+            ])
+            .err()
+            .expect("unknown kind refused")
+            .to_string();
+            assert!(error.contains("base or fixed"), "{error}");
+        }
+        for args in [
+            vec!["farhelm", "agent", "create", "--title-kind", "base"],
+            vec!["farhelm", "spawn", "--title-kind", "base"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
     }
 
     /// Spec: the launch flags become the launcher edits the helm applies

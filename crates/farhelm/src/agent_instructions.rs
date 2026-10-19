@@ -161,7 +161,13 @@ fn render(agent: &Command) -> String {
          set is the agent type's default, never the user's remembered GUI choice; pass default\n\
          to reset one a template set.\n\
          template create NAME and template edit NAME write templates from create's flags plus\n\
-         --cwd or --gh/--github, --title and --host (never --template); edit sets only the fields you give and\n\
+         --cwd or --gh/--github, --title, --title-kind base|fixed and --host (never --template).\n\
+         A template's title defaults to a base name: used as-is when free, otherwise\n\
+         numbered (review-2, -3, ... through -50) for managed checkouts. A fixed name\n\
+         is used exactly and reports a clash. Folder destinations never number names.\n\
+         On edit, --title alone keeps the saved kind; --title-kind alone changes\n\
+         the kind of an existing title. A kind without a title is refused.\n\
+         Edit sets only the fields you give and\n\
          cannot unset one or change a template between agent and command launches, so delete\n\
          and recreate a template to do either. --command always needs --yolo or --no-yolo. The\n\
          --quick-launch flag marks a template that chooses an agent or a nonblank command;\n\
@@ -169,7 +175,7 @@ fn render(agent: &Command) -> String {
          mark or key from another template, and the approval card names the move. On edit,\n\
          --no-quick-launch and --no-key clear this template's own assignments. You can edit\n\
          only these shortcuts without changing a template field. The templates listing\n\
-         shows each template's quick-launch mark and number key, but hides command text,\n\
+         shows each template's name kind, quick-launch mark and number key, but hides command text,\n\
          so you cannot copy a template you did not write.\n\
          Clone requires an exact source session id and destination host; cwd, title, and the\n\
          source's launch inherit. Spawn creates on this host only, from --inherit-agent (this\n\
