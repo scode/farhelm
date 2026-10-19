@@ -15938,7 +15938,8 @@
   file and notes that opening was not offered. JS tests updated, including the one pinning today's behavior, and one
   SPEC_impl.md sentence. Complexity gate: if not a small, localized change, discard instead. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/link-hover-covers.md`.
+- Execution: implemented in change `yxmplmvw`, bookmark `plan/link-hover-covers/03-hover-opening-hint`;
+  https://github.com/scode/farhelm/pull/2351/changes.
 
 ## payload-workers-outlive-state-lock.md
 

@@ -2059,9 +2059,10 @@ cursor decorations: xterm's accessors target whichever link is current, which ma
 underline before lookup but gain a pointer only when ready. Click reopens the disclosed canonical path independently.
 Browser bodies become a bounded Blob only after successful EOF; an object URL is released after the save click. The
 desktop handoff secret identifies native mode, which requests `save_to_downloads` and adds `open` only for its platform
-modifier-click; it never falls back to Blob. Tooltip and transfer outcomes use textContent, peer-value isolation and
-visible Unicode format escapes. The addon is disposed with its terminal, cancelling pending work; retained reconnect
-terminals retain it.
+modifier-click when that hover's stat reply offered opening; otherwise the modified click saves and explains that
+opening was not offered. It never falls back to Blob. Tooltip and transfer outcomes use textContent, peer-value
+isolation and visible Unicode format escapes. The addon is disposed with its terminal, cancelling pending work; retained
+reconnect terminals retain it.
 
 ## Supervisor internals
 
