@@ -15817,7 +15817,10 @@
   supervisor through a dedicated check (a new session's initial prompt keeps its current rules); SPEC.md's "An
   explicitly empty message is legal" is replaced by the refusal; the CLI test that pins `--prompt ""` as legal expects a
   refusal; a supervisor test covers the refusal. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/agent-spawned-session-rules.md`.
+- Execution: complete in change `mnvynprmnnry`, bookmark `plan/agent-spawned-session-rules/03-refuse-blank-prompts`,
+  https://github.com/scode/farhelm/pull/2352/changes. A dedicated prompt-command check refuses whitespace-empty messages
+  at every admission boundary, preserving new-session initial prompts. The prompt command stays disabled for its
+  remaining status-sample gap.
 
 ## create-reply-foreign-id-bypasses-cache-refusal.md
 

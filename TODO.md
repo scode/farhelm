@@ -181,16 +181,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
   session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
-  request, and the command is hidden from agents. Two gaps remain where a delivered message could do something the user
+  request, and the command is hidden from agents. One gap remains where a delivered message could do something the user
   never agreed to. The "is it waiting on a question?" check uses a status reading up to about two seconds old, so a
   permission or trust question that appears in that window, or right after the agent starts, can receive the message and
-  its Enter as its answer. And an empty message sends only the submit key, which submits whatever the user has typed in
-  that agent's input box. TRIAGE_OUTCOMES.md records the pending decision to refuse empty messages
-  (`empty-agent-prompt-submits-existing-draft.md`). The prompt card's permission shield is an informational snapshot
-  that can change while approval waits, as SPEC.md now states. Re-enabling means fixing each remaining gap or deciding
-  to accept it, then setting `AGENT_PROMPTS_ENABLED` in `crates/farhelm-helm/src/agent_requests.rs` to true, unhiding
-  the CLI verb, restoring its agent instructions and docs, un-ignoring the end-to-end delivery tests, and writing a new
-  changelog fragment. SPEC.md, Agent-spawned sessions, keeps the design.
+  its Enter as its answer. Re-enabling means fixing that gap or deciding to accept it, then setting
+  `AGENT_PROMPTS_ENABLED` in `crates/farhelm-helm/src/agent_requests.rs` to true, unhiding the CLI verb, restoring its
+  agent instructions and docs, un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md,
+  Agent-spawned sessions, keeps the design.
 
 - **Say why Enter in the session launcher did nothing.** When pressing Enter in the session launcher does not launch,
   for whatever reason, show the reason instead of silently doing nothing. The case that prompted this: Clone on a

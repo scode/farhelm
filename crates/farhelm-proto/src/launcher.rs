@@ -380,6 +380,19 @@ pub fn check_initial_prompt(prompt: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Require actual message text before submitting to a running agent.
+/// Initial prompts retain their existing empty-text rule. A running-agent
+/// prompt also sends a submit key, so blank text could submit the user's
+/// existing composer draft. Trimming only decides admission; accepted text
+/// keeps its original bytes, including surrounding whitespace.
+pub fn check_agent_prompt(prompt: &str) -> Result<(), String> {
+    check_initial_prompt(prompt)?;
+    if prompt.trim().is_empty() {
+        return Err("a prompt for a running agent must contain non-whitespace text".into());
+    }
+    Ok(())
+}
+
 /// A named, partial set of launcher edits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -959,6 +972,32 @@ mod tests {
             assert!(super::check_initial_prompt(bad).is_err(), "{bad:?}");
         }
         assert!(super::check_initial_prompt(&"x".repeat(super::TEMPLATE_FIELDS_CAP + 1)).is_err());
+    }
+
+    /// Blank follow-ups would submit an existing composer draft, but an empty
+    /// initial prompt must remain valid. Whitespace is only an admission check:
+    /// useful messages retain newline, tab and surrounding spaces as data.
+    #[test]
+    fn agent_prompt_requires_text_without_changing_initial_prompts() {
+        for blank in ["", " \t\n ", "\u{a0}\u{2003}"] {
+            assert!(super::check_initial_prompt(blank).is_ok(), "{blank:?}");
+            assert_eq!(
+                super::check_agent_prompt(blank).unwrap_err(),
+                "a prompt for a running agent must contain non-whitespace text",
+                "{blank:?}"
+            );
+        }
+        for text in [" \tmessage\n ", &"é".repeat(super::TEMPLATE_FIELDS_CAP / 2)] {
+            assert!(super::check_agent_prompt(text).is_ok(), "{text:?}");
+        }
+        for text in [
+            "bad\r",
+            "bad\x1b[201~",
+            "bad\0",
+            &"x".repeat(super::TEMPLATE_FIELDS_CAP + 1),
+        ] {
+            assert!(super::check_agent_prompt(text).is_err(), "{text:?}");
+        }
     }
 
     /// Custom CLI words stay with their agent, survive template serialization,

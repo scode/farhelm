@@ -10553,12 +10553,14 @@ impl Supervisor {
     /// This deliberately takes no target agent-request fence. The asking
     /// session already holds its own, and two agents prompting each other
     /// must not form a cycle. Ordinary attached input can interleave.
+    /// Blank messages are refused before taking the lifecycle claim: their
+    /// submit key could otherwise submit a draft already in the composer.
     pub(crate) async fn prompt_session(
         &self,
         session_id: &str,
         prompt: &str,
     ) -> anyhow::Result<()> {
-        farhelm_proto::launcher::check_initial_prompt(prompt)
+        farhelm_proto::launcher::check_agent_prompt(prompt)
             .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
         let _lifecycle = self.lifecycle_locks.claim(session_id).await;
         let entry = self
@@ -19645,6 +19647,40 @@ pub(crate) mod tests {
                 recorded_prompt_bytes(&sup, &entry, &path, &expected).await;
             }
         }
+    }
+
+    /// Empty and whitespace-only follow-ups must never type or submit: their
+    /// submit key would act on the user's existing draft. A subsequent valid
+    /// message proves that the live target remained eligible and that no
+    /// earlier blank paste or submit reached the ordered input stream.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn prompt_refuses_blank_text_without_typing_or_submitting() {
+        use crate::agent_kind::screen_reader::ScreenState;
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let (entry, path) = prompt_recorder(&sup, &state, AgentKind::Claude, true).await;
+        entry.run.activity.lock().unwrap().reading.state = ScreenState::Working;
+        for prompt in ["", " \t\n ", "\u{a0}\u{2003}"] {
+            let error = sup
+                .prompt_session(&entry.info.id, prompt)
+                .await
+                .unwrap_err();
+            assert_eq!(error_kind(&error), ErrorKind::InvalidRequest);
+            assert!(
+                error
+                    .to_string()
+                    .contains("must contain non-whitespace text"),
+                "{prompt:?}: {error:#}"
+            );
+        }
+        const PROMPT: &str = " \tkeep these bytes\n ";
+        sup.prompt_session(&entry.info.id, PROMPT).await.unwrap();
+        let mut expected = b"\x1b[200~".to_vec();
+        expected.extend_from_slice(PROMPT.as_bytes());
+        expected.extend_from_slice(b"\x1b[201~\r");
+        recorded_prompt_bytes(&sup, &entry, &path, &expected).await;
     }
 
     /// Refusal must leave the composer untouched: in particular a waiting

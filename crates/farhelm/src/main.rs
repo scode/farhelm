@@ -251,8 +251,8 @@ enum AgentCmd {
     // the helm's `agent_requests`; TODO.md, "Re-assess letting agents prompt
     // running sessions"). Hiding keeps it out of `--help` and out of the
     // generated agent instructions, so agents are never taught a verb that
-    // always fails; it still parses, so a caller who already knows it gets
-    // the helm's refusal instead of a usage error. Unhide it with the
+    // always fails; valid requests still parse, so a caller who already
+    // knows it gets the helm's refusal. Unhide it with the
     // re-enable.
     /// Send a prompt to another session's running Claude or Codex agent.
     #[command(hide = true)]
@@ -262,12 +262,13 @@ enum AgentCmd {
         #[arg(long = "session", allow_hyphen_values = true)]
         session: String,
         /// Message to submit, queued after the current turn if the agent is busy.
-        /// Newlines and tabs are allowed; other control characters are refused.
-        #[arg(long, value_name = "TEXT", allow_hyphen_values = true, value_parser = parse_initial_prompt)]
+        /// Must contain non-whitespace text. Newlines and tabs are allowed;
+        /// other control characters are refused.
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true, value_parser = parse_agent_prompt)]
         prompt: Option<String>,
         /// Read the message from a UTF-8 file, or - for stdin (64 KiB cap).
         /// Cannot be combined with --prompt; takes contents, not a target-host path.
-        #[arg(long, value_name = "PATH", allow_hyphen_values = true, value_parser = read_initial_prompt)]
+        #[arg(long, value_name = "PATH", allow_hyphen_values = true, value_parser = read_agent_prompt)]
         prompt_file: Option<String>,
     },
     /// Delete an explicitly named session and its stored state; never this session.
@@ -994,6 +995,13 @@ fn parse_initial_prompt(text: &str) -> Result<String, String> {
     Ok(text.to_string())
 }
 
+/// Keep running-agent submission stricter than a new session's first message.
+/// The command must not send a submit key for an empty or whitespace-only paste.
+fn parse_agent_prompt(text: &str) -> Result<String, String> {
+    farhelm_proto::launcher::check_agent_prompt(text)?;
+    Ok(text.to_string())
+}
+
 /// Materialize one bounded UTF-8 message for initial or running-agent prompts.
 /// Reading the cap plus one byte also bounds stdin. Approval and any create
 /// retry digest see these contents, never a path that could change while waiting.
@@ -1010,6 +1018,15 @@ fn read_initial_prompt(path: &str) -> Result<String, String> {
         .read_to_string(&mut text)
         .map_err(|e| format!("cannot read a UTF-8 prompt: {e}"))?;
     parse_initial_prompt(&text)
+}
+
+/// Apply the running-agent rule to the materialized file or stdin contents.
+/// Reusing the initial reader preserves its UTF-8 and byte limits without
+/// changing what a new session accepts. The message itself is never trimmed.
+fn read_agent_prompt(path: &str) -> Result<String, String> {
+    let text = read_initial_prompt(path)?;
+    farhelm_proto::launcher::check_agent_prompt(&text)?;
+    Ok(text)
 }
 
 #[derive(Subcommand)]
