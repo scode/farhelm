@@ -1,10 +1,61 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `aeeda466fdaee55755a341046cb051e882495dcd`
+Last reviewed commit: `c5fcfee8681e46b1d47718771b321488037d3f83`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through c5fcfee8
+
+Reviewed range: `aeeda466fdaee55755a341046cb051e882495dcd..c5fcfee8681e46b1d47718771b321488037d3f83`, 41 commits. The
+tip and saved checkpoint came from fetched `origin/main`; the checkpoint was verified as an ancestor. A second fetch
+before recording the result found no newer checkpoint or main commits. Five separate same-model adversarial reviewers
+read the complete individual patches, including intermediate changes and deletions:
+
+| Ordered commits | Count | Main content                                                         |
+| --------------- | ----: | -------------------------------------------------------------------- |
+| 1–10            |    10 | Hover summaries, release-review page, readiness tests and menu focus |
+| 11–19           |     9 | Template shortcut refactoring, launcher application and Cmd-J        |
+| 20–28           |     9 | Plan state, landing reports, TODO and triage decisions               |
+| 29–36           |     8 | Approved-plan deletions and shortcut documentation                   |
+| 37–41           |     5 | Triage criteria and plan reports                                     |
+
+All 41 commits are accounted for; no assigned patch lines remain unread. Surrounding code and coverage sources were read
+selectively to assess candidates, not exhaustively across the repository. Historical private runtime evidence and
+maintainer conversations quoted by reports were not independently authenticated.
+
+Seven records were retained. Three are conservatively in `highest`: a main hover summary that omits observed YOLO, a
+template-list row that can launch a template recreated under the same name, and a cached shortcut badge that can guide a
+later launch to a different template. Their static mechanisms are established, but consequential reliance, complete
+concurrent sequences and harmful launches remain unverified. The two template-list records preserve specification
+ambiguities rather than claiming fresh resolution or preference caching is itself forbidden. The independent auditor
+agreed that stale badge display alone is expressly accepted, but could not approve excluding the possible later
+wrong-target gesture. Triage should resolve those contracts before commissioning broader designs.
+
+One `high` record concerns reapplying an unchanged template after a lost reply, which clears the retained retry identity
+and can duplicate a launch. Three `other` records concern inaccessible lower hover-summary rows, shortcut tests that
+skip remaining cleanup after an earlier cleanup failure, and unsafe links in the release-review page generator. The last
+has a confirmed attribute-escaping defect, but attacker exposure and consequential security impact are unverified; its
+input is curated maintainer prose. Exact confidence, possible coverage and verification limits are in each record.
+
+A separate fresh-context auditor checked every proposed security or user-work exclusion, including leads refuted by
+source inspection. It agreed to duplicate-only exclusions for tunnel port reuse, armed-sequence binding drift and header
+confirmation focus recovery, all of which remain recorded already. It confirmed the explicitly accepted same-entry host
+retarget/adoption behavior, the scoped host-identity redesign criteria, DOM-only tooltip rendering, modal/opening
+fences, inert historical template trust, missing-name refusal and whole-batch validation. These are narrow conclusions,
+not clean verdicts for their subsystems. Ambiguous exclusions became the template-list and release-page records above.
+
+The reported native shortcut desynchronization was narrowed: a refused Begin can leave an orphan press snapshot and drop
+a later press, but a following press in a stable context can recover. The landing report's stronger claim that it
+persists until reload was not substantiated. The recoverable narrow admission race matched the existing filter. No
+runtime reproduction was run.
+
+This was a static review. No product runtime, browser, native Mac or vendor-agent tests were run, and no prior runtime
+results were reused as current passes. The result changes feedback records, the index and this checkpoint only. No fixes
+or triage outcomes were executed. Documentation formatting, whitespace, queue/index consistency and instruction pointer
+checks validate the result. The review-result PR stays a draft for separate manual merging; this proposed checkpoint has
+not advanced on main.
 
 ## Review through aeeda466
 

@@ -87,6 +87,15 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`download-opens-without-hover-hint.md`](download-opens-without-hover-hint.md) — A policy change can make a Cmd-click
   open a file whose hover offered only a download.
 
+- [`summary-card-omits-observed-yolo.md`](summary-card-omits-observed-yolo.md) — The main session summary can still say
+  guarded after YOLO is observed; consequential reliance remains unverified.
+
+- [`template-list-can-launch-recreated-name.md`](template-list-can-launch-recreated-name.md) — A stale template-list row
+  can launch a replacement recreated under the same name; harmful execution remains unverified.
+
+- [`template-list-advertises-rebound-shortcut.md`](template-list-advertises-rebound-shortcut.md) — Cached shortcut
+  badges can guide a later launch to a different template; the gesture and harm remain unverified.
+
 ## High priority: material UX degradation
 
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
@@ -105,6 +114,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`auth-refusal-forgets-partial-replace.md`](auth-refusal-forgets-partial-replace.md) — An authentication refusal can
   forget a partially successful Replace attempt, allowing its retry to create another replacement.
+
+- [`unchanged-template-drops-launch-retry-key.md`](unchanged-template-drops-launch-retry-key.md) — Reapplying an
+  unchanged template after a lost reply discards retry protection and can start another session.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -235,3 +247,12 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`noop-shortcut-approval-reports-missing-binding.md`](noop-shortcut-approval-reports-missing-binding.md) — A shortcut
   request can report success after another client moves its initially satisfied binding during approval.
+
+- [`summary-card-clips-lower-facts.md`](summary-card-clips-lower-facts.md) — A tall hover summary can hide its directory
+  and timestamps without scrolling.
+
+- [`shortcut-tests-skip-owned-cleanup.md`](shortcut-tests-skip-owned-cleanup.md) — Early cleanup failures in new
+  shortcut tests skip remaining owned sessions or templates.
+
+- [`release-review-links-allow-page-script.md`](release-review-links-allow-page-script.md) — Draft Markdown links can
+  inject release-review page script; attacker exposure and consequential harm remain unverified.
