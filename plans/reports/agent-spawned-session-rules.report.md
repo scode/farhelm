@@ -77,3 +77,62 @@ off. No live installation was changed.
 
 Each PR passed its own independent fresh-context gpt-6.1-sol high review for correctness, design and idiomatic code or
 prose. No findings remained. Each commit message also passed a fresh-context cold read; unclear wording was revised.
+
+### Landing
+
+Landed as #2346, #2347 and #2352, merged bottom-up, unchanged from what the report describes. The other plan in the same
+landing round, link-hover-covers, lands after it.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained only plan bookkeeping. The other plan in this round, link-hover-covers, changes how
+terminal file and web links refuse clicks when something covers their hover details, and when a desktop Cmd-click may
+open a downloaded file. A fresh-context reviewer and I read the two against each other:
+
+- They edit different sections of SPEC.md: this plan the agent-spawned sessions section, the other the terminal section.
+  Neither contradicts the other's text.
+- Both remove their own entries from the review feedback queue's index. That was the only conflict, and both sides'
+  removals are kept.
+- Only this plan edits TODO.md, and the two plans' TRIAGE_OUTCOMES.md entries are separate.
+
+The reviewer also confirmed that, at the helm, the switch turning agent prompts off still refuses before the new
+blank-message check, so a blank message that reaches the helm gets the same "turned off" refusal as any other (the
+command line itself refuses a blank message before sending anything). A supervisor still on 0.30.0, which lacks the
+blank check, is therefore never asked; once prompts are turned back on, the helm's own blank check still stops a blank
+message before it reaches such a supervisor. New sessions' first messages keep their old rules, including allowing an
+empty one.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-ups
+
+- When agent prompts are turned back on: a message made only of invisible characters that do not count as whitespace (a
+  zero-width space, for example) passes the new check, and its submit key would still submit whatever the user had typed
+  in the target agent's input box. SPEC.md already says a message may mix with text in that box, so this is within the
+  stated design, but the re-enable work may want to refuse such messages too.
+- SPEC.md lists the places that refuse a blank message as the command line, the helm and the target session's
+  supervisor. The asking session's supervisor, which relays the request, refuses it too, as the report says. Adding it
+  to that sentence would make the list complete; nothing behaves differently either way.
+
+#### Checks
+
+Run now, on this stack rebased onto main with link-hover-covers on top (link-hover-covers changes no Rust code; its
+browser and JavaScript checks from the same run are reported in its own landing notes):
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the isolated test-sleep check, `dprint check` on every changed
+  documentation, changelog, stylesheet, script and test file, and `python3 releasing/check-changelog.py format`: all
+  passed.
+- Through the test recorder with pinned nextest and tmux, four slots and no retries, the whole protocol, helm and
+  supervisor libraries, the `farhelm` binary's own tests and the agent command-line test file: 2762 passed, run
+  `13dd7643-487f-4153-b8a3-34e3a79e91cc`. The two tests nextest skipped are helpers that only run as child processes of
+  other tests, and the output had no runtime `SKIPPED` marker. The executor had run selected tests only. The run's
+  record was read after it finished and then lost when the machine rebooted before this plan was recorded; the result
+  above is from that reading.
+- Skipped: browser, desktop, systemd, SSH and vendor-agent suites, and the end-to-end prompt delivery tests (still
+  ignored while prompts are off), for the report's reasons. `python3 scripts/check-agents-md.py` was skipped because the
+  stack changes no repository instruction file.
+
+Nothing in the executor's report became untrue at landing.
