@@ -15930,7 +15930,10 @@
   launch uses the templates shown (a renamed or deleted template still refuses), with a unit test and the module doc and
   SPEC_impl.md sentences that say references resolve from a fresh read corrected. Complexity gate: if this is not a
   small, localized change of about an hour or two, discard instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/queued-launch-snapshot.md`.
+- Execution: change `nrtzounvuzoukspnqvprwprvouqwvnok`, bookmark
+  `plan/queued-launch-snapshot/01-displayed-template-bindings`. The complexity gate held: Enter captures the displayed
+  names before the existing fresh read, while explicitly unbound references retain their refusal and binding hints.
+  Draft PR [#2355](https://github.com/scode/farhelm/pull/2355/changes).
 
 ## download-opens-without-hover-hint.md
 
