@@ -608,11 +608,11 @@ test("program-only link clicks do nothing without mouse reporting", async ({ pag
   }
 });
 
-/** These tests keep the real terminal and approval renderer. Only the helm's
- * approval listing and file replies are controlled; the hover is always the
- * one created by the real link provider after pointer movement.
+/** These tests keep the real terminal and link providers. Approval listings,
+ * file replies and the desktop-only tunnel notice are controlled; every
+ * disclosure still comes from the real provider after pointer movement.
  */
-test.describe("approval-covered terminal disclosures", () => {
+test.describe("covered terminal disclosures", () => {
   // Scope the reset/build-stamp capture to these additions. The cleanup hook
   // drains routed replies before Playwright disposes their page context.
   installTerminalSuiteHooks();
@@ -664,16 +664,16 @@ test.describe("approval-covered terminal disclosures", () => {
     return cell(page, label);
   }
 
-  /** Put the pointer left of the card while its ordinary below-right hover
-   * reaches beneath it. The allowed location is below that same live card,
-   * so a positive click cannot pass merely because approvals disappeared.
+  /** Put the pointer left of a cover while its ordinary below-right hover
+   * reaches beneath it. For approval cards the allowed location is below
+   * the same live card, so the positive control keeps approvals present.
    */
-  async function besideApproval(page: Page, label: string, target: string | null, covered: boolean) {
+  async function besideCover(page: Page, label: string, target: string | null, covered: boolean, coverSelector = ".approval-cards") {
     await page.evaluate(() => document.fonts.ready);
-    const grid = await page.evaluate(({ label, covered }) => {
+    const grid = await page.evaluate(({ label, covered, coverSelector }) => {
       const term = (window as any).__farhelmTerm;
       const screen = document.querySelector("#terminal .xterm-screen")!.getBoundingClientRect();
-      const region = document.querySelector(".approval-cards")!.getBoundingClientRect();
+      const region = document.querySelector(coverSelector)!.getBoundingClientRect();
       const width = screen.width / term.cols;
       const height = screen.height / term.rows;
       return {
@@ -682,22 +682,22 @@ test.describe("approval-covered terminal disclosures", () => {
         rows: term.rows,
         cols: term.cols,
       };
-    }, { label, covered });
+    }, { label, covered, coverSelector });
     expect(grid.row, "the target row must be in this live terminal").toBeGreaterThan(0);
     expect(grid.row).toBeLessThanOrEqual(grid.rows);
-    expect(grid.col, "the entire label must fit left of the card's center").toBeGreaterThan(0);
+    expect(grid.col, "the entire label must fit beside the covering surface").toBeGreaterThan(0);
     expect(grid.col + label.length).toBeLessThanOrEqual(grid.cols);
     return paintDisclosureLink(page, label, target, grid.row, grid.col);
   }
 
   /** Establish both causes independently: the link receives real pointer
-   * input, and its otherwise fitting hover intersects the higher card region.
+   * input, and its otherwise fitting hover intersects the higher cover region.
    * Reading the rectangles also gives useful fixture state on failure.
    */
-  async function assertDisclosureGeometry(page: Page, selector: string, point: { x: number; y: number }, covered: boolean) {
+  async function assertDisclosureGeometry(page: Page, selector: string, point: { x: number; y: number }, covered: boolean, coverSelector = ".approval-cards") {
     await expect(page.locator(selector)).toBeVisible();
-    await expect.poll(() => page.locator(selector).evaluate((hover, point) => {
-      const card = document.querySelector(".approval-cards")!;
+    await expect.poll(() => page.locator(selector).evaluate((hover, { point, coverSelector }) => {
+      const card = document.querySelector(coverSelector)!;
       const h = hover.getBoundingClientRect();
       const c = card.getBoundingClientRect();
       return {
@@ -705,27 +705,86 @@ test.describe("approval-covered terminal disclosures", () => {
           hover.scrollWidth <= hover.clientWidth && h.top >= 0 && h.left >= 0 && h.bottom <= innerHeight && h.right <= innerWidth,
         overlaps: h.left < c.right && h.right > c.left && h.top < c.bottom && h.bottom > c.top,
         pointerUncovered: !!document.elementFromPoint(point.x, point.y)?.closest("#terminal"),
-        cardAboveHover: Number(getComputedStyle(card).zIndex) > Number(getComputedStyle(hover).zIndex),
+        coverAboveHover: Number(getComputedStyle(card).zIndex) > Number(getComputedStyle(hover).zIndex),
       };
-    }, point), { message: "live pointer, fitting disclosure and approval-region intersection" }).toEqual({
-      fits: true, overlaps: covered, pointerUncovered: true, cardAboveHover: true,
+    }, { point, coverSelector }), { message: "live pointer, fitting disclosure and covering-region intersection" }).toEqual({
+      fits: true, overlaps: covered, pointerUncovered: true, coverAboveHover: true,
     });
   }
 
   /** Refusal must be a new, readable outcome above the surface that covered
    * the destination, not an ordinary low-layer transfer failure.
    */
-  async function assertCoveredRefusal(page: Page, operation: "download" | "open") {
+  async function assertCoveredRefusal(page: Page, operation: "download" | "open", coverSelector = ".approval-cards") {
     const notice = page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]');
     await expect(notice).toContainText(`cannot ${operation}:`);
-    await expect(notice).toContainText("covered by an approval request");
+    await expect(notice).toContainText("covered by another Farhelm surface");
     await expect(notice).toBeVisible();
-    await expect.poll(() => notice.evaluate(el => {
-      const card = document.querySelector(".approval-cards")!;
+    await expect.poll(() => notice.evaluate((el, coverSelector) => {
+      const card = document.querySelector(coverSelector)!;
       const box = el.getBoundingClientRect();
       return Number(getComputedStyle(el).zIndex) > Number(getComputedStyle(card).zIndex) &&
         box.top >= 0 && box.bottom <= innerHeight && el.scrollHeight <= el.clientHeight;
-    }), { message: "the full refusal is inside the window and above approval cards" }).toBe(true);
+    }, coverSelector), { message: "the full refusal is inside the window and above the covering surface" }).toBe(true);
+  }
+
+  /** The desktop renders this notice outside browser builds. Inject its real
+   * class and child structure, retaining production CSS while fixing a tall
+   * geometry that crosses both the hover and the terminal's refusal banner.
+   */
+  async function stageCoveringTunnelNotice(page: Page) {
+    await page.evaluate(() => {
+      const screen = document.querySelector("#terminal .xterm-screen")!.getBoundingClientRect();
+      const term = (window as any).__farhelmTerm;
+      const notice = document.createElement("div");
+      notice.className = "tunnel-error-notice";
+      notice.setAttribute("role", "alert");
+      notice.style.top = `${screen.top}px`;
+      // Keep the cell helper's bottom-right reset inside the terminal. A
+      // covered reset leaves xterm's last link-cell cache unchanged, so the
+      // second click form would never obtain a fresh file hover or lookup.
+      notice.style.bottom = `${innerHeight - screen.bottom + 2 * screen.height / term.rows}px`;
+      notice.style.width = "480px";
+      const text = document.createElement("span");
+      text.textContent = "fixture tunnel failure";
+      const dismiss = document.createElement("button");
+      dismiss.type = "button";
+      dismiss.className = "btn btn-neutral";
+      dismiss.textContent = "dismiss";
+      dismiss.addEventListener("click", () => notice.remove());
+      notice.append(text, dismiss);
+      document.body.appendChild(notice);
+    });
+    await expect(page.locator(".tunnel-error-notice")).toBeVisible();
+  }
+
+  /** A layer number alone does not prove readability across stacking contexts.
+   * Sample the actual refusal/notice intersection without moving the pointer.
+   * Refusals normally ignore hit testing, so enable it only during this sample
+   * and restore the exact inline property before any further user input.
+   */
+  async function assertRefusalAboveTunnelNotice(page: Page) {
+    const refusal = page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]');
+    await expect.poll(() => refusal.evaluate(el => {
+      const notice = document.querySelector(".tunnel-error-notice")!;
+      const r = el.getBoundingClientRect();
+      const n = notice.getBoundingClientRect();
+      const left = Math.max(r.left, n.left);
+      const top = Math.max(r.top, n.top);
+      const right = Math.min(r.right, n.right);
+      const bottom = Math.min(r.bottom, n.bottom);
+      if (right <= left || bottom <= top) return false;
+      const style = (el as HTMLElement).style;
+      const previous = style.getPropertyValue("pointer-events");
+      const priority = style.getPropertyPriority("pointer-events");
+      try {
+        style.setProperty("pointer-events", "auto");
+        return document.elementFromPoint((left + right) / 2, (top + bottom) / 2) === el;
+      } finally {
+        if (previous) style.setProperty("pointer-events", previous, priority);
+        else style.removeProperty("pointer-events");
+      }
+    }), { message: "a tall tunnel notice intersects the refusal but paints below it" }).toBe(true);
   }
 
   /** Both browser click forms must reach admission, refuse without a request,
@@ -760,7 +819,7 @@ test.describe("approval-covered terminal disclosures", () => {
       const modifier = await page.evaluate(() => navigator.platform.includes("Mac") ? "Meta" : "Control");
       const disclosure = "#terminal .terminal-file-target";
       for (const modified of [false, true]) {
-        const point = await besideApproval(page, "/output/report.txt", null, true);
+        const point = await besideCover(page, "/output/report.txt", null, true);
         await expect(page.locator(disclosure)).toContainText("8 B");
         await expectLinkUnderPointer(page, point, "/output/report.txt");
         await assertDisclosureGeometry(page, disclosure, point, true);
@@ -772,7 +831,7 @@ test.describe("approval-covered terminal disclosures", () => {
         expect(transfers, "refusal is the completed admission boundary").toBe(0);
         expect(await opens()).toEqual([]);
       }
-      const point = await besideApproval(page, "/output/report.txt", null, false);
+      const point = await besideCover(page, "/output/report.txt", null, false);
       await expect(page.locator(disclosure)).toContainText("8 B");
       await assertDisclosureGeometry(page, disclosure, point, false);
       const downloaded = page.waitForEvent("download");
@@ -813,7 +872,7 @@ test.describe("approval-covered terminal disclosures", () => {
       await expect(page.locator(".approval-card .approval-allow")).toBeEnabled();
       const target = "https://example.test/covered-osc";
       const disclosure = "#terminal .terminal-link-target:not(.terminal-file-target)";
-      const point = await besideApproval(page, "COVERED-WEB", target, true);
+      const point = await besideCover(page, "COVERED-WEB", target, true);
       await expect(page.locator(disclosure)).toContainText(target);
       await expectLinkUnderPointer(page, point, "COVERED-WEB");
       await assertDisclosureGeometry(page, disclosure, point, true);
@@ -822,18 +881,134 @@ test.describe("approval-covered terminal disclosures", () => {
       expect(await opens()).toEqual([]);
 
       const plain = "https://p.test";
-      const plainPoint = await besideApproval(page, plain, null, true);
+      const plainPoint = await besideCover(page, plain, null, true);
       await expect(page.locator(disclosure)).toBeHidden();
       expect(await page.evaluate(point => !!document.elementFromPoint(point.x, point.y)?.closest("#terminal"), plainPoint)).toBe(true);
       await expectLinkUnderPointer(page, plainPoint, plain);
       await page.mouse.click(plainPoint.x, plainPoint.y);
       expect(await opens()).toEqual([plain]);
 
-      const uncovered = await besideApproval(page, "UNCOVERED-WEB", target, false);
+      const uncovered = await besideCover(page, "UNCOVERED-WEB", target, false);
       await expect(page.locator(disclosure)).toContainText(target);
       await assertDisclosureGeometry(page, disclosure, uncovered, false);
       await page.mouse.click(uncovered.x, uncovered.y);
       expect(await opens()).toEqual([plain, target]);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["session", () => sessionId && cleanupSession(request, sessionId)],
+        ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+      ]);
+    }
+  });
+
+  /** A persistent tunnel failure can hide ready file details without taking
+   * the pointer off the path. Both click forms must refuse before requesting
+   * a transfer, and the tall failure must not conceal that refusal in turn.
+   */
+  test("a tunnel notice covering a file hover refuses plain and modifier clicks", async ({ page, request }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const opens = await probeDisclosureOpens(page);
+    let sessionId: string | undefined;
+    let bodyFailed = false;
+    let transfers = 0;
+    try {
+      await patchPreferences(request, { terminal_link_click: null });
+      const session = await createSession(request, { title: `file-tunnel-covered-${Date.now()}`, cwd: "/tmp", invocation });
+      sessionId = session.id;
+      page.on("request", request => {
+        if (new URL(request.url()).pathname === `/api/sessions/${session.id}/files/download`) transfers++;
+      });
+      await page.route(`**/api/sessions/${session.id}/files/stat`, route => fulfillAsHelm(route, {
+        json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
+      }));
+      await page.route(`**/api/sessions/${session.id}/files/download`, route => fulfillAsHelm(route, {
+        status: 200, contentType: "application/octet-stream", body: "fixture\n",
+      }));
+      await page.goto("/");
+      await attachSession(page, session.id);
+      await waitForTermText(page, "FAKE-AGENT READY");
+      await cue(page, "links");
+      await stageCoveringTunnelNotice(page);
+      const modifier = await page.evaluate(() => navigator.platform.includes("Mac") ? "Meta" : "Control");
+      const disclosure = "#terminal .terminal-file-target";
+      const label = "/output/report.txt";
+      for (const modified of [false, true]) {
+        const point = await besideCover(page, label, null, true, ".tunnel-error-notice");
+        await expect(page.locator(disclosure)).toContainText("8 B");
+        await expectLinkUnderPointer(page, point, label);
+        await assertDisclosureGeometry(page, disclosure, point, true, ".tunnel-error-notice");
+        await expect(page.locator('#terminal .terminal-file-message[data-outcome="disclosure-refusal"]')).toHaveCount(0);
+        if (modified) await page.keyboard.down(modifier);
+        await page.mouse.click(point.x, point.y);
+        if (modified) await page.keyboard.up(modifier);
+        await assertCoveredRefusal(page, "download", ".tunnel-error-notice");
+        await assertRefusalAboveTunnelNotice(page);
+        expect(transfers, "the completed refusal must precede any transfer request").toBe(0);
+        expect(await opens()).toEqual([]);
+      }
+      // Fresh hover of the same cells proves admission recovers when only the
+      // covering notice is removed, without a new lookup target or terminal.
+      await page.locator(".tunnel-error-notice").evaluate(el => el.remove());
+      const point = await cell(page, label);
+      await expect(page.locator(disclosure)).toContainText("8 B");
+      await expectLinkUnderPointer(page, point, label);
+      const downloaded = page.waitForEvent("download");
+      await page.mouse.click(point.x, point.y);
+      expect((await downloaded).suggestedFilename()).toBe("report.txt");
+      expect(transfers).toBe(1);
+      await expect(page.locator("#terminal .terminal-file-message.showing")).toHaveText("downloaded report.txt");
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["Control key", () => page.keyboard.up("Control")],
+        ["Meta key", () => page.keyboard.up("Meta")],
+        ["session", () => sessionId && cleanupSession(request, sessionId)],
+        ["link preference", () => patchPreferences(request, { terminal_link_click: null })],
+      ]);
+    }
+  });
+
+  /** OSC labels do not reveal their destinations. A notice beside the live
+   * link must block opening while its hover is hidden, then permit the same
+   * target after dismissal; its refusal must remain readable meanwhile.
+   */
+  test("a tunnel notice covering an OSC web hover refuses opening", async ({ page, request }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const opens = await probeDisclosureOpens(page);
+    let sessionId: string | undefined;
+    let bodyFailed = false;
+    try {
+      await patchPreferences(request, { terminal_link_click: null });
+      const session = await createSession(request, { title: `web-tunnel-covered-${Date.now()}`, cwd: "/tmp", invocation });
+      sessionId = session.id;
+      await page.goto("/");
+      await attachSession(page, session.id);
+      await waitForTermText(page, "FAKE-AGENT READY");
+      await cue(page, "links");
+      await stageCoveringTunnelNotice(page);
+      const target = "https://example.test/tunnel-covered-osc";
+      const label = "COVERED-WEB";
+      const disclosure = "#terminal .terminal-link-target:not(.terminal-file-target)";
+      const point = await besideCover(page, label, target, true, ".tunnel-error-notice");
+      await expect(page.locator(disclosure)).toContainText(target);
+      await expectLinkUnderPointer(page, point, label);
+      await assertDisclosureGeometry(page, disclosure, point, true, ".tunnel-error-notice");
+      await page.mouse.click(point.x, point.y);
+      await assertCoveredRefusal(page, "open", ".tunnel-error-notice");
+      await assertRefusalAboveTunnelNotice(page);
+      expect(await opens()).toEqual([]);
+
+      await page.locator(".tunnel-error-notice").evaluate(el => el.remove());
+      const uncovered = await cell(page, label);
+      await expect(page.locator(disclosure)).toContainText(target);
+      await expectLinkUnderPointer(page, uncovered, label);
+      await page.mouse.click(uncovered.x, uncovered.y);
+      expect(await opens()).toEqual([target]);
     } catch (error) {
       bodyFailed = true;
       throw error;

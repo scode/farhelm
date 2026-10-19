@@ -1363,8 +1363,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   /* Low on the z-index ladder (see `.header-confirm`): a status line inside
      the terminal must not cover header confirmations, menus, dialogs or the
      hover disclosure that names what a click would open or download. A refused
-     disclosure is the exception: neither its hover nor an approval card may
-     hide why the click was refused, including during a terminal redraw. */
+     disclosure is the exception: neither its hover, an approval card nor a
+     tunnel-error notice may hide why the click was refused, including during
+     a terminal redraw. */
   z-index: 12;
   padding: 4px 6px;
   background: var(--bg-2);
@@ -1381,8 +1382,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .terminal-file-message.showing { opacity: 1; }
 .terminal-file-message[data-outcome="disclosure-refusal"] { z-index: 46; }
 /* Modal isolation already marks background content inert. The refusal only
-   outranks hovers and approval cards while its terminal is active, never the
-   dialog above it. */
+   outranks hovers, approval cards and tunnel failures while its terminal is
+   active, never the dialog above it. */
 [inert] .terminal-file-message[data-outcome="disclosure-refusal"],
 .terminal-file-message[data-outcome="disclosure-refusal"][inert] { z-index: 12; }
 @media (prefers-reduced-motion: reduce) {
@@ -1712,9 +1713,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
      45 `.approval-cards` — an agent's request waiting for the user, above
         every modal dialog's backdrop (40) because an agent that asked while a
         dialog was open is waiting on this answer, not on the dialog
+     45 `.tunnel-error-notice` — a persistent tunnel failure, above link hovers
+        (40) but below their refusal explanation (46)
      46 `.terminal-file-message[data-outcome="disclosure-refusal"]` — a clipped
-        or covered link hover's refusal, above that hover (40) and cards (45);
-        reverts to 12 when modal isolation makes its terminal inert, and drops
+        or covered link hover's refusal, above that hover (40), cards and tunnel
+        failures (45); reverts to 12 when modal isolation makes its terminal
+        inert, and drops
         to the ordinary failure layer once its file or web hover leaves, so it
         never covers a later disclosure or the header confirmation
      50 `.farhelm-tooltip` — hover help, above every panel and modal backdrop,
@@ -8180,7 +8184,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .tunnel-consent-dialog p { margin: 0; }
 .tunnel-error-notice {
   position: fixed;
-  z-index: 1100;
+  /* A failed tunnel must not conceal the explanation when a later link click
+     is refused because this notice covers its destination. */
+  z-index: 45;
   bottom: 16px;
   right: 16px;
   max-width: min(480px, calc(100vw - 32px));

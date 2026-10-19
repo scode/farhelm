@@ -8,9 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`tunnel-error-notice-obscures-link-disclosure.md`](tunnel-error-notice-obscures-link-disclosure.md) — A terminal file
-  or hovered web link can remain clickable while a tunnel-error notice hides its destination.
-
 - [`pending-approval-can-cross-host-entries.md`](pending-approval-can-cross-host-entries.md) — Waiting approvals and GUI
   Delete/Replace consent can act on another host entry after session ownership changes.
 

@@ -15870,7 +15870,8 @@
   on 2026-10-18 ("sure fix with complexity gate"): the notice must not hide the refusal explanation itself (raise the
   explanation above the notice, or cap and lower the notice); if that part is not cheap, leave it out and say so. Remove
   the feedback file and its index entry.
-- Execution: planned in `plans/queue/link-hover-covers.md`.
+- Execution: implemented in change `lorymusw`, bookmark `plan/link-hover-covers/01-notice-covers-hover`;
+  https://github.com/scode/farhelm/pull/2348/changes.
 
 ## refusal-banner-hides-approval-context.md
 

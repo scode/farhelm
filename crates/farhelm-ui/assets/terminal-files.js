@@ -365,7 +365,7 @@
     admitDisclosure(display, web = false) {
       const fits = disclosureFits(display, window);
       if (fits && disclosureFits(display, window, this.coveringRects())) return true;
-      const reason = fits ? 'are covered by an approval request; move the pointer' : 'are not visible; enlarge the window';
+      const reason = fits ? 'are covered by another Farhelm surface; move the pointer' : 'are not visible; enlarge the window';
       this.refuse(`cannot ${web ? 'open' : 'download'}: full ${web ? 'link' : 'file'} details ${reason} and hover again`);
       return false;
     }

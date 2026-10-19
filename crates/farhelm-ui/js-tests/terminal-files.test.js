@@ -538,7 +538,7 @@ test('live approval coverage refuses file transfers and shares web refusal lifet
   let [id, task] = [...fixture.timers][0];
   fixture.timers.delete(id);
   task.callback();
-  assert.match(fixture.notice().textContent, /cannot download:.*covered by an approval request/);
+  assert.match(fixture.notice().textContent, /cannot download:.*covered by another Farhelm surface/);
   assert.equal(fixture.notice().dataset.outcome, 'disclosure-refusal');
 
   assert.equal(fixture.addon.admitDisclosure(fixture.disclosure, true), false);
@@ -546,7 +546,7 @@ test('live approval coverage refuses file transfers and shares web refusal lifet
   [id, task] = [...fixture.timers][0];
   fixture.timers.delete(id);
   task.callback();
-  assert.match(fixture.notice().textContent, /cannot open:.*covered by an approval request/);
+  assert.match(fixture.notice().textContent, /cannot open:.*covered by another Farhelm surface/);
   assert.equal(fixture.notice().dataset.outcome, 'failure', 'departure before the task must not re-raise the notice');
   cover = { top: 70, bottom: 80, left: 20, right: 30 };
   assert.equal(fixture.addon.admitDisclosure(fixture.disclosure, true), true, 'moving the card away admits the same hover');
