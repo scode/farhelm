@@ -21,7 +21,7 @@ use dioxus::prelude::*;
 pub(super) use farhelm_proto::launcher::quick_launch_eligible;
 use farhelm_proto::launcher::{
     LaunchCatalogModel, LaunchTemplate, LauncherKind, TEMPLATE_NAME_CAP, TemplateDestination,
-    TemplateFields, check_template_shape,
+    TemplateFields, TemplateNameKind, check_template_shape,
 };
 use farhelm_proto::{LaunchHarness, LaunchPermission};
 use std::collections::{BTreeMap, HashMap};
@@ -445,12 +445,16 @@ impl Field {
             Self::Resume => f.resume_command = Some(None),
             Self::Host => f.host = Some(String::new()),
             Self::Destination => f.destination = Some(TemplateDestination::Folder(String::new())),
-            Self::Name => f.name = Some(String::new()),
+            Self::Name => {
+                f.name = Some(String::new());
+                f.name_kind = None;
+            }
         }
     }
 
     /// Removal leaves the field alone when the template is applied; it does
-    /// not reset the launcher's current value.
+    /// not reset the launcher's current value. A removed name takes its kind
+    /// with it, so re-adding the field cannot revive an unseen Fixed choice.
     pub(super) fn remove(self, f: &mut TemplateFields) {
         match self {
             Self::Prompt => f.prompt = None,
@@ -467,7 +471,10 @@ impl Field {
             Self::Resume => f.resume_command = None,
             Self::Host => f.host = None,
             Self::Destination => f.destination = None,
-            Self::Name => f.name = None,
+            Self::Name => {
+                f.name = None;
+                f.name_kind = None;
+            }
         }
     }
 
@@ -826,6 +833,31 @@ pub(super) fn template_summary(fields: &TemplateFields) -> String {
     }
 }
 
+/// The same explanation accompanies the editor and launcher-save choices.
+pub(super) const NAME_KIND_HELP: &str = "Base name: used as-is when free, otherwise numbered (app-review-2, -3, …). Fixed name: used exactly; a clash is reported.";
+
+/// Base is represented by absence, so a saved draft and the helm's normalized
+/// reply agree immediately. This control edits only the policy; its caller
+/// keeps it coupled to a present name and owns the immutable save snapshot.
+#[component]
+pub(super) fn NameKindControl(
+    kind: Option<TemplateNameKind>,
+    disabled: bool,
+    on_change: EventHandler<Option<TemplateNameKind>>,
+) -> Element {
+    let fixed = kind == Some(TemplateNameKind::Fixed);
+    rsx! {
+        div { class: "templates-segments template-name-kind", role: "group", aria_label: "session name kind",
+            for (value, text) in [(None, "base name"), (Some(TemplateNameKind::Fixed), "fixed name")] {
+                button { r#type: "button", disabled, aria_pressed: fixed == value.is_some(),
+                    "data-tooltip": "session name: {text}. {NAME_KIND_HELP}",
+                    onclick: move |_| on_change.call(value), "{text}"
+                }
+            }
+        }
+    }
+}
+
 /// One native select, including an older incompatible value until the user
 /// corrects it. Dropping an unknown option would visually claim a different
 /// choice while the draft still held the old one. Its explicit accessible name
@@ -1046,12 +1078,18 @@ fn FieldEditor(
             rsx! { Choice { label, value, options, disabled, on_change: move |v: String| draft.with_mut(|d| d.fields.host = Some(v)) } }
         }
         Field::Name => rsx! {
-            label { class: "templates-field",
-                span { "session name" }
-                input { class: "templates-session-name", value: escaped.unwrap_or_else(|| current.name.unwrap_or_default()), disabled, readonly: text_read_only, placeholder: "review",
+            div { class: "templates-field",
+                div { class: "template-name-label",
+                    label { r#for: "template-session-name", "session name" }
+                    NameKindControl { kind: current.name_kind, disabled,
+                        on_change: move |kind| draft.with_mut(|d| d.fields.name_kind = kind)
+                    }
+                }
+                input { id: "template-session-name", aria_label: "session name", class: "templates-session-name", value: escaped.unwrap_or_else(|| current.name.unwrap_or_default()), disabled, readonly: text_read_only, placeholder: "review",
                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
                     "data-tooltip": "session name: the name this template puts in the launcher", oninput: move |e| { if !text_read_only { draft.with_mut(|d| d.fields.name = Some(e.value())); } },
                 }
+                p { class: "templates-hint", "{NAME_KIND_HELP}" }
             }
         },
         Field::Destination => {
@@ -1788,6 +1826,23 @@ pub(super) fn TemplatesDialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Removing a name must remove its policy; re-adding it starts a new Base
+    /// choice instead of resurrecting a hidden Fixed setting.
+    #[test]
+    fn name_field_presence_owns_its_kind() {
+        let mut fields = TemplateFields {
+            name: Some("review".into()),
+            name_kind: Some(TemplateNameKind::Fixed),
+            ..Default::default()
+        };
+        Field::Name.remove(&mut fields);
+        assert_eq!(fields.name, None);
+        assert_eq!(fields.name_kind, None);
+        Field::Name.add(&mut fields);
+        assert_eq!(fields.name.as_deref(), Some(""));
+        assert_eq!(fields.name_kind, None);
+    }
 
     /// The editor distinguishes an absent edit from a present reset. Prefix
     /// words are displayed as shell text, with unsafe persisted bytes escaped

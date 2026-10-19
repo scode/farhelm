@@ -310,6 +310,61 @@ test("template name numbering yields to typed and fixed names", async ({ page, r
   }
 });
 
+/** Save the source name and policy, rather than a preview's allocated suffix.
+ * Both a ready Base preview and a refused Fixed preview remain saveable;
+ * saving must never submit a checkout or leave the saved editor dirty. */
+for (const fixed of [false, true]) {
+  test(`save as template keeps the ${fixed ? "fixed name" : "unnumbered base"} from a checkout template`, async ({ page, request }) => {
+    const fixture = await checkoutFixture("save-name-kind");
+    const original = `save-source-${Date.now()}`;
+    const saved = `${original}-copy`;
+    const base = "app-review";
+    let creates = 0;
+    page.on("request", request => {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/api/sessions") creates++;
+    });
+    try {
+      const occupied = path.join(fixture.root, `${fixture.repoName}-${base}`);
+      await fs.mkdir(occupied);
+      await fs.writeFile(path.join(occupied, "foreign"), "keep saved-name premise\n");
+      const local = (await listHosts(request)).find(host => host.kind === "local");
+      expect(local?.identity).toBeTruthy();
+      const response = await request.put(`/api/templates/${original}`, { data: {
+        kind: "agent", agent: "codex", permissions: "guarded", host: local!.identity,
+        destination: { github: fixture.repo }, name: base, ...(fixed ? { name_kind: "fixed" } : {}),
+      } });
+      expect(response.ok(), await response.text()).toBe(true);
+      const form = await openComposer(page, local!.id);
+      await form.locator('.launch-composer-search input[role="combobox"]').fill(`tl:${original}`);
+      await form.getByRole("option", { name: `Template: ${original}`, exact: true }).click();
+      await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue(fixed ? base : `${base}-2`);
+      if (fixed) await expect(form.locator(".launch-composer-checkout-preview")).toContainText("a directory with that checkout name already exists");
+      else await expect(form.locator(".create-session-submit")).toBeEnabled();
+      await form.locator(".launch-composer-save-template").click();
+      const panel = form.locator(".save-template-panel");
+      await expect(panel.locator('[data-field="name"]')).toBeChecked();
+      await expect(panel.getByRole("group", { name: "session name kind", exact: true }).getByRole("button", { name: fixed ? "fixed name" : "base name", exact: true }))
+        .toHaveAttribute("aria-pressed", "true");
+      await expect(panel.locator(".save-template-choice").filter({ has: page.locator('[data-field="name"]') })).toContainText(base);
+      await panel.locator(".save-template-name").fill(saved);
+      await panel.locator(".save-template-name").press("Enter");
+      const editor = page.locator(".templates-dialog");
+      await expect(editor.locator(".templates-name")).toHaveValue(saved);
+      await expect(editor.locator(".templates-unsaved")).toHaveCount(0);
+      const catalog = await request.get("/api/templates");
+      expect(catalog.ok()).toBe(true);
+      const fields = (await catalog.json()).templates.find((template: any) => template.name === saved)?.fields;
+      expect(fields?.name).toBe(base);
+      expect(fields?.name_kind).toBe(fixed ? "fixed" : undefined);
+      expect(creates, "saving a reusable name does not launch a checkout").toBe(0);
+      expect(await fs.readFile(path.join(occupied, "foreign"), "utf8")).toBe("keep saved-name premise\n");
+    } finally {
+      for (const name of [original, saved]) await request.delete(`/api/templates/${name}`);
+      await fixture.close(request);
+    }
+  });
+}
+
 /** Compare every owned byte, link and directory across an archival rename.
  * Git metadata and untracked work are included: checking only the tracked
  * sentinel would miss a destructive re-clone or partial copy. */

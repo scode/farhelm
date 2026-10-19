@@ -1154,6 +1154,57 @@ test("long summaries stay reachable and taken names refuse save and undo", async
   }
 });
 
+/** A name's policy survives copying and delete undo, but removing the name
+ * discards it. Base saves must agree with the normalized API reply so a
+ * successful save cannot immediately look dirty again. */
+test("session name kind survives duplicate and undo and base saves stay clean", async ({ page, request }, info) => {
+  const name = `name-kind-${Date.now()}`;
+  const copy = `${name} copy`;
+  try {
+    await putTemplate(request, name, { kind: "agent", name: "review", name_kind: "fixed" });
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-row-name").getByText(name, { exact: true }).click();
+    const kinds = dialog.getByRole("group", { name: "session name kind", exact: true });
+    await expect(kinds.getByRole("button", { name: "fixed name", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 800 });
+    await expect(kinds).toBeVisible();
+    const bounds = await kinds.evaluate(node => ({ control: node.getBoundingClientRect().right, dialog: node.closest('[role="dialog"]')!.getBoundingClientRect().right }));
+    expect(bounds.control, "the policy stays inside the phone-width editor").toBeLessThanOrEqual(bounds.dialog);
+    await page.screenshot({ path: info.outputPath("template-name-kind-phone.png") });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await dialog.locator(".templates-duplicate").click();
+    await expect(dialog.locator(".templates-name")).toHaveValue(copy);
+    await expect(kinds.getByRole("button", { name: "fixed name", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, copy)).fields.name_kind).toBe("fixed");
+    await dialog.locator(".templates-delete").click();
+    await expect(dialog.locator(".templates-undo")).toBeVisible();
+    expect(await storedTemplate(request, copy)).toBeUndefined();
+    await dialog.locator(".templates-undo").click();
+    await expect(dialog.locator(".templates-row-name").getByText(copy, { exact: true })).toBeVisible();
+    expect((await storedTemplate(request, copy)).fields.name_kind).toBe("fixed");
+    await dialog.locator(".templates-row-name").getByText(copy, { exact: true }).click();
+    await kinds.getByRole("button", { name: "base name", exact: true }).click();
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, copy)).fields).toEqual({ kind: "agent", name: "review" });
+    await dialog.getByRole("button", { name: "remove session name", exact: true }).click();
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, copy)).fields).toEqual({ kind: "agent" });
+    await addField(dialog, "session name");
+    await expect(kinds.getByRole("button", { name: "base name", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await dialog.locator(".templates-session-name").fill("review again");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, copy)).fields).toEqual({ kind: "agent", name: "review again" });
+  } finally {
+    for (const item of [name, copy]) await deleteTemplate(request, item);
+  }
+});
+
 /**
  * Every departure uses an inline guard. The pending target survives save, and
  * discarding before duplicate copies the stored version rather than the edits
@@ -1579,10 +1630,15 @@ for (const kind of ["agent", "command"] as const) {
         await form.getByRole("group", { name: "runs in YOLO mode" }).getByLabel("no", { exact: true }).check();
       }
       await form.getByLabel("folder", { exact: true }).fill("/tmp");
+      await form.getByLabel("name (optional)", { exact: true }).fill("typed review");
       await form.locator(".launch-composer-save-template").click();
       const panel = form.locator(".save-template-panel");
       await expect(panel).toBeVisible();
       await expect(panel.locator('[data-field="destination"]')).toBeChecked();
+      await expect(panel.locator('[data-field="name"]')).toBeChecked();
+      const nameKinds = panel.getByRole("group", { name: "session name kind", exact: true });
+      await expect(nameKinds.getByRole("button", { name: "base name", exact: true })).toHaveAttribute("aria-pressed", "true");
+      if (kind === "command") await nameKinds.getByRole("button", { name: "fixed name", exact: true }).click();
       if (kind === "agent") await expect(panel.locator('[data-field="agent"]')).toBeChecked();
       else await expect(panel.locator('[data-field="command"]')).toBeChecked();
       const choices = panel.locator(".save-template-choice");
@@ -1615,8 +1671,11 @@ for (const kind of ["agent", "command"] as const) {
       const stored = await storedTemplate(request, name);
       expect(stored.fields.kind).toBe(kind);
       expect(stored.fields.destination).toBeUndefined();
-      if (kind === "agent") expect(stored.fields.agent).toBe("codex");
-      else expect(stored.fields).toEqual({ kind: "command", command: "printf hello", yolo: false });
+      if (kind === "agent") {
+        expect(stored.fields.agent).toBe("codex");
+        expect(stored.fields.name).toBe("typed review");
+        expect(stored.fields.name_kind).toBeUndefined();
+      } else expect(stored.fields).toEqual({ kind: "command", command: "printf hello", yolo: false, name: "typed review", name_kind: "fixed" });
       expect(creates, "saving a template sends no session create").toEqual([]);
     } finally {
       await deleteTemplate(request, name);
