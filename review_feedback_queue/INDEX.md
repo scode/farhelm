@@ -60,9 +60,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`tunnel-port-can-divert-local-traffic.md`](tunnel-port-can-divert-local-traffic.md) — A consented tunnel can take a
   Mac port a later local service expects, without that consequence in the warning.
 
-- [`refusal-banner-hides-approval-context.md`](refusal-banner-hides-approval-context.md) — A link-refusal banner can
-  hide the requesting host or session while keyboard approval remains possible.
-
 - [`inherited-spawn-carries-workspace-trust.md`](inherited-spawn-carries-workspace-trust.md) — Inherited spawn can carry
   managed-checkout trust into an ordinary folder.
 

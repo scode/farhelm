@@ -15887,7 +15887,8 @@
   card, including the heading and the requesting session and host, that the card stays answerable from the keyboard
   meanwhile, and that the cover ends when the pointer leaves the link. No code change. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/link-hover-covers.md`.
+- Execution: implemented in change `vzzxxyqo`, bookmark `plan/link-hover-covers/02-accept-refusal-overlap`;
+  https://github.com/scode/farhelm/pull/2350/changes.
 
 ## terminal-recovery-steals-confirmation-focus.md
 
