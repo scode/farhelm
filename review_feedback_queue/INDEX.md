@@ -26,9 +26,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`approval-session-id-display-collision.md`](approval-session-id-display-collision.md) — Approval cards can display
   distinct session IDs identically; mistaken authorization remains unverified.
 
-- [`tunnel-port-can-divert-local-traffic.md`](tunnel-port-can-divert-local-traffic.md) — A consented tunnel can take a
-  Mac port a later local service expects, without that consequence in the warning.
-
 - [`summary-card-omits-observed-yolo.md`](summary-card-omits-observed-yolo.md) — The main session summary can still say
   guarded after YOLO is observed; consequential reliance remains unverified.
 

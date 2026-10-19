@@ -365,6 +365,9 @@ pub(crate) fn TunnelControls() -> Element {
                         h2 { id: "tunnel-consent-heading", "Allow tunnels from remote sessions?" }
                         p { strong { "A remote page opened through a tunnel runs at 127.0.0.1 on this Mac. It can read cookies set by other services on 127.0.0.1; different ports do not keep those cookies separate." } }
                         p { "Your browser treats it as a local page, so its private-network checks do not apply. Any program on this Mac can connect to an open tunnel." }
+                        // Consent covers every tunnel, so explain port reuse without
+                        // implying this warning names one particular listener.
+                        p { "A tunnel uses the remote service's port number on this Mac when it is free, so a Mac program expecting that port may reach the remote host instead." }
                         p { "Ordinary links from other 127.0.0.1 pages into the standalone Farhelm helm are refused." }
                         p { "Allow this only for remote pages you trust. You can turn tunnels off in Settings, which closes every open tunnel." }
                         div { class: "approval-card-actions",
