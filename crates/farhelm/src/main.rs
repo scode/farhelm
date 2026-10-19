@@ -247,7 +247,15 @@ enum AgentCmd {
         #[arg(long = "session", allow_hyphen_values = true)]
         session: String,
     },
+    // Hidden while the helm refuses agent prompts (`AGENT_PROMPTS_ENABLED` in
+    // the helm's `agent_requests`; TODO.md, "Re-assess letting agents prompt
+    // running sessions"). Hiding keeps it out of `--help` and out of the
+    // generated agent instructions, so agents are never taught a verb that
+    // always fails; it still parses, so a caller who already knows it gets
+    // the helm's refusal instead of a usage error. Unhide it with the
+    // re-enable.
     /// Send a prompt to another session's running Claude or Codex agent.
+    #[command(hide = true)]
     #[command(group(clap::ArgGroup::new("prompt_source").required(true).args(["prompt", "prompt_file"])))]
     Prompt {
         /// Exact target id from `farhelm agent sessions`; never this session.

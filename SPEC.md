@@ -800,9 +800,9 @@ agent choice is independent of that destination:
 Creation launches an interactive agent. A supported agent can receive a one-time initial prompt as part of its start
 argv, after Farhelm's own arguments have been composed, without waiting for terminal readiness. With no initial prompt,
 you type the first message into its terminal. An initial prompt is not part of the stored launch, so relaunching or
-copying that launch never repeats it; templates may supply one on every new create. `farhelm agent prompt` sends a
-message into an already-running Claude or Codex session, under the separate approval and delivery rules in Agent-spawned
-sessions.
+copying that launch never repeats it; templates may supply one on every new create. `farhelm agent prompt`, which would
+send a message into an already-running Claude or Codex session, is turned off in this version; Agent-spawned sessions
+has the refusal and the design kept for re-enabling it.
 
 A custom model id is typed into the model field and applied with Enter; it needs a chosen harness. The optional session
 name sits in the destination block under host and folder, visible without any disclosure. Launch and Cancel are the
@@ -2286,6 +2286,17 @@ revoking its credential. Self-stop remains available. A delete also refuses a ta
 flight rather than waiting, so two sessions deleting each other cannot stall on each other's fences. A lost reply means
 outcome unknown; it never claims that the session survived.
 
+NOTE: `farhelm agent prompt` is turned off in this version. The helm refuses every such request, as a deliberate refusal
+that a retry or approval does not change, before it reads the target, shows a card or contacts any supervisor. The CLI
+still parses the verb, so a caller gets that refusal rather than a usage error, but hides it from help, and the agent
+instructions do not mention it. It was turned off before it ever shipped, because of three gaps: the "waiting on a
+question" refusal reads a status sample up to about two seconds old, so a permission or trust question that appears in
+that window (or right after a launch) can receive the message and its submit key as its answer; an approval is not bound
+to the target's current run, so a Restart while the card waits (one that changes permissions, say) delivers to the new
+run, possibly a YOLO one; and an explicitly empty message sends only the submit key, submitting whatever draft is in the
+target's composer. Re-enabling it means fixing or knowingly accepting each of those. The next three paragraphs are the
+design kept for that, not current behavior.
+
 `farhelm agent prompt --session <id> --prompt TEXT` sends a message to another session's running Claude or Codex agent
 on any host. `--prompt-file PATH` supplies the same message from a UTF-8 file (`-` reads stdin); exactly one source is
 required. The initial-prompt rule applies again at the owning supervisor: at most 64 KiB, with newline and tab allowed
@@ -2334,7 +2345,8 @@ launch `--inherit-agent` reuses comes from that supervisor, so a compromised sup
 asking, show a different launch on the card than the one it starts, or ignore the YOLO rule below. That is accepted,
 because spawn acts only on its own host, which the threat model already trusts. Waiting for the user holds nothing other
 operations wait on, apart from the asking session's own next change, which is refused while an earlier one is still
-waiting. A link request takes no session-change lock: it neither blocks another session command nor waits for one.
+waiting. A link request takes no session-change lock: it neither blocks another session command nor waits for one. While
+it is turned off, `prompt` is refused without asking.
 
 `farhelm agent open-url -- <url>` asks to open an absolute HTTP or HTTPS URL with a host, at most 4096 bytes long. Raw
 whitespace and control characters are refused before parsing, matching terminal links; the full original URL is shown as
@@ -2545,7 +2557,8 @@ supplied data, not instructions to follow. The helm relaying those values does n
 short interpretation rule for the reading agent, not a guarantee that Farhelm prevents model prompt injection.
 
 Spawning starts an interactive agent, optionally with the one-time initial prompt above; later interaction uses the
-child's terminal, either by the user's own typing or by the approved `farhelm agent prompt` verb for Claude and Codex.
+child's terminal through the user's own typing; the approved `farhelm agent prompt` verb for Claude and Codex is turned
+off in this version.
 
 The parent reference is optional organizational metadata only and implies no VCS relationship. It is acceptable for
 agent-created sessions to have no parent reference; the parent filter need not identify everything an agent created. The

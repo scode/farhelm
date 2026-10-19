@@ -6,6 +6,9 @@
 //! even after many samples. Status-specific refusals belong in the supervisor
 //! tests. Viewer probes establish live input after replay and prove that
 //! delivery leaves the original attachment usable.
+//!
+//! While the helm refuses agent prompts, only the turned-off proof runs; the
+//! delivery proofs are ignored until the re-enable (see the note above them).
 
 use crate::agent_listing_real_stack::{attach_terminal, hosts_until_attached, session_token};
 use crate::harness::*;
@@ -307,10 +310,23 @@ async fn prompt_cli(
     }
 }
 
-/// Exercise one submit strategy against a Running recorder. Keeping the same
-/// viewer for probes on either side of the command detects attachment takeover,
-/// while exact raw bytes distinguish one paste from ordinary typed keystrokes.
-async fn prove_delivery(agent: LaunchHarness, submit: u8, include_refusals: bool) {
+/// What one run expects `farhelm agent prompt` to do to a Running target whose
+/// host runs farhelm commands without asking, so no approval card stands in
+/// the way of delivery.
+enum Expect {
+    /// Agent prompts are turned off in the helm: the CLI fails with the
+    /// helm's refusal and the target's terminal receives no input from it.
+    TurnedOff,
+    /// One paste followed by `submit`, optionally followed by the generic and
+    /// self-target refusals. Only reachable once prompts are re-enabled.
+    Delivered { submit: u8, include_refusals: bool },
+}
+
+/// Run one prompt command against a Running recorder and check `expect`.
+/// Keeping the same viewer for probes on either side of the command detects
+/// attachment takeover, while exact raw bytes distinguish one paste from
+/// ordinary typed keystrokes, and a refusal from a delivery.
+async fn prove_prompt(agent: LaunchHarness, expect: Expect) {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     // The fixture files must outlive the processes and their failure diagnostics.
     let work = farhelm_teststate::tempdir().expect("prompt recorder workdir");
@@ -353,6 +369,27 @@ async fn prove_delivery(agent: LaunchHarness, submit: u8, include_refusals: bool
 
     let text = "first line\nsecond\tline λ";
     let output = prompt_cli(&asking, &token, &socket, &target.session.id, text).await;
+    let (submit, include_refusals) = match expect {
+        Expect::TurnedOff => {
+            let reason = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "turned-off prompt succeeded");
+            assert!(
+                reason.contains("turned off in this version of Farhelm"),
+                "unexpected refusal: {reason}"
+            );
+            // The probe's exact-file comparison is the delivery check: the
+            // record must hold only the two viewer probes, with no paste or
+            // submit byte from the refused command between them.
+            target_viewer
+                .probe(&observer, &target, b"viewer-after")
+                .await;
+            return;
+        }
+        Expect::Delivered {
+            submit,
+            include_refusals,
+        } => (submit, include_refusals),
+    };
     assert!(
         output.status.success(),
         "prompt failed: {}",
@@ -402,16 +439,52 @@ async fn prove_delivery(agent: LaunchHarness, submit: u8, include_refusals: bool
     }
 }
 
+/// Spec: while agent prompts are turned off, `farhelm agent prompt` from a
+/// session, through the real supervisor relay and real helm, fails with the
+/// helm's turned-off refusal, and the Running Claude target, on a host that
+/// runs farhelm commands without asking, receives no input from it.
+///
+/// Why: the helm's unit test pins where its switch sits; this one proves the
+/// shipped path actually ends there, with an exact record of every byte the
+/// target's terminal got. A target that would otherwise accept delivery with
+/// no card is the case the switch exists for.
+#[farhelm_testtrace::test]
+async fn prompt_is_refused_end_to_end_while_turned_off() {
+    prove_prompt(LaunchHarness::Claude, Expect::TurnedOff).await;
+}
+
+// The two delivery proofs below are ignored, not deleted, while the helm
+// refuses agent prompts (`AGENT_PROMPTS_ENABLED` in the helm's
+// `agent_requests`): run against the real helm they could only fail. They are
+// the end-to-end evidence a re-enable needs, so un-ignore them with it. The
+// helm's unit tests keep its approval and delivery path covered meanwhile.
+
 /// Claude delivery must preserve one multiline paste and submit with CR, even
 /// with a viewer attached. Refused self and generic targets receive no prompt.
 #[farhelm_testtrace::test]
+#[ignore = "agent prompts to running sessions are disabled; see TODO.md, Near term"]
 async fn claude_prompt_relay_preserves_bytes_and_viewer_and_refuses_invalid_targets() {
-    prove_delivery(LaunchHarness::Claude, b'\r', true).await;
+    prove_prompt(
+        LaunchHarness::Claude,
+        Expect::Delivered {
+            submit: b'\r',
+            include_refusals: true,
+        },
+    )
+    .await;
 }
 
 /// Codex uses Tab after the complete paste. A tab inside the message remains
 /// data, and the original viewer still accepts input after the relay returns.
 #[farhelm_testtrace::test]
+#[ignore = "agent prompts to running sessions are disabled; see TODO.md, Near term"]
 async fn codex_prompt_relay_preserves_bytes_and_viewer() {
-    prove_delivery(LaunchHarness::Codex, b'\t', false).await;
+    prove_prompt(
+        LaunchHarness::Codex,
+        Expect::Delivered {
+            submit: b'\t',
+            include_refusals: false,
+        },
+    )
+    .await;
 }

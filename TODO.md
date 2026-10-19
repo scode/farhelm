@@ -188,6 +188,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   move was already sent. The menu focus fix (#2232) narrowed this and removed the earlier TODO entry; this entry tracks
   the remaining case.
 
+- **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
+  session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
+  request, and the command is hidden from agents. Review found three ways a delivered message could do something the
+  user never agreed to. The "is it waiting on a question?" check uses a status reading up to about two seconds old, so a
+  permission or trust question that appears in that window, or right after the agent starts, can receive the message and
+  its Enter as its answer. Approving the card does not tie it to the session's current run, so a Restart while the card
+  waits (a Restart with that changes permissions, say) sends the message to the new run, which may be a YOLO one. And an
+  empty message sends only the submit key, which submits whatever the user has typed in that agent's input box.
+  TRIAGE_OUTCOMES.md already records decisions on the last two (`prompt-approval-can-cross-agent-runs.md`: call the
+  card's permission shield a snapshot; `empty-agent-prompt-submits-existing-draft.md`: refuse empty messages), not yet
+  carried out. Re-enabling means fixing each gap or deciding to accept it, then setting `AGENT_PROMPTS_ENABLED` in
+  `crates/farhelm-helm/src/agent_requests.rs` to true, unhiding the CLI verb, restoring its agent instructions and docs,
+  un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md, Agent-spawned sessions,
+  keeps the design.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
@@ -829,9 +844,9 @@ are large mostly because of their tests.
   under `/assets/`. Came up in review-feedback triage (`desktop-protocol-filesystem-fallback.md`) on 2026-10-02.
 
 - **Inject commands into agents from the UI.** A button such as "stop all work and restart" could send a message to a
-  running agent. Agents and scripts can already send a prompt to a running Claude or Codex session with
-  `farhelm agent prompt`; a UI button and delivery to other agents remain separate work. See SPEC.md, Agent-spawned
-  sessions.
+  running agent. `farhelm agent prompt` holds the delivery path for Claude and Codex but is turned off for now (see
+  "Re-assess letting agents prompt running sessions", Near term); a UI button and delivery to other agents remain
+  separate work. See SPEC.md, Agent-spawned sessions.
 
 - **Make copying work out of the box with Codex.** Since Codex 0.157 its fullscreen interface captures the mouse, so a
   plain drag in its prompt box highlights text without copying it; the drag-copy hint plan only explains this to the
