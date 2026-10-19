@@ -5,7 +5,8 @@ Reviewed commit: 5e1f1cfffe38f41e450ab70d440ca8fabac8be36
 ## TLDR
 
 Opening app Settings, a help dialog, Add host or Remove while a host plan is loading can leave both dialogs unresponsive
-to clicks and normal keyboard interaction when the host confirmation arrives. Escape provides recovery.
+to clicks and normal keyboard interaction when the host confirmation arrives. New host-action refusal dialogs can
+overlap another app dialog the same way, including after an Update that needs no confirmation. Escape provides recovery.
 
 ## Details
 
@@ -38,3 +39,26 @@ covered dialog, not mutual inertness. No matching Planned item, BUGS entry or cu
 
 Proposed drop: none. Provenance: persistent Astra/high review, `ui-preferences-and-navigation-1/f3` and
 `ui-host-management-1/f4`; one combined underlying modal-coordination finding.
+
+## Refusal dialogs extend the same gap
+
+Additional reviewed commit: 6a780e2ec502a9711eaa55cb16ab66fd5f1e46a4.
+
+Host-action refusals now open dialogs independently of an earlier confirmation. A one-click Update can be planning while
+the user opens app Settings or another app-wide dialog. If planning then refuses, the hosts panel publishes the refusal
+without checking that other modal owner. Its exclusion checks only Add, Remove, Host Settings and provisioning
+confirmation state (`crates/farhelm-ui/src/hosts.rs:1788–1794`). Those checks do not cover app Settings, New Session,
+Templates or the Cmd-J list. The resulting dialogs use the same independent isolation mechanism described above.
+
+The landing report already identifies this extension under Possible follow-ups
+(`plans/reports/host-uninstall-dialogs.report.md:179–184`). It also notes that closing the refusal can return focus to a
+host row behind the still-open app dialog. This adds action and dialog scope to the existing finding; it does not
+establish a new security or loss-of-work consequence.
+
+Suggested bucket remains **other**. Confidence: **likely**, from static ownership and publication tracing, with no
+browser reproduction. The planning delay need not be a sub-second window; both dialogs remain affected until dismissal,
+so the narrow person-timing filter does not cover this case. Possible cover: the existing finding covers delayed host
+confirmations, but did not name these newly introduced refusal paths. The specification and recorded Host Settings fix
+do not accept app-wide mutual inertness. Proposed drop: none. Provenance: trailing review of
+`c5fcfee8681e46b1d47718771b321488037d3f83..6a780e2ec502a9711eaa55cb16ab66fd5f1e46a4`, host UI reviewer and independent
+reading of the landing report; parent checked the refusal's modal-owner exclusion.

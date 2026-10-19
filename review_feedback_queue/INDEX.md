@@ -96,6 +96,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-list-advertises-rebound-shortcut.md`](template-list-advertises-rebound-shortcut.md) — Cached shortcut
   badges can guide a later launch to a different template; the gesture and harm remain unverified.
 
+- [`expanded-setup-failure-displaces-open-menu.md`](expanded-setup-failure-displaces-open-menu.md) — A setup failure can
+  leave a menu beside another row while it still acts on the original target; harmful reliance is unverified.
+
 ## High priority: material UX degradation
 
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
@@ -139,7 +142,7 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   automatic-installation claim omits architecture and systemd user-manager prerequisites.
 
 - [`pinned-host-dialog-chrome-can-hide-content.md`](pinned-host-dialog-chrome-can-hide-content.md) — Fixed host-dialog
-  headings and answers can exceed the available height, hiding controls or plan content.
+  headings and answers can exceed the available height, hiding controls, plan content or a refusal's explanation.
 
 - [`update-check-replacement-loses-focus.md`](update-check-replacement-loses-focus.md) — Installing an update replaces
   the keyboard-focused check button without transferring focus to the restart control.
@@ -239,8 +242,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   template table omits the words that its custom permission setting applies.
 
 - [`delayed-host-confirmation-conflicts-with-other-dialogs.md`](delayed-host-confirmation-conflicts-with-other-dialogs.md)
-  — A delayed host confirmation can disable another open dialog's clicks and normal keyboard interaction; Escape
-  recovers.
+  — A delayed host confirmation or action refusal can disable another open dialog's clicks and normal keyboard
+  interaction; Escape recovers.
 
 - [`stale-template-dialog-undoes-agent-shortcut.md`](stale-template-dialog-undoes-agent-shortcut.md) — An open Templates
   dialog can overwrite an approved agent shortcut move with its old bindings.
@@ -256,3 +259,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`release-review-links-allow-page-script.md`](release-review-links-allow-page-script.md) — Draft Markdown links can
   inject release-review page script; attacker exposure and consequential harm remain unverified.
+
+- [`draft-release-note-promises-update-confirmation.md`](draft-release-note-promises-update-confirmation.md) — The draft
+  release note promises a numbered Update confirmation although clicking Update starts it without asking.
