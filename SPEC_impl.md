@@ -1303,7 +1303,7 @@ tabs have no durable record at all and are rediscovered from their markers alone
 private server can conjure windows a positional scan would adopt: a program pointed at its socket, a process the agent
 login shell's startup files started before the launch removed `TMUX`, or a session or tab launched by a version that did
 not remove it yet. Agents and tabs no longer inherit `TMUX`/`TMUX_PANE` (removed by the launch shim for agents, after
-the login shell's startup files, and by the tab command's innermost `env -u` for tabs; see `PRIVATE_TMUX_ENV_VARS` in
+the login shell's startup files, and by the tab helper before starting its shell; see `PRIVATE_TMUX_ENV_VARS` in
 launch.rs). That was checked statically against Claude Code 2.1.286 and Codex 0.159.3, not by running them: both wrap
 clipboard and similar escapes in tmux passthrough when `TMUX` is set, and the supervisor unwraps passthrough itself, so
 either form reaches xterm.js; Claude Code also keeps truecolor without `TMUX` instead of dropping to 256 colors (the
@@ -2323,6 +2323,16 @@ file is introduced.
   stock Debian/Ubuntu `.bashrc` interactivity guard doesn't bail out when the profile chains it. Either way the sourced
   file set matches an SSH-and-type session, which is the contract. When `$SHELL` is unset (user-manager services on
   systemd older than 255 don't set it), the supervisor falls back to the passwd database, then `/bin/sh`.
+- The supervisor's shared agent-launch builder also writes the intended working directory into the launch spec. After
+  checkout preparation, the shim enters it before exec and supplies matching `PWD`; a failed chdir prevents the agent
+  from executing and writes the ordinary launch-failure sentinel naming the directory. Entry is separate from exec so an
+  absent or non-executable agent is reported as a program failure, rather than a directory problem. tmux's `-c` alone is
+  insufficient because tmux falls back to HOME when it cannot enter the folder, and login-shell startup may cd again.
+  Older specs lacking the optional field retain their inherited directory. Terminal tabs run `internal tab-shell` inside
+  their existing scope, through the supervisor's own program rather than the app forwarder; the helper enters the folder
+  and scrubs the agent/private-tmux markers before execing the login shell. A failed tab entry reaches the existing
+  dead-before-open refusal with its last output. This keeps tab startup inside containment and preserves a tab shell's
+  own startup-file cd, while agent startup restores the session folder after those files have run.
 - Status heuristics: periodic sampling of each live agent pane's visible grid, read by one screen reader per agent kind
   (`agent_kind::screen_reader`). Sampling must never sit on the attach/input path — SPEC.md forbids status from gating
   interaction. The supervisor's own ticker takes the samples and stores one reading per successful capture; replies only
@@ -4039,11 +4049,13 @@ the shape, so elsewhere nothing changes.
 
 Inside that layout the supervisor hands sessions two different programs. Its own launch shim (`internal launch`, run in
 each session's tmux window) is its own versioned program, because the launch description it writes is read only by its
-own version. Everything a session keeps beyond its supervisor's life names the forwarder instead: the hook command
-lines, the reporter variables, and the directory put first on the session's `PATH`. Desktop-managed supervisors before
-this layout ran from `Contents/MacOS/farhelm`, so sessions they started already hold that path, and putting the
-forwarder exactly there is what keeps them working without migration; it must never move. Outside the layout the
-supervisor uses its own program for all of these, as it always has.
+own version. A terminal tab's helper (`internal tab-shell`) is its own versioned program too: it only enters the tab's
+folder and then replaces itself with the shell, so it never outlives the supervisor that started it. Everything a
+session keeps beyond its supervisor's life names the forwarder instead: the hook command lines, the reporter variables,
+and the directory put first on the session's `PATH`. Desktop-managed supervisors before this layout ran from
+`Contents/MacOS/farhelm`, so sessions they started already hold that path, and putting the forwarder exactly there is
+what keeps them working without migration; it must never move. Outside the layout the supervisor uses its own program
+for all of these, as it always has.
 
 An update in place, as `install.sh` performs it: the new version's folder is staged privately and renamed into
 `Versions/`, then a complete copy of the new `farhelm-desktop` is renamed over the old one, then the icon, the forwarder

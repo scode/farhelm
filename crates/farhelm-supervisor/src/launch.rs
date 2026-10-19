@@ -108,8 +108,8 @@ pub const TAB_ID_ENV_VAR: &str = "FARHELM_TAB_ID";
 /// # Scrubbing
 ///
 /// Every launch boundary removes the OTHER kind's marker before setting
-/// its own — the agent shim `env_remove`s [`TAB_ID_ENV_VAR`], a tab's
-/// window command runs through `env -u FARHELM_AGENT_ID` — so an ambient
+/// its own — the agent shim `env_remove`s [`TAB_ID_ENV_VAR`], and the tab
+/// helper `env_remove`s [`AGENT_ID_ENV_VAR`] before execing its shell — so an ambient
 /// marker inherited from an outer farhelm can never survive into an inner
 /// launch of the opposite kind and misfile it.
 pub const AGENT_ID_ENV_VAR: &str = "FARHELM_AGENT_ID";
@@ -137,6 +137,12 @@ pub const PRIVATE_TMUX_ENV_VARS: [&str; 2] = ["TMUX", "TMUX_PANE"];
 pub struct LaunchSpec {
     /// The agent argv, already shell-words-split by the supervisor.
     pub argv: Vec<String>,
+    /// The directory the agent must enter after login-shell initialization and checkout
+    /// preparation. tmux's start directory is only a hint: it can silently fall back to
+    /// HOME, and shell startup can change it again. The shim enters this directory
+    /// before exec and supplies matching PWD. Absent only for older supervisors' specs.
+    #[serde(default)]
+    pub working_directory: Option<PathBuf>,
     /// Where the shim attempts to record exec failure.
     ///
     /// Presence positively identifies a failed `exec`. Absence alone is
@@ -172,8 +178,7 @@ pub struct LaunchSpec {
     /// session's terminal — clone, run the post-clone hook, and only then
     /// exec the agent — before launching anything. `None` (the serde
     /// default, so specs written before this field existed still parse) is
-    /// an ordinary launch: the shim's behavior is byte-for-byte what it
-    /// was without preparation.
+    /// an ordinary launch with no checkout preparation.
     ///
     /// This field travels INSIDE the spec because the spec is the one
     /// message the supervisor hands the shim, but nothing bookkeeping-
@@ -664,24 +669,19 @@ pub fn window_command(
     ]
 }
 
-/// Build the tmux window command for a TERMINAL TAB: the user's shell as
-/// an interactive login shell, and nothing else (PLAN_M4.md item 2).
-///
-/// The contrast with [`window_command`] is the whole design, not an
-/// omission. An agent launch needs a shim between the shell and the agent
-/// so a failed `exec` can leave a sentinel; a tab has nothing to exec —
-/// the shell IS what the user asked for — so there is no spec, no shim,
-/// no sentinel, and no error-vs-exited classification to make. A tab shell
-/// that starts and later exits is just a dead pane (`remain-on-exit` keeps
-/// it viewable), and a tab shell that never starts at all is caught at
-/// open time by the pane-liveness check in the `OpenTab` handler.
+/// Build the terminal tab's directory-enforcing helper command, inside its scope.
+/// tmux can silently fall back to HOME when it cannot enter a directory. The helper
+/// enters the requested folder before execing the user's interactive login shell,
+/// so failure reaches the tab-open pane-liveness check instead of opening elsewhere.
+/// Tabs need no spec or sentinel: a shell that dies during open already refuses the
+/// open with its last output, while a later exit silently reaps the tab.
 ///
 /// `-l -i` is the same SSH-and-type contract the agent launch delivers,
 /// and `-i` is equally load-bearing here: without it the shell skips
 /// `.zshrc`/`.bashrc`, so a tab would not see the environment the user's
 /// own terminals do.
 ///
-/// `scope_prefix` wraps the SHELL, unlike [`window_command`] where it
+/// `scope_prefix` wraps the helper AND SHELL, unlike [`window_command`] where it
 /// wraps only the shim. That difference is deliberate and follows from the
 /// same rule both obey — everything the operation promises to reap must be
 /// inside the cgroup. For an agent that is the shim and its exec'd agent,
@@ -694,31 +694,33 @@ pub fn window_command(
 /// payload — nothing here is ever re-parsed by a shell and nothing needs
 /// quoting.
 ///
-/// The `env -u` is the tab side of the marker scrub ([`AGENT_ID_ENV_VAR`]).
-/// tmux's own `-e` can only SET a variable, so removing an inherited one
-/// takes a process that can: `env` is POSIX-mandated, and putting it
-/// INNERMOST — after any scope prefix, immediately before the shell —
-/// guarantees the shell and everything under it start without an ambient
-/// agent marker from an outer farhelm, whatever the wrapper above did.
+/// [`exec_tab_shell`] scrubs the agent marker ([`AGENT_ID_ENV_VAR`]) immediately
+/// before exec, so the shell and its startup children carry only the tab identity,
+/// including when a scope wrapper supplied an ambient marker.
 ///
-/// The same `env` removes [`PRIVATE_TMUX_ENV_VARS`], which tmux sets in
+/// The same helper removes [`PRIVATE_TMUX_ENV_VARS`], which tmux sets in
 /// the pane. For a tab that has to happen before the user's shell starts,
 /// so its startup files run without them too: a tab then behaves like a
 /// fresh SSH login, and an rc snippet that starts or attaches tmux when
 /// `TMUX` is unset fires here exactly as it would there (accepted when
 /// this was decided, 2026-09-30).
-pub fn tab_window_command(shell: &str, scope_prefix: Vec<String>) -> Vec<String> {
+pub fn tab_window_command(
+    shell: &str,
+    farhelm_exe: &Path,
+    directory: &str,
+    scope_prefix: Vec<String>,
+) -> Vec<String> {
     let mut argv = scope_prefix;
-    argv.push("env".to_string());
-    argv.push("-u".to_string());
-    argv.push(AGENT_ID_ENV_VAR.to_string());
-    for name in PRIVATE_TMUX_ENV_VARS {
-        argv.push("-u".to_string());
-        argv.push(name.to_string());
-    }
-    argv.push(shell.to_string());
-    argv.push("-l".to_string());
-    argv.push("-i".to_string());
+    // Like window_command, the supervisor's startup validation guarantees this
+    // executable path is UTF-8. tmux receives argv directly, without shell parsing.
+    argv.extend([
+        farhelm_exe.to_string_lossy().into_owned(),
+        "internal".to_string(),
+        "tab-shell".to_string(),
+        "--".to_string(),
+        directory.to_string(),
+        shell.to_string(),
+    ]);
     argv
 }
 
@@ -937,6 +939,26 @@ pub fn exec_launch_spec_with_seam(
     {
         return e;
     }
+    // This disposable shim enters the directory itself, so an entry error cannot
+    // be confused with exec failing for a missing or non-executable agent. Keep
+    // the sentinel anchored across that chdir, even for a relative internal spec.
+    let status_path = match std::path::absolute(&status_path) {
+        Ok(path) => path,
+        Err(error) => {
+            let report = record_launch_failure(
+                &status_path,
+                format!("resolving launch failure path: {error}"),
+                seam,
+            );
+            return anyhow::Error::from(error).context(report);
+        }
+    };
+    if let Some(directory) = &spec.working_directory
+        && let Err(error) = enter_session_directory(directory)
+    {
+        let report = record_launch_failure(&status_path, format!("{error:#}"), seam);
+        return error.context(report);
+    }
     // Nothing is written to the terminal before `exec`. The shim once
     // painted a "preamble" here — the previous run's captured last screen,
     // handed over by a restart — and SPEC.md now forbids exactly that: a
@@ -957,7 +979,7 @@ pub fn exec_launch_spec_with_seam(
     // is the exec that ends that inheritance.
     let err = agent_command(&spec).exec();
     let report = format!(
-        "exec_failed argv0={} errno={}",
+        "exec_failed argv0={} errno={}: {err}",
         spec.argv[0],
         err.raw_os_error().unwrap_or(-1)
     );
@@ -993,7 +1015,46 @@ fn agent_command_with_browser(
     {
         command.env("BROWSER", browser);
     }
+    if let Some(directory) = &spec.working_directory {
+        command.env("PWD", directory);
+    }
     command
+}
+
+/// Enter the launch directory in the single-purpose shim or tab helper itself.
+/// Success establishes the cwd inherited by exec; a later path replacement cannot
+/// redirect it through a second lookup. Call only in a disposable helper process,
+/// never in the supervisor or a shared test process. PWD is set on the final command.
+fn enter_session_directory(directory: &Path) -> anyhow::Result<()> {
+    std::env::set_current_dir(directory)
+        .with_context(|| format!("could not enter working directory {}", directory.display()))
+}
+
+/// Enter a tab's session folder before starting its interactive login shell.
+/// The shell's own startup files may subsequently cd, as in an ordinary terminal.
+/// The scope wrapper already contains this helper and everything the shell starts;
+/// an entry or exec failure prints through the CLI and the tab-open liveness check.
+/// This changes the helper process's cwd. Callers must exit on return, since a
+/// failed exec can leave the process environment unsafe for further use.
+pub fn exec_tab_shell(directory: &Path, shell: &Path) -> anyhow::Error {
+    use std::os::unix::process::CommandExt;
+
+    if let Err(error) = enter_session_directory(directory) {
+        return error;
+    }
+    let mut command = std::process::Command::new(shell);
+    command
+        .args(["-l", "-i"])
+        .env("PWD", directory)
+        .env_remove(AGENT_ID_ENV_VAR);
+    for name in PRIVATE_TMUX_ENV_VARS {
+        command.env_remove(name);
+    }
+    let error = command.exec();
+    anyhow::Error::from(error).context(format!(
+        "could not execute terminal shell {}",
+        shell.display()
+    ))
 }
 
 /// BROWSER readers split on colon and whitespace, and substitute percent placeholders.
@@ -2074,6 +2135,26 @@ mod tests {
         finish_exec_failure_child(&spec_path, &error);
     }
 
+    /// Run the production tab helper for supervisor fixtures without linking the CLI.
+    /// Only an explicitly selected ignored child may change cwd or exec. A failed
+    /// exec must exit immediately, just like exec_failure_child, without returning
+    /// its potentially inconsistent process environment to libtest cleanup.
+    #[farhelm_testtrace::test]
+    #[ignore = "the child half of the supervisor tab-helper fixtures"]
+    fn tab_shell_child() {
+        let directory = std::env::var_os("FARHELM_TAB_SHELL_CHILD_DIRECTORY")
+            .map(PathBuf::from)
+            .expect("the parent must provide the tab directory");
+        let shell = std::env::var_os("FARHELM_TAB_SHELL_CHILD_SHELL")
+            .map(PathBuf::from)
+            .expect("the parent must provide the tab shell");
+        let error = exec_tab_shell(&directory, &shell);
+        eprintln!("{error:#}");
+        // SAFETY: this is an isolated helper child; no libtest or Rust cleanup
+        // may read the environment after the production helper's failed exec.
+        unsafe { libc::_exit(1) }
+    }
+
     /// The ordinary case: no launch has ever failed for this session, so
     /// there is no sentinel file at all, and the reader must say so
     /// plainly rather than treating a missing file as any kind of error.
@@ -2113,6 +2194,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn browser_forwarding_preserves_agent_environment_and_excludes_preparation() {
         let spec = LaunchSpec {
+            working_directory: None,
             argv: vec!["agent".into()],
             status_file: PathBuf::from("/tmp/status"),
             session_id: "session".into(),
@@ -2153,12 +2235,37 @@ mod tests {
         );
         let mut legacy = serde_json::to_value(&spec).unwrap();
         legacy.as_object_mut().unwrap().remove("browser_command");
-        assert!(
-            serde_json::from_value::<LaunchSpec>(legacy)
-                .unwrap()
-                .browser_command
-                .is_none()
-        );
+        legacy.as_object_mut().unwrap().remove("working_directory");
+        let legacy: LaunchSpec = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.working_directory.is_none());
+        assert!(legacy.browser_command.is_none());
+    }
+
+    /// Explicit launch environment must not override the PWD established after
+    /// directory entry. Exercise only the command environment in this shared process;
+    /// the disposable helper's actual chdir is covered by the launch runtime tests.
+    #[farhelm_testtrace::test]
+    fn agent_command_sets_pwd_after_launch_environment() {
+        let work = farhelm_teststate::tempdir().unwrap();
+        // Use the canonical spelling supplied by the production builder, even
+        // where the system temp directory itself is a symlink.
+        let directory = std::fs::canonicalize(work.path()).unwrap();
+        let spec = LaunchSpec {
+            argv: vec!["/usr/bin/printenv".into(), "PWD".into()],
+            working_directory: Some(directory.clone()),
+            status_file: work.path().join("unused.status"),
+            session_id: "directory-test".into(),
+            session_token: "credential".into(),
+            supervisor_sock: work.path().join("unused.sock"),
+            farhelm_bin_dir: PathBuf::from("/usr/bin"),
+            browser_command: None,
+            preparation: None,
+            env: vec![("PWD".into(), "/wrong".into())],
+        };
+        let output = agent_command(&spec).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let expected = format!("{}\n", directory.display());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
     }
 
     /// The reader's whole reason to exist: surfacing exactly what
@@ -2175,6 +2282,7 @@ mod tests {
         std::fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
         let spec = LaunchSpec {
+            working_directory: None,
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: id.to_string(),
@@ -2285,6 +2393,7 @@ mod tests {
         let spec_path = tmp.path().join("spec.json");
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
         let spec = LaunchSpec {
+            working_directory: Some(tmp.path().to_path_buf()),
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
@@ -2301,6 +2410,10 @@ mod tests {
         assert!(
             rendered.contains("exec_failed"),
             "error chain should surface the exec-failure report: {rendered}"
+        );
+        assert!(
+            !rendered.contains("working directory"),
+            "successful directory entry must not mislabel a missing program: {rendered}"
         );
 
         let status_path = status_path_for_spec(&spec_path);
@@ -2325,6 +2438,43 @@ mod tests {
         );
     }
 
+    /// Entry failure is recorded before trying the agent, even if that program
+    /// is also missing. This distinguishes the directory diagnosis from exec's
+    /// identical ENOENT and keeps the failure visible through the durable sentinel.
+    #[farhelm_testtrace::test]
+    fn exec_launch_spec_names_a_directory_only_when_entry_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let spec_path = tmp.path().join("spec.json");
+        let directory = tmp.path().join("missing-directory");
+        let spec = LaunchSpec {
+            working_directory: Some(directory.clone()),
+            argv: vec![tmp.path().join("missing-agent").to_str().unwrap().into()],
+            status_file: status_path_for_spec(&spec_path),
+            session_id: "test-session".into(),
+            session_token: "test-token".into(),
+            supervisor_sock: tmp.path().join("supervisor.sock"),
+            farhelm_bin_dir: tmp.path().into(),
+            browser_command: None,
+            preparation: None,
+            env: Vec::new(),
+        };
+        assert!(
+            !directory.exists(),
+            "premise: the launch directory is absent"
+        );
+        std::fs::write(&spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+        let rendered = run_exec_failure_child(&spec_path, "real");
+        let sentinel = std::fs::read_to_string(status_path_for_spec(&spec_path)).unwrap();
+        for report in [&rendered, &sentinel] {
+            assert!(
+                report.contains("could not enter working directory"),
+                "{report}"
+            );
+            assert!(report.contains(directory.to_str().unwrap()), "{report}");
+            assert!(!report.contains("exec_failed"), "{report}");
+        }
+    }
+
     /// The EACCES half of "exec fails" (item 23), distinct from the
     /// ENOENT case above: a real, existing file with no execute bit set
     /// at all makes `exec` fail for a completely different reason
@@ -2338,6 +2488,7 @@ mod tests {
         std::fs::write(&non_executable, b"not a real binary").unwrap();
         std::fs::set_permissions(&non_executable, std::fs::Permissions::from_mode(0o600)).unwrap();
         let spec = LaunchSpec {
+            working_directory: None,
             argv: vec![non_executable.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
@@ -2416,6 +2567,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let spec_path = tmp.path().join("spec.json");
         let spec = LaunchSpec {
+            working_directory: None,
             argv: vec![],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
@@ -2451,6 +2603,7 @@ mod tests {
         let spec_path = tmp.path().join("spec.json");
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
         let spec = LaunchSpec {
+            working_directory: None,
             argv: vec![missing_binary.to_string_lossy().into_owned()],
             status_file: status_path_for_spec(&spec_path),
             session_id: "test-session".to_string(),
@@ -2578,6 +2731,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_launchs_own_environment_reaches_only_the_agent_and_wins() {
         let spec = LaunchSpec {
+            working_directory: None,
             argv: vec!["pi".to_string()],
             status_file: PathBuf::from("/tmp/status"),
             session_id: "session-7".to_string(),
@@ -2614,6 +2768,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn agent_command_injects_the_spawn_contract() {
         let spec = LaunchSpec {
+            working_directory: None,
             argv: vec!["agent".to_string()],
             status_file: PathBuf::from("/tmp/status"),
             session_id: "session-7".to_string(),
@@ -2710,26 +2865,24 @@ mod tests {
         );
     }
 
-    /// A tab is a bare interactive login shell — no shim, no spec, no
-    /// `-c` payload — and `-i` is the flag whose loss would silently cost
-    /// the user their rc-file environment (SPEC.md's environment
-    /// contract). Pinned as a complete argv so a future addition to the
-    /// chain cannot slip in unnoticed.
+    /// Tabs enforce entry before shell startup without a shell-parsed payload.
+    /// Folder and shell paths remain individual arguments, including metacharacters.
     #[farhelm_testtrace::test]
-    fn tab_window_command_is_a_bare_login_interactive_shell() {
+    fn tab_window_command_enters_directory_before_login_shell() {
         assert_eq!(
-            tab_window_command("/bin/zsh", Vec::new()),
-            vec![
-                "env",
-                "-u",
-                AGENT_ID_ENV_VAR,
-                "-u",
-                "TMUX",
-                "-u",
-                "TMUX_PANE",
+            tab_window_command(
                 "/bin/zsh",
-                "-l",
-                "-i"
+                Path::new("/opt/farhelm"),
+                "/work a'{}",
+                Vec::new()
+            ),
+            vec![
+                "/opt/farhelm",
+                "internal",
+                "tab-shell",
+                "--",
+                "/work a'{}",
+                "/bin/zsh",
             ]
         );
     }
@@ -2747,24 +2900,18 @@ mod tests {
             .map(|s| s.to_string())
             .collect();
         assert_eq!(
-            tab_window_command("/bin/bash", prefix),
+            tab_window_command("/bin/bash", Path::new("/opt/farhelm"), "/work", prefix),
             vec![
                 "systemd-run",
                 "--user",
                 "--scope",
                 "--",
-                // The scrub stays INNERMOST even under a wrapper, so the
-                // shell itself is what starts without the ambient marker.
-                "env",
-                "-u",
-                AGENT_ID_ENV_VAR,
-                "-u",
-                "TMUX",
-                "-u",
-                "TMUX_PANE",
+                "/opt/farhelm",
+                "internal",
+                "tab-shell",
+                "--",
+                "/work",
                 "/bin/bash",
-                "-l",
-                "-i"
             ]
         );
     }
@@ -3110,9 +3257,11 @@ exec sleep 60
         /// "terminal" the child inherited), and its exit status.
         /// (Re)write the launch spec. Rewritten on EVERY run: the shim
         /// unlinks the spec the moment it has read it, so a restart needs
-        /// a fresh copy.
+        /// a fresh copy. Carry the preparation destination into final exec too,
+        /// matching the production builder's post-preparation directory contract.
         fn write_spec(&self) -> PathBuf {
             let spec = LaunchSpec {
+                working_directory: Some(PathBuf::from(&self.preparation.cwd)),
                 argv: FAKE_AGENT_ARGV.iter().map(|s| s.to_string()).collect(),
                 status_file: status_path_for_spec(&self.spec_path),
                 session_id: "prep-session".to_string(),

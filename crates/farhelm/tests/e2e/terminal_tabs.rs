@@ -39,6 +39,208 @@ async fn harness_with_shell(shell: &str) -> Harness {
     .await
 }
 
+/// Temporarily deny entry while preserving the directory's existence and identity.
+/// Create and tab regressions share this premise: metadata and canonicalization
+/// succeed, but a real child cannot chdir. Drop restores permissions even after an
+/// assertion fails, so the test's retained state and eventual cleanup stay usable.
+pub(crate) struct DeniedDirectory {
+    path: std::path::PathBuf,
+    permissions: std::fs::Permissions,
+}
+
+impl DeniedDirectory {
+    /// Restrict an owned fixture directory after the caller has excluded root.
+    pub(crate) fn new(path: &std::path::Path) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        let guard = Self {
+            path: path.to_path_buf(),
+            permissions: std::fs::metadata(path).unwrap().permissions(),
+        };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(std::fs::metadata(path).unwrap().is_dir());
+        assert!(std::fs::canonicalize(path).is_ok());
+        let error = std::process::Command::new("/bin/pwd")
+            .current_dir(path)
+            .output()
+            .expect_err("fixture directory must deny actual process entry");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        guard
+    }
+}
+
+impl Drop for DeniedDirectory {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::set_permissions(&self.path, self.permissions.clone()) {
+            eprintln!(
+                "could not restore fixture directory {}: {error}",
+                self.path.display()
+            );
+        }
+    }
+}
+
+/// tmux's HOME fallback must not turn an unusable session folder into a successful
+/// tab. Hold open's settle until the helper is dead, then require its directory
+/// error to reach the user and its unpublished tab to be cleaned up.
+#[farhelm_testtrace::test]
+async fn a_tab_refuses_a_directory_it_cannot_enter() {
+    // SAFETY: geteuid has no arguments and cannot fail. Root bypasses this fixture.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("SKIPPED: root bypasses directory search permissions");
+        return;
+    }
+    let (settle_gate, settle_entered, settle_release) = notifying_gate();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_shell: Some("/bin/sh".into()),
+            faults: FaultHooks {
+                tab_settle_gate: Some(settle_gate),
+                ..FaultHooks::default()
+            },
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let (session, work) = basic_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let denied = DeniedDirectory::new(work.path());
+    let (opened, ()) = tokio::join!(h.client.open_tab(&session.id), async {
+        tokio::time::timeout(Duration::from_secs(60), settle_entered.notified())
+            .await
+            .expect("tab open must reach the settle boundary");
+        wait_for_dead_tab_pane(&h, &session.id).await;
+        settle_release.notify_one();
+    });
+    drop(denied);
+    let detail = format!(
+        "{:#}",
+        opened.expect_err("unenterable directory must refuse the tab")
+    );
+    // Last words come from the pane's rendered lines, which can wrap inside
+    // this whitespace-free fixture path even though the full path is present.
+    assert!(
+        detail
+            .replace('\n', "")
+            .contains(work.path().to_str().unwrap()),
+        "{detail}"
+    );
+    assert!(detail.contains("working directory"), "{detail}");
+    assert!(listed_tabs(&h.client, &session.id).await.is_empty());
+    assert!(matches!(
+        listed(&h.client, &session.id).await.status,
+        SessionStatus::Running | SessionStatus::Idle
+    ));
+}
+
+/// Agent startup must undo an rc-file cd, while a tab preserves the user's normal
+/// shell startup behavior. Both report physical cwd and PWD; the private profile's
+/// witness proves it actually changed directory before either observation.
+#[farhelm_testtrace::test]
+async fn agent_restores_session_directory_but_tab_keeps_startup_cd() {
+    let home = farhelm_teststate::tempdir().unwrap();
+    let startup = farhelm_teststate::tempdir().unwrap();
+    let work = farhelm_teststate::tempdir().unwrap();
+    // macOS resolves /tmp through a symlink. Use physical fixture spellings so
+    // the assertions isolate startup ordering rather than shell PWD spelling.
+    let startup_path = std::fs::canonicalize(startup.path()).unwrap();
+    let work_path = std::fs::canonicalize(work.path()).unwrap();
+    let witness = home.path().join("profile-entered");
+    std::fs::write(
+        home.path().join(".bash_profile"),
+        format!(
+            "cd {} || exit 1\nprintf '%s\\n' \"$PWD\" >> {}\n",
+            farhelm_proto::text::shell_quote(startup_path.to_str().unwrap()),
+            farhelm_proto::text::shell_quote(witness.to_str().unwrap()),
+        ),
+    )
+    .unwrap();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            launch_shell: Some("/bin/bash".into()),
+            launch_env: vec![("HOME".into(), home.path().to_str().unwrap().into())],
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    let session = h
+        .client
+        .create_session(work_path.to_str().unwrap(), "/bin/sh", None, 80, 24)
+        .await
+        .unwrap();
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+    let (channel, initial, mut rx) = h
+        .client
+        .attach_terminal_live(
+            &session.id,
+            120,
+            24,
+            TerminalSelector::Agent,
+            "directory-agent",
+        )
+        .await
+        .unwrap();
+    let mut seen = initial;
+    wait_for_shell(&h.client, channel, &mut rx, &mut seen, "AGENT-READY").await;
+    assert_eq!(
+        std::fs::read_to_string(&witness).unwrap().trim(),
+        startup_path.to_str().unwrap()
+    );
+    run_in_shell(
+        &h.client,
+        channel,
+        &mut rx,
+        &mut seen,
+        "printf 'CW%s[%s|%s]%s\\n' D \"$(pwd -P)\" \"$PWD\" DWC",
+        "]DWC",
+        20,
+    )
+    .await;
+    let expected = work_path;
+    assert!(
+        String::from_utf8_lossy(&seen).contains(&format!("CWD[{0}|{0}]DWC", expected.display())),
+        "agent must restore cwd/PWD after profile cd: {}",
+        String::from_utf8_lossy(&seen)
+    );
+
+    let tab = h.client.open_tab(&session.id).await.unwrap();
+    let (channel, initial, mut rx) = h
+        .client
+        .attach_terminal_live(
+            &session.id,
+            120,
+            24,
+            TerminalSelector::Tab { id: tab.id },
+            "directory-tab",
+        )
+        .await
+        .unwrap();
+    let mut seen = initial;
+    wait_for_shell(&h.client, channel, &mut rx, &mut seen, "TAB-READY").await;
+    assert_eq!(
+        std::fs::read_to_string(&witness).unwrap().lines().count(),
+        2,
+        "the tab must also execute the private startup profile"
+    );
+    run_in_shell(
+        &h.client,
+        channel,
+        &mut rx,
+        &mut seen,
+        "printf 'CW%s[%s|%s]%s\\n' D \"$(pwd -P)\" \"$PWD\" DWC",
+        "]DWC",
+        20,
+    )
+    .await;
+    assert!(
+        String::from_utf8_lossy(&seen)
+            .contains(&format!("CWD[{0}|{0}]DWC", startup_path.display())),
+        "tab shell startup remains free to cd: {}",
+        String::from_utf8_lossy(&seen)
+    );
+}
+
 /// The shape both pause hooks below share, spelled once so the constructor's
 /// signature stays readable; identical to the supervisor's own alias for
 /// these seams.

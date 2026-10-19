@@ -15760,7 +15760,8 @@
   Restart, Replace and OpenTab fail visibly instead of running in HOME; an optional earlier pre-check is allowed but not
   in place of the in-launch check. Tests use a folder the user cannot enter (skipped as root). SPEC.md states the
   principle above. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/launch-enters-working-dir.md`.
+- Execution: implemented in jj change `kzzyxtwq`, bookmark `plan/launch-enters-working-dir/01-enter-session-folder`;
+  https://github.com/scode/farhelm/pull/2363/changes.
 
 ## template-wrapper-follows-different-agent.md
 
