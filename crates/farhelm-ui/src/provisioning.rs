@@ -435,6 +435,8 @@ struct TrackedRun {
 pub(crate) enum HostUpdateProgress {
     /// Planning or acceptance is underway, before a usable run snapshot exists.
     Pending(UpdatePendingPhase),
+    /// A setup or uninstall plan request is in flight before its dialog opens.
+    PendingConfirmed(ProvisioningOperation),
     /// A tracked run has a live progress snapshot and a local elapsed origin.
     Running(UpdateProgressSummary),
 }
@@ -476,11 +478,12 @@ impl UpdatePendingPhase {
 
 impl UpdateProgressSummary {
     /// The word the row's inline status and its hover popup use for this
-    /// run: "updating" or "uninstalling".
+    /// run: "setting up", "updating" or "uninstalling".
     pub(crate) fn verb(&self) -> &'static str {
         match self.operation {
+            ProvisioningOperation::Add => "setting up",
             ProvisioningOperation::Uninstall => "uninstalling",
-            ProvisioningOperation::Add | ProvisioningOperation::Update => "updating",
+            ProvisioningOperation::Update => "updating",
         }
     }
 }
@@ -490,9 +493,8 @@ impl UpdateProgressSummary {
 pub(crate) struct UpdateProgressSummary {
     /// The exact tracked run id, so replacing a run also replaces its clock.
     pub(crate) run_id: String,
-    /// The run's operation, UPDATE or UNINSTALL. Only the status wording
-    /// depends on it ("updating" or "uninstalling"): SPEC.md asks for an
-    /// uninstall's progress to show in the row the way Update's does.
+    /// The run's operation chooses the inline verb; the step list itself
+    /// keeps the helm's words for every kind of run.
     pub(crate) operation: ProvisioningOperation,
     /// First executor-ordered `running` step, absent when the view names none.
     pub(crate) current_step: Option<String>,
@@ -507,15 +509,35 @@ pub(crate) struct UpdateProgressSummary {
     pub(crate) started_at: Instant,
 }
 
-/// One step of a running update, as the hover popup lists it: the executor's
-/// label and its status string, with the step in progress marked. Step
-/// messages are left out: the popup is a glance at where the run is, and the
-/// expanded row's step list is where diagnostics are read.
+/// One run step in the hover popup, with the helm's warning or failure reason.
+///
+/// The id is a stable handle and the name is for people. A folded row can
+/// hide the expanded rail for this run, so the popup must retain a reason
+/// that changes what the host will do, such as lingering falling back to login.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UpdateStepLine {
+    pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) status: String,
+    pub(crate) message: Option<String>,
     pub(crate) current: bool,
+}
+
+/// The helm's readable step name, with the stable id as a compatibility fallback.
+fn progress_step_name(step: &crate::api::ProvisioningStep) -> &str {
+    step.name
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&step.step)
+}
+
+/// Use a result word that distinguishes no-op and degraded work from failure.
+pub(crate) fn progress_step_status(status: &str) -> &str {
+    match status {
+        "skipped" => "unchanged",
+        "degraded" => "warning",
+        other => other,
+    }
 }
 
 /// One unresolved update diagnostic, kept apart from observed progress.
@@ -558,9 +580,9 @@ fn authoritative_update_success(view: &ProvisioningView, tracked: &TrackedRun) -
 
 /// Whether this row's automatic disclosure is currently owed.
 ///
-/// Only update failures, unresolved diagnostics, or a failed progress read during a live UPDATE open the row.
-/// Running intent and progress stay inline; ADD confirmation and its global
-/// reveal are unchanged, and a merely observed ADD run is trace enough.
+/// Only Update failure or uncertainty opens its row automatically. Running
+/// Update progress stays inline; setup and uninstall use the separate
+/// per-run decision below.
 fn update_auto_disclosed(
     tracked: Option<&TrackedRun>,
     error: Option<&UpdateDiagnostic>,
@@ -572,6 +594,47 @@ fn update_auto_disclosed(
             && (run.last_status == Some(ProvisioningStatus::Failed) || progress_error.is_some())
     }) || error.is_some()
         || warning.is_some()
+}
+
+/// One setup or uninstall run's client-local expansion choice.
+///
+/// The run id is the boundary: folding one run cannot hide the next one.
+/// A failed result reopens for its diagnostic even if the user folded while
+/// it was running. Reloading intentionally forgets the choice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConfirmedRunDisclosure {
+    run_id: String,
+    folded: bool,
+    failed: bool,
+}
+
+/// Reconcile the one-off expansion with the latest host-scoped run snapshot.
+///
+/// Only a run with an id can own a fold choice. An idle, completed, or Update
+/// snapshot clears it; a new id starts expanded, and failure overrides a fold.
+fn confirmed_run_disclosure(
+    prior: Option<&ConfirmedRunDisclosure>,
+    view: Option<&ProvisioningView>,
+) -> Option<ConfirmedRunDisclosure> {
+    let view = view.filter(|view| {
+        matches!(
+            view.operation,
+            Some(ProvisioningOperation::Add | ProvisioningOperation::Uninstall)
+        ) && matches!(
+            view.status,
+            ProvisioningStatus::Running | ProvisioningStatus::Failed
+        )
+    })?;
+    let run_id = view.run_id.as_ref()?.clone();
+    let failed = view.status == ProvisioningStatus::Failed;
+    Some(ConfirmedRunDisclosure {
+        folded: !failed
+            && prior
+                .filter(|prior| prior.run_id == run_id)
+                .is_some_and(|prior| prior.folded),
+        run_id,
+        failed,
+    })
 }
 
 /// Derive the row-sized progress facts from the exact live UPDATE snapshot.
@@ -619,14 +682,17 @@ fn summarize_running_view(
         })
         .count();
     let current_index = view.steps.iter().position(|step| step.status == "running");
-    let current_step = current_index.map(|index| view.steps[index].step.clone());
+    let current_step =
+        current_index.map(|index| progress_step_name(&view.steps[index]).to_string());
     let steps = view
         .steps
         .iter()
         .enumerate()
         .map(|(index, step)| UpdateStepLine {
-            name: step.step.clone(),
+            id: step.step.clone(),
+            name: progress_step_name(step).to_string(),
             status: step.status.clone(),
+            message: step.message.clone(),
             current: Some(index) == current_index,
         })
         .collect();
@@ -641,24 +707,25 @@ fn summarize_running_view(
     }
 }
 
-/// The compact update status this row publishes to its host row, if any.
+/// The compact run status this panel publishes to its host row, if any.
 ///
 /// A live automatic-update intent always wins and names its own phase, so
 /// the click shows `updating…` from the moment it is accepted and never
 /// falls back to the ordinary label while the POST is outstanding. After the
 /// intent ends, only a live tracked UPDATE run keeps a status: full progress
 /// when the displayed view is that exact run running, otherwise the
-/// awaiting-progress stage. Terminal runs, ADD runs, and rows with nothing
-/// tracked publish nothing, which is what returns the ordinary label.
+/// awaiting-progress stage. Confirmed setup and uninstall use a matching
+/// observed run id and first-seen clock instead of Update's tracked run.
+/// Terminal runs and rows with no current work return the ordinary label.
 ///
 /// The same answer also decides whether the collapsed trace line is drawn:
-/// while the row carries this inline status, a second line saying the update
-/// is running would only repeat it.
+/// while the row carries this inline status, a second trace line would only
+/// repeat it.
 fn derive_row_update_progress(
     intent: Option<&UpdateIntent>,
     tracked: Option<&TrackedRun>,
     view: Option<&ProvisioningView>,
-    uninstall_clock: Option<&(String, Instant)>,
+    confirmed_run_clock: Option<&(String, Instant)>,
 ) -> Option<HostUpdateProgress> {
     if let Some(live) = intent {
         return Some(HostUpdateProgress::Pending(match live.phase {
@@ -678,23 +745,21 @@ fn derive_row_update_progress(
                 ),
         );
     }
-    // A running UNINSTALL shows in the row the same way. It has no tracked
-    // run or intent (it is confirmed like setup), so the live read itself is
-    // the evidence, paired with the clock the panel started when it first
-    // saw this run (see `uninstall_clock` in the panel). This matters most
-    // once the run stops the supervisor: without it the row's status would
-    // read unreachable while the removal is still going.
-    let (clock_run, started_at) = uninstall_clock?;
+    // A confirmed ADD or UNINSTALL has no tracked update run or intent. Its
+    // live read is paired with the clock first observed for that exact id.
+    let (clock_run, started_at) = confirmed_run_clock?;
     let view = view.filter(|view| {
-        view.operation == Some(ProvisioningOperation::Uninstall)
-            && view.status == ProvisioningStatus::Running
+        matches!(
+            view.operation,
+            Some(ProvisioningOperation::Add | ProvisioningOperation::Uninstall)
+        ) && view.status == ProvisioningStatus::Running
             && view.run_id.as_deref() == Some(clock_run.as_str())
     })?;
     Some(HostUpdateProgress::Running(summarize_running_view(
         view,
         clock_run.clone(),
         *started_at,
-        ProvisioningOperation::Uninstall,
+        view.operation.expect("filtered to a confirmed operation"),
     )))
 }
 
@@ -1871,6 +1936,9 @@ pub(crate) fn ProvisioningPanel(
     /// the user's preference and this panel never writes it for an update;
     /// the automatic half is published into `auto_details` below.
     details_open: bool,
+    /// The global preference independently holds rows open. A one-off fold
+    /// control only applies when this preference is off.
+    global_details_open: bool,
     /// Whether this row's manual local remedy should be replaced by an
     /// automatic ADD probe and offer.
     local_setup: bool,
@@ -1882,16 +1950,15 @@ pub(crate) fn ProvisioningPanel(
     mut menu_states: Signal<HashMap<HostId, ProvisioningMenuState>>,
     /// Collapsed traces whose presence changes fixed-surface geometry.
     mut trace_shapes: Signal<HashMap<HostId, ProvisioningTraceShape>>,
-    /// Rows whose automatic disclosure currently holds them open. Published
-    /// for update failures and unresolved diagnostics; the parent ORs this
-    /// with the global checkbox per row.
+    /// Rows whose automatic disclosure currently holds them open. A confirmed
+    /// setup or uninstall owns one expansion per run; failures and unresolved
+    /// diagnostics also open their row. The parent ORs this with the global
+    /// checkbox per row.
     mut auto_details: Signal<HashSet<HostId>>,
     /// Compact row status published beside the automatic-disclosure set.
     mut row_update_progress: Signal<HashMap<HostId, HostUpdateProgress>>,
-    /// Reveal global details when ADD preparation produces a confirmation or
-    /// hidden diagnostic. Updates keep their running status inline and rely
-    /// on automatic row disclosure only when a failure or uncertainty needs
-    /// the full trace.
+    /// Reveal global details for the local ADD handoff's hidden diagnostic.
+    /// Remote confirmations stay visible even when every row is folded.
     on_reveal_details: EventHandler<()>,
     /// Paint-only busy bookkeeping for this row in the parent. It never
     /// excludes a run.
@@ -1917,7 +1984,9 @@ pub(crate) fn ProvisioningPanel(
     let mut read_gate = use_signal(ReadGate::default);
     let mut pending = use_signal(|| None::<PendingPlan>);
     let mut auto_submit_add = use_signal(|| false);
-    let mut planning = use_signal(|| false);
+    // A confirmed action owns this slot from click through its plan reply,
+    // letting the folded row name the pending operation.
+    let mut planning = use_signal(|| None::<ProvisioningOperation>);
     let mut action_error = use_signal(|| None::<String>);
     let mut action_warning = use_signal(|| None::<String>);
     let mut update_error = use_signal(|| None::<UpdateDiagnostic>);
@@ -1932,10 +2001,10 @@ pub(crate) fn ProvisioningPanel(
     // old target's run as the new target's work.
     let mut outstanding_submission = use_signal(|| None::<OutstandingSubmission>);
     let mut tracked = use_signal(|| None::<TrackedRun>);
-    // When this panel first saw the current running UNINSTALL, by run id: the
-    // origin of its inline elapsed time. Uninstall has no tracked run (it is
-    // confirmed like setup), so this is its only clock.
-    let mut uninstall_clock = use_signal(|| None::<(String, Instant)>);
+    // Confirmed setup and uninstall are not tracked like automatic Update.
+    // Their first observed run snapshot starts the row's elapsed clock.
+    let mut confirmed_run_clock = use_signal(|| None::<(String, Instant)>);
+    let mut confirmed_disclosure = use_signal(|| None::<ConfirmedRunDisclosure>);
     // Run ids a target change detached from this row. The progress route is
     // host-scoped, not target-scoped, so the helm can keep reporting the old
     // target's retained run after a retarget; adopting it would reinterpret
@@ -2083,10 +2152,10 @@ pub(crate) fn ProvisioningPanel(
     // and submits only on an explicit confirmation. Only ADD carries the
     // local-setup retry and the remembered "don't ask again" answer.
     let begin_confirmed_plan = move |operation: ProvisioningOperation| -> bool {
-        if *planning.peek() || ops.busy_now() {
+        if planning.peek().is_some() || ops.busy_now() {
             return false;
         }
-        planning.set(true);
+        planning.set(Some(operation));
         pending.set(None);
         action_error.set(None);
         action_warning.set(None);
@@ -2100,7 +2169,7 @@ pub(crate) fn ProvisioningPanel(
         spawn(async move {
             let prepared = prepare(&base, &host, operation).await;
             if *current_binding.peek() != requested_binding {
-                planning.set(false);
+                planning.set(None);
                 return;
             }
             match prepared {
@@ -2110,7 +2179,6 @@ pub(crate) fn ProvisioningPanel(
                     }
                     auto_submit_add.set(!is_local_add && remembered_answer);
                     pending.set(Some(*plan));
-                    on_reveal_details.call(());
                 }
                 Ok(Preparation::Discovered) => {
                     // Discovery can register a host and can resolve a
@@ -2126,7 +2194,9 @@ pub(crate) fn ProvisioningPanel(
                         local_auto_retry.set(false);
                     }
                     action_error.set(Some(reason));
-                    on_reveal_details.call(());
+                    if is_local_add {
+                        on_reveal_details.call(());
+                    }
                 }
                 Ok(Preparation::Unvalidated(problem)) => {
                     if is_local_add {
@@ -2134,17 +2204,21 @@ pub(crate) fn ProvisioningPanel(
                     }
                     action_error.set(Some(problem));
                     on_changed.call(());
-                    on_reveal_details.call(());
+                    if is_local_add {
+                        on_reveal_details.call(());
+                    }
                 }
                 Err(error) => {
                     if is_local_add {
                         local_auto_retry.set(true);
                     }
                     action_error.set(Some(error));
-                    on_reveal_details.call(());
+                    if is_local_add {
+                        on_reveal_details.call(());
+                    }
                 }
             }
-            planning.set(false);
+            planning.set(None);
         });
         true
     };
@@ -2275,7 +2349,7 @@ pub(crate) fn ProvisioningPanel(
             // `RuntimeError: unreachable` per click, zero requests sent).
             let current = current_binding.peek().clone();
             let owned = update_owned(intent.peek().as_ref(), tracked.peek().as_ref());
-            let add_planning = *planning.peek();
+            let add_planning = planning.peek().is_some();
             let busy = ops.busy_now();
             match decide_request(request, &current, owned, add_planning, busy) {
                 RequestDecision::Refuse => false,
@@ -2465,9 +2539,9 @@ pub(crate) fn ProvisioningPanel(
         }
     }));
 
-    // Publish the row's disclosure and compact status together. Running work
-    // remains folded unless the user opened global details; errors, warnings,
-    // and retained failed runs keep the step list visible for diagnosis.
+    // Publish the row's disclosure and compact status together. Update stays
+    // folded while running; confirmed actions expand once per run id. Errors,
+    // warnings, and retained failed runs keep their diagnosis visible.
     use_effect(move || {
         let current_intent = intent();
         let current_tracked = tracked();
@@ -2475,12 +2549,23 @@ pub(crate) fn ProvisioningPanel(
         let error = update_error();
         let warning = update_warning();
         let read_error = progress_error();
-        let disclosed = update_auto_disclosed(
-            current_tracked.as_ref(),
-            error.as_ref(),
-            warning.as_ref(),
-            read_error.as_deref(),
-        );
+        let action_diagnostic = action_error().is_some() || action_warning().is_some();
+        let prior_confirmed = confirmed_disclosure();
+        let next_confirmed =
+            confirmed_run_disclosure(prior_confirmed.as_ref(), current_progress.as_ref());
+        if prior_confirmed != next_confirmed {
+            confirmed_disclosure.set(next_confirmed.clone());
+        }
+        let disclosed = action_diagnostic
+            || next_confirmed
+                .as_ref()
+                .is_some_and(|run| !run.folded || run.failed)
+            || update_auto_disclosed(
+                current_tracked.as_ref(),
+                error.as_ref(),
+                warning.as_ref(),
+                read_error.as_deref(),
+            );
         let held = auto_details.peek().contains(&host_id);
         if disclosed && !held {
             auto_details.write().insert(host_id);
@@ -2488,36 +2573,42 @@ pub(crate) fn ProvisioningPanel(
             auto_details.write().remove(&host_id);
         }
 
-        // Start the elapsed clock the first time a running uninstall is
-        // seen, keyed by its run id so a later run gets a fresh one.
-        let running_uninstall = current_progress
+        // Start the elapsed clock on the first running snapshot of a
+        // confirmed action, keyed by run id so a later run starts fresh.
+        let running_confirmed = current_progress
             .as_ref()
             .filter(|view| {
-                view.operation == Some(ProvisioningOperation::Uninstall)
-                    && view.status == ProvisioningStatus::Running
+                matches!(
+                    view.operation,
+                    Some(ProvisioningOperation::Add | ProvisioningOperation::Uninstall)
+                ) && view.status == ProvisioningStatus::Running
             })
             .and_then(|view| view.run_id.clone());
-        let previous_clock = uninstall_clock.peek().clone();
-        let clock = match (running_uninstall, previous_clock) {
+        let previous_clock = confirmed_run_clock.peek().clone();
+        let clock = match (running_confirmed, previous_clock) {
             (Some(run), Some((seen, at))) if seen == run => Some((seen, at)),
             (Some(run), _) => {
                 let started = (run, Instant::now());
-                uninstall_clock.set(Some(started.clone()));
+                confirmed_run_clock.set(Some(started.clone()));
                 Some(started)
             }
             (None, previous) => {
                 if previous.is_some() {
-                    uninstall_clock.set(None);
+                    confirmed_run_clock.set(None);
                 }
                 None
             }
         };
-        let row_progress = derive_row_update_progress(
-            current_intent.as_ref(),
-            current_tracked.as_ref(),
-            current_progress.as_ref(),
-            clock.as_ref(),
-        );
+        let row_progress = planning()
+            .map(HostUpdateProgress::PendingConfirmed)
+            .or_else(|| {
+                derive_row_update_progress(
+                    current_intent.as_ref(),
+                    current_tracked.as_ref(),
+                    current_progress.as_ref(),
+                    clock.as_ref(),
+                )
+            });
         let previous = row_update_progress.peek().get(&host_id).cloned();
         if previous != row_progress {
             if let Some(row_progress) = row_progress {
@@ -2592,7 +2683,7 @@ pub(crate) fn ProvisioningPanel(
         (&local_setup, &menu_host_kind, &menu_too_new),
         move |(local_setup, menu_host_kind, menu_too_new)| {
             let snapshot = progress();
-            let is_planning = planning();
+            let is_planning = planning().is_some();
             let has_pending_plan = pending().is_some();
             let owned = update_owned(intent().as_ref(), tracked().as_ref());
             let can_retry_local_setup = local_auto_retry();
@@ -2765,7 +2856,7 @@ pub(crate) fn ProvisioningPanel(
     let current_progress_error = progress_error.read().clone();
     let live_intent = intent.read().clone();
     let intent_phase = live_intent.as_ref().map(|live| live.phase);
-    let is_planning = *planning.read() || intent_phase == Some(IntentPhase::Planning);
+    let is_planning = planning.read().is_some() || intent_phase == Some(IntentPhase::Planning);
     let is_waiting_claim = intent_phase == Some(IntentPhase::WaitingForClaim);
     let is_submitting = intent_phase == Some(IntentPhase::Submitting);
     let is_accepted_run_waiting = *accepted_run_waiting.read();
@@ -2784,13 +2875,17 @@ pub(crate) fn ProvisioningPanel(
     // running or failed retained run keeps it. Suppressing it here, where the trace
     // shape is also published, keeps fixed-surface geometry in step with
     // what is actually drawn.
-    let inline_update_status = derive_row_update_progress(
-        live_intent.as_ref(),
-        tracked.read().as_ref(),
-        snapshot.as_ref(),
-        uninstall_clock.read().as_ref(),
-    )
-    .is_some();
+    let inline_update_status = (*planning.read())
+        .map(HostUpdateProgress::PendingConfirmed)
+        .or_else(|| {
+            derive_row_update_progress(
+                live_intent.as_ref(),
+                tracked.read().as_ref(),
+                snapshot.as_ref(),
+                confirmed_run_clock.read().as_ref(),
+            )
+        })
+        .is_some();
     let visible_trace = (!details_open && !inline_update_status)
         .then(|| {
             snapshot.as_ref().and_then(|view| {
@@ -2831,13 +2926,21 @@ pub(crate) fn ProvisioningPanel(
         || current_warning.is_some()
         || current_progress_error.is_some()
         || (local_setup && manual_remedy.is_some());
+    let foldable_run = (!global_details_open && details_open)
+        .then(|| confirmed_disclosure.read().clone())
+        .flatten()
+        .filter(|run| !run.folded && !run.failed)
+        .map(|run| run.run_id);
 
     rsx! {
         div {
             class: "provisioning-panel",
             "data-provisioning-host": "{host_id}",
-            if details_open && has_details_content {
+            // Confirmation modals live outside row disclosure: opening one
+            // must not switch on the global details checkbox.
+            if (details_open && has_details_content) || offer.is_some() {
             div {
+            if details_open {
             if let Some(view) = snapshot && view.run_id.is_some() {
                 div {
                         class: "provisioning-run",
@@ -2848,6 +2951,26 @@ pub(crate) fn ProvisioningPanel(
                                 "{operation_label(view.operation)} provisioning"
                             }
                             span { class: "provisioning-status", "{status_label(view.status)}" }
+                            if let Some(fold_run_id) = foldable_run {
+                                button {
+                                    r#type: "button",
+                                    class: "btn provisioning-run-fold",
+                                    "data-tooltip": "collapse this run's steps",
+                                    aria_label: "collapse this run's steps",
+                                    onclick: move |_| {
+                                        let observed = confirmed_disclosure.peek().clone();
+                                        if let Some(current) = observed
+                                            && current.run_id == fold_run_id && !current.failed
+                                        {
+                                            confirmed_disclosure.set(Some(ConfirmedRunDisclosure {
+                                                folded: true,
+                                                ..current
+                                            }));
+                                        }
+                                    },
+                                    "collapse"
+                                }
+                            }
                         }
                         ol { class: "provisioning-steps",
                             for step in view.steps {
@@ -2855,8 +2978,10 @@ pub(crate) fn ProvisioningPanel(
                                     class: "provisioning-step",
                                     "data-step": "{step.step}",
                                     "data-status": "{step.status}",
-                                    span { class: "provisioning-step-name", "{step.step}" }
-                                    span { class: "provisioning-step-status", "{step.status}" }
+                                    "data-current": if step.status == "running" { "true" },
+                                    span { class: "provisioning-step-marker", aria_hidden: "true" }
+                                    span { class: "provisioning-step-name peer-value", dir: "ltr", "{display_peer(progress_step_name(&step))}" }
+                                    span { class: "provisioning-step-status", "{progress_step_status(&step.status)}" }
                                     if let Some(message) = step.message {
                                         PeerLine {
                                             class: "provisioning-step-message",
@@ -2873,6 +2998,7 @@ pub(crate) fn ProvisioningPanel(
                             }
                         }
                 }
+            }
             }
 
             if let Some(plan) = offer {
@@ -2982,25 +3108,26 @@ pub(crate) fn ProvisioningPanel(
                         },
                     }
                 }
-            } else if is_planning {
+            } else if details_open && is_planning {
                 div {
                     class: "provisioning-planning",
                     if local_setup { "checking automatic setup…" } else { "planning…" }
                 }
-            } else if is_waiting_claim {
+            } else if details_open && is_waiting_claim {
                 // The minted plan is stored while the row stays folded;
                 // submission follows as soon as the page token frees.
                 div {
                     class: "provisioning-waiting",
                     "waiting to submit…"
                 }
-            } else if is_submitting {
+            } else if details_open && is_submitting {
                 div {
                     class: "provisioning-submitting",
                     "submitting…"
                 }
             }
 
+            if details_open {
             if let Some(error) = current_error {
                 PeerLine {
                     class: "action-error provisioning-error",
@@ -3028,6 +3155,7 @@ pub(crate) fn ProvisioningPanel(
                     },
                     parts: remedy,
                 }
+            }
             }
             }
             } else if let Some(shape) = visible_trace {
@@ -3517,10 +3645,61 @@ mod tests {
         ));
     }
 
+    /// A fold is one run's choice, while failure restores the steps needed to diagnose it.
+    ///
+    /// Setup and uninstall use the same host-scoped progress feed as Update.
+    /// This decision must key on its opaque run id: repeated snapshots cannot
+    /// reopen a folded run, and a later run must not inherit that fold.
+    #[farhelm_testtrace::test]
+    fn confirmed_run_expansion_is_one_off_per_run_id() {
+        let mut view = ProvisioningView {
+            run_id: Some("run-a".to_string()),
+            operation: Some(ProvisioningOperation::Add),
+            status: ProvisioningStatus::Running,
+            steps: vec![],
+            message: None,
+        };
+        let first = confirmed_run_disclosure(None, Some(&view)).expect("running setup opens");
+        assert!(!first.folded);
+        let folded = ConfirmedRunDisclosure {
+            folded: true,
+            ..first
+        };
+        assert_eq!(
+            confirmed_run_disclosure(Some(&folded), Some(&view)),
+            Some(folded.clone())
+        );
+        view.status = ProvisioningStatus::Failed;
+        let failed_folded =
+            confirmed_run_disclosure(Some(&folded), Some(&view)).expect("failure reopens");
+        assert!(!failed_folded.folded);
+        assert!(failed_folded.failed);
+        view.status = ProvisioningStatus::Running;
+
+        view.run_id = Some("run-b".to_string());
+        let next = confirmed_run_disclosure(Some(&folded), Some(&view)).expect("new run opens");
+        assert!(!next.folded);
+        assert_eq!(next.run_id, "run-b");
+
+        view.status = ProvisioningStatus::Failed;
+        let failure = confirmed_run_disclosure(Some(&folded), Some(&view)).expect("failure opens");
+        assert!(failure.failed);
+        assert!(!failure.folded);
+        view.status = ProvisioningStatus::Completed;
+        assert_eq!(confirmed_run_disclosure(Some(&failure), Some(&view)), None);
+
+        view.operation = Some(ProvisioningOperation::Uninstall);
+        view.status = ProvisioningStatus::Running;
+        assert!(confirmed_run_disclosure(None, Some(&view)).is_some());
+        view.operation = Some(ProvisioningOperation::Update);
+        assert_eq!(confirmed_run_disclosure(None, Some(&view)), None);
+    }
+
     /// Inline progress counts terminal steps and names only a currently running step.
     ///
     /// The row cannot show the full trace while folded, so this summary must
-    /// preserve executor order and reject stale snapshots that name another run.
+    /// preserve executor order, retain warning reasons for its popup, and
+    /// reject stale snapshots that name another run.
     #[farhelm_testtrace::test]
     fn update_progress_summary_counts_steps_and_requires_the_tracked_live_run() {
         let started_at = Instant::now();
@@ -3542,42 +3721,53 @@ mod tests {
                     step: "check-host".to_string(),
                     status: "completed".to_string(),
                     message: None,
+                    ..Default::default()
                 },
                 crate::api::ProvisioningStep {
                     step: "upload-farhelm".to_string(),
+                    name: Some("upload the farhelm binary".to_string()),
                     status: "running".to_string(),
                     message: None,
+                    ..Default::default()
                 },
                 crate::api::ProvisioningStep {
                     step: "install-supervisor".to_string(),
                     status: "pending".to_string(),
                     message: None,
+                    ..Default::default()
                 },
                 crate::api::ProvisioningStep {
                     step: "optional-step".to_string(),
                     status: "skipped".to_string(),
                     message: None,
+                    ..Default::default()
                 },
                 crate::api::ProvisioningStep {
                     step: "degraded-step".to_string(),
                     status: "degraded".to_string(),
-                    message: None,
+                    message: Some("starts at login instead".to_string()),
+                    ..Default::default()
                 },
                 crate::api::ProvisioningStep {
                     step: "failed-step".to_string(),
                     status: "failed".to_string(),
                     message: None,
+                    ..Default::default()
                 },
                 crate::api::ProvisioningStep {
                     step: "future-step".to_string(),
                     status: "new-status".to_string(),
                     message: None,
+                    ..Default::default()
                 },
             ],
             message: None,
         };
         let summary = update_progress_summary(&view, &tracked).expect("live run has progress");
-        assert_eq!(summary.current_step.as_deref(), Some("upload-farhelm"));
+        assert_eq!(
+            summary.current_step.as_deref(),
+            Some("upload the farhelm binary")
+        );
         assert_eq!((summary.done, summary.total), (4, 7));
         assert_eq!(summary.started_at, started_at);
         // The hover popup's list: every step in executor order, statuses as
@@ -3586,13 +3776,21 @@ mod tests {
             summary
                 .steps
                 .iter()
-                .map(|step| step.name.as_str())
+                .map(|step| step.id.as_str())
                 .collect::<Vec<_>>(),
             view.steps
                 .iter()
                 .map(|step| step.step.as_str())
                 .collect::<Vec<_>>(),
         );
+        assert_eq!(summary.steps[1].name, "upload the farhelm binary");
+        assert_eq!(
+            summary.steps[4].message.as_deref(),
+            Some("starts at login instead")
+        );
+        assert_eq!(progress_step_status("skipped"), "unchanged");
+        assert_eq!(progress_step_status("degraded"), "warning");
+        assert_eq!(progress_step_status("new-status"), "new-status");
         assert!(
             summary
                 .steps
@@ -3607,7 +3805,7 @@ mod tests {
                 .filter(|step| step.current)
                 .map(|step| step.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["upload-farhelm"],
+            vec!["upload the farhelm binary"],
         );
 
         let mut other_run = view.clone();
@@ -3618,17 +3816,12 @@ mod tests {
         assert_eq!(update_progress_summary(&terminal, &tracked), None);
     }
 
-    /// A running uninstall shows in the row's inline status the way an
-    /// update does, worded as uninstalling, and only for the run the panel's
-    /// clock was started for.
+    /// Confirmed setup and uninstall keep the row's status current without a dialog.
     ///
-    /// Why it matters: SPEC.md asks for an uninstall's progress to show in
-    /// the row like Update's, and once the run stops the supervisor the row's
-    /// connection status would otherwise read unreachable while the removal
-    /// is still going. Specified: a running uninstall view whose run id
-    /// matches the clock yields a running summary with its steps, done count
-    /// and "uninstalling"; no clock, another run's view, or a finished run
-    /// yields nothing.
+    /// Once uninstall stops the supervisor, the ordinary connection status
+    /// would read unreachable while removal still runs. Both operations use
+    /// a run-id clock and helm-authored step names; stale or finished views
+    /// cannot claim that the work is still live.
     #[farhelm_testtrace::test]
     fn a_running_uninstall_shows_inline_like_an_update() {
         let started_at = Instant::now();
@@ -3642,11 +3835,13 @@ mod tests {
                     step: "disable-supervisor".to_string(),
                     status: "completed".to_string(),
                     message: None,
+                    ..Default::default()
                 },
                 crate::api::ProvisioningStep {
                     step: "remove-unit".to_string(),
                     status: "running".to_string(),
                     message: None,
+                    ..Default::default()
                 },
             ],
             message: None,
@@ -3661,6 +3856,17 @@ mod tests {
         assert_eq!(summary.current_step.as_deref(), Some("remove-unit"));
         assert_eq!((summary.done, summary.total), (1, 2));
         assert_eq!(summary.started_at, started_at);
+
+        let setup = ProvisioningView {
+            operation: Some(ProvisioningOperation::Add),
+            ..view.clone()
+        };
+        let Some(HostUpdateProgress::Running(setup_summary)) =
+            derive_row_update_progress(None, None, Some(&setup), Some(&clock))
+        else {
+            panic!("a running setup must show inline progress");
+        };
+        assert_eq!(setup_summary.verb(), "setting up");
 
         assert_eq!(
             derive_row_update_progress(None, None, Some(&view), None),
@@ -3731,6 +3937,7 @@ mod tests {
                 step: "create-directories".to_string(),
                 status: "running".to_string(),
                 message: None,
+                ..Default::default()
             }],
             message: None,
         };

@@ -298,10 +298,11 @@ async function waitForProgress(
   return await progress(request, host);
 }
 
-/** Open the real add form and submit one destination.
+/** Open the real add form and submit one destination with host details open.
  *
- * Ensuring host details first keeps any resulting plan or diagnostic visible
- * without making callers repeat the disclosure prerequisite.
+ * Most discovery tests inspect the expanded row after probing, so this helper
+ * preserves that shared fixture state. Tests of folded disclosure open the
+ * form directly.
  */
 async function probeRemote(page: Page, destination: string): Promise<void> {
   await openHostsPanel(page);
@@ -490,9 +491,10 @@ test("Update replaces an earlier uninstall action error with its own refusal", a
   await expect(row.locator(".provisioning-error")).not.toContainText("old uninstall refusal");
 });
 
-/** An open, unscrollable popup must follow progress, not just its first step.
+/** An open, unscrollable popup must follow progress and retain warning detail.
  * A controlled long step list makes the next step start outside its clip;
- * the existing geometry oracle distinguishes scrolling from text repaint. */
+ * the geometry oracle distinguishes scrolling from text repaint. A degraded
+ * prior step must keep the helm's reason when the row is folded. */
 test("an open Update popup follows the new current step in a short viewport", async ({ page, request }, testInfo) => {
   const remote = destination(testInfo, "popup-follow");
   const accepted = await startAdd(request, remote);
@@ -504,7 +506,7 @@ test("an open Update popup follows the new current step in a short viewport", as
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-update").click();
-  await expect(row.locator(".host-update-step")).toHaveText(" create-directories");
+  await expect(row.locator(".host-update-step")).toHaveText(" create directories");
   const live = await progress(request, accepted.host_id);
   expect(live.status).toBe("running");
   expect(live.operation).toBe("update");
@@ -512,7 +514,11 @@ test("an open Update popup follows the new current step in a short viewport", as
   await page.route(`**/api/hosts/${accepted.host_id}/provisioning`, async (route) => {
     await route.fulfill({ headers: { "x-farhelm-build": HELM_BUILD }, json: {
       ...live,
-      steps: Array.from({ length: 16 }, (_, index) => ({ step: `fixture-step-${index}`, status: index === current ? "running" : index < current ? "completed" : "pending", message: null })),
+      steps: Array.from({ length: 16 }, (_, index) => ({
+        step: `fixture-step-${index}`,
+        status: index === current ? "running" : index === 14 && current === 15 ? "degraded" : index < current ? "completed" : "pending",
+        message: index === 14 && current === 15 ? "Lingering denied; supervisor starts at login instead of boot." : null,
+      })),
     } });
   });
   feed.notify(1);
@@ -526,6 +532,8 @@ test("an open Update popup follows the new current step in a short viewport", as
   current = 15;
   feed.notify(2);
   await expect(popup.locator(".host-update-popup-step")).toHaveText("fixture-step-15");
+  await expect(popup.locator('.provisioning-step[data-status="degraded"] .provisioning-step-message'))
+    .toHaveText("Lingering denied; supervisor starts at login instead of boot.");
   await expect.poll(() => popupTextVisible(popup), { message: "the already-open popup must scroll to step 15" }).toEqual({ current: true, count: true, elapsed: true });
 });
 
@@ -677,6 +685,55 @@ for (const phone of [false, true]) {
     expect((await readPreferences(request)).skip_host_setup_confirmation).not.toBe(true);
   });
 }
+
+/**
+ * Setup leaves its confirmation immediately, then exposes live work in the
+ * row without taking over the global details preference. A user who folds
+ * that one run must still get its compact status and visible verb while it continues.
+ */
+test("confirmed setup expands its row once and can be folded", async ({ page, request }, testInfo) => {
+  test.setTimeout(120_000);
+  const remote = destination(testInfo, "setup-progress-rail");
+  await configureBackend({ targets: { [target(remote)]: { action_delay_ms: 1_500 } } });
+  await patchPreferences(request, { skip_host_setup_confirmation: null });
+  await page.goto("/");
+  await expect(page.locator(".hosts-panel")).toBeVisible();
+  await page.getByRole("button", { name: "add host" }).click();
+  await page.locator(".add-host-ssh").fill(remote);
+  await page.locator(".add-host-submit").click();
+  const dialog = page.getByRole("dialog", { name: "add host", exact: true });
+  await expect(dialog.locator(".provisioning-plan")).toBeVisible();
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+  await dialog.getByRole("button", { name: "set up", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+
+  const row = hostRowByName(page, remote);
+  await expect(row.locator('.provisioning-run[data-provisioning-operation="setup"]')).toBeVisible({ timeout: 30_000 });
+  await expect(row.locator('.provisioning-step[data-step="create-directories"] .provisioning-step-name'))
+    .toHaveText("create directories");
+  await testInfo.attach("setup-progress-rail", { body: await row.screenshot(), contentType: "image/png" });
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+  await row.locator(".provisioning-run-fold").click();
+  await expect(row.locator(".provisioning-run")).toHaveCount(0);
+  await expect(row.locator(".host-update-verb")).toBeVisible();
+  await expect(row.locator(".host-update-verb")).toHaveText("setting up");
+  const compact = await row.evaluate((node) => {
+    const sidebar = node.closest(".app-sidebar")!;
+    const menu = node.querySelector(".host-row-menu")!.getBoundingClientRect();
+    const verb = node.querySelector(".host-update-verb")!.getBoundingClientRect();
+    const clock = node.querySelector(".host-update-elapsed")!.getBoundingClientRect();
+    return {
+      verbLeft: verb.left,
+      sidebarLeft: sidebar.getBoundingClientRect().left,
+      clockRight: clock.right,
+      menuLeft: menu.left,
+    };
+  });
+  expect(compact.verbLeft).toBeGreaterThanOrEqual(compact.sidebarLeft);
+  expect(compact.clockRight).toBeLessThanOrEqual(compact.menuLeft);
+  await expect(row.locator(".host-update-running")).toHaveCount(0, { timeout: 90_000 });
+  await expect(row.locator(".provisioning-run")).toHaveCount(0);
+});
 
 /**
  * Discovery must display the helm's concrete steps without acting on them.
@@ -1128,6 +1185,8 @@ test("the add dialog's cancel stays live while discovery is pending", async ({
   expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
 });
 
+/** Acceptance registers the host and releases unrelated page actions, while
+ * this row stays busy until its numbered setup run reaches completion. */
 test("accepted ADD registers before execution and releases the page lock while running", async ({
   page,
   request,
@@ -1173,6 +1232,9 @@ test("accepted ADD registers before execution and releases the page lock while r
     "data-provisioning-status",
     "completed",
   );
+  // Completion can fold the one-off rail and invalidate the menu's measured
+  // position. Open it again before checking the now-available Update action.
+  await openHostMenu(registeredRow);
   await expect(page.locator(`[data-host-id="${registered.id}"] .provisioning-update`)).toBeVisible();
   expect(documents).toBe(1);
 });
@@ -1419,11 +1481,11 @@ test("an unvalidated automatic local probe reveals its feedback", async ({ page 
 });
 
 /**
- * Automatic setup has no initiating click that can reveal its confirmation.
- * Releasing a held plan from the collapsed state must open Details through
- * the child-to-parent reveal bridge.
+ * A confirmation must mount from a folded row without rewriting the user's
+ * global details choice. This stub reaches a defensive local plan path;
+ * production local probes hand off to the manual setup command.
  */
-test("an automatic local plan reveals its confirmation", async ({ page }, testInfo) => {
+test("a held local plan opens its confirmation while details stay folded", async ({ page }, testInfo) => {
   const state = { down: true };
   await controlLocalState(page, state);
   let release!: () => void;
@@ -1451,7 +1513,7 @@ test("an automatic local plan reveals its confirmation", async ({ page }, testIn
   await expect(page.locator('[data-host-kind="local"] .provisioning-plan')).toContainText(
     "install the local supervisor",
   );
-  await expect(page.locator(".host-details-toggle")).toBeChecked();
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   const question = page.getByRole("dialog", { name: "host setup", exact: true });
   await expect(question.getByRole("heading")).toHaveText("set up host · local (this machine)");
   await expect(question.locator(".host-settings-summary")).toHaveText("Farhelm is not running here yet");
@@ -1699,10 +1761,10 @@ async function holdLockWithAdd(
 }
 
 /**
- * The inline status of a running update, as text content: `updating: N/M step m:ss`.
+ * The inline status names the helm's current step, which may contain spaces.
  * The `updating: ` prefix is visually hidden but kept for assistive technology.
  */
-const RUNNING_PROGRESS = /updating: \d+\/\d+ \S+ \d+:\d{2}/;
+const RUNNING_PROGRESS = /updating: \d+\/\d+ .+ \d+:\d{2}/;
 
 /**
  * The row's pending `updating…` status at one exact lifecycle stage.
@@ -1802,12 +1864,11 @@ test("single Update shows inline progress without opening its row", async ({
   // than sitting above a second line that repeats it.
   await expect(row.locator(".provisioning-trace")).toHaveCount(0);
 
-  // The held step is `create-directories`, which ties for the longest real
-  // executor step name. It must not push the menu toggle past the sidebar's
-  // visible right edge (the sidebar clips horizontal overflow): the step
-  // name truncates, while the count and the clock stay whole, left of the
-  // toggle.
-  await expect(row.locator(".host-update-step")).toHaveText(" create-directories");
+  // The held `create-directories` step has a multiword helm name. It must
+  // not push the menu toggle past the sidebar's visible right edge (the
+  // sidebar clips horizontal overflow): the name truncates, while the count
+  // and clock stay whole, left of the toggle.
+  await expect(row.locator(".host-update-step")).toHaveText(" create directories");
   // The visible count is bare, and `updating: ` survives only as hidden text:
   // in a sidebar this narrow the prefix was most of the step name's room.
   await expect(row.locator(".host-update-count .visually-hidden")).toHaveText("updating: ");
@@ -1834,7 +1895,7 @@ test("single Update shows inline progress without opening its row", async ({
   await row.locator(".host-update-count").hover();
   await expect(popup).toBeVisible();
   await expect(popup).toContainText(/updating: \d+ of \d+ steps done/);
-  await expect(popup.locator(".host-update-popup-step")).toHaveText("create-directories");
+  await expect(popup.locator(".host-update-popup-step")).toHaveText("create directories");
   await expect(popup).toContainText(/\d+:\d{2} elapsed/);
   // Every step of the held run is listed, in executor order with the
   // statuses the helm reports, and exactly one is marked as in progress:
@@ -1950,15 +2011,11 @@ test("single Update shows inline progress without opening its row", async ({
 });
 
 /**
- * Running, failed, and cleared traces each alter the collapsed host-list
- * shape. A fixed row menu must close at every boundary, including
- * running-to-failed where the traced host set itself is unchanged.
- *
- * The retained run is an ADD: a live UPDATE run shows its status inline in
- * the host row and draws no trace while it runs, so a setup run is what
- * exercises every trace transition here.
+ * Setup's automatic expansion, failure reopening and success folding move
+ * rows below it. Each boundary must close a fixed menu measured before that
+ * move, even though the host list itself has not changed.
  */
-test("collapsed trace transitions invalidate fixed-surface geometry", async ({
+test("setup disclosure transitions invalidate fixed-surface geometry", async ({
   page,
   request,
 }, testInfo) => {
@@ -1994,13 +2051,20 @@ test("collapsed trace transitions invalidate fixed-surface geometry", async ({
     await expect(row.locator(".host-row-menu-panel")).toHaveCount(0);
     await expect(row.locator(".host-row-menu")).toHaveAttribute("aria-expanded", "false");
     if (status === "completed") {
-      await expect(row.locator(".provisioning-trace")).toHaveCount(0);
+      await expect(row.locator(".host-detail")).toHaveCount(0);
     } else {
-      await expect(row.locator(".provisioning-trace")).toHaveAttribute(
+      await expect(row.locator(".provisioning-run")).toHaveAttribute(
         "data-provisioning-status",
         status,
       );
+      if (status === "running") {
+        // A user fold persists for this run. Failure must reopen it, giving
+        // the next iteration a real layout change to invalidate the menu.
+        await row.locator(".provisioning-run-fold").click();
+        await expect(row.locator(".host-detail")).toHaveCount(0);
+      }
     }
+    await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   }
 });
 
@@ -2639,6 +2703,8 @@ test("two provisioning-busy rows reconcile independently", async ({
   await expect(rowTwo.locator(".host-settings")).toBeDisabled();
 });
 
+/** A retained setup failure opens its rail without a global Details change;
+ * rerun probes the saved destination and can recover by discovery alone. */
 test("failed ADD rerun probes the registered destination and discovery resolves the run", async ({
   page,
   request,
@@ -2665,7 +2731,9 @@ test("failed ADD rerun probes the registered destination and discovery resolves 
   });
   await page.goto("/");
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
-  await expect(row.locator(".provisioning-trace")).toHaveText("setup provisioning failed");
+  await expect(row.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "failed");
+  await expect(row.locator(".host-detail")).toBeVisible();
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   await openHostsPanel(page);
   await expect(row.locator(".provisioning-run-message")).toContainText(
     "supervisor started but attachment failed",
@@ -2870,9 +2938,11 @@ test("update all skips a host already busy with setup", async ({ page, request }
 
   await page.goto("/");
   const busyRow = page.locator(`[data-host-id="${busyHost.host_id}"]`);
-  // An ADD started before this page mounted does not auto-expand its detail
-  // panel. The row's own summary still reports the accepted running setup.
-  await expect(busyRow).toContainText("setup provisioning running");
+  // Observing an accepted ADD opens that run's rail even in a new window.
+  // Its compact status remains the same authority that suppresses Update.
+  await expect(busyRow.locator(".provisioning-run")).toHaveAttribute("data-provisioning-status", "running");
+  await expect(busyRow.locator(".host-update-verb")).toHaveText("setting up");
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   await openHostMenu(busyRow);
   await expect(busyRow.locator(".provisioning-update")).toHaveCount(0);
   const updateAll = page.getByRole("button", { name: "update all" });

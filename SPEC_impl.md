@@ -551,15 +551,16 @@ eligibility predicate (remote kind, not newer, menu offer present, no live provi
 Update request as the menu. The button sits outside the status region; that region retains its phase words through an
 accessible label. Its hover uses escaped peer builds and explains urgency and installing the helm's version. Current,
 newer, local, busy, and not-yet-loaded rows keep their existing presentation. Each row's effective disclosure is the
-global checkbox OR that row's automatic update disclosure: the checkbox is the user's preference and no update writes
-it, while an update keeps its row folded during planning and execution, shows a pending status until a progress snapshot
-is available, and then publishes compact step/count/elapsed progress beside the row status. A failed run or unresolved
-diagnostic opens that row; authoritative success clears the automatic half for the exact tracked run. Provisioning
-commands live in the row menu, with the older-host update shortcut also inline, but active or retained progress stays
-under the row because that lifecycle owns more context than a floating menu can safely hold. Starting setup opens
-details before planning, while a running or failed retained run leaves one short trace when details are closed. The one
-exception is an update or uninstall whose status is showing inline: the trace would only repeat it, so it is left out
-until that status clears.
+global checkbox OR that row's automatic provisioning disclosure: the checkbox is the user's preference and no run writes
+it. Update stays folded during planning and execution, shows a pending status until a snapshot is available, and then
+publishes compact step/count/elapsed progress beside the row status. Setup and uninstall show their own pending verbs;
+their first running snapshot opens the row once, with a fold choice kept for that run id. Failure opens the row for its
+diagnostic, and completion clears the one-off expansion. A failed Update or unresolved diagnostic also opens its row;
+authoritative Update success clears the automatic half for the tracked run. Provisioning commands live in the row menu,
+with the older-host update shortcut also inline, but active or retained progress stays under the row because that
+lifecycle owns more context than a floating menu can safely hold. Setup and uninstall confirmation dialogs render
+independently of row details, while a failed retained run leaves one short trace when details are closed. A run whose
+status is showing inline leaves that trace out because it would only repeat the progress.
 
 The app bar's gear opens a modal `settings` dialog as a sibling of the sticky bar, so the bar's stacking context cannot
 cap the backdrop below main-pane surfaces. It holds the two app-wide host-confirmation choices, with state-specific help

@@ -3651,7 +3651,8 @@ test.describe("multi-host", () => {
       },
     ];
 
-    // A live ADD keeps the old words: age alone must not offer an action.
+    // A live ADD takes the status slot with setup progress: age alone must
+    // not offer Update while that operation owns the host.
     // Missing menu publication is covered by the pure eligibility test;
     // a failed progress read does not itself withdraw the menu's offer.
     await page.route("**/api/hosts/*/provisioning", async (route) => {
@@ -3662,7 +3663,9 @@ test.describe("multi-host", () => {
           run_id: hostId === 8015 ? "active-add" : null,
           operation: hostId === 8015 ? "add" : null,
           status: hostId === 8015 ? "running" : "completed",
-          steps: [],
+          steps: hostId === 8015
+            ? [{ step: "attach-supervisor", name: "connect to the supervisor", status: "running" }]
+            : [],
           message: null,
         },
       });
@@ -3700,6 +3703,9 @@ test.describe("multi-host", () => {
             '.provisioning-run[data-provisioning-operation="setup"][data-provisioning-status="running"]',
           ),
         ).toBeVisible();
+        await expect(status.locator(".host-update-verb")).toHaveText("setting up");
+        await expect(status.locator(".host-update-count")).toHaveText("0/1");
+        await expect(status.locator(".host-update-step")).toHaveText("connect to the supervisor");
       }
       if (updateKind) {
         const button = row.getByRole("button", { name: /^update / });
@@ -3729,7 +3735,7 @@ test.describe("multi-host", () => {
         await expect(status.locator(".host-status-label")).toBeVisible();
       }
       if (!updateKind) await expect(row.locator(".host-update-button")).toHaveCount(0);
-      if (label !== undefined && !updateKind) {
+      if (label !== undefined && !updateKind && entry.id !== 8015) {
         await expect(status.locator(".host-status-label")).toHaveText(label);
       }
       const detail = row.locator(".host-detail");
@@ -4207,6 +4213,7 @@ test.describe("multi-host", () => {
     test.setTimeout(120_000);
     const info = stackInfo();
     const previousProbe = readProbeTarget(info.remote_ssh);
+    let releasePlan: (() => void) | undefined;
     try {
       const remote = await uninstallableRemote(request);
       writeProbeTarget(info.remote_ssh, {
@@ -4219,18 +4226,94 @@ test.describe("multi-host", () => {
       });
 
       await page.goto("/");
-      await openHostsPanel(page);
+      await expect(page.locator(".hosts-panel")).toBeVisible();
       const row = hostRowByName(page, info.remote_ssh);
+      const planningHeld = new Promise<void>((resolve) => { releasePlan = resolve; });
+      let markPlanRequested!: () => void;
+      const planRequested = new Promise<void>((resolve) => { markPlanRequested = resolve; });
+      // Planning is the bodyless POST; confirmation uses the same URL with a
+      // body. Signal from the route before holding planning so pending UI is
+      // observable without waiting for a request event Playwright has held.
+      await page.route(`**/api/hosts/${remote.id}/uninstall`, async (route) => {
+        if (route.request().method() === "POST" && !route.request().postData()) {
+          markPlanRequested();
+          await planningHeld;
+        }
+        await route.continue();
+      });
       await openHostMenu(row);
       await row.locator(".provisioning-uninstall").click();
+      await planRequested;
+      await expect(row.locator(".host-update-pending")).toContainText("uninstalling");
+      releasePlan?.();
       const dialog = page.locator(".host-uninstall-dialog");
       await expect(dialog).toContainText("Farhelm will uninstall from", { timeout: 30_000 });
+      await expect(page.locator(".host-details-toggle")).not.toBeChecked();
       await dialog.locator(".uninstall-confirm").click();
 
       await expect(row.locator(".host-update-running")).toContainText("uninstalling", {
         timeout: 30_000,
       });
+      await expect(row.locator(".provisioning-run")).toBeVisible();
+      await expect(row.locator(".provisioning-run-fold")).toBeVisible();
+      await row.locator(".provisioning-run-fold").click();
+      await expect(row.locator(".provisioning-run")).toHaveCount(0);
+      await expect(row.locator(".host-update-running")).toContainText("uninstalling");
       await expect(row).toHaveCount(0, { timeout: 60_000 });
+    } finally {
+      releasePlan?.();
+      writeProbeTarget(info.remote_ssh, previousProbe);
+      await restoreFleetRow(request);
+    }
+  });
+
+  /**
+   * Confirmation can race a changed host, and the helm accepts that request
+   * before its locked recheck runs. The refusal therefore belongs to the
+   * failed step in the host row, where it stays visible after the dialog
+   * closes, rather than appearing as a new confirmation-time modal.
+   */
+  test("uninstall recheck refusal stays on the failed step", async ({ page, request }) => {
+    requireFleet();
+    test.setTimeout(120_000);
+    const info = stackInfo();
+    const previousProbe = readProbeTarget(info.remote_ssh);
+    try {
+      const remote = await uninstallableRemote(request);
+      const target = {
+        probe: "supervisor" as const,
+        build_version: helmBuild(),
+        dial_farhelm: "/home/farhelm-e2e/.local/lib/farhelm/farhelm",
+        dial_state_dir: "/var/lib/farhelm-e2e-recheck-original",
+        identity: remote.identity,
+      };
+      writeProbeTarget(info.remote_ssh, target);
+      await page.goto("/");
+      await expect(page.locator(".hosts-panel")).toBeVisible();
+      const row = hostRowByName(page, info.remote_ssh);
+      await openHostMenu(row);
+      await row.locator(".provisioning-uninstall").click();
+      const dialog = page.locator(".host-uninstall-dialog");
+      await expect(dialog).toContainText("Farhelm will uninstall from", { timeout: 30_000 });
+      await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+
+      writeProbeTarget(info.remote_ssh, {
+        ...target,
+        dial_state_dir: "/var/lib/farhelm-e2e-recheck-changed",
+      });
+      const submitted = page.waitForResponse((response) =>
+        new URL(response.url()).pathname === `/api/hosts/${remote.id}/uninstall` &&
+        response.request().method() === "POST" && !!response.request().postData()
+      );
+      await dialog.locator(".uninstall-confirm").click();
+      expect((await submitted).status(), "the recheck runs after accepted submission").toBe(202);
+      await expect(dialog).toHaveCount(0);
+      const run = row.locator('.provisioning-run[data-provisioning-status="failed"]');
+      await expect(run).toBeVisible({ timeout: 30_000 });
+      const failed = run.locator('.provisioning-step[data-status="failed"]').first();
+      await expect(failed).toHaveAttribute("data-step", "disable-supervisor");
+      await expect(failed).toContainText("the host changed after the uninstall plan was made");
+      await expect(page.locator(".host-details-toggle")).not.toBeChecked();
     } finally {
       writeProbeTarget(info.remote_ssh, previousProbe);
       await restoreFleetRow(request);

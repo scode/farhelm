@@ -3731,10 +3731,19 @@ pub(crate) enum ProvisioningStatus {
 }
 
 /// One executor action as `GET /api/hosts/{id}/provisioning` reports it.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub(crate) struct ProvisioningStep {
-    /// Stable executor label, shown as supplied.
+    /// Stable executor label; presentation uses the helm's readable name.
     pub(crate) step: String,
+    /// Additive plan wording, absent only in hand-built or older snapshots.
+    #[serde(default)]
+    pub(crate) name: Option<String>,
+    /// The same host paths shown in the confirmation, if supplied.
+    #[serde(default)]
+    pub(crate) paths: Vec<PlanStepPath>,
+    /// Why this action is part of the plan, authored by the helm.
+    #[serde(default)]
+    pub(crate) explanation: Option<String>,
     /// Kept as a string so a newer step outcome costs only its styling, not
     /// the entire progress panel.
     pub(crate) status: String,

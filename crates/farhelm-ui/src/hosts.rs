@@ -1109,7 +1109,7 @@ pub(crate) fn HostsPanel(
     // The global disclosure is the user's preference: one checkbox for every
     // row. It stays client-local and resets on page mount; a host refresh
     // changes facts, not the user's chosen level of detail. Each row's
-    // EFFECTIVE disclosure ORs this with its automatic update disclosure,
+    // EFFECTIVE disclosure ORs this with its automatic per-row disclosure,
     // which the provisioning panels publish per row and which never writes
     // this checkbox.
     let mut details_open = use_signal(|| false);
@@ -1607,8 +1607,8 @@ pub(crate) fn HostsPanel(
                     class: "host-details-toggle",
                     checked: details_open(),
                     onchange: move |event| {
-                        // Automatic setup may reveal details before that
-                        // render reaches the checkbox. Honor the native
+                        // The local setup handoff may reveal details before
+                        // this render reaches the checkbox. Honor the native
                         // requested state instead of inverting a newer signal.
                         details_open.set(event.checked());
                         // Every row changes height together. A fixed menu is
@@ -1802,6 +1802,7 @@ pub(crate) fn HostsPanel(
                                     ops,
                                     details_open: details_open()
                                         || provisioning_auto_details.read().contains(&host.id),
+                                    global_details_open: details_open(),
                                     local_setup,
                                     manual_remedy: state_remedy(&host.state),
                                     action_requests: provisioning_action_requests,
@@ -1877,22 +1878,14 @@ pub(crate) fn HostsPanel(
                                 if provisioning_busy_hosts.peek().contains(&id) {
                                     return;
                                 }
-                                // Setup still confirms explicitly, and its
-                                // confirmation must be visible: reveal the
-                                // global disclosure past the page lock, as
-                                // before. Update progress stays in its row's
-                                // status spot, and planning never consults the
-                                // lock — so neither the reveal nor the lock
-                                // check applies to it here.
-                                // Uninstall's plan is confirmed the same way.
+                                // Confirmed actions respect the page lock,
+                                // while their dialogs leave the global
+                                // details preference alone.
                                 if matches!(
                                     request.operation,
                                     ProvisioningOperation::Add | ProvisioningOperation::Uninstall
-                                ) {
-                                    if ops.busy_now() {
-                                        return;
-                                    }
-                                    details_open.set(true);
+                                ) && ops.busy_now() {
+                                    return;
                                 }
                                 host_menu_open.set(None);
                                 provisioning_action_requests.write().insert(id, request);
@@ -2319,7 +2312,7 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
     HOST_ROW_RENDERS.with(|renders| renders.borrow().iter().map(|(id, n)| (*id, *n)).collect())
 }
 
-/// Render one live update's inline progress inside the row that owns it.
+/// Render a live host run's compact progress inside the row that owns it.
 ///
 /// The one-second clock's future belongs to this keyed component: when the
 /// run completes, is replaced, or the row unmounts, Dioxus drops the task
@@ -2329,10 +2322,9 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// fixed-width sidebar beside the host name and the always-present `⋯`
 /// toggle (see `.host-status.updating` in `app.css`). Only the step name may
 /// give up width: the `N/M` count and the clock are what the user reads at a
-/// glance, so they never truncate. The visible text has no `updating:`
-/// prefix, because in a sidebar that narrow the prefix was most of the room
-/// the step name needed. The word survives as visually hidden text, since it
-/// is the only thing telling assistive technology what the bare count means.
+/// glance, so they never truncate. Update keeps its prefix visually hidden
+/// because it consumed most of the room the step name needed. Setup and
+/// uninstall show their verbs so the same count cannot be mistaken for Update.
 /// The leading spaces in the text nodes are for the text content (what
 /// assistive technology and tests read); the visible spacing comes from the
 /// flex gap, since a flex item's leading space collapses.
@@ -2409,12 +2401,17 @@ fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
                 popup_origin.set(None);
             },
             UpdateProgressDot {}
+            if summary.operation != ProvisioningOperation::Update {
+                span { class: "host-update-verb", "{summary.verb()}" }
+            }
             span { class: "host-update-count",
-                span { class: "visually-hidden", "{summary.verb()}: " }
+                if summary.operation == ProvisioningOperation::Update {
+                    span { class: "visually-hidden", "{summary.verb()}: " }
+                }
                 "{summary.done}/{summary.total}"
             }
             if let Some(step) = summary.current_step.clone() {
-                span { class: "host-update-step", " {step}" }
+                span { class: "host-update-step peer-value", dir: "ltr", " {display_peer(&step)}" }
             }
             span { class: "host-update-elapsed", "aria-hidden": "true", " {elapsed_text}" }
             if let Some(origin) = popup_origin() {
@@ -2530,7 +2527,8 @@ impl PopupAnchor {
 /// A user who hovers wants the detail the narrow inline label cannot hold,
 /// so this lists the run's whole step list, the same steps and statuses the
 /// expanded row's `provisioning-steps` list shows (and styled with its
-/// classes), minus the step messages. The step in progress carries
+/// classes). Warnings and failures keep the helm's reason, since folding the
+/// row otherwise hides what that status means. The step in progress carries
 /// `data-current` and its name keeps the `host-update-popup-step` class, the
 /// untruncated copy of the name the inline label may have cut short.
 ///
@@ -2547,7 +2545,7 @@ impl PopupAnchor {
 #[component]
 fn UpdateProgressPopup(
     origin: PopupOrigin,
-    /// "updating" or "uninstalling", from the run's summary.
+    /// The visible action word from the run's summary.
     verb: &'static str,
     done: usize,
     total: usize,
@@ -2610,18 +2608,28 @@ fn UpdateProgressPopup(
                 for step in steps {
                     li {
                         class: "provisioning-step",
-                        "data-step": "{step.name}",
+                        "data-step": "{step.id}",
                         "data-status": "{step.status}",
                         "data-current": if step.current { "true" },
+                        span { class: "provisioning-step-marker", aria_hidden: "true" }
                         span {
                             class: if step.current {
-                                "provisioning-step-name host-update-popup-step"
+                                "provisioning-step-name host-update-popup-step peer-value"
                             } else {
-                                "provisioning-step-name"
+                                "provisioning-step-name peer-value"
                             },
-                            "{step.name}"
+                            dir: "ltr",
+                            "{display_peer(&step.name)}"
                         }
-                        span { class: "provisioning-step-status", "{step.status}" }
+                        span { class: "provisioning-step-status", "{crate::provisioning::progress_step_status(&step.status)}" }
+                        if matches!(step.status.as_str(), "degraded" | "failed") {
+                            if let Some(message) = step.message {
+                                PeerLine {
+                                    class: "provisioning-step-message",
+                                    parts: vec![DetailPart::Peer(message)],
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2709,12 +2717,12 @@ fn format_elapsed(seconds: u64) -> String {
 /// `HostsPanel`; while it is open the row remains behind the modal and cannot
 /// receive a competing command.
 ///
-/// Every actionable item closes the menu when chosen. Setup commands
-/// additionally open the global details disclosure before sending their
-/// one-shot request to the permanently mounted provisioning component, so
-/// planning feedback and confirmation never appear invisibly. An update
-/// needs no confirmation and leaves details alone: it reports through this
-/// row's status spot, and only a failure or uncertain outcome opens the row.
+/// Every actionable item closes the menu when chosen. Setup and uninstall
+/// confirmations come from the permanently mounted provisioning component,
+/// so they remain visible with the row folded. Their planning and run status
+/// uses the row's status spot; an observed run opens that row once without
+/// changing the global details preference. Update leaves details folded until
+/// a failure or uncertain outcome opens the row.
 ///
 /// `settings` and `remove` both take over from the menu (modal dialogs), so
 /// closing is a correctness requirement:
@@ -3091,6 +3099,18 @@ fn HostRow(
                                 "data-update-phase": phase.attribute(),
                                 UpdateProgressDot {}
                                 "updating…"
+                            }
+                        },
+                        Some(HostUpdateProgress::PendingConfirmed(operation)) => rsx! {
+                            span {
+                                class: "host-status-label host-update-pending",
+                                "data-update-phase": "planning",
+                                UpdateProgressDot {}
+                                {match operation {
+                                    ProvisioningOperation::Add => "setting up…",
+                                    ProvisioningOperation::Uninstall => "uninstalling…",
+                                    ProvisioningOperation::Update => "updating…",
+                                }}
                             }
                         },
                         Some(HostUpdateProgress::Running(summary)) => rsx! {
