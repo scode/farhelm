@@ -9,7 +9,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `link-hover-covers.md` — The tunnel-error notice counts as covering a link hover, the spec accepts the refusal banner over a card, and a modified click opens only when the hover offered it (3 triage outcomes).
 - [in-flight cb6b05] `session-header-and-row-fixes.md` — Automatic terminal recovery leaves an open Restart/Replace/Delete question focused; the copy warning follows the copied value; accessible names escape titles (3 triage outcomes).
 - [complete] `queued-launch-snapshot.md` — At Enter, an armed quick-launch sequence launches the templates its pill showed, not whatever the keys are bound to by then (1 triage outcome).
-- [pending] `payload-lock-reproduction.md` — Reproduce whether old payload work overlapping a successor helm can leave a bad cached program copy, and record the evidence for a later decision (1 triage outcome).
+- [in-flight 2705f2] `payload-lock-reproduction.md` — Reproduce whether old payload work overlapping a successor helm can leave a bad cached program copy, and record the evidence for a later decision (1 triage outcome).
 - [pending] `archive-recovery-reproduction.md` — Reproduce whether a cancelled startup's archive recovery can leave a trashed checkout unlisted, and record the evidence for a later decision (1 triage outcome).
 - [pending] `triage-discards-oct18.md` — Remove the five feedback items the 2026-10-18 triage discarded, with their ledger updates, in one PR (5 triage outcomes).
 - [pending] `supervisor-colon-path-refusal.md` — The supervisor and the desktop app refuse to start when the folder sessions get on PATH contains ':' (1 triage outcome).
