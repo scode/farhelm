@@ -1402,7 +1402,9 @@ test("accepted ADD registers before execution and releases the page lock while r
   expect(documents).toBe(1);
 });
 
-test("a refused ADD attempt consumes the displayed offer and refreshes committed state", async ({
+/** A definite setup submission refusal reopens the add form with its
+ * destination intact, but cannot restore the consumed one-use plan. */
+test("a refused ADD attempt reopens the form and refreshes committed state", async ({
   page,
   request,
 }, testInfo) => {
@@ -1419,10 +1421,13 @@ test("a refused ADD attempt consumes the displayed offer and refreshes committed
   expect(consumed.status()).toBe(202);
 
   await page.getByRole("button", { name: "set up", exact: true }).click();
-  // Confirming closed the dialog before the refusal arrived, so the refusal
-  // is reported on the hosts panel rather than inside a dialog that is gone.
-  await expect(page.locator(".add-host-error")).toContainText("already been used");
-  await expect(page.locator(".add-host-form")).toHaveCount(0);
+  const form = page.locator(".add-host-form");
+  await expect(form.locator(".add-host-error")).toContainText("already been used");
+  await expect(form.locator(".add-host-ssh")).toHaveValue(remote);
+  await expect(form.locator(".provisioning-plan")).toHaveCount(0);
+  await expect(page.locator(".hosts-panel > .add-host-error")).toHaveCount(0);
+  await form.locator(".add-host-cancel").click();
+  await expect(form).toHaveCount(0);
   await expect(page.getByRole("button", { name: "add host" })).toBeEnabled();
   await expect(page.locator(`.host-row:has-text("${remote}")`)).toBeVisible();
 });

@@ -933,8 +933,8 @@ test.describe("multi-host", () => {
 
   /**
    * Removal begins and confirms while Details is collapsed. A refused DELETE
-   * must leave its concrete error on the row instead of returning to an
-   * apparently unchanged resting state.
+   * must keep the confirmation open with its concrete reason, preserving
+   * the host and the global Details setting until the user dismisses it.
    */
   test("a failed removal stays visible with details collapsed", async ({ page }) => {
     await page.route("**/api/hosts", async (route) => {
@@ -975,8 +975,14 @@ test.describe("multi-host", () => {
     await row.locator(".host-remove").click();
     await page.locator(".host-remove-dialog").getByRole("button", { name: "remove", exact: true }).click();
 
-    await expect(row.locator(".host-error")).toContainText("the host is still required");
+    const dialog = page.locator(".host-remove-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator(".host-refusal-reason")).toContainText("the host is still required");
     await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+    await dialog.locator(".host-settings-close").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(row).toBeVisible();
+    await expect(row.locator(".host-detail")).toHaveCount(0);
   });
 
   // F2/COR-HOST-MENU-OFFSCREEN: the longest real phase word
@@ -2470,10 +2476,12 @@ test.describe("multi-host", () => {
     await openHostMenu(row);
     await row.locator(".host-adopt").click();
 
-    // The refusal is the helm's, verbatim, in this row's own error line —
-    // never a generic "adopt failed", which would leave the user unable to
-    // tell a race from a bug.
-    await expect(row.locator(".host-error")).toContainText(refusal);
+    // The helm's exact race reason belongs to a focused modal; a generic
+    // error or a row line would hide the identity that changed.
+    const dialog = page.locator(".host-refusal-dialog");
+    await expect(dialog).toContainText(refusal);
+    await expect(dialog.locator(".host-refusal-close")).toBeFocused();
+    await expect(row.locator(".host-error")).toHaveCount(0);
     expect(
       adoptBody,
       "the adopt must name the identity that was displayed, which is the whole content of the promise the helm checks",
@@ -3903,6 +3911,27 @@ test.describe("multi-host", () => {
     await expect(row).toBeVisible();
   });
 
+  /** Retry is chosen from a closed row menu. A refused POST must give its
+   * helm reason a dialog without changing the global Details preference. */
+  test("a refused Retry opens a host dialog", async ({ page, request }) => {
+    const local = (await apiHosts(request)).find((host: any) => host.kind === "local");
+    const reason = "the retry was refused by this helm";
+    await page.route(`**/api/hosts/${local.id}/retry`, async (route) => {
+      await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: reason });
+    });
+    await page.goto("/");
+    await openHostsPanel(page);
+    const detailsInitiallyChecked = await page.locator(".host-details-toggle").isChecked();
+    const row = page.locator(`[data-host-id="${local.id}"]`);
+    await openHostMenu(row);
+    await row.locator(".host-retry").click();
+    const dialog = page.locator(".host-refusal-dialog");
+    await expect(dialog).toContainText(reason);
+    await expect(dialog.locator(".host-refusal-close")).toBeFocused();
+    await expect(page.locator(".host-details-toggle")).toHaveJSProperty("checked", detailsInitiallyChecked);
+    await expect(row.locator(".host-error")).toHaveCount(0);
+  });
+
   /**
    * Cancel and the header dismiss both forget nothing and return to the same
    * row. Desktop/phone measurements guard the new answer layout without
@@ -3970,6 +3999,94 @@ test.describe("multi-host", () => {
     await expect(row.locator(".host-remove")).toBeVisible();
     await expect(page.locator(".host-remove-dialog")).toHaveCount(0);
     expect((await apiRemoteHost(request)).id).toBe(before.id);
+  });
+
+  /** A visible Remove confirmation owns its DELETE outcome. A dismissal in
+   * the confirmation's event turn must preserve isolation even before busy
+   * controls render, and the eventual refusal must stay in that dialog. */
+  for (const dismissal of ["header", "cancel", "escape"] as const) {
+    test(`Remove keeps its dialog open through a refused request: ${dismissal}`, async ({ page, request }) => {
+      requireFleet();
+      const remote = await apiRemoteHost(request);
+      const reason = "the host could not be removed";
+      let arrived = false;
+      let release!: () => void;
+      const replyGate = new Promise<void>((resolve) => (release = resolve));
+      await page.route(`**/api/hosts/${remote.id}`, async (route) => {
+        if (route.request().method() !== "DELETE") return route.continue();
+        arrived = true;
+        await replyGate;
+        await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: reason });
+      });
+      try {
+        await page.goto("/");
+        await openHostsPanel(page);
+        const row = hostRowByName(page, stackInfo().remote_ssh);
+        await openHostMenu(row);
+        await row.locator(".host-remove").click();
+        const dialog = page.locator(".host-remove-dialog");
+        await expect(dialog.locator(".host-remove-confirm")).toBeFocused();
+        expect(await row.evaluate((node) => node.closest("[inert]") !== null)).toBe(true);
+        // Dispatch both events in one turn: an awaited Playwright click would
+        // let the busy render replace the captured props before dismissal.
+        await dialog.evaluate((node, dismissal) => {
+          const confirm = node.querySelector<HTMLButtonElement>(".host-remove-confirm")!;
+          confirm.click();
+          if (dismissal === "escape") {
+            node.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+          } else {
+            const selector = dismissal === "header" ? ".host-settings-dismiss" : ".host-settings-close";
+            node.querySelector<HTMLButtonElement>(selector)!.click();
+          }
+        }, dismissal);
+        await expect.poll(() => arrived).toBe(true);
+        await expect(dialog).toBeVisible();
+        await expect(dialog.locator(".host-settings-close")).toBeDisabled();
+        await dialog.getByRole("button", { name: "cancel host removal", exact: true }).click();
+        await expect(dialog).toBeVisible();
+        expect(await row.evaluate((node) => node.closest("[inert]") !== null)).toBe(true);
+        expect(await dialog.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+        release();
+        await expect(dialog.locator(".host-refusal-reason")).toContainText(reason);
+        await expect(dialog.locator(".host-settings-close")).toBeFocused();
+        expect(await row.evaluate((node) => node.closest("[inert]") !== null)).toBe(true);
+        await expect(row.locator(".host-error")).toHaveCount(0);
+        await dialog.locator(".host-settings-close").click();
+        await expect(dialog).toHaveCount(0);
+        await expect(row).toBeVisible();
+      } finally {
+        release();
+        await page.unrouteAll({ behavior: "ignoreErrors" });
+      }
+    });
+  }
+
+  /** A saved skip preference leaves no Remove confirmation to retain, so a
+   * refused direct removal needs the same short host refusal dialog as Retry. */
+  test("a refused Remove without confirmation opens a host dialog", async ({ page, request }) => {
+    requireFleet();
+    const remote = await apiRemoteHost(request);
+    const reason = "the direct removal was refused";
+    await patchPreferences(request, { skip_host_remove_confirmation: true });
+    try {
+      await page.route(`**/api/hosts/${remote.id}`, async (route) => {
+        if (route.request().method() !== "DELETE") return route.continue();
+        await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: reason });
+      });
+      await page.goto("/");
+      await openHostsPanel(page);
+      const row = hostRowByName(page, stackInfo().remote_ssh);
+      await openHostMenu(row);
+      await row.locator(".host-remove").click();
+      await expect(page.locator(".host-remove-dialog")).toHaveCount(0);
+      const dialog = page.locator(".host-refusal-dialog");
+      await expect(dialog).toContainText(reason);
+      await expect(dialog.locator(".host-refusal-close")).toBeFocused();
+      await expect(row.locator(".host-error")).toHaveCount(0);
+    } finally {
+      await patchPreferences(request, { skip_host_remove_confirmation: null });
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+    }
   });
 
   /**

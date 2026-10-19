@@ -47,21 +47,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Crappy model warning.** Let the user pick a list of models they never want to run. Warn when an agent's TUI
   indicates that one of those models is being used anyway.
 
-- **Show host uninstall refusals in a dialog.** When Uninstall is refused because the host was set up manually or
-  Farhelm cannot safely remove it, the reason currently appears as red text in the host sidebar. Show the refusal in a
-  proper dialog, consistent with other host actions. Audit similar refusal and error paths for legacy sidebar text and
-  bring any outliers into the current UI convention. Plan: `plans/queue/host-uninstall-dialogs.md`.
-
-- **Render host setup and uninstall plans as GUI steps.** The setup and uninstall confirmation dialogs currently show
-  the planned actions in a plain text box. Present the actions as distinct items in the dialog so the user can scan what
-  will happen before deciding, while keeping the paths and other details the plans currently show. Plan:
-  `plans/queue/host-uninstall-dialogs.md`.
-
-- **Improve the post-uninstall host notice.** After uninstall, a large plain-text notice sits above the host rows in the
-  sidebar. It says Farhelm was removed, names the host and the path where its data remains, and has a separate Dismiss
-  button. The text wraps across several lines and dominates the narrow panel. Find a better way to present this result;
-  the design details are TBD. Plan: `plans/queue/host-uninstall-dialogs.md`.
-
 - **Allow repeated quick launches from one setup.** Quick-launching a recent managed-checkout setup while an earlier
   session from it is still running can strand New Session with the repository name prefilled in Name. The checkout
   preview request (`POST /api/github-checkout-preview`) returns
@@ -1026,5 +1011,4 @@ are large mostly because of their tests.
   pasted into the sentence, "a supervisor answers there that Farhelm cannot use" is vague, and "resolve that first"
   gives no way to resolve it. The same wording covers identity-mismatch, identity-unverified and duplicate hosts. Name
   the problem in user terms (this host runs a newer or older Farhelm than this helm) and the concrete way out for each
-  case. Related to "Show host uninstall refusals in a dialog", which changes where the refusal appears but not its
-  words.
+  case. Host refusals now appear in a dialog; this entry concerns their wording.

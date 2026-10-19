@@ -101,25 +101,19 @@ pub(super) enum FieldOutcome {
     Warning(String),
 }
 
-/// Place this host's current error or warning line in the dialog: under the
-/// setting the dialog's own last write changed, or, with `None`, at the top.
-///
-/// `HostsPanel` keeps outcomes per host, not per field, and a host's line can
-/// come from something the dialog did not do (a retry or adopt refusal). Such
-/// a line still shows, at the top, rather than nowhere: the row that would
-/// otherwise carry it is behind the backdrop, and a refusal that sent the user
-/// to these settings (fix the destination) is exactly the one to keep in
-/// view. `last_write` is the setting the dialog last wrote for THIS host, if
-/// its write is what produced the current line.
+/// Place only a settings write's outcome under the field that produced it.
+/// Menu action refusals have their own dialogs, so a host-level line with no
+/// `last_write` no longer has a meaningful place in Settings.
 pub(super) fn field_outcome(
     last_write: Option<SettingsField>,
     error: Option<String>,
     warning: Option<String>,
-) -> Option<(Option<SettingsField>, FieldOutcome)> {
+) -> Option<(SettingsField, FieldOutcome)> {
+    let owner = last_write?;
     let outcome = error
         .map(FieldOutcome::Error)
         .or(warning.map(FieldOutcome::Warning))?;
-    Some((last_write, outcome))
+    Some((owner, outcome))
 }
 
 /// Release the dialog's isolation, then focus host `id`'s "⋯" toggle.
@@ -144,6 +138,15 @@ pub(crate) fn return_focus_to_row(id: HostId) {
 /// could move the keyboard behind that new modal one frame later.
 pub(crate) fn leave_refusal_for_handoff() {
     document::eval(&modal_isolation::release_js(DIALOG_SELECTOR));
+}
+
+/// A refused Remove leaves its confirmation mounted. Focus its safe exit
+/// after the busy controls re-enable so the refusal can be dismissed with
+/// Enter or Escape without reaching the page behind the dialog.
+pub(crate) fn focus_remove_refusal() {
+    document::eval(
+        "requestAnimationFrame(() => document.querySelector('.host-remove-dialog .host-settings-close')?.focus({ preventScroll: true }))",
+    );
 }
 
 /// Move focus into the freshly mounted dialog, then isolate it.
@@ -519,9 +522,8 @@ pub(super) fn HostSettingsDialog(
     busy: bool,
     /// The field whose editor is open, if any.
     editing: Option<EditField>,
-    /// This host's error or warning line, under the setting the dialog's own
-    /// write changed, or (`None`) at the top; see [`field_outcome`].
-    outcome: Option<(Option<SettingsField>, FieldOutcome)>,
+    /// This host's last settings-write outcome, attributed to its field.
+    outcome: Option<(SettingsField, FieldOutcome)>,
     /// The open editor's draft, owned by the panel so a refresh cannot drop it.
     draft: Signal<String>,
     on_edit_start: EventHandler<(HostId, EditField, String)>,
@@ -550,12 +552,10 @@ pub(super) fn HostSettingsDialog(
     let checkbox_refused = matches!(
         &outcome,
         Some((
-            Some(
-                SettingsField::YoloWithoutAsking
-                    | SettingsField::CommandsWithoutAsking
-                    | SettingsField::LinksWithoutAsking
-                    | SettingsField::LocalLinksWithoutAsking
-            ),
+            SettingsField::YoloWithoutAsking
+                | SettingsField::CommandsWithoutAsking
+                | SettingsField::LinksWithoutAsking
+                | SettingsField::LocalLinksWithoutAsking,
             FieldOutcome::Error(_)
         ))
     );
@@ -580,7 +580,7 @@ pub(super) fn HostSettingsDialog(
         last_editing.set(editing);
     }));
 
-    let outcome_for = move |field: Option<SettingsField>| -> Element {
+    let outcome_for = move |field: SettingsField| -> Element {
         match &outcome {
             Some((owner, FieldOutcome::Error(text))) if *owner == field => rsx! {
                 PeerLine {
@@ -639,7 +639,6 @@ pub(super) fn HostSettingsDialog(
                 tabindex: if busy { Some("0") } else { None },
                 role: if busy { Some("region") } else { None },
                 aria_label: if busy { Some("host settings") } else { None },
-                {outcome_for(None)}
                 if manageable || alias_supported {
                 section { class: "host-settings-section", aria_label: "Connection",
                     h3 { class: "host-settings-section-title", "Connection" }
@@ -671,7 +670,7 @@ pub(super) fn HostSettingsDialog(
                                 "edit"
                             }
                         }
-                        {outcome_for(Some(SettingsField::Destination))}
+                        {outcome_for(SettingsField::Destination)}
                     }
                 }
                 if alias_supported {
@@ -702,7 +701,7 @@ pub(super) fn HostSettingsDialog(
                                 "edit"
                             }
                         }
-                        {outcome_for(Some(SettingsField::Alias))}
+                        {outcome_for(SettingsField::Alias)}
                     }
                 }
                 }
@@ -746,7 +745,7 @@ pub(super) fn HostSettingsDialog(
                                 span { "session" }
                             }
                         }
-                        {outcome_for(Some(SettingsField::Appearance))}
+                        {outcome_for(SettingsField::Appearance)}
                     }
                 }
                 section { class: "host-settings-section", aria_label: "Permissions",
@@ -768,7 +767,7 @@ pub(super) fn HostSettingsDialog(
                         }
                     }
                     p { class: "host-settings-help", "{yolo_help(host.yolo_without_asking)}" }
-                    {outcome_for(Some(SettingsField::YoloWithoutAsking))}
+                    {outcome_for(SettingsField::YoloWithoutAsking)}
                 }
                 div { class: "host-settings-commands",
                     label { class: "host-commands-without-asking",
@@ -785,7 +784,7 @@ pub(super) fn HostSettingsDialog(
                         }
                     }
                     p { class: "host-settings-help", "{commands_help(host.commands_without_asking)}" }
-                    {outcome_for(Some(SettingsField::CommandsWithoutAsking))}
+                    {outcome_for(SettingsField::CommandsWithoutAsking)}
                     for (local_network, allowed, label, help, field) in [
                         (false, host.links_without_asking, "Open links without asking",
                          "Agents on this host may open public web addresses. Local-network addresses still need their own permission.",
@@ -809,7 +808,7 @@ pub(super) fn HostSettingsDialog(
                             }
                         }
                         p { class: "host-settings-help", "{help}" }
-                        {outcome_for(Some(field))}
+                        {outcome_for(field)}
                     }
                 }
                 }
@@ -832,14 +831,17 @@ pub(super) fn HostSettingsDialog(
 /// Ask before forgetting a host, with its identity and answers always visible.
 ///
 /// Removing the row leaves the supervisor and sessions running. The header
-/// and Cancel therefore share the same safe dismissal and row-focus return;
-/// both stay usable while another operation runs, though Escape retains this
-/// dialog's existing busy refusal. The permanent answer names the app-wide
-/// gear so users can find how to restore this confirmation.
+/// and Cancel therefore share the same safe dismissal and row-focus return.
+/// Once removal starts, neither may release modal isolation before the helm
+/// answers; the panel checks its live request state before releasing focus
+/// and closing. Rendered busy props alone cannot guard same-turn input.
+/// The dialog owns any refusal from that request. The permanent
+/// answer names the app-wide gear so users can restore this confirmation.
 #[component]
 pub(super) fn HostRemoveDialog(
     host: Host,
     busy: bool,
+    error: Option<String>,
     on_remove: EventHandler<bool>,
     on_cancel: EventHandler<()>,
 ) -> Element {
@@ -855,24 +857,32 @@ pub(super) fn HostRemoveDialog(
                 onmounted: move |_| install_remove_dialog(),
                 onkeydown: move |evt: KeyboardEvent| {
                     if evt.key() == Key::Escape && !evt.is_composing() && !busy {
-                        return_focus_to_row(host.id);
                         on_cancel.call(());
                     }
                 },
                 HostDialogHeader {
                     host: Some(host.clone()),
                     title: rsx! { "remove host · " span { class: "peer-value", dir: "ltr", "{shown_name}" } },
+                    summary: error.as_ref().map(|_| "Farhelm refused this action".to_string()),
+                    summary_danger: error.is_some(),
                     dismiss_label: "cancel host removal",
                     dismiss_tooltip: "cancel: keep this host",
                     on_dismiss: move |_| {
-                        return_focus_to_row(host.id);
-                        on_cancel.call(());
+                        if !busy {
+                            on_cancel.call(());
+                        }
                     },
                 }
                 div { class: "host-settings-body",
                     tabindex: "0", role: "region", aria_label: "host removal details",
                     p { class: "host-remove-explanation",
                         "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them."
+                    }
+                    if let Some(reason) = error {
+                        PeerLine {
+                            class: "host-refusal-reason",
+                            parts: vec![DetailPart::Peer(reason)],
+                        }
                     }
                 }
                 div { class: "host-settings-footer host-dialog-footer",
@@ -884,10 +894,12 @@ pub(super) fn HostRemoveDialog(
                             r#type: "button",
                             class: "btn btn-neutral host-settings-close",
                             "data-tooltip": "cancel: keep this host",
+                            disabled: busy,
                             autofocus: busy,
                             onclick: move |_| {
-                                return_focus_to_row(host.id);
-                                on_cancel.call(())
+                                if !busy {
+                                    on_cancel.call(())
+                                }
                             },
                             "cancel"
                         }
@@ -924,11 +936,11 @@ mod tests {
 
     /// A host's line must show in the dialog while the dialog hides the row
     /// that would otherwise carry it, and under the right setting: a leftover
-    /// retry or adopt refusal shown under a setting the user never touched
-    /// would blame the wrong thing, and one shown nowhere would be lost.
+    /// host-action refusal shown under a setting the user never touched
+    /// would blame the wrong thing; those actions use their own dialogs.
     /// Specifies: nothing to show gives nothing; a line the dialog's own write
-    /// produced goes under that setting; any other line goes to the top
-    /// (`None`); a committed-but-unreadable reply is a warning, not an error.
+    /// produced goes under that setting; a host action with no settings
+    /// field never appears here. An unreadable accepted reply is a warning.
     #[test]
     fn field_outcome_places_the_line_under_the_setting_that_produced_it() {
         let error = || Some("refused".to_string());
@@ -939,13 +951,13 @@ mod tests {
         );
         assert_eq!(
             field_outcome(None, error(), None),
-            Some((None, FieldOutcome::Error("refused".to_string()))),
-            "a line the dialog did not produce goes to the top"
+            None,
+            "a host action's line has no settings field"
         );
         assert_eq!(
             field_outcome(Some(SettingsField::Alias), error(), None),
             Some((
-                Some(SettingsField::Alias),
+                SettingsField::Alias,
                 FieldOutcome::Error("refused".to_string())
             ))
         );
@@ -956,7 +968,7 @@ mod tests {
                 Some("unreadable reply".to_string())
             ),
             Some((
-                Some(SettingsField::YoloWithoutAsking),
+                SettingsField::YoloWithoutAsking,
                 FieldOutcome::Warning("unreadable reply".to_string())
             )),
             "a committed-but-unreadable reply is shown as a warning, not an error"
