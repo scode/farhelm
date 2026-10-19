@@ -1110,13 +1110,17 @@
    * Menus have the same boundary: a reveal can land after the toggle opens
    * but before focus reaches an item. Keep both the expanded toggle and an
    * item inside a menu from losing the next arrow or Enter to the terminal.
+   * Inline session questions mark their panel as a keyboard owner for the
+   * same reason: their focused answer must survive replay, availability
+   * recovery and selected-tab fallback. Check focus within the panel rather
+   * than its presence, so deliberately selecting a terminal still works.
    */
   function keyboardHeldElsewhere() {
     if (document.querySelector(OPEN_MODAL_SELECTOR)) return true;
     const active = document.activeElement;
     return !!(active && active.closest && active.closest(
       '.approval-cards, .sidebar-resize-handle, .session-bell-flyout, .session-row-bell[aria-expanded="true"], ' +
-      '[role="menu"], [aria-haspopup="menu"][aria-expanded="true"]',
+      '[role="menu"], [aria-haspopup="menu"][aria-expanded="true"], [data-terminal-keyboard-owner="true"]',
     ));
   }
 
@@ -3041,7 +3045,8 @@
       // pull focus out of the dialog and send the next keystroke to the
       // agent beneath the scrim. That is the same theft `takesFocus()`
       // vetoes for reveals, and like that veto it is not replayed when the
-      // dialog closes. Only the dialog vetoes here: the rest of
+      // dialog closes. Other focused keyboard owners, including inline
+      // session questions, share that veto. The rest of
       // `takesFocus()`'s rules would break select-then-type, because
       // selecting a tab leaves focus on its strip button.
       //
@@ -4498,7 +4503,8 @@
          * selector is the concrete case: selecting a tab leaves focus on its
          * button, and the point of that selection is to type into the tab once
          * it is ready. Open menus are different: their toggle and items are
-         * active keyboard destinations, covered by `keyboardHeldElsewhere()`.
+         * active keyboard destinations, as are inline confirmation answers;
+         * both are covered by `keyboardHeldElsewhere()`.
          * Treating every button like a typing target would strand the
          * select-then-type flow.
          */

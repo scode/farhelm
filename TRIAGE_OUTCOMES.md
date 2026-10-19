@@ -15911,7 +15911,9 @@
   SPEC_impl.md says these paths yield to an open header question. Also in scope, added by the user on 2026-10-18: the
   same guard for the sidebar row's Delete and Replace questions, the interrupted-session card's Replace and tab close
   (for example through a shared keyboard-owner marker). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/session-header-and-row-fixes.md`.
+- Execution: complete in change `oxwlswtswzuwvsplpvvxvpzyzqqxrmyp`, bookmark
+  `plan/session-header-and-row-fixes/01-question-keeps-focus`, draft PR
+  https://github.com/scode/farhelm/pull/2357/changes.
 
 ## queued-launch-can-change-template.md
 

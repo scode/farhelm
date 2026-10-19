@@ -1979,6 +1979,9 @@ pub(super) fn SessionRow(
                         // why dismissing a prompt without answering it
                         // would leave the row primed to reopen into it.
                         role: if !showing_menu_items { "dialog" },
+                        // The menu already owns its keys by role. Its question
+                        // keeps that ownership when it replaces the menu items.
+                        "data-terminal-keyboard-owner": (!showing_menu_items).then_some("true"),
                         aria_label: if !showing_menu_items { prompt_label.clone() },
                         // The presentation half of `PanelPlacement`'s state
                         // machine — see that type's own doc for what each

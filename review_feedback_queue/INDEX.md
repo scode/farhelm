@@ -42,9 +42,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`capture-marker-collision-misframes-replay.md`](capture-marker-collision-misframes-replay.md) — Terminal text can
   imitate capture delimiters, truncating replay or entering diagnostics; confidentiality impact is unverified.
 
-- [`terminal-recovery-steals-confirmation-focus.md`](terminal-recovery-steals-confirmation-focus.md) — Automatic
-  terminal recovery or tab fallback can take Enter intended for a header confirmation.
-
 - [`header-copy-warning-follows-refreshed-value.md`](header-copy-warning-follows-refreshed-value.md) — Refreshed session
   metadata can remove the warning for hidden characters still on the clipboard; harmful subsequent use is unverified.
 

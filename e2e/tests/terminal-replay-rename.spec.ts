@@ -19,16 +19,21 @@ import { createSession, openRowMenu, SESSION_LISTING, stubFeed } from "./helpers
 import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
 import {
   addTab,
+  armTerminalFocusSpy,
+  closeTabAndAwaitAgentFallback,
   createTabSession,
   disableReconnectFromNextLoad,
   FAKE_AGENT_INVOCATION,
   fulfillAsHelm,
   islandText,
+  installTerminalFocusSpy,
   replayRecord,
   runInShell,
   selectTerminal,
+  selectTabOverRevealedAgent,
   sharedSessionRow,
   shellMarker,
+  terminalFocusCount,
   waitForIslandText,
   waitForReplayReveal,
   installTerminalSuiteHooks,
@@ -1863,5 +1868,110 @@ test("reveal-does-not-steal-focus: a rename field being typed into keeps focus a
     await expect(field).toHaveValue(`${typed}-tail`);
   } finally {
     if (id) await cleanupSession(request, id);
+  }
+});
+
+/** Observe real agent input independently of xterm's focus bookkeeping.
+ * Binary frames carry terminal input; text frames carry protocol controls.
+ * The final live echo in each caller also proves this observer saw the
+ * attachment that would have received a stray Enter.
+ */
+function observeQuestionInput(page: Page, id: string): Buffer[] {
+  const binary: Buffer[] = [];
+  page.on("websocket", (socket) => {
+    if (new URL(socket.url()).pathname !== `/api/sessions/${id}/term`) return;
+    socket.on("framesent", ({ payload }) => { if (Buffer.isBuffer(payload)) binary.push(payload); });
+  });
+  return binary;
+}
+
+/** Both ways of declining a question must leave terminal input intentional.
+ * Enter on Cancel must cancel without sending a carriage return. Reopening
+ * and using Escape then restores the selected terminal, whose processed echo
+ * settles the outgoing-frame observation without a time-only quiet window.
+ */
+async function declineQuestionAndCheckInput(page: Page, action: "delete" | "replace", binary: Buffer[]) {
+  const trigger = page.locator(`.header-${action}`);
+  const question = page.locator(`.header-${action}-confirm`);
+  await expect(question.locator(".btn-danger")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(question.locator(".btn-neutral")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(question).toHaveCount(0);
+
+  await trigger.click();
+  await expect(question.locator(".btn-danger")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(question).toHaveCount(0);
+  await expect(page.locator("#terminal .xterm-helper-textarea")).toBeFocused();
+  const marker = `question-escape-live-${Date.now()}`;
+  await page.keyboard.type(marker);
+  await page.keyboard.press("Enter");
+  await waitForTermText(page, `echo:${marker}`);
+  expect(Buffer.concat(binary).toString(), "only input after Escape may reach the terminal").toBe(`${marker}\r`);
+}
+
+for (const action of ["delete", "replace"] as const) {
+  /** A replay completion is automatic, even when a question opened after attach.
+   * The held marker makes that ordering deterministic. The answer must retain
+   * focus throughout reveal so Enter cannot become input to the live agent.
+   */
+  test(`replay reveal preserves a header ${action} question's keyboard ownership`, async ({ page, request }) => {
+    test.setTimeout(120_000);
+    const session = await createTabSession(request, `replay-question-${action}-${Date.now()}`);
+    const binary = observeQuestionInput(page, session.id);
+    await installTerminalFocusSpy(page);
+    try {
+      await holdCatchUpFromNextLoad(page);
+      await page.goto("/");
+      await page.locator(`[data-session-id="${session.id}"]`).click();
+      await waitForSessionMounted(page, session.id);
+      await waitForHeldCatchUp(page, "terminal");
+      await expect(page.locator("#terminal")).toBeHidden();
+      await page.locator(`.header-${action}`).click();
+      const answer = page.locator(`.header-${action}-confirm .btn-danger`);
+      await expect(answer).toBeFocused();
+      binary.length = 0;
+      await armTerminalFocusSpy(page);
+
+      await releaseCatchUp(page, "terminal");
+      const replay = await waitForReplayReveal(page, "terminal");
+      expect(replay.revealReason).toBe("marker");
+      await expect(page.locator("#terminal")).toBeVisible();
+      await expect(answer).toBeFocused();
+      expect(await terminalFocusCount(page), "reveal must never focus the terminal behind the question").toBe(0);
+      await declineQuestionAndCheckInput(page, action, binary);
+    } finally {
+      await cleanupSession(request, session.id);
+    }
+  });
+}
+
+/** Losing a selected tab changes the selected pane without an explicit click.
+ * An already-revealed agent exercises the direct fallback focus path rather
+ * than another replay. The open header question must still own the keyboard.
+ */
+test("selected tab removal preserves a header delete question's keyboard ownership", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const session = await createTabSession(request, `fallback-question-${Date.now()}`);
+  const binary = observeQuestionInput(page, session.id);
+  await installTerminalFocusSpy(page);
+  try {
+    await page.goto("/");
+    await attachSession(page, session.id);
+    const tabId = await addTab(page, 0);
+    await selectTabOverRevealedAgent(page, session.id, tabId);
+    await page.locator(".header-delete").click();
+    const answer = page.locator(".header-delete-confirm .btn-danger");
+    await expect(answer).toBeFocused();
+    binary.length = 0;
+    await armTerminalFocusSpy(page);
+
+    await closeTabAndAwaitAgentFallback(page, request, session.id, tabId);
+    await expect(answer).toBeFocused();
+    expect(await terminalFocusCount(page), "tab fallback must never focus the terminal behind the question").toBe(0);
+    await declineQuestionAndCheckInput(page, "delete", binary);
+  } finally {
+    await cleanupSession(request, session.id);
   }
 });
