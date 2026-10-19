@@ -16011,7 +16011,8 @@
   longer depends on the cache. Damage not shown. The killed-preparation filter covers only the orphan's own checkout.
 - Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: planned in `plans/queue/triage-discards-oct18.md`.
+- Execution: complete (discard) in change `wmpvqkzkkukrmrqynwykssnxkwzoytwn`, bookmark
+  `plan/triage-discards-oct18/01-discards`; [PR #2360](https://github.com/scode/farhelm/pull/2360/changes).
 
 ## restart-abort-admits-old-child-report.md
 
@@ -16023,7 +16024,8 @@
   a later ancestor report corrects it.
 - Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: planned in `plans/queue/triage-discards-oct18.md`.
+- Execution: complete (discard) in change `wmpvqkzkkukrmrqynwykssnxkwzoytwn`, bookmark
+  `plan/triage-discards-oct18/01-discards`; [PR #2360](https://github.com/scode/farhelm/pull/2360/changes).
 
 ## capture-marker-collision-misframes-replay.md
 
@@ -16035,7 +16037,8 @@
   read.
 - Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: planned in `plans/queue/triage-discards-oct18.md`.
+- Execution: complete (discard) in change `wmpvqkzkkukrmrqynwykssnxkwzoytwn`, bookmark
+  `plan/triage-discards-oct18/01-discards`; [PR #2360](https://github.com/scode/farhelm/pull/2360/changes).
 
 ## initial-launch-retains-uncanonicalized-path.md
 
@@ -16045,7 +16048,8 @@
   start the agent elsewhere. The deliberate case is already accepted. No accidental trigger or harm shown.
 - Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: planned in `plans/queue/triage-discards-oct18.md`.
+- Execution: complete (discard) in change `wmpvqkzkkukrmrqynwykssnxkwzoytwn`, bookmark
+  `plan/triage-discards-oct18/01-discards`; [PR #2360](https://github.com/scode/farhelm/pull/2360/changes).
 
 ## tunnel-never-pins-learned-identity.md
 
@@ -16055,7 +16059,8 @@
   by the protocol version gate), plus a replacement installation advertising the same session ID. No shipped trigger.
 - Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: no reachable trigger, discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: planned in `plans/queue/triage-discards-oct18.md`.
+- Execution: complete (discard) in change `wmpvqkzkkukrmrqynwykssnxkwzoytwn`, bookmark
+  `plan/triage-discards-oct18/01-discards`; [PR #2360](https://github.com/scode/farhelm/pull/2360/changes).
 
 ## installation-colon-splits-session-path.md
 
