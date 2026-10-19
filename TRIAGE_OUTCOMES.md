@@ -15703,7 +15703,7 @@
   PR; a regression test modeled on `agent_clone_normalizes_trust_for_the_target_before_dispatch`; SPEC.md "Managed
   checkouts" states that an inherited spawn's trust follows its destination. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/workspace-trust-destination.md`.
 
 ## reused-checkout-path-grants-trust.md
 
@@ -15727,7 +15727,7 @@
   more than the small change sketched (reusing the existing identity comparison in that read), stop and record the item
   as covered by SPEC.md's 2026-10-11 out-of-band acceptance instead, with no code change. Either way, remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/workspace-trust-destination.md`.
 
 ## unusable-directory-launches-in-home.md
 
@@ -15755,7 +15755,7 @@
   Restart, Replace and OpenTab fail visibly instead of running in HOME; an optional earlier pre-check is allowed but not
   in place of the in-launch check. Tests use a folder the user cannot enter (skipped as root). SPEC.md states the
   principle above. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/launch-enters-working-dir.md`.
 
 ## template-wrapper-follows-different-agent.md
 
@@ -15777,7 +15777,7 @@
 - Completion criteria: SPEC.md (wrappers or agent-spawned sessions) states the principle, so the command-line behavior
   and the absent wrapper card are covered; no code change. If the report's open decision is still presented as
   unresolved somewhere maintained, point it at this outcome. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/agent-spawned-session-rules.md`.
 
 ## prompt-approval-can-cross-agent-runs.md
 
@@ -15795,7 +15795,7 @@
 - Completion criteria: SPEC.md "Agent-spawned sessions" states that the target's permission shield on a prompt card,
   like the open-in-a-client note, is a snapshot that may change while the card waits; no code change. Remove the
   feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/agent-spawned-session-rules.md`.
 
 ## empty-agent-prompt-submits-existing-draft.md
 
@@ -15812,7 +15812,7 @@
   supervisor through a dedicated check (a new session's initial prompt keeps its current rules); SPEC.md's "An
   explicitly empty message is legal" is replaced by the refusal; the CLI test that pins `--prompt ""` as legal expects a
   refusal; a supervisor test covers the refusal. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/agent-spawned-session-rules.md`.
 
 ## create-reply-foreign-id-bypasses-cache-refusal.md
 
@@ -15862,7 +15862,7 @@
   on 2026-10-18 ("sure fix with complexity gate"): the notice must not hide the refusal explanation itself (raise the
   explanation above the notice, or cap and lower the notice); if that part is not cheap, leave it out and say so. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/link-hover-covers.md`.
 
 ## refusal-banner-hides-approval-context.md
 
@@ -15878,7 +15878,7 @@
   card, including the heading and the requesting session and host, that the card stays answerable from the keyboard
   meanwhile, and that the cover ends when the pointer leaves the link. No code change. Remove the feedback file and its
   index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/link-hover-covers.md`.
 
 ## terminal-recovery-steals-confirmation-focus.md
 
@@ -15896,7 +15896,7 @@
   SPEC_impl.md says these paths yield to an open header question. Also in scope, added by the user on 2026-10-18: the
   same guard for the sidebar row's Delete and Replace questions, the interrupted-session card's Replace and tab close
   (for example through a shared keyboard-owner marker). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/session-header-and-row-fixes.md`.
 
 ## queued-launch-can-change-template.md
 
@@ -15913,7 +15913,7 @@
   launch uses the templates shown (a renamed or deleted template still refuses), with a unit test and the module doc and
   SPEC_impl.md sentences that say references resolve from a fresh read corrected. Complexity gate: if this is not a
   small, localized change of about an hour or two, discard instead. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/queued-launch-snapshot.md`.
 
 ## download-opens-without-hover-hint.md
 
@@ -15928,7 +15928,7 @@
   file and notes that opening was not offered. JS tests updated, including the one pinning today's behavior, and one
   SPEC_impl.md sentence. Complexity gate: if not a small, localized change, discard instead. Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/link-hover-covers.md`.
 
 ## payload-workers-outlive-state-lock.md
 
@@ -15948,7 +15948,7 @@
   finish, release the old one, and check whether a later lookup counts bytes that differ from the signed archive member
   as a cache hit. Bring the evidence back to the user for a decision; record the result here. The feedback item stays
   until that decision is executed.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/payload-lock-reproduction.md`.
 
 ## cancelled-startup-loses-archive-location.md
 
@@ -15968,7 +15968,7 @@
   the moved folder exists on disk while the trash listing omits it and no record names it. Report the evidence,
   including that the window is artificial on healthy storage, to the user for a decision; record the result here. The
   feedback item stays until that decision is executed.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/archive-recovery-reproduction.md`.
 
 ## orphan-git-outlives-cache-lock.md
 
@@ -15980,7 +15980,7 @@
   longer depends on the cache. Damage not shown. The killed-preparation filter covers only the orphan's own checkout.
 - Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-discards-oct18.md`.
 
 ## restart-abort-admits-old-child-report.md
 
@@ -15992,7 +15992,7 @@
   a later ancestor report corrects it.
 - Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-discards-oct18.md`.
 
 ## capture-marker-collision-misframes-replay.md
 
@@ -16004,7 +16004,7 @@
   read.
 - Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-discards-oct18.md`.
 
 ## initial-launch-retains-uncanonicalized-path.md
 
@@ -16014,7 +16014,7 @@
   start the agent elsewhere. The deliberate case is already accepted. No accidental trigger or harm shown.
 - Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: rare trigger, no shown damage, discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-discards-oct18.md`.
 
 ## tunnel-never-pins-learned-identity.md
 
@@ -16024,7 +16024,7 @@
   by the protocol version gate), plus a replacement installation advertising the same session ID. No shipped trigger.
 - Decision: on 2026-10-18 the user applied the 2026-10-11 rule to this group: no reachable trigger, discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/triage-discards-oct18.md`.
 
 ## installation-colon-splits-session-path.md
 
@@ -16040,7 +16040,7 @@
   contains `:`, with a message naming the folder; the desktop app shows that clearly instead of a bare child exit; a
   test modeled on the non-UTF-8 startup refusal; SPEC.md "Supported user environments" gains a sentence beside the `$`
   refusal. Complexity gate: if it is not that small, discard instead. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/supervisor-colon-path-refusal.md`.
 
 ## header-copy-warning-follows-refreshed-value.md
 
@@ -16052,7 +16052,7 @@
 - Completion criteria: the warning is computed at click time from the copied value and kept with the feedback state,
   with a test showing it survives a change of the shown value. Complexity gate: if not cheap, discard instead. Remove
   the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/session-header-and-row-fixes.md`.
 
 ## session-accessible-names-use-raw-titles.md
 
@@ -16066,7 +16066,7 @@
 - Completion criteria: escape the title before shortening it in those four names, with a unit test using a direction
   override and a zero-width space. SPEC.md may say "including accessible names" in the escaping rule. Complexity gate:
   if not cheap, discard instead. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/session-header-and-row-fixes.md`.
 
 ## approval-session-id-display-collision.md
 
@@ -16079,7 +16079,7 @@
 - Completion criteria: session IDs on approval cards use the identity rendering (keeping the shortened labels), with a
   test that two IDs colliding today render differently while the action still sends the raw ID. Complexity gate: if not
   cheap, discard instead. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-entry-session-ids.md`.
 
 ## agent-approval-omits-workspace-trust.md
 
@@ -16094,7 +16094,7 @@
   asking) or a stored "not trusted"; no line when unset; unit tests. Claude is out of scope. SPEC.md may add trust to
   what a launch card shows. Complexity gate: if not cheap, discard instead. Remove the feedback file and its index
   entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/workspace-trust-destination.md`.
 
 ## tunnel-port-can-divert-local-traffic.md
 
@@ -16109,7 +16109,7 @@
   on the Mac when free, so a Mac program expecting that port may reach the remote host instead; SPEC.md's list of what
   the warning explains and the docs page that repeats the warning say the same; edit the tunnel feature's existing
   changelog fragment if it is unreleased. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/tunnel-port-consent-warning.md`.
 
 ## pending-approval-can-cross-host-entries.md
 
@@ -16157,4 +16157,4 @@
     the moment of the update may get no answer.
   - SPEC.md and SPEC_impl.md state the principle and the rules above; the agent instructions describe full IDs.
   - Remove this feedback file and `create-reply-foreign-id-bypasses-cache-refusal.md`, with their index entries.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/host-entry-session-ids.md`.
