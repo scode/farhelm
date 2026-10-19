@@ -652,6 +652,7 @@ impl ProvisioningService {
                 );
                 Ok(ProbeResponse::Provisionable {
                     probe_id,
+                    steps: Box::new(plan.steps()),
                     plan,
                     confirmation,
                 })
@@ -1122,6 +1123,7 @@ impl ProvisioningService {
         .await;
         Ok(HostPlanResponse {
             probe_id,
+            steps: plan.steps(),
             plan,
             confirmation,
         })
@@ -1214,6 +1216,7 @@ impl ProvisioningService {
         .await;
         Ok(HostPlanResponse {
             probe_id,
+            steps: plan.steps(),
             plan,
             confirmation,
         })

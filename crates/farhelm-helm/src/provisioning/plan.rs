@@ -113,9 +113,9 @@ pub(crate) struct DirectorySpec {
 ///
 /// Paths, unit contents, linger's conditional boot promise, and the
 /// persistent-run statement live here rather than in a parallel confirmation
-/// template. Adding executor behavior therefore requires adding a line to
-/// the plan text the same request authorizes — setup confirmation shows it,
-/// and remote updates consume it sight unseen from the same rendering.
+/// template. Each action becomes one user-facing step for confirmation and
+/// progress. Adding executor behavior therefore also changes the plan text
+/// the request authorizes; remote updates consume it sight unseen.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "step", rename_all = "kebab-case")]
 pub(crate) enum ProvisioningAction {
@@ -198,6 +198,7 @@ pub(crate) enum ProvisioningAction {
 }
 
 impl ProvisioningAction {
+    /// Stable action identity shared by the frozen plan and its progress view.
     pub(super) fn label(&self) -> &'static str {
         match self {
             Self::EnsureDirectories { .. } => "create-directories",
@@ -231,66 +232,169 @@ impl ProvisioningAction {
         }
     }
 
-    /// Describe only a user-visible change on the host.
-    ///
-    /// Transfer staging, digest checks, atomic renames, daemon reloads, and
-    /// attaching the resulting supervisor are execution details. They remain
-    /// in the frozen action list, but the add-host question names the durable
-    /// host changes the user is deciding to authorize.
-    fn confirmation_line(&self) -> Option<String> {
-        match self {
-            Self::EnsureDirectories { directories } => Some(
+    /// Give every frozen action one user-facing step, including actions that
+    /// the old confirmation text hid. The helm owns this wording so a client
+    /// cannot promise a different run than the one it was asked to confirm.
+    fn step(&self, home: &Path) -> PlanStep {
+        let (name, paths, explanation): (&str, Vec<&Path>, Option<String>) = match self {
+            Self::EnsureDirectories { directories } => (
+                "create directories",
                 directories
                     .iter()
-                    .map(|directory| format!("create or reuse directory {}", directory.path.display()))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
+                    .map(|directory| directory.path.as_path())
+                    .collect(),
+                Some("Existing shared directories keep their permissions.".to_string()),
             ),
-            Self::UploadPayload { .. } | Self::DaemonReload | Self::AttachSupervisor => None,
+            Self::UploadPayload {
+                payload, temporary, ..
+            } => (
+                match payload {
+                    PayloadKind::Farhelm => "upload the farhelm binary",
+                    PayloadKind::Tmux => "upload tmux",
+                },
+                vec![temporary],
+                None,
+            ),
             Self::InstallPayload {
                 payload,
                 destination,
+                temporary,
                 ..
-            } => Some(format!(
-                "place {} at {}",
+            } => (
                 match payload {
-                    PayloadKind::Farhelm => "Farhelm",
-                    PayloadKind::Tmux => "tmux",
+                    PayloadKind::Farhelm => "install the farhelm binary",
+                    PayloadKind::Tmux => "install tmux",
                 },
-                destination.display()
-            )),
+                vec![destination, temporary],
+                None,
+            ),
             Self::WriteUnit {
-                unit, destination, ..
-            } => Some(format!("write user service {unit} at {}", destination.display())),
-            Self::EnableSupervisor {
                 unit,
+                destination,
+                temporary,
+                ..
+            } => (
+                "write the systemd user unit",
+                vec![destination, temporary],
+                Some(format!("Unit: {unit}")),
+            ),
+            Self::DaemonReload => ("reload systemd user units", vec![], None),
+            Self::EnableSupervisor {
+                unit_path,
                 persistent_run,
                 ..
-            } => Some(format!("enable and start {unit}; {persistent_run}")),
-            Self::EnableLinger { .. } => Some(
-                "start the supervisor at boot when user lingering is enabled; if lingering is refused, start it at login instead"
-                    .to_string(),
+            } => (
+                "enable and start the supervisor",
+                vec![unit_path],
+                Some(persistent_run.clone()),
             ),
-            Self::RestartSupervisor { unit } => Some(format!("restart {unit}")),
-            Self::DisableSupervisor { unit } => {
-                Some(format!("disable user service {unit} so it no longer starts"))
-            }
+            Self::EnableLinger {
+                boot_start_if_enabled,
+                login_start_if_refused,
+            } => (
+                "enable lingering, to start at boot",
+                vec![],
+                Some(format!(
+                    "{boot_start_if_enabled}; if lingering is refused, {login_start_if_refused}"
+                )),
+            ),
+            Self::RestartSupervisor { .. } => ("restart the supervisor", vec![], None),
+            Self::AttachSupervisor => ("connect to the supervisor", vec![], None),
+            Self::DisableSupervisor { .. } => ("disable the supervisor", vec![], None),
             Self::RemoveUnit { destination, .. } => {
-                Some(format!("remove its unit file {}", destination.display()))
+                ("remove the systemd user unit", vec![destination], None)
             }
-            Self::StopSupervisor { unit, .. } => {
-                Some(format!("stop {unit} and its private tmux server"))
+            Self::StopSupervisor { .. } => {
+                ("stop the supervisor and its tmux server", vec![], None)
             }
-            Self::RemoveDirectory { path } => Some(format!(
-                "remove {} with the Farhelm binary and any private tmux in it",
-                path.display()
-            )),
-            Self::ForgetHost => Some("remove this host from the host list".to_string()),
+            Self::RemoveDirectory { path } => (
+                "remove the install directory",
+                vec![path],
+                Some("The Farhelm binary and any private tmux in it are removed.".to_string()),
+            ),
+            Self::ForgetHost => ("remove the host from the list", vec![], None),
+        };
+        PlanStep {
+            id: self.label().to_string(),
+            name: name.to_string(),
+            paths: paths
+                .into_iter()
+                .map(|path| PlanStepPath::new(path, home))
+                .collect(),
+            explanation,
         }
     }
 }
 
-/// The exact value the confirmation text renders and execution later consumes.
+/// A path in the helm's plan with its complete spelling and a home-relative
+/// spelling for narrow dialog chips. `strip_prefix` checks path components,
+/// so a sibling whose name starts with the home directory is never shortened.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(super) struct PlanStepPath {
+    pub(super) full: String,
+    pub(super) short: String,
+}
+
+impl PlanStepPath {
+    /// Keep a path's full spelling for hover and copying, while shortening
+    /// only paths that are actually inside this inspected host's home.
+    fn new(path: &Path, home: &Path) -> Self {
+        let full = path.display().to_string();
+        let short = path.strip_prefix(home).map_or_else(
+            |_| full.clone(),
+            |relative| {
+                if relative.as_os_str().is_empty() {
+                    "~".to_string()
+                } else {
+                    format!("~/{}", relative.display())
+                }
+            },
+        );
+        Self { full, short }
+    }
+}
+
+/// One frozen action as the user sees it before and during a run. The id
+/// remains the executor's stable label; the name is the helm's public wording.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(super) struct PlanStep {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) paths: Vec<PlanStepPath>,
+    pub(super) explanation: Option<String>,
+}
+
+/// The single ordered description used for confirmation and progress. Kept
+/// data is a separate note because uninstall never acts on that directory.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(super) struct PlanSteps {
+    pub(super) lead: String,
+    pub(super) steps: Vec<PlanStep>,
+    pub(super) kept: Option<String>,
+}
+
+#[cfg(test)]
+mod step_path_tests {
+    use super::*;
+
+    /// A path whose first characters match the home is still outside it
+    /// when the next path component differs. Shortening it would mislead the
+    /// user about the host path a step actually touches.
+    #[test]
+    fn only_paths_within_the_host_home_get_tilde_spelling() {
+        let home = Path::new("/home/host-user");
+        assert_eq!(
+            PlanStepPath::new(Path::new("/home/host-user/lib/farhelm"), home).short,
+            "~/lib/farhelm"
+        );
+        assert_eq!(
+            PlanStepPath::new(Path::new("/home/host-user-other/lib"), home).short,
+            "/home/host-user-other/lib"
+        );
+    }
+}
+
+/// The frozen value both the confirmation text and the executor consume.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct ProvisioningPlan {
     pub(super) operation: ProvisioningOperation,
@@ -298,6 +402,9 @@ pub(crate) struct ProvisioningPlan {
     pub(super) farhelm_path: PathBuf,
     pub(super) state_dir: PathBuf,
     pub(super) actions: Vec<ProvisioningAction>,
+    /// The inspected host's home directory, frozen with the actions so their
+    /// path chips cannot be shortened against this client's own home.
+    pub(super) host_home: PathBuf,
     /// The reach probe's validated `/etc/os-release` `ID`, empty when the
     /// host had none, and the payload architecture it matched — carried
     /// through purely for `confirmation()`'s host line. Validation happens
@@ -309,19 +416,16 @@ pub(crate) struct ProvisioningPlan {
 }
 
 impl ProvisioningPlan {
-    /// Render the plan without maintaining a second list of promises.
+    /// Describe exactly the actions the run will carry out, in run order.
     ///
     /// The heading names the destination, distribution, and architecture so
     /// distro-agnostic provisioning still gives the user a chance to notice
     /// an unexpected host before authorizing its durable changes.
     ///
-    /// UNINSTALL's heading says so instead of "set up", and its text ends
-    /// with what it keeps: the host's state directory is not an action, but
-    /// the user is deciding whether to remove Farhelm and needs to know
-    /// where the data stays and that deleting it is theirs to do.
-    pub(super) fn confirmation(&self) -> String {
-        let mut rendered = format!(
-            "Farhelm will {} {} ({}, {}):\n",
+    /// UNINSTALL's kept-data note is separate: no action touches that path.
+    pub(super) fn steps(&self) -> PlanSteps {
+        let lead = format!(
+            "Farhelm will {} {} ({}, {}):",
             match self.operation {
                 ProvisioningOperation::Add | ProvisioningOperation::Update => "set up",
                 ProvisioningOperation::Uninstall => "uninstall from",
@@ -337,21 +441,40 @@ impl ProvisioningPlan {
             },
             self.host_arch,
         );
-        for action in &self.actions {
-            if let Some(line) = action.confirmation_line() {
-                for line in line.lines() {
-                    rendered.push_str("- ");
-                    rendered.push_str(line);
-                    rendered.push('\n');
-                }
+        let kept = (self.operation == ProvisioningOperation::Uninstall).then(|| {
+            format!(
+                "Kept: the host's Farhelm data in {}. Deleting that directory by hand removes the \
+                 data too.",
+                self.state_dir.display()
+            )
+        });
+        PlanSteps {
+            lead,
+            steps: self
+                .actions
+                .iter()
+                .map(|action| action.step(&self.host_home))
+                .collect(),
+            kept,
+        }
+    }
+
+    /// Render copyable plan text from the same entries the dialogs and run
+    /// use. A separate prose action list could drift from the run's steps.
+    pub(super) fn confirmation(&self) -> String {
+        let steps = self.steps();
+        let mut rendered = format!("{}\n", steps.lead);
+        for step in steps.steps {
+            rendered.push_str(&format!("- {}\n", step.name));
+            for path in step.paths {
+                rendered.push_str(&format!("  {}\n", path.full));
+            }
+            if let Some(explanation) = step.explanation {
+                rendered.push_str(&format!("  {explanation}\n"));
             }
         }
-        if self.operation == ProvisioningOperation::Uninstall {
-            rendered.push_str(&format!(
-                "Kept: the host's Farhelm data in {}. Deleting that directory by hand removes the \
-                 data too.\n",
-                self.state_dir.display()
-            ));
+        if let Some(kept) = steps.kept {
+            rendered.push_str(&format!("{kept}\n"));
         }
         rendered
     }
@@ -593,6 +716,7 @@ impl PlanLayout {
             farhelm_path,
             state_dir,
             actions,
+            host_home: reach.home.clone(),
             host_distro_id: reach.distro_id.clone(),
             host_arch: reach.arch,
         })
@@ -722,6 +846,7 @@ impl PlanLayout {
                 .unwrap_or_else(|| paths.lib_dir.join("farhelm")),
             state_dir: facts.state_dir.named.clone(),
             actions,
+            host_home: reach.home.clone(),
             host_distro_id: reach.distro_id.clone(),
             host_arch: reach.arch,
         })
