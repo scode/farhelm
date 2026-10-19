@@ -91,16 +91,74 @@ proof that the provisioned service failed.
 ## Guest commands and app launch
 
 Actual release checks use `brick_test.py test`, which stages an independent guest executor and checkpoint envelope
-through this journaled channel. Each checkpoint starts a fresh `codex exec --yolo` process. Its owned process group is
-terminated on timeout or completion, including surviving MCP children; Python `waitid`/`WNOWAIT` preserves identity
-through teardown. Export includes only bounded executor diagnostics and validated evidence references. A permission
-block is retained as automation failure; no host UI rescue or manual approval is allowed during actual testing.
+through this journaled channel. Each checkpoint starts a fresh Codex process with shell tools disabled and explicit
+approval for the guest test server's fixed operations and native CUA tools. The disposable guest is the isolation
+boundary; Codex uses `danger-full-access` with `approval_policy=never` there because its read-only sandbox generates
+nested native approval requests that cannot be answered unattended. The bridge forwards approvals unchanged, never
+accepting them itself. Its owned process group is terminated on timeout or completion, including surviving MCP children;
+Python `waitid`/`WNOWAIT` preserves identity through teardown. Export includes only bounded executor diagnostics and
+validated evidence references. A permission block is retained as automation failure; no host UI rescue or manual
+approval is allowed during actual testing.
 
 The executor persists native image bytes directly from the private tool event stream, retaining up to ten recent
-distinct captures that fit its evidence budget. The tester requests screenshots at acceptance states and writes command
-receipts; it must not encode images or run image-saving scripts. The raw `model-result.json` and enriched `result.json`
-remain separate so evidence persistence cannot silently rewrite what the model originally observed. Tester
-script/evidence faults use `automation-failure`, not a product `fail`.
+distinct captures that fit its evidence budget. Window-drag retains ten separate occurrences, including identical
+cropped pixels, because a moved window can look unchanged in an app-only image. The tester requests screenshots at
+acceptance states; the managed operation helper writes command receipts and the executor serializes the final
+observation. The model neither writes scripts nor chooses evidence paths. `final.txt` retains the original structured UI
+observation, while `model-result.json` and enriched `result.json` retain the bound task identity, command references and
+native captures. Failures of the tester's tools or evidence preparation use `automation-failure`, not a product `fail`.
+
+`guest_operations.py` exposes only named operations for signed inputs, installation, app launch, version/service
+inspection, continuity and earlier receipts. It forwards genuine native CUA through the same serial tool server. A
+failed command or native tool closes the action gate before another request can run, even when the model did not inspect
+the failure. An unexpected bridge restart is refused rather than replaying an uncertain action. The shell tool is
+disabled and ambient user configuration is not loaded; explicit guest-only tool approval cannot authorize an arbitrary
+shell command. This is an accidental-failure boundary, not a sandbox against a malicious native tester.
+
+Launch logs and digest-bound receipt references live in the private pass directory. A later checkpoint requests
+`prior_receipts`; it never infers a previous model working directory or recreates a missing observation. Repeated
+observations retain their files while the handoff contains the latest receipt for each checkpoint/operation pair. The
+fixed operations check each subprocess result before another action. Expected absence, such as a launch log that has not
+appeared, is returned explicitly; unexpected command or transport failures close the gate and retain diagnostics.
+
+`checkpoint_contract.py` binds the host-selected update path to both the offered operations and the required evidence.
+The model receives only that path's instructions: a manual installer test cannot acquire override-removal obligations.
+Installers and app launches run at most once per attempt; repeated observations can poll for actual readiness.
+
+`guest_ui.py` exposes single structured app actions through the official native provider; executable JavaScript is not
+offered to the model. Restart is a separate lifecycle action: one native click, independent observation of the running
+candidate process, then native rebinding. It never combines the click with a read of the disappearing old app, retries
+the click, or binds Farhelm while its process is absent. Returned UI state and images are unchanged provider output.
+
+Exact text uses the native provider's `paste`, which restores the guest clipboard afterward. Native `typeText` dropped
+characters in the P1 message during validation, so the structured tool does not offer it. Verify the complete reactive
+field value before submitting; successful input delivery is not inferred from the tool's exit. Host clipboard sharing
+stays disabled.
+
+Each task includes its complete acceptance contract, including P1's literal message and the selected bonus stage. The
+tester does not browse staged recipes or evidence directories through Finder to discover its instructions. Bonus
+conversation passes require an independently recorded captured conversation identity as well as the actual reply.
+
+Window-drag also uses `window_geometry.swift`, a read-only query of the guest's public window-server API. The installed
+guest Swift toolchain runs it for explicit owned process IDs; it exports frame, window identity and display geometry
+without titles, images or input. `window_geometry.py` pins the owned window/process and calibrates coordinates against
+the actual native image dimensions. A display's pixel counts alone are not that calibration. `window_frame` records each
+measurement and its checked command in one bounded aggregate receipt. The acceptance gate requires the ten image states,
+both same-size moves, both zoom/restores and unchanged geometry throughout the control interactions. Optional
+`finder_frame` supplies the same read-only measurement for the native gesture-delivery oracle. Ambiguous windows,
+replacement identity or unavailable geometry stop the attempt; no gesture requirement is waived.
+
+A successful AX-plus-screenshot request can return only a menu's accessibility text. Preserve that observation and clear
+its image association; it is neither a capture nor a tool failure. The tester dismisses the menu normally before
+requesting an acceptance image. Frame-only measurements still count for stationary-control checks, so a missing image
+cannot hide transient window movement or borrow an earlier screenshot's calibration.
+
+Bonus native readiness exercises a real Finder window drag and folder double-click before Farhelm installation. P0 keeps
+its smaller screenshot/click/text prerequisites. With the native provider bundled in desktop build `26.1013.31256`
+(`@oai/sky` 0.7.8), held drags returned success but moved neither Farhelm nor an ordinary Finder window, including after
+Bring All to Front. Folder double-click navigation did work. The independent frame query distinguishes that missing
+delivery from a Farhelm drag failure. Revalidate a different runtime rather than assuming these gestures work because
+clicks and text do; do not substitute direct OS input or host Tart gestures for acceptance.
 
 The staged `fixture_probe.py` performs read-only cleanliness inspection in the Mac and its pinned Linux peer. Use its
 recorded helper path and SSH alias from the task context; it writes one private receipt. Do not replace it with guessed
@@ -267,3 +325,8 @@ The historical 27-test suite passed on real Linux during bring-up; profile/coord
 process tests skip on macOS, so a Mac-only run cannot claim those tests ran. BRICK-TEST documents a separate
 command-only real-guest smoke for coordinator changes. Guest product checks still need the actual native bundle and GUI
 flow described in RECIPE.md.
+
+Geometry unit tests cover frame identity, image calibration and rejected gesture traces. Validate the native API
+separately in an owned disposable guest with its installed SDK: type-check the staged Swift file, then execute a
+read-only query for the actual app process. The full native window check remains necessary to prove gesture delivery and
+product behavior; a successful metadata query alone proves neither.

@@ -285,9 +285,15 @@ On the first open after a fresh install, or after upgrading from a release witho
 For each ready fixture, run `python3 -B releasing/mac-vm-test/brick_test.py test "$test_run" <pass>`. Keep its separate
 `serve` owner alive. The `test` command injects already-authorized credentials into both disposable roles, checks actual
 native screenshot/click/text entry before Farhelm, then executes the ordered checkpoints in fresh guest Codex turns with
-`--yolo`. It selects the update branch from a fresh `/latest` observation at the action boundary, imports bounded
-private evidence, and stops at the first model, tool or permission failure, or product failure outside P1. There is no
-automatic retry. `--timeout` bounds each turn (30–3600 seconds, default 1200). Status remains queryable while a turn
+shell tools disabled inside the owned disposable guest. Fixed operations and native CUA share one serial failure gate;
+their guest-only approval is explicit in the invocation. It selects the update branch from a fresh `/latest` observation
+at the action boundary, imports bounded private evidence, and stops at the first model, tool or permission failure, or
+product failure outside P1. There is no automatic retry. `--timeout` bounds each turn (30–3600 seconds, default 1200).
+Exact native text entry uses paste with reactive-value verification; the tool omits `typeText` after observed partial
+delivery. Each turn receives its complete selected checkpoint contract, so recipe-file browsing is not part of a test.
+Bonus native readiness additionally proves a real Finder window move and folder double-click before installing Farhelm.
+P0 retains its smaller prerequisites. A gesture tool's successful return is insufficient: an independent same-window
+frame change must establish drag delivery, or that fixture stops as unavailable. Status remains queryable while a turn
 runs; cleanup and another tester refuse an active attempt. If the controller disappears, reconcile the retained claim
 and guest process before cleanup; a stale claim is not permission to start a second tester.
 
@@ -312,12 +318,16 @@ components, authentication-store names and executor-owned record names are refus
 case so a Mac volume cannot alias a model-created directory to an executor record.
 
 The executor saves up to ten recent distinct native image results that fit the remaining reference and byte budgets, as
-private `native-capture-*` files. The guest requests screenshots at the important acceptance states and writes command
-receipts; it never encodes or saves images itself. `model-result.json` preserves the original observation, while the
-accepted `result.json` adds those captures. The P1 contract requires before-Send and after-Send observations; its
-structural gate requires two distinct native images. This binds their bytes to real tool results; review of the images
-and event sequence must establish their before/after meaning. Interrupted event rows can be skipped when salvaging
-failure diagnostics, but successful execution still requires strict event parsing and a completed turn.
+private `native-capture-*` files. The window-drag check instead retains its ten separate image occurrences, since a
+cropped app image can have identical pixels after the window moves. Its fixed read-only window-server measurements pin
+the owned window/process, calibrate actual image coordinates and verify moves, zoom/restores and stationary controls.
+Those measurements supplement the native images and gestures; they do not replace them. The guest requests screenshots
+at the important acceptance states; fixed operations retain command receipts, and the model never encodes or saves
+images itself. `final.txt` preserves the original UI observation, `model-result.json` adds machine-owned command
+references, and the accepted `result.json` adds native captures. The P1 contract requires before-Send and after-Send
+observations; its structural gate requires two distinct native images. This binds their bytes to real tool results;
+review of the images and event sequence must establish their before/after meaning. Interrupted event rows can be skipped
+when salvaging failure diagnostics, but successful execution still requires strict event parsing and a completed turn.
 
 The tester reserves `fail` for actual Farhelm failures. Errors in its own scripts or evidence preparation use
 `automation-failure`; missing product prerequisites use `could-not-run`, and OS/CUA/authentication refusals use

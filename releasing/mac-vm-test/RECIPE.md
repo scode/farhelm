@@ -182,15 +182,25 @@ together. Historical manifests with no declared P1 check report it as not planne
    selected again and the delete confirmation open, and one with settings open. This check runs after the session steps
    because a fresh install has no session, and so no main-pane row, at startup.
 
-   Open bring-up question: guest-native CUA has proven screenshots, clicks and text entry, but press-move-release drags
-   and double-clicks have not been exercised through it. (OPERATIONS.md's scrollbar-drag and triple-click observations
-   came from the host Tart binding.) If the native API lacks either gesture or refuses it, the check is could not run,
-   not a product failure. Before reporting a failure, the tester checks that the gesture reached the guest: an
-   unanswered drag is repeated on a Finder window's title bar, and an unanswered double-click is tried on an unselected
-   folder icon in a Finder window in icon view, which should navigate into the folder (in column view a single click
-   already shows a folder's contents). If that check gets no response either, the result is could not run. A Finder
-   title bar is no oracle for double-clicks, because its action follows a user setting that may be off. Record the first
-   run's actual gesture behavior in OPERATIONS.md's computer-use notes.
+   Native CUA crops images to the app, so an unchanged crop cannot prove that the window stayed put. The fixed
+   `window_frame` operation reads the owned app's window ID, process ID and frame from the guest's public window-server
+   API. Pin that identity throughout the check. Query it before the first image, immediately after each of the ten
+   images and after every control interaction, including closing dialogs. The harness retains the measurements in one
+   receipt and checks both moves, both zoom/restores and stationary controls. Derive gesture offsets from the actual
+   image-to-frame scale returned with each image measurement; display pixel counts can describe a different scale. This
+   command only measures geometry: all gestures and all ten images still come from native CUA. Retain separate image
+   occurrences even when their cropped pixels are identical.
+
+   Bonus fixture readiness must prove actual window motion and folder double-click navigation before installing Farhelm.
+   OPERATIONS.md records a native runtime whose drags returned success while leaving Finder stationary; screenshots,
+   clicks and text entry alone do not establish gesture readiness. (Its earlier scrollbar-drag and triple-click
+   observations came from the host Tart binding.) If the native API lacks either gesture or refuses it, the check is
+   could not run, not a product failure. Before reporting a failure, the tester checks that the gesture reached the
+   guest: an unanswered drag is repeated on a Finder window's title bar, and an unanswered double-click is tried on an
+   unselected folder icon in a Finder window in icon view, which should navigate into the folder (in column view a
+   single click already shows a folder's contents). If that check gets no response either, the result is could not run.
+   A Finder title bar is no oracle for double-clicks, because its action follows a user setting that may be off. Record
+   the first run's actual gesture behavior in OPERATIONS.md's computer-use notes.
 6. Run applicable addendum checks. Capture a screenshot per GUI check and command output for command checks. Export
    evidence with `control.py collect`, verify each exported archive, then `shutdown` and `delete` only this pass's owned
    clones. Bases remain stopped and unchanged.

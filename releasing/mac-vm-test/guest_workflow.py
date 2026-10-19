@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from control import Refused
 from guest_tester import request
+from checkpoint_contract import update_instructions, window_instructions
 
 
 HERE = Path(__file__).resolve().parent
@@ -292,6 +293,139 @@ Any prerequisite refusal is permission-block/automation failure, never a pass.''
             'Do not replace skipped or unavailable bonus checks with a pass.')
 
 
+def managed_instructions(check_id, pass_id, update_path=None):
+    """Assign commands to fixed operations and reserve product interactions for native CUA.
+
+Explicit ordering matters at quit, install and relaunch boundaries. A stable
+operation vocabulary replaces fresh model-written scripts without replacing
+the GUI acceptance checks or weakening the historical upgrade obligations.
+"""
+    if check_id in ('update-discovery', 'update-relaunch'):
+        return update_instructions(check_id, pass_id, update_path)
+    if check_id == 'native-preflight' and not pass_id.startswith('p0-'):
+        return '''Call prerequisites. This bonus fixture needs native window gestures as well
+as screenshots, clicks and exact text. Bind Finder and establish exactly one
+normal file window using its native File > New Finder Window if needed;
+Desktop alone is not the oracle. Inspect AX before asking for an image. If a
+menu is open, dismiss it through its actual Cancel secondary action or an
+ordinary menu dismissal, and verify the standard window returned. Click an ordinary control,
+paste nonsecret text and verify its complete reactive value. Restore a normal
+window with empty title-bar background and room to move. Capture and call
+finder_frame, drag that background through the documented native drag API,
+capture and call finder_frame again. Require changed position with unchanged
+size on that same window; successful tool exit alone cannot prove delivery.
+Also double-click an unselected existing folder icon in Finder icon view and
+require navigation. Capture actual final native state. If either gesture is
+unsupported or has no effect, report could-not-run and stop before Farhelm
+installation. No product state, OS permissions or authentication changes.'''
+    contracts = {
+        'native-preflight': '''Call brick_action prerequisites. Bind Finder using native CUA, capture its
+actual image/AX, click an ordinary control and enter nonsecret text. Verify the
+reactive field and capture the final native image. No Farhelm product state.''',
+        'artifact-verification': 'Call brick_action verify_candidate. Require its verified release receipt.',
+        'fixture-clean': 'Call brick_action fixture_clean. Require both roles clean; never repair residue.',
+        'install': 'Call brick_action install_candidate. Require successful installer and exact candidate CLI version.',
+        'app-start': '''Call brick_action launch. Bind the installed Farhelm app through native CUA,
+dismiss welcome with got it, and require candidate UI, usable session list and
+connected candidate local supervisor. Call versions after observing that state.
+No remote setup, conversations, templates or settings.''',
+        'old-fixture': '''Call fixture_clean before installing anything; require both roles clean. Then call
+verify_previous and install_previous; its helper disables automatic updates
+before first launch. Call launch. Through native CUA dismiss welcome with got it,
+verify previous app/local supervisor and automatic updates off. Call versions.
+For every fixture except p0-installer-upgrade, add context.ssh.alias through the
+ordinary Add host GUI, accept its ordinary setup confirmation and require remote
+connected at previous. Then call remote_version. No session or feedback yet.''',
+        'local-supervisor-agent': '''Require connected candidate local supervisor, using local Update only if offered.
+Through Farhelm native GUI launch one genuine local Codex session, gpt-6.1-sol
+low effort YOLO and per-run trust where offered. Send: What is 17 + 25? Explain
+in one short sentence. Require a separate actual answer 42, sensible explanation,
+responsive terminal and completion. Call versions. Retain actual native images.''',
+        'remote-supervisor-agent': '''Through Farhelm native GUI use remote Update and its ordinary confirmation.
+Require connected candidate remote, then call remote_version. Launch one genuine
+remote Codex session, gpt-6.1-sol low effort YOLO and per-run trust where offered.
+Send: What is 17 + 25? Explain in one short sentence. Require a separate actual
+answer 42, explanation, responsive terminal and completion. Capture native images.''',
+        'remote-provision': '''Add context.ssh.alias through native Add host and its ordinary confirmation.
+Require connected candidate remote and call remote_version. Capture native image.''',
+        'codex-conversation': '''On the connected candidate local host, launch one genuine session for each
+context.agents entry. For Codex use gpt-6.1-sol, low effort and per-launch YOLO
+confirmation. Send a small prompt and require a separate meaningful answer,
+responsive terminal and completion. Require a captured conversation in Farhelm,
+not only terminal output. Call inspect_state until its session receipt records
+the captured identity. Capture the actual conversation and host/session state.
+Do not start the remote terminal or perform window gestures in this checkpoint.''',
+        'remote-terminal': '''Call prior_receipts. Through Farhelm create a plain-command session on the pinned Linux host,
+agent type none, running an interactive sh. Enter printf 'brick-remote-ready\\n';
+uname -s in its terminal. Require separate command output brick-remote-ready
+and Linux, followed by a responsive shell prompt. Capture native output and
+the remote session/host identity. This is a terminal check, not an agent reply.''',
+        'seed-state': '''Keep the previous app running with automatic updates off. Launch a genuine
+local conversation for each context.agents entry. Ask it to remember the word
+bluebird and explain 17 + 25; require an actual answer and captured conversation.
+Save one launch template named brick-template using settings supported by this
+previous release. Set the visible compact session-list checkbox on. Record the
+session IDs, captured conversation IDs, template fields and compact setting
+with inspect_state, plus native images of the conversation/template/setting.
+Call versions and require the previous version still runs. Do not update yet.
+The later resume check must recover bluebird from this captured conversation.''',
+        'preserved-state': '''Call prior_receipts for the seed-state facts. Through native UI require the
+original sessions, saved brick-template and compact setting remain accessible
+after the app update. Compare inspect_state with the retained seed receipt:
+same original session/captured identities, template present and compact on.
+Inspect the template's meaningful fields through its ordinary UI. Honor only
+the explicit per-feature loss accepted in context.addendum. Do not recreate
+missing state, resume agents or update the remote host here. Capture evidence.''',
+        'codex-resume': '''Call prior_receipts for the original session and captured conversation IDs.
+Through the original Farhelm session's ordinary Restart action, resume that
+captured conversation. This is an agent restart, not the app updater: use the
+ordinary UI click, not brick_ui method restart. Ask which word you told it to
+remember. Require a separate actual reply naming bluebird and a responsive
+terminal. Do not start a fresh conversation or supply the answer in the prompt.
+Call inspect_state to retain session, generation and captured-identity facts;
+compare with the seed receipt. Capture the real resumed answer and session.''',
+        'continuity-before': '''Call continuity_command and start its exact command as a Farhelm plain-command
+session on the pinned Linux host, with agent type none. Call continuity_before
+to establish original identity and advancing counters independently over SSH.''',
+        'remote-update': '''Call continuity_remote_before. Use remote Update through native GUI and its normal
+confirmation; require candidate remote connected. Call remote_version and
+continuity_remote_after. Both must establish the original process survived.''',
+        'reopen': '''Call continuity_reopen_before. Quit the candidate normally through native UI,
+then call launch. Require usable candidate, both connected hosts, retained
+sessions and responsiveness. Call versions, remote_version, inspect_state and
+continuity_reopen_after. Capture final native image.''',
+        'p1-feedback-send': '''Call prior_receipts. This is the separately approved P1 send after all five P0 checks passed.
+Require context.feedback_authorized true. Open the normal ? > send feedback
+dialog. Use native paste for exactly this message, replacing vX.Y.Z only with
+context.candidate:
+
+[brick-test] vX.Y.Z
+
+This is an automated release brick test checking that this release can send feedback; no action is needed.
+
+Leave contact blank. Verify the entire reactive message, candidate version and
+desktop app metadata. Capture a native image BEFORE Send. Press Send once;
+require the dialog closes by itself without failure, and capture the closed
+dialog/thanks state. Do not resend or inspect the private inbox. An actual send
+failure is a P1 product failure, independent from P0. No recipe/file browsing.''',
+        'addendum': '''Call prior_receipts and review this pass's observations against context.addendum.
+Report actual coverage and any gaps for this pass only. Separately declared
+extra-* checkpoints perform their own hands-on checks; do not claim a pending
+one passed or perform it early here. Do not repeat P0, send feedback, or start
+another upgrade. Capture final native state if this checkpoint declares GUI.''',
+    }
+    if check_id in contracts:
+        return contracts[check_id]
+    if check_id == 'window-drag':
+        return window_instructions()
+    if check_id.startswith('extra-'):
+        return (f'Call prior_receipts. Perform only the extra check named {check_id} for {pass_id}, '
+                'using its actions and expected result in context.addendum and context.check_contracts. '
+                'Use native UI, inspect_state for applicable independent state facts, and actual native '
+                'acceptance images. Do not repeat other recipe stages or send feedback.')
+    raise ValueError('checkpoint has no explicit managed acceptance contract')
+
+
 def stage(control, task, source_files):
     """Install a single exclusive executor/task tree by journaled stdin transfer.
 
@@ -386,4 +520,5 @@ def task_for(run, pass_id, check_id, context, timeout=1200):
     return request({'format': 1, 'attempt': attempt, 'run_id': run.data['run_id'],
                     'pass_id': pass_id, 'check_id': check_id, 'gui': gui, 'timeout_seconds': timeout,
                     'settings': run.profile.values['guest_tester']['settings'], 'context': context,
-                    'instructions': instructions(check_id, pass_id, context.get('update_path'))})
+                    'instructions': (managed_instructions if context.get('managed_operations') else instructions)(
+                        check_id, pass_id, context.get('update_path'))})

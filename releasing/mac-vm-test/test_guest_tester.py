@@ -6,6 +6,7 @@ provenance linkage, never a Farhelm rendering or agent-conversation result.
 """
 
 import base64
+import copy
 import json
 import os
 from pathlib import Path
@@ -33,10 +34,10 @@ def task(gui=True):
             'context': {}, 'instructions': 'Fixture checkpoint.'}
 
 
-def events(image=b'fixture-native-image'):
+def events(image=b'fixture-native-image', tool='js'):
     """Make the capture bytes observable independently from the retained evidence file."""
     return [{'type': 'item.completed', 'item': {'type': 'mcp_tool_call', 'server': 'cua_repl',
-            'tool': 'js', 'status': 'completed', 'result': {'content': [
+            'tool': tool, 'status': 'completed', 'result': {'content': [
                 {'type': 'image', 'data': base64.b64encode(image).decode()}]}}}, {'type': 'turn.completed'}]
 
 
@@ -90,6 +91,104 @@ that cross-phase naming mismatch.
             validate_result(value, result(value), self.root, events())
         with self.assertRaisesRegex(TesterError, 'no actual'):
             validate_result(value, result(value), self.root, [{'type': 'turn.completed'}])
+
+    def test_managed_native_provenance_rejects_executable_ui_code(self):
+        """A managed pass must use the structured bridge even if an unrestricted JS call returned a real image."""
+        value = dict(task(), context={'managed_operations': True})
+        (self.root / 'native.jpg').write_bytes(b'fixture-native-image')
+        with self.assertRaisesRegex(TesterError, 'executable UI code'):
+            validate_result(value, result(value), self.root, events())
+        accepted = validate_result(value, result(value), self.root, events(tool='brick_ui'))
+        self.assertEqual(accepted['status'], 'pass')
+
+    def test_window_images_keep_occurrences_even_when_cropped_pixels_repeat(self):
+        """A moved window can have identical cropped pixels; its separate timed acceptance states must survive export."""
+        value = dict(task(), check_id='window-drag')
+        capture_events = events(PNG, tool='brick_ui')
+        capture_events.insert(1, copy.deepcopy(capture_events[0]))
+        empty = dict(result(value), evidence=[])
+        retained = retain_native_captures(value, empty, self.root, capture_events)
+        self.assertEqual(len(retained['evidence']), 2)
+        self.assertEqual((self.root / retained['evidence'][0]).read_bytes(), PNG)
+        self.assertEqual((self.root / retained['evidence'][1]).read_bytes(), PNG)
+
+    def test_managed_final_reply_gets_machine_receipts_without_model_files(self):
+        """The UI model returns only an observation; trusted execution owns JSON and capture persistence."""
+        value = dict(task(), pass_id='p0-fresh', check_id='native-preflight', context={'managed_operations': True})
+        output = self.root / 'managed'
+        final = {'status': 'pass', 'detail': 'Observed the controlled native fixture.'}
+        operations = {'completed': ['prerequisites'], 'receipts': ['commands.json'],
+                      'observations': {}, 'continuity': None}
+        script = ('import json;from pathlib import Path; '
+                  'p=Path(' + repr(str(output)) + '); '
+                  '(p/"final.txt").write_text(' + repr(json.dumps(final)) + '); '
+                  '(p/"managed-operations.json").write_text(' + repr(json.dumps(operations)) + '); '
+                  '(p/"work/commands.json").write_text("{\\"fixture\\":true}"); '
+                  '[print(json.dumps(row),flush=True) for row in ' + repr(events(PNG, tool='brick_ui')) + ']')
+        captured = []
+        def spawn(argv, **kwargs):
+            """Model the separate trusted operation record and native provider event stream in one owned child."""
+            captured.extend(argv)
+            return subprocess.Popen([sys.executable, '-c', script], **kwargs)
+        summary = run(value, output, spawner=spawn)
+        self.assertEqual(summary['status'], 'pass')
+        self.assertIn('--ignore-user-config', captured)
+        self.assertIn('danger-full-access', captured)
+        self.assertIn('features.shell_tool=false', captured)
+        self.assertNotIn('--yolo', captured)
+        self.assertEqual(summary['result']['evidence'], ['commands.json', 'native-capture-001.png'])
+        export = output / 'export'
+        self.assertEqual(json.loads((export / 'final.txt').read_text()), final)
+        self.assertTrue((export / 'commands.json').is_file())
+        self.assertEqual((export / 'native-capture-001.png').read_bytes(), PNG)
+
+    def test_managed_failure_keeps_command_and_capture_despite_model_pass(self):
+        """A mistaken model pass cannot clear a latched failure or discard the command that caused it."""
+        value = dict(task(), check_id='native-preflight', context={'managed_operations': True})
+        output = self.root / 'managed-failure'
+        final = {'status': 'pass', 'detail': 'Unverified model claim.'}
+        operations = {'completed': [], 'receipts': ['failed-command.json'], 'observations': {}, 'continuity': None}
+        script = ('import json;from pathlib import Path; '
+                  'p=Path(' + repr(str(output)) + '); '
+                  '(p/"final.txt").write_text(' + repr(json.dumps(final)) + '); '
+                  '(p/"managed-failure.json").write_text(' + repr(json.dumps({'error': 'fixture command failed'})) + '); '
+                  '(p/"managed-operations.json").write_text(' + repr(json.dumps(operations)) + '); '
+                  '(p/"work/failed-command.json").write_text("{\\"returncode\\":1}"); '
+                  '[print(json.dumps(row),flush=True) for row in ' + repr(events(PNG, tool='brick_ui')) + ']')
+        def spawn(argv, **kwargs):
+            """Emit a completed model turn while independently retaining the failed operation boundary."""
+            return subprocess.Popen([sys.executable, '-c', script], **kwargs)
+        with self.assertRaisesRegex(TesterError, 'fixture command failed'):
+            run(value, output, spawner=spawn)
+        export = output / 'export'
+        execution = json.loads((export / 'execution.json').read_text())
+        self.assertEqual(execution['status'], 'automation-failure')
+        self.assertEqual(json.loads((export / 'final.txt').read_text()), final)
+        self.assertTrue((export / 'failed-command.json').is_file())
+        self.assertTrue((export / 'native-capture-001.png').is_file())
+
+    def test_managed_tool_failure_preserves_an_unverified_product_failure(self):
+        """A disappearing app can cause a tool error; that must not erase the tester's earlier product-failure claim."""
+        value = dict(task(), check_id='app-start', context={'managed_operations': True})
+        output = self.root / 'managed-product-failure'
+        final = {'status': 'fail', 'detail': 'Observed the controlled app disappear during its action.'}
+        operations = {'completed': [], 'receipts': [], 'observations': {}, 'continuity': None}
+        script = ('import json;from pathlib import Path; '
+                  'p=Path(' + repr(str(output)) + '); '
+                  '(p/"final.txt").write_text(' + repr(json.dumps(final)) + '); '
+                  '(p/"managed-failure.json").write_text(' + repr(json.dumps({'error': 'later native read failed'})) + '); '
+                  '(p/"managed-operations.json").write_text(' + repr(json.dumps(operations)) + '); '
+                  '[print(json.dumps(row),flush=True) for row in ' + repr(events(PNG, tool='brick_ui')) + ']')
+        def spawn(argv, **kwargs):
+            """Keep the independent failure latch and model claim in one owned disposable process."""
+            return subprocess.Popen([sys.executable, '-c', script], **kwargs)
+        with self.assertRaisesRegex(TesterError, 'later native read'):
+            run(value, output, spawner=spawn)
+        summary = json.loads((output / 'execution.json').read_text())
+        self.assertEqual(summary['status'], 'automation-failure')
+        self.assertEqual(summary['unverified_result']['status'], 'fail')
+        self.assertIn(final['detail'], summary['unverified_result']['detail'])
+        self.assertEqual(json.loads((output / 'export/final.txt').read_text()), final)
 
     def test_failed_tool_and_failed_turn_cannot_be_hidden_by_result(self):
         """Vendor refusal and model errors are execution failures even with a pass file."""
