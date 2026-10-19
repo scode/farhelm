@@ -3398,7 +3398,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => Ok(()),
         AgentVerb::Prompt { session_id, prompt } => {
             validate_target(session_id, "--session", "name another session's exact id")?;
-            farhelm_proto::launcher::check_initial_prompt(prompt)
+            farhelm_proto::launcher::check_agent_prompt(prompt)
         }
         AgentVerb::Rename {
             session_id,
@@ -5565,16 +5565,25 @@ mod tests {
     }
 
     /// Prompt text and target shape are bounded before the relay's queues.
-    /// The initial-prompt rule stays shared: empty text is legal, newline and
-    /// tab remain data, and the cap counts bytes rather than characters.
+    /// A follow-up must contain non-whitespace text because its submit key
+    /// could act on an existing draft. Newline and tab remain literal data
+    /// in nonblank messages, and the cap counts bytes rather than characters.
     #[farhelm_testtrace::test]
-    fn prompt_relay_validation_preserves_the_shared_literal_message_rule() {
+    fn prompt_relay_validation_requires_text_and_preserves_literal_message_rules() {
         let request = |target: Option<&str>, prompt: &str| AgentVerb::Prompt {
             session_id: target.map(str::to_string),
             prompt: prompt.to_string(),
         };
-        for text in ["", "first\n\tlast", &"é".repeat(32 * 1024)] {
+        for text in [" \tfirst\n\tlast ", &"é".repeat(32 * 1024)] {
             assert!(validate_agent_verb(&request(Some("target"), text)).is_ok());
+        }
+        for text in ["", " \t\n ", "\u{a0}\u{2003}"] {
+            assert!(
+                validate_agent_verb(&request(Some("target"), text))
+                    .unwrap_err()
+                    .contains("must contain non-whitespace text"),
+                "{text:?}"
+            );
         }
         for target in [
             None,

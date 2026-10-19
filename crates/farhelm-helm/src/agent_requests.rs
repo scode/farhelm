@@ -293,25 +293,16 @@ impl HelmAgentRequests {
 /// the helm side; see TODO.md, "Re-assess letting agents prompt running
 /// sessions", for what has to be fixed or accepted first.
 ///
-/// It was turned off before the verb ever shipped, after review found three
-/// ways an approved or trusted prompt could do something the user did not
-/// agree to:
+/// The remaining gap is the owning supervisor's "waiting on a question"
+/// refusal: its latest status sample can be about two seconds old. A
+/// permission or trust question that appears inside that window (or right
+/// after a launch, before the first sample) can receive the pasted message
+/// and its submit key as the answer. The card's permission shield is an
+/// informational snapshot, so approval may reach a replacement run. Blank
+/// messages are refused separately before any card or typed input.
 ///
-/// - The owning supervisor's "waiting on a question" refusal reads its
-///   latest status sample, which can be about two seconds old. A permission
-///   or trust question that appears inside that window (or right after a
-///   launch, before the first sample) can receive the pasted message and
-///   its submit key as the answer.
-/// - An approval is not bound to the target's current run. A Restart
-///   while the card waits (a Restart with that changes permissions, say)
-///   delivers to the new run, which may be a YOLO launch the user never
-///   pictured receiving the message. A Replace makes a new session id, so
-///   delivery after one is refused as not found instead.
-/// - An explicitly empty message sends only the submit key, which submits
-///   whatever draft the user has in the target's composer.
-///
-/// The verb itself stays: the CLI still parses it (hidden from agents) so a
-/// caller gets this refusal rather than a usage error, and the wire protocol
+/// The verb itself stays: the CLI still parses valid requests (hidden from
+/// agents) so a caller gets this refusal, and the wire protocol
 /// is unchanged.
 const AGENT_PROMPTS_ENABLED: bool = false;
 
@@ -843,7 +834,7 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
             {
                 return Err("--session must not contain control characters".to_string());
             }
-            farhelm_proto::launcher::check_initial_prompt(prompt)
+            farhelm_proto::launcher::check_agent_prompt(prompt)
         }
         AgentVerb::Rename {
             session_id,
@@ -4811,15 +4802,24 @@ mod tests {
     /// commands run without asking (which would otherwise deliver at once).
     ///
     /// Why: agent prompts are switched off ([`AGENT_PROMPTS_ENABLED`])
-    /// because a delivered message can answer a permission question, reach
-    /// a run the user never approved, or submit the user's draft. The
-    /// switch only protects anyone if it sits ahead of the card and the
-    /// supervisor's input path, so this pins where it sits. When prompts
+    /// because a delivered message can answer a permission question that
+    /// appeared after the target's latest status sample. The switch only
+    /// protects anyone if it sits ahead of the card and the supervisor's
+    /// input path, so this pins where it sits.
+    /// Blank messages receive this refusal too: dormant-path validation must
+    /// never take precedence over the production switch. When prompts
     /// are re-enabled this test goes, and the tests built on
     /// [`HelmAgentRequests::with_prompts_enabled`] go back to `for_state`.
     #[farhelm_testtrace::test]
     async fn prompt_is_refused_before_any_card_or_supervisor_contact_while_turned_off() {
-        for trusted in [false, true] {
+        for (trusted, prompt) in [
+            (false, "exact message"),
+            (true, "exact message"),
+            (false, ""),
+            (true, ""),
+            (false, " \t\n "),
+            (true, "\u{a0}\u{2003}"),
+        ] {
             let shown = session_info("target", SessionStatus::Running);
             let (client, peer, mut received, stop) = prompt_peer(shown.clone(), false);
             let (h, local) = spliced_local_fleet(client, vec![session("asker", 1), shown]).await;
@@ -4840,7 +4840,7 @@ mod tests {
                     "asker",
                     AgentVerb::Prompt {
                         session_id: Some("target".into()),
-                        prompt: "exact message".into(),
+                        prompt: prompt.into(),
                     },
                 )
                 .await;
@@ -5036,6 +5036,9 @@ mod tests {
             (Some("bad\n"), "ok"),
             (Some("asker"), "ok"),
             (Some("target"), "bad\u{1b}"),
+            (Some("target"), ""),
+            (Some("target"), " \t\n "),
+            (Some("target"), "\u{a0}\u{2003}"),
         ] {
             let outcome = handler
                 .handle(
@@ -5057,10 +5060,17 @@ mod tests {
                 ),
                 "{outcome:?}"
             );
+            if prompt.trim().is_empty() {
+                assert!(
+                    matches!(&outcome, AgentOutcome::Err { message, .. } if message.contains("must contain non-whitespace text")),
+                    "{outcome:?}"
+                );
+            }
             assert!(
                 received.try_recv().is_err(),
                 "invalid input must fail before preflight"
             );
+            assert!(h.state.approvals.list().is_empty());
         }
         let outcome = handler
             .handle(

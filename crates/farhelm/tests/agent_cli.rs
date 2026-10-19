@@ -1866,11 +1866,13 @@ fn initial_prompt_flags_refuse_controls_conflicts_and_oversized_files() {
 // sends, and how replies are reported.
 
 /// Each source must send its literal contents to the exact selected target.
-/// Empty text is legal under the shared validator; source presence, rather
-/// than nonempty contents, is the requirement. Success reports delivery only.
+/// Surrounding whitespace remains message data once the text is nonblank;
+/// validating a follow-up must not trim what the user approves and receives.
+/// Success reports delivery only.
 #[farhelm_testtrace::test]
-fn prompt_sends_literal_file_stdin_and_empty_text() {
+fn prompt_sends_literal_file_and_stdin_text() {
     const TEXT: &str = "--help\n\t{farhelm_args}";
+    const PADDED_TEXT: &str = " \tmessage\n ";
     let temp = farhelm_teststate::tempdir().unwrap();
     let file = temp.path().join("message.txt");
     std::fs::write(&file, TEXT).unwrap();
@@ -1878,7 +1880,7 @@ fn prompt_sends_literal_file_stdin_and_empty_text() {
         ("--prompt", TEXT, TEXT),
         ("--prompt-file", file.to_str().unwrap(), TEXT),
         ("--prompt-file", "-", TEXT),
-        ("--prompt", "", ""),
+        ("--prompt", PADDED_TEXT, PADDED_TEXT),
     ]
     .into_iter()
     .enumerate()
@@ -1941,6 +1943,64 @@ fn prompt_sends_literal_file_stdin_and_empty_text() {
         assert_eq!(output.status.code(), Some(0), "{output:?}");
         assert_eq!(output.stdout, b"prompt sent to target-session\n");
         assert!(output.stderr.is_empty(), "{output:?}");
+    }
+}
+
+/// Every source must reject blank contents before dialing the supervisor.
+/// A supplied source alone does not make a safe follow-up: its submit key
+/// could send text already waiting in the target's composer. Unicode spaces
+/// establish that the rule is whitespace-aware rather than a length check.
+#[farhelm_testtrace::test]
+fn prompt_refuses_blank_literal_file_and_stdin_before_dialing() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("not-listening.sock");
+    let file = temp.path().join("blank.txt");
+    for text in ["", " \t\n ", "\u{a0}\u{2003}"] {
+        std::fs::write(&file, text).unwrap();
+        for (flag, value) in [
+            ("--prompt", text),
+            ("--prompt-file", file.to_str().unwrap()),
+            ("--prompt-file", "-"),
+        ] {
+            let command =
+                agent_command_with_args(&socket, &["prompt", "--session", "target", flag, value]);
+            // The bounded runner owns stdin closure. As in the success
+            // fixture, redirect this owned file in the child before exec
+            // so stdin contents are exercised without changing that runner.
+            let command = if value == "-" {
+                let mut redirected = Command::new("/bin/sh");
+                redirected
+                    .args(["-c", "exec \"$@\" < \"$0\""])
+                    .arg(&file)
+                    .arg(command.get_program())
+                    .args(command.get_args());
+                for (name, value) in command.get_envs() {
+                    match value {
+                        Some(value) => {
+                            redirected.env(name, value);
+                        }
+                        None => {
+                            redirected.env_remove(name);
+                        }
+                    }
+                }
+                redirected
+            } else {
+                command
+            };
+            let output = output_with_timeout(command);
+            assert_eq!(
+                output.status.code(),
+                Some(2),
+                "{text:?}, {flag}: {output:?}"
+            );
+            assert!(output.stdout.is_empty(), "{output:?}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("must contain non-whitespace text"),
+                "{text:?}, {flag}: {output:?}"
+            );
+        }
     }
 }
 

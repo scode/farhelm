@@ -72,9 +72,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`reused-checkout-path-grants-trust.md`](reused-checkout-path-grants-trust.md) — Replacing a managed checkout at its
   recorded path can make ordinary content appear eligible for automatic trust.
 
-- [`empty-agent-prompt-submits-existing-draft.md`](empty-agent-prompt-submits-existing-draft.md) — An empty approved
-  prompt can submit text already waiting in an agent's composer.
-
 - [`agent-approval-omits-workspace-trust.md`](agent-approval-omits-workspace-trust.md) — Agent launch approval cards no
   longer explain the effective managed-checkout trust choice in plain language.
 

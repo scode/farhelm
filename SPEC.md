@@ -2302,17 +2302,17 @@ outcome unknown; it never claims that the session survived.
 
 NOTE: `farhelm agent prompt` is turned off in this version. The helm refuses every such request, as a deliberate refusal
 that a retry or approval does not change, before it reads the target, shows a card or contacts any supervisor. The CLI
-still parses the verb, so a caller gets that refusal rather than a usage error, but hides it from help, and the agent
-instructions do not mention it. It was turned off before it ever shipped. Two gaps remain: the "waiting on a question"
-refusal reads a status sample up to about two seconds old, so a permission or trust question that appears in that window
-(or right after a launch) can receive the message and its submit key as its answer; and an explicitly empty message
-sends only the submit key, submitting whatever draft is in the target's composer. Re-enabling it means fixing or
-knowingly accepting each of those. The next three paragraphs are the design kept for that, not current behavior.
+still parses the verb, so a valid request gets that refusal rather than a usage error, but hides it from help, and the
+agent instructions do not mention it. It was turned off before it ever shipped. One gap remains: the "waiting on a
+question" refusal reads a status sample up to about two seconds old, so a permission or trust question that appears in
+that window (or right after a launch) can receive the message and its submit key as its answer. Re-enabling it means
+fixing or knowingly accepting that gap. The next three paragraphs are the design kept for that, not current behavior.
 
 `farhelm agent prompt --session <id> --prompt TEXT` sends a message to another session's running Claude or Codex agent
 on any host. `--prompt-file PATH` supplies the same message from a UTF-8 file (`-` reads stdin); exactly one source is
 required. The initial-prompt rule applies again at the owning supervisor: at most 64 KiB, with newline and tab allowed
-and other control characters refused. An explicitly empty message is legal. A self target is refused. The verb holds the
+and other control characters refused. The command line, helm and owning supervisor refuse a message that is empty after
+trimming whitespace; accepted messages keep their literal whitespace. A self target is refused. The verb holds the
 asking session's one-change-at-a-time fence, and asks through the ordinary command approval card unless the asking
 host's commands-without-asking setting is on. The YOLO launch rule does not apply because this starts no agent.
 
