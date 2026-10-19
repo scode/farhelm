@@ -2,6 +2,64 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.30.0 - 2026-10-18
+
+**DRAFT release notes - not yet finalized**
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#2192, #2206, #2227, #2255, #2257, #2265, #2271, #2273, #2325)
+- Workspace trust for Codex, Muse and Pi is no longer chosen in the session launcher. It now comes from separate Settings switches, off by default, that apply only to managed checkouts. The `--trust` command-line option is gone, so scripts that pass it need it removed, and the trust saved in older templates is ignored. Codex and Muse show a hint beside their trust question that opens the matching setting. (#2255, #2256)
+
+### 🚀 Added
+
+- You can now give a new session an initial prompt in the session launcher, in a launch template or on the command line, and the agent receives it once when it starts. Goose, Pi and custom commands do not take prompts. (#2200, #2202, #2203, #2238, #2295)
+- You can now set a wrapper prefix, a command that runs the agent for you, in the session launcher or a launch template, and keep Farhelm's agent status, conversation tracking and Restart. Agents can pass `--wrapper` too; on hosts that ask before YOLO launches, a wrapper an agent supplies needs your approval. (#2271, #2272)
+- You can now combine launch templates from the keyboard: Cmd+X in the Mac app, or Ctrl+Shift+X elsewhere, followed by their number keys and Enter. A template that leaves some choices open can have a number key too; pressed alone, it opens the session launcher. (#2225, #2228)
+- While New, Clone or Replace with is open, your template shortcuts now fill in the session launcher with their saved choices, so you can press several, review the result and launch when ready. (#2310)
+- Cmd+J on a Mac, or Ctrl+Shift+J elsewhere, opens a list of your templates: type a name and press Enter to start from that template. Browsers may keep the key for their own shortcut; the desktop app does not. (#2316)
+- Quick launch now offers to name the new session while its agent starts; Enter or Escape keeps the default name, and a Settings switch turns the offer off. (#2233, #2234)
+- Cmd+W in the Mac app, or Ctrl+Shift+Backspace in a browser, now deletes the open session, with the same confirmation as its Delete button. Cmd+L, or Ctrl+Shift+L in a browser, renames it. Cmd+W no longer closes the Mac app; the close button and Cmd+Q still do. (#2221, #2230)
+- In the session launcher, you can now type `guarded` to pick Guarded permissions, `perms:` to find the approval modes your agent offers, and `effort:default` to go back to the agent's default effort. (#2297, #2301)
+- Agents can now delete other sessions with your approval, and stop their agent first when they ask to. (#2192)
+- Agents can now assign the ⚡ quick-launch mark and number keys when they create or edit launch templates; the approval card names the template a shortcut moves from. (#2273, #2274)
+- Your Mac can now have its own icon and color, like a remote host. A Settings switch, off by default, colors each terminal's thin frame to match its host, and the session launcher's host list shows each host's mark. (#2266, #2269)
+- In the Mac app, Cmd-clicking a localhost link in a remote session, or choosing **Tunnel and open** on its link card, now opens that service through a tunnel to the host. Tunnels are off until you accept a security warning, last until you close them, delete the session or quit the app, and can be turned off again in Settings. (#2227, #2229, #2231)
+- In the desktop app, Cmd-click (Ctrl-click on Linux) can now open downloaded JSON files, alongside Markdown and plain text, and Settings lets you choose which file types open this way. (#2296, #2299)
+
+### 🔄 Changed
+
+- When you add, update or uninstall Farhelm on a remote host, the confirmation now lists every step it will run, and the host row shows the same steps while they run. If Farhelm cannot plan the work or refuses it, a dialog shows the reason. After an uninstall, a short notice names the removed host and where its data remains. (#2298, #2303, #2305, #2307, #2311, #2317)
+- The session's name, host, directory and command now sit in a slim bar under the terminal, and the terminal tabs and action buttons share one row at the top. (#2253)
+- Hovering a session in the sidebar now shows one summary with its full name, host, directory, agent, status and activity times. (#2300)
+- When a session's host is unreachable, one calm card now explains why, and an open terminal keeps its last screen dimmed and reattaches by itself when the host returns. (#2198)
+- Once Farhelm sees an agent running without safety checks, its shield now stays YOLO until that agent is restarted, even if the agent later asks before acting. (#2251)
+- Links on pages served from other local ports can no longer open the browser helm; opening it from the address bar or a bookmark still works. (#2219)
+
+### 🔧 Fixes worth highlighting
+
+- Starting a session from a template now numbers its session name when the template's managed-checkout folder is already taken, instead of refusing, so you can reuse the template. This applies to existing templates too; a template set to a fixed name still reports the clash. (#2325, #2328, #2330, #2332)
+- Sessions can now start in fresh GitHub checkouts on hosts that use Git's `safe.bareRepository=explicit` setting, without relaxing it. (#2199)
+- Retrying Replace from another button, or after reopening the session, no longer starts an extra agent when the first attempt had already created the replacement. (#2205)
+- Terminal links whose destination hover is covered by an approval card, or cut off by the window, now refuse to open, so you always see where a link goes before it opens. (#2254)
+- On a Mac with a Force Touch trackpad, dragging the window by its header now works every time. (#2318)
+- You can now move the Mac app's window by dragging anywhere along its top edge, and double-click there to zoom it, like any other Mac window. (#2319)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- After Replace fails because the session's folder is missing, restoring the folder and trying again now works from both the sidebar and the top of the open session. (#2206)
+- Escape now cancels the Restart, Replace and Delete questions at the top of an open session and returns to its terminal. (#2218)
+- Clicking empty space in the session launcher or another dialog no longer loses your place, and Enter uses the dialog's main action when the dialog itself has focus. (#2267, #2294)
+- Open menus now keep keyboard focus when a session's terminal appears, which also stops the help menu closing by itself in narrow desktop windows. (#2315)
+- Menu arrow keys now follow focus more reliably during a quick burst of presses. (#2232)
+- Host setup and uninstall plans, the trash list, SSH connection help, host removal details and a few other panels can now be scrolled with the keyboard in the Mac app and Safari. (#2190, #2191, #2222)
+- In the Mac app and Safari, pressing Enter or Escape to finish typing with an input method less often submits or closes the dialog. (#2194)
+- The template editor now shows invisible and direction-changing characters in older templates' session names. (#2204)
+- Starting Farhelm no longer waits on Claude's settings lock to tidy up its managed-checkout trust entries. (#2201)
+- Cancelling a terminal file download before it starts no longer holds on to a little helm memory. (#2197)
+
 ## v0.29.0 - 2026-10-16
 
 ### 💥 Breaking
