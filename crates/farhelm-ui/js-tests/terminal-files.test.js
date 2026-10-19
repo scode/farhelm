@@ -92,8 +92,8 @@ test('hover preserves both path pieces and advertises open only for native admit
 });
 
 /** Both xterm adapters pass the click event to this shared admission path.
- * A native modifier requests opening even for refused types, so the server
- * reports a completed save with its reason; web modifiers only download.
+ * A native modifier can request an opening offered by the hover, while the
+ * server can still refuse it after saving; web modifiers only download.
  */
 test('modifier opening is native-only and save outcomes survive opener refusal', async () => {
   for (const [native, isMac, event, opens] of [
@@ -120,6 +120,31 @@ test('modifier opening is native-only and save outcomes survive opener refusal',
   await success.addon.download('report.pdf', { metaKey: true });
   assert.equal(success.notice().textContent, 'saved to /Downloads/notes.md · opened');
   success.addon.dispose();
+});
+
+/** A later policy change cannot authorize an opening the hover never offered.
+ * Missing capability data also stays save-only, and that successful save must
+ * explain the unfulfilled modifier rather than becoming a download failure.
+ */
+test('a native modified click saves without opening when hover offered only download', async () => {
+  for (const isMac of [true, false]) {
+    for (const canOpen of [false, undefined]) {
+      const fixture = noticeFixture(true, true, false, isMac);
+      fixture.addon.hovered.info.can_open = canOpen;
+      let requested;
+      fixture.addon.request = async (operation, path, _signal, open) => {
+        requested = { operation, path, open };
+        return { json: async () => ({ path: '/Downloads/report.pdf' }) };
+      };
+      await fixture.addon.download('report.pdf', isMac ? { metaKey: true } : { ctrlKey: true });
+      assert.deepEqual(requested, { operation: 'download', path: '/output/report.pdf', open: false });
+      assert.equal(fixture.notice().textContent, 'saved to /Downloads/report.pdf · not opened: opening was not offered');
+      assert.equal(fixture.addon.failureMessage, false);
+      await fixture.addon.download('report.pdf');
+      assert.equal(fixture.notice().textContent, 'saved to /Downloads/report.pdf', 'an ordinary save needs no opening explanation');
+      fixture.addon.dispose();
+    }
+  }
 });
 
 /** A ready lookup and a native modifier cannot authorize a drag. The common
@@ -425,6 +450,7 @@ test('disposal clears pending hover teardown and rejects late replies', async ()
 /** Run the shipped addon with an owned DOM and clock, without changing globals.
  * Notice, click, save and public buffer primitives are modeled; real geometry and
  * browser rendering remain the two-engine integration suite's responsibility.
+ * The ready hover offers opening by default; save-only cases remove that offer.
  */
 function noticeFixture(native = true, opened = true, defaultTimers = false, isMac = false) {
   const children = [];
@@ -479,7 +505,7 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
   const term = { element: opened ? root : undefined, registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '',
     buffer: { active: { getLine: () => ({ length: 10, translateToString: () => 'report.pdf' }) } } };
   addon.activate(term);
-  addon.hovered = { path: 'report.pdf', info: { status: 'ready', path: '/output/report.pdf' }, controller: new AbortController(),
+  addon.hovered = { path: 'report.pdf', info: { status: 'ready', path: '/output/report.pdf', can_open: true }, controller: new AbortController(),
     range: { start: { x: 1, y: 1 }, end: { x: 10, y: 1 } }, screenText: 'report.pdf' };
   return { addon, timers, listeners, disclosure, open: () => { term.element = root; }, notice: () => root.querySelector(':scope > .terminal-file-message') };
 }
@@ -571,7 +597,7 @@ test('partial wrapped redraw invalidates file transfer evidence', async () => {
     const requests = [];
     fixture.addon.request = async (operation, _path, _signal, open) => {
       requests.push({ operation, open });
-      if (operation === 'stat') return { json: async () => ({ status: 'ready', path: '/output/report.pdf', size: 1, host: 'fixture' }) };
+      if (operation === 'stat') return { json: async () => ({ status: 'ready', path: '/output/report.pdf', size: 1, host: 'fixture', can_open: true }) };
       return native ? { json: async () => ({ path: '/Downloads/report.pdf', opened: false }) } : new Response('bytes');
     };
     await fixture.addon.hover({}, 'report.pdf', null, range, 'report.pdf');
@@ -610,7 +636,7 @@ test('a wrapped printed path cannot grow beyond its cached endpoint', async () =
     const requests = [];
     fixture.addon.request = async (operation, _path, _signal, open) => {
       requests.push({ operation, open });
-      if (operation === 'stat') return { json: async () => ({ status: 'ready', path: '/output/long/report.txt', size: 1, host: 'fixture' }) };
+      if (operation === 'stat') return { json: async () => ({ status: 'ready', path: '/output/long/report.txt', size: 1, host: 'fixture', can_open: true }) };
       return native ? { json: async () => ({ path: '/Downloads/report.txt', opened: true }) } : new Response('bytes');
     };
     await fixture.addon.hover({}, path, { range, decorations: {} }, range);

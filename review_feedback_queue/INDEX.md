@@ -69,9 +69,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`agent-approval-omits-workspace-trust.md`](agent-approval-omits-workspace-trust.md) — Agent launch approval cards no
   longer explain the effective managed-checkout trust choice in plain language.
 
-- [`download-opens-without-hover-hint.md`](download-opens-without-hover-hint.md) — A policy change can make a Cmd-click
-  open a file whose hover offered only a download.
-
 - [`summary-card-omits-observed-yolo.md`](summary-card-omits-observed-yolo.md) — The main session summary can still say
   guarded after YOLO is observed; consequential reliance remains unverified.
 

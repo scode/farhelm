@@ -449,8 +449,9 @@
 
     /** Only a successful hover over unchanged text can start a transfer.
      * xterm may retain a link after a partial redraw; its cached target must
-     * not outlive the cells that established this hover. Native failure never
-     * falls back to a webview Blob save.
+     * not outlive the cells that established this hover. Native opening also
+     * requires that hover's opening offer. Native failure never falls back to
+     * a webview Blob save.
      */
     async download(path, event = {}) {
       const state = this.hovered;
@@ -467,12 +468,17 @@
       this.transfers.add(controller);
       this.message('downloading…');
       try {
-        const open = this.native && Boolean(this.isMac ? event.metaKey : event.ctrlKey);
+        // The current policy can become more permissive after hover. Its
+        // click-time check may refuse an advertised opening, but cannot add
+        // an opening that this hover never offered to the user.
+        const requestedOpen = this.native && Boolean(this.isMac ? event.metaKey : event.ctrlKey);
+        const open = requestedOpen && Boolean(state.info.can_open);
         const response = await this.request('download', state.info.path, controller.signal, open);
         if (this.native) {
           const result = await response.json();
           if (controller.signal.aborted) return;
-          const outcome = open ? result.opened ? ' · opened' : ` · not opened: ${result.open_error}` : '';
+          const outcome = open ? result.opened ? ' · opened' : ` · not opened: ${result.open_error}` :
+            requestedOpen ? ' · not opened: opening was not offered' : '';
           this.message(`saved to ${result.path}${outcome}`, 'success');
         } else {
           const blob = await boundedBlob(response);
