@@ -11,6 +11,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `queued-launch-snapshot.md` — At Enter, an armed quick-launch sequence launches the templates its pill showed, not whatever the keys are bound to by then (1 triage outcome).
 - [complete] `payload-lock-reproduction.md` — Reproduce whether old payload work overlapping a successor helm can leave a bad cached program copy, and record the evidence for a later decision (1 triage outcome).
 - [in-flight e244b8] `archive-recovery-reproduction.md` — Reproduce whether a cancelled startup's archive recovery can leave a trashed checkout unlisted, and record the evidence for a later decision (1 triage outcome).
-- [pending] `triage-discards-oct18.md` — Remove the five feedback items the 2026-10-18 triage discarded, with their ledger updates, in one PR (5 triage outcomes).
+- [in-flight cc8edb] `triage-discards-oct18.md` — Remove the five feedback items the 2026-10-18 triage discarded, with their ledger updates, in one PR (5 triage outcomes).
 - [pending] `supervisor-colon-path-refusal.md` — The supervisor and the desktop app refuse to start when the folder sessions get on PATH contains ':' (1 triage outcome).
 - [pending] `tunnel-port-consent-warning.md` — The one-time localhost tunnel warning says a tunnel uses the remote service's port number on the Mac when free (1 triage outcome).
