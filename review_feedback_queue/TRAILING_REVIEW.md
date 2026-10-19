@@ -1,10 +1,55 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `c5fcfee8681e46b1d47718771b321488037d3f83`
+Last reviewed commit: `6a780e2ec502a9711eaa55cb16ab66fd5f1e46a4`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through 6a780e2e
+
+Reviewed range: `c5fcfee8681e46b1d47718771b321488037d3f83..6a780e2ec502a9711eaa55cb16ab66fd5f1e46a4`, 15 commits. The
+tip and saved checkpoint came from fetched `origin/main`; the checkpoint was verified as an ancestor. A second fetch
+found the same tip and checkpoint. Four separate same-model adversarial reviewers read every individual patch, including
+intermediate changes and deletions:
+
+| Ordered commits | Count | Main content                                                           |
+| --------------- | ----: | ---------------------------------------------------------------------- |
+| 1–3             |     3 | Mac window dragging, top-band classification and brick-test coverage   |
+| 4               |     1 | Landing-checkout cleanup instruction                                   |
+| 5–10            |     6 | Host confirmations, progress rows and refusal dialogs                  |
+| 11–15           |     5 | Landing report, prompt disablement, plan state and prior review result |
+
+The host changes had separate UI/browser-test and backend/specification reviewers; their path assignments together cover
+all six commits. All 15 commits are accounted for, with no unread assigned patch lines. Surrounding source and coverage
+sources were read selectively, not exhaustively across the repository. Historical reports' private runtime evidence and
+prior review provenance were not independently authenticated.
+
+Two new records were retained, and two existing records were extended. A setup failure can enlarge an already-expanded
+progress row without closing a fixed menu below it. The menu keeps its original target, labels and confirmation text,
+but accidental destructive use remains unverified. The primary reviewer proposed excluding the demonstrated placement
+error as a transient visual glitch. An independent auditor could not approve that exclusion: Stop and some Delete paths
+need no second confirmation, and earlier triage treated the same coordinate mismatch as requiring a fix. The record is
+conservatively in `highest` for that unresolved loss-of-work consequence, not as a demonstrated wrong-target dispatch.
+Its possible coverage by the older host-row residual decision is preserved for triage.
+
+The other new record concerns an unpublished release-note fragment that promises a numbered Update confirmation,
+although Update starts when clicked. Release-time curation may correct it before publication. The two extensions add the
+new refusal-dialog surface to existing modal-overlap and pinned-header clipping findings. These three concerns are in
+`other`; browser geometry, mutual inertness and harmful reader reliance were not reproduced.
+
+The independent auditor agreed to the narrow exclusions for bypassing the disabled prompt command, treating remote
+diagnostic prose as a Remove remedy, and reusing consumed Add authority. Production helm prompt requests are refused
+before routing, session-authenticated peers cannot invoke the direct supervisor control, and full-authority same-host
+control remains within the specification's local trust boundary. The dormant prompt implementation's earlier hazards and
+existing records are not declared fixed. Typed remedy handling and the consumed Add offer likewise refute only the
+examined paths, not broader subsystem risks.
+
+This was a static review. No product runtime, browser, native Mac or vendor-agent tests were run, and no previous
+runtime results were reused as current passes. Actual AppKit click-count and drag behavior remain unverified here. The
+result changes only feedback records, their index and this checkpoint; no fixes or triage outcomes were executed.
+Validation of these records covers formatting, whitespace, queue/index consistency and instruction pointers. The
+review-result PR stays a draft for separate manual merging; this proposed checkpoint has not advanced on main.
 
 ## Review through c5fcfee8
 

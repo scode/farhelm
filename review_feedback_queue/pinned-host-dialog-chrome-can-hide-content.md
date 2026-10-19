@@ -139,3 +139,21 @@ and relevant supporting material was reopened separately. No Sol reports or work
 
 Runtime evidence: None, as requested by default. Static review only; browser geometry remains unverified. Created,
 modified, and deleted no files; no fetch, rebase, or helper agents.
+
+## Refusal dialogs have the same pinned-header limit
+
+Additional reviewed commit: 6a780e2ec502a9711eaa55cb16ab66fd5f1e46a4.
+
+The new host-action refusal dialog uses `host-dialog-framed` (`crates/farhelm-ui/src/hosts.rs:149`) and puts the
+complete host name in its pinned title (`:137,165`). In `crates/farhelm-ui/assets/app.css`, the card is capped to
+viewport height (`2822–2829`), clips overflow (`3347–3351`), and keeps its header and footer from shrinking while only
+its body scrolls (`3508–3516`). The title wraps (`3273–3278`); the single-line cap applies only to
+`host-settings-refreshed` (`3375–3380`), which the refusal dialog does not use. A sufficiently long host name or short
+window can therefore hide the refusal reason and footer beyond reachable scrolling.
+
+Suggested bucket: **other**. Confidence: **likely**, from the shared frame geometry; no browser reproduction or measured
+clipping threshold. No unintended action or lost work is established. This is additional affected scope of the existing
+finding, not a separate layout mechanism. The dialog-explanation filter does not cover content that cannot be reached by
+scrolling. Possible cover: the original record covers setup, removal and uninstall; this section adds the refusal
+surface. Proposed drop: none. Provenance: host UI reviewer in the trailing review of
+`c5fcfee8681e46b1d47718771b321488037d3f83..6a780e2ec502a9711eaa55cb16ab66fd5f1e46a4`.
