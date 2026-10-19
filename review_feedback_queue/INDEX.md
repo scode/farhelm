@@ -75,9 +75,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`empty-agent-prompt-submits-existing-draft.md`](empty-agent-prompt-submits-existing-draft.md) — An empty approved
   prompt can submit text already waiting in an agent's composer.
 
-- [`prompt-approval-can-cross-agent-runs.md`](prompt-approval-can-cross-agent-runs.md) — A prompt approval can reach a
-  replacement agent run whose permissions differ from those shown on the card.
-
 - [`agent-approval-omits-workspace-trust.md`](agent-approval-omits-workspace-trust.md) — Agent launch approval cards no
   longer explain the effective managed-checkout trust choice in plain language.
 

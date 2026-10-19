@@ -2303,13 +2303,11 @@ outcome unknown; it never claims that the session survived.
 NOTE: `farhelm agent prompt` is turned off in this version. The helm refuses every such request, as a deliberate refusal
 that a retry or approval does not change, before it reads the target, shows a card or contacts any supervisor. The CLI
 still parses the verb, so a caller gets that refusal rather than a usage error, but hides it from help, and the agent
-instructions do not mention it. It was turned off before it ever shipped, because of three gaps: the "waiting on a
-question" refusal reads a status sample up to about two seconds old, so a permission or trust question that appears in
-that window (or right after a launch) can receive the message and its submit key as its answer; an approval is not bound
-to the target's current run, so a Restart while the card waits (one that changes permissions, say) delivers to the new
-run, possibly a YOLO one; and an explicitly empty message sends only the submit key, submitting whatever draft is in the
-target's composer. Re-enabling it means fixing or knowingly accepting each of those. The next three paragraphs are the
-design kept for that, not current behavior.
+instructions do not mention it. It was turned off before it ever shipped. Two gaps remain: the "waiting on a question"
+refusal reads a status sample up to about two seconds old, so a permission or trust question that appears in that window
+(or right after a launch) can receive the message and its submit key as its answer; and an explicitly empty message
+sends only the submit key, submitting whatever draft is in the target's composer. Re-enabling it means fixing or
+knowingly accepting each of those. The next three paragraphs are the design kept for that, not current behavior.
 
 `farhelm agent prompt --session <id> --prompt TEXT` sends a message to another session's running Claude or Codex agent
 on any host. `--prompt-file PATH` supplies the same message from a UTF-8 file (`-` reads stdin); exactly one source is
@@ -2320,8 +2318,9 @@ host's commands-without-asking setting is on. The YOLO launch rule does not appl
 
 The card names both sessions and hosts, shows the full escaped message as labelled data, and shows the target's
 permission shield by the session list's rules, including observed permission bypass. It says when the target session is
-open in a client; that notice is a snapshot and may change while the card waits. Approval authorizes sending even when a
-user is typing there: the message may mix with or follow text already in the agent's composer.
+open in a client. Both the permission shield and that notice are snapshots and may change while the card waits. Approval
+authorizes sending even when a user is typing there: the message may mix with or follow text already in the agent's
+composer.
 
 At handling time, the owning supervisor requires a live agent reading idle or running and a terminal with bracketed
 paste enabled. That reading is its latest status sample, so a question that appears within about one sampling interval

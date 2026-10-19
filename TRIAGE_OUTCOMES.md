@@ -15798,7 +15798,9 @@
 - Completion criteria: SPEC.md "Agent-spawned sessions" states that the target's permission shield on a prompt card,
   like the open-in-a-client note, is a snapshot that may change while the card waits; no code change. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/agent-spawned-session-rules.md`.
+- Execution: complete in change `qmkxxxkqwwtw`, bookmark `plan/agent-spawned-session-rules/02-prompt-shield-snapshot`,
+  https://github.com/scode/farhelm/pull/2347/changes. The specification accepts the permission shield as a snapshot; the
+  command stays disabled for its remaining gaps.
 
 ## empty-agent-prompt-submits-existing-draft.md
 
