@@ -165,7 +165,33 @@ together. Historical manifests with no declared P1 check report it as not planne
 4. Start a real authenticated session for each selected agent on the local host. Give each a small conversation and
    require a meaningful reply, terminal input/output and a captured conversation. On Linux, start a plain command
    session and prove its terminal responds. Mock agents or a CLI `--version` alone do not satisfy this.
-5. Run applicable addendum checks. Capture a screenshot per GUI check and command output for command checks. Export
+5. Check the window's title-bar band (`window-drag`). The Mac app draws its own title bar: empty background in the
+   sidebar's top bar and in the main pane's top row of terminal tabs and session actions moves the window when dragged,
+   and a double-click there zooms it and a second one restores the prior frame. Controls in those rows keep their own
+   behavior. On the windowed app, with one of the sessions above selected so the main pane's row exists, first make sure
+   the window has an ordinary, unzoomed frame with room to move (Window > Zoom toggles it). Drag from empty sidebar-bar
+   background and then from empty main-row background, requiring the window to move each time with its size unchanged.
+   On each of the two rows, double-click empty background and require a zoom, then find empty band background again in
+   the zoomed window and double-click there, requiring the frame from before. Press and move on a terminal tab, on the
+   delete button and on the settings gear and require the frame to stay put: a control never drags the window. Open a
+   shell tab with + terminal, then click the agent tab, the shell tab and the agent tab again, requiring each to become
+   selected, then click delete and require its confirmation to open, cancel it without deleting, and close the shell tab
+   again; click the settings gear and require its dialog to open, then close it, with the frame unchanged throughout.
+   The contract fixes ten native images, which is all the executor retains: one before the first gesture, one after each
+   drag, one zoomed and one restored per row, one with the shell tab selected by a click, one with the agent tab
+   selected again and the delete confirmation open, and one with settings open. This check runs after the session steps
+   because a fresh install has no session, and so no main-pane row, at startup.
+
+   Open bring-up question: guest-native CUA has proven screenshots, clicks and text entry, but press-move-release drags
+   and double-clicks have not been exercised through it. (OPERATIONS.md's scrollbar-drag and triple-click observations
+   came from the host Tart binding.) If the native API lacks either gesture or refuses it, the check is could not run,
+   not a product failure. Before reporting a failure, the tester checks that the gesture reached the guest: an
+   unanswered drag is repeated on a Finder window's title bar, and an unanswered double-click is tried on an unselected
+   folder icon in a Finder window in icon view, which should navigate into the folder (in column view a single click
+   already shows a folder's contents). If that check gets no response either, the result is could not run. A Finder
+   title bar is no oracle for double-clicks, because its action follows a user setting that may be off. Record the first
+   run's actual gesture behavior in OPERATIONS.md's computer-use notes.
+6. Run applicable addendum checks. Capture a screenshot per GUI check and command output for command checks. Export
    evidence with `control.py collect`, verify each exported archive, then `shutdown` and `delete` only this pass's owned
    clones. Bases remain stopped and unchanged.
 
@@ -267,7 +293,7 @@ retain, guest `farhelm --version` output, remote supervisor version and command 
 failures. Copy them to private host storage before teardown. An unavailable relaunch log is a diagnostic coverage gap,
 not by itself a failed functional check. Screenshots and logs can reveal account names, credentials, conversations and
 addresses; do not commit or publish raw evidence. Shared reports use portable evidence labels and redacted copies, not
-hostnames, usernames or private paths.
+hostnames, usernames or private paths. `window-drag` instead keeps exactly the ten native images its contract names.
 
 ```text
 Verdict: pass | fail | could not run

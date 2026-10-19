@@ -202,9 +202,15 @@ Continuity checkpoints require independent before/after receipts as well.
             required['p1-feedback-send'] = {'gui': True, 'command': False,
                                              'continuity': False, 'priority': 'P1'}
         return required
+    # Dict order is the tester's checkpoint order. `window-drag` follows the
+    # session checks rather than `app-start` for two reasons: a fresh install
+    # has no session at startup, and the main pane's top row only exists once
+    # one is selected; and a failed check stops the pass, so a title-bar
+    # regression should not cost the provisioning and conversation coverage.
+    # Manifests store their own required set, so older runs keep theirs.
     items = ({'artifact-verification': False, 'fixture-clean': False, 'install': False,
               'app-start': True, 'remote-provision': True, 'codex-conversation': True,
-              'remote-terminal': True, 'addendum': False} if pass_id == 'fresh' else
+              'remote-terminal': True, 'window-drag': True, 'addendum': False} if pass_id == 'fresh' else
              {'artifact-verification': False, 'old-fixture': True, 'seed-state': True,
               'continuity-before': False, 'update-relaunch': True, 'preserved-state': True,
               'codex-resume': True, 'remote-update': True, 'reopen': True, 'addendum': False})

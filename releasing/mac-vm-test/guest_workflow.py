@@ -128,6 +128,9 @@ Release metadata, source commits, paths and SSH alias are supplied separately.
 The recipe remains authoritative for broader checks, and the guest retains its
 small shared observation record so fresh tester turns need no huge transcript.
 Bonus upgrades combine discovery and relaunch; P0 schedules them separately.
+Most bonus checkpoints map onto RECIPE steps through the generic text below;
+window-drag carries its own contract because its gestures, observation and
+could-not-run boundary are too specific to leave to that mapping.
 """
     contracts = {
         'p1-feedback-send': '''This is the separately authorized P1 check after all P0 checks passed.
@@ -166,6 +169,59 @@ stdout/stderr capture. Through native CUA require candidate app version, usable
 session list and connected local supervisor at candidate. Retain native image
 and independent installed/running version evidence. No remote provisioning,
 conversation, templates, settings or other product checks in this fixture.''',
+        # Guest-native CUA has proven screenshots, clicks and typing, but not
+        # press-move-release drags or double-clicks. The Finder comparison keeps
+        # an input gesture that never reaches the guest from reading as a
+        # broken title bar; it can only downgrade a fail, never make a pass.
+        'window-drag': '''Test the running candidate app window's title-bar band through native CUA.
+Use the ordinary window; if it is fullscreen, report could-not-run. Select an
+existing session if none is selected, so the main pane's top row of terminal
+tabs and session actions exists; do not create one (none: could-not-run).
+Read the window frame from native window bounds or from screenshots showing the
+desktop around it; if neither shows it, report could-not-run.
+Take exactly these ten native screenshots, S1 to S10, and no others, so the ten
+most recent images the executor retains are all of them.
+0. Start from an ordinary, unzoomed frame with room to move: if the window
+fills the desktop, choose Window > Zoom in the menu bar once (it toggles
+zoom); if it still fills the desktop, report could-not-run. Take S1.
+1. Press on empty background of the sidebar's top bar (for example between the
+wordmark and the version readout), move about 150 right and 100 down while
+held, release. Require the window moved by that offset, size unchanged. Pick
+other directions instead if those would push the window off the desktop. S2.
+2. Repeat from empty background of the main pane's top row, away from tabs and
+buttons, moving about 100 left and 50 up. Require the same. S3.
+3. Double-click empty background of the sidebar's top bar. Require a zoomed,
+clearly larger frame (S4). Then find empty top-band background again in the
+zoomed window (its band may have moved) and double-click there; require the
+frame from before this step (S5).
+4. Repeat step 3 from empty background of the main pane's top row (S6 zoomed,
+S7 restored).
+5. Press on the agent tab, move about 120 right while held, release; then do
+the same on the delete button. Require the frame unchanged both times:
+a control never drags the window. Click + terminal once to open a shell tab.
+Click the agent tab and require it selected; click the shell tab and require it
+selected (S8); click the agent tab and require it selected again. Then click
+delete once and require its confirmation panel to open under the top row, with
+the frame unchanged throughout (S9). Dismiss the panel with its own cancel
+control without deleting anything, then close the shell tab with its own close
+control, confirming that close if asked, so only the agent tab remains.
+6. Press on the sidebar's settings gear, move about 120 right while held,
+release; require the frame unchanged, since a control never drags the window.
+Then click the gear once. Require the settings dialog to open with the frame
+unchanged (S10), then close it with its own close control.
+Use the native API's own drag and double-click as its documentation describes.
+If it lacks either or refuses one, report could-not-run naming the operation.
+Before reporting fail for a drag on band background that left the frame
+unchanged, drag an ordinary
+Finder window's title bar the same way; if Finder does not move either, the gesture is not reaching the guest:
+could-not-run, not fail. Before reporting fail for a double-click that did not
+zoom or restore, open a Finder window in icon view (View > as Icons) and
+double-click an unselected folder icon (for example Documents in the home
+folder); if the window does not navigate into it, the double-click is not
+reaching the guest: could-not-run, not fail. (A Finder title bar is no oracle
+for double-clicks: its action follows a user setting that may be off.) A frame that moved in step 5 or
+6 is always a fail, and so is a control that did not open.
+No command receipt is needed.''',
         'old-fixture': '''Install previous from its published version path, verifying its signature and
 installer checksum with source-known keys. Disable automatic app updates in the
 guest's desktop-client.json BEFORE first launch, only if no Farhelm state exists.
