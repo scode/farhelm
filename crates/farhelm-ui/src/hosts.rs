@@ -1718,16 +1718,39 @@ pub(crate) fn HostsPanel(
             }
             if let Some(notice) = uninstall_notice() {
                 div { class: "uninstall-notice", role: "status",
-                    PeerLine {
-                        class: "uninstall-notice-text",
-                        parts: uninstall_notice_parts(&notice),
+                    div {
+                        class: "uninstall-notice-summary",
+                        tabindex: "0",
+                        "data-tooltip": "{peer_parts_tooltip(&uninstall_notice_parts(&notice))}",
+                        div { "aria-hidden": "true",
+                            PeerLine {
+                                class: "uninstall-notice-text",
+                                parts: uninstall_notice_compact_parts(&notice),
+                            }
+                        }
+                        PeerLine {
+                            class: "visually-hidden",
+                            parts: uninstall_notice_parts(&notice),
+                        }
                     }
                     button {
                         r#type: "button",
-                        class: "btn btn-neutral uninstall-notice-dismiss",
+                        class: "btn uninstall-notice-copy",
+                        "aria-label": "copy kept data path",
+                        "data-tooltip": "copy the kept data path",
+                        onclick: {
+                            let path = notice.state_dir.clone();
+                            move |_| crate::session_view::copy_to_clipboard(&path)
+                        },
+                        "copy"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn uninstall-notice-dismiss",
+                        "aria-label": "dismiss uninstall notice",
                         "data-tooltip": "dismiss: hide this notice",
                         onclick: move |_| uninstall_notice.set(None),
-                        "dismiss"
+                        "×"
                     }
                 }
             }
@@ -2161,9 +2184,10 @@ fn resolve_edit_submission(field: EditField, value: &str) -> Result<EditSubmissi
     }
 }
 
-/// The one-line notice an uninstall leaves behind once its host is gone:
-/// that Farhelm was removed, and where the host's data stayed. The host's
-/// name and the path are peer text and render escaped.
+/// The full result behind a compact uninstall notice, including the kept path.
+///
+/// The tooltip and accessible sentence must preserve the data location after
+/// the host row disappears. The host name and path remain separate peer runs.
 fn uninstall_notice_parts(notice: &UninstallNotice) -> Vec<DetailPart> {
     vec![
         DetailPart::Text("Farhelm was removed from ".to_string()),
@@ -2171,6 +2195,18 @@ fn uninstall_notice_parts(notice: &UninstallNotice) -> Vec<DetailPart> {
         DetailPart::Text("; its data remains in ".to_string()),
         DetailPart::Peer(notice.state_dir.clone()),
         DetailPart::Text(" on that host.".to_string()),
+    ]
+}
+
+/// The notice's visible line names the result without spending sidebar width on the path.
+///
+/// Its full spelling stays in the hover and accessible sentence, and the
+/// copy button carries the raw path rather than this shortened wording.
+fn uninstall_notice_compact_parts(notice: &UninstallNotice) -> Vec<DetailPart> {
+    vec![
+        DetailPart::text("removed from "),
+        DetailPart::peer(notice.host_name.clone()),
+        DetailPart::text(" · data kept"),
     ]
 }
 
@@ -2213,14 +2249,18 @@ fn host_menu_summary_parts(host: &Host) -> Vec<DetailPart> {
     ]
 }
 
-/// Build the hover tooltip from isolated header runs without allowing peer
-/// text to reorder the app-authored separator.
-fn host_menu_summary_tooltip(parts: &[DetailPart]) -> String {
+/// Flatten peer runs for a text-only tooltip without losing their direction boundary.
+///
+/// Farhelm's tooltip script writes this as text, never markup. Visible and
+/// accessible lines render each peer run in its own isolated element. The
+/// tooltip has no child elements, so app-authored LTR isolates delimit those
+/// runs after their untrusted control characters have been escaped.
+fn peer_parts_tooltip(parts: &[DetailPart]) -> String {
     parts
         .iter()
         .map(|part| match part {
             DetailPart::Text(text) => text.clone(),
-            DetailPart::Peer(value) => display_peer(value),
+            DetailPart::Peer(value) => format!("\u{2066}{}\u{2069}", display_peer(value)),
         })
         .collect()
 }
@@ -3234,7 +3274,7 @@ fn HostRow(
                                     }
                                     div {
                                         class: "session-row-menu-summary",
-                                        "data-tooltip": "{host_menu_summary_tooltip(&menu_summary_parts)}",
+                                        "data-tooltip": "{peer_parts_tooltip(&menu_summary_parts)}",
                                         PeerLine {
                                             class: "session-row-menu-summary-runs".to_string(),
                                             parts: menu_summary_parts.clone(),
@@ -4642,22 +4682,27 @@ mod tests {
         );
     }
 
-    /// The notice an uninstall leaves names the host and the kept data
-    /// directory as peer text, between the UI's own words.
+    /// A compact notice keeps its full result and path available after the row is gone.
     ///
-    /// Why it matters: both values come from the helm (a host name may be
-    /// an ssh destination the remote end chose, the path is the host's), so
-    /// they must render through the escaping path rather than as trusted
-    /// text. Specified: the host name and the path are the only peer runs,
-    /// in that order, and the sentence says Farhelm was removed and the data
-    /// remains.
+    /// Both values come from the helm. The short line names the host; the
+    /// tooltip and accessible line still name the kept path as peer text.
     #[farhelm_testtrace::test]
     fn the_uninstall_notice_keeps_host_values_as_peer_text() {
-        let parts = uninstall_notice_parts(&UninstallNotice {
+        let notice = UninstallNotice {
             host_name: "build-box".to_string(),
             state_dir: "/home/u/.local/state/farhelm".to_string(),
             superseded_run: None,
-        });
+        };
+        let compact = uninstall_notice_compact_parts(&notice);
+        assert_eq!(
+            compact,
+            vec![
+                DetailPart::text("removed from "),
+                DetailPart::peer("build-box"),
+                DetailPart::text(" · data kept"),
+            ]
+        );
+        let parts = uninstall_notice_parts(&notice);
         let peers: Vec<&str> = parts
             .iter()
             .filter_map(|part| match part {
@@ -4676,6 +4721,30 @@ mod tests {
             text,
             "Farhelm was removed from build-box; its data remains in \
              /home/u/.local/state/farhelm on that host."
+        );
+        assert_eq!(
+            peer_parts_tooltip(&parts),
+            "Farhelm was removed from \u{2066}build-box\u{2069}; its data remains in \
+             \u{2066}/home/u/.local/state/farhelm\u{2069} on that host."
+        );
+    }
+
+    /// The hover sentence must keep each untrusted value in its own LTR run.
+    ///
+    /// A host name with strong RTL text can otherwise reorder the app's
+    /// punctuation and the path. Explicit bidi controls from the host are
+    /// shown as escaped text, never allowed to set the tooltip direction.
+    #[farhelm_testtrace::test]
+    fn the_uninstall_tooltip_isolates_and_escapes_peer_values() {
+        let notice = UninstallNotice {
+            host_name: "بناء\u{202e}x".to_string(),
+            state_dir: "/home/u/بيانات".to_string(),
+            superseded_run: None,
+        };
+        assert_eq!(
+            peer_parts_tooltip(&uninstall_notice_parts(&notice)),
+            "Farhelm was removed from \u{2066}بناء<U+202E>x\u{2069}; its data remains in \
+             \u{2066}/home/u/بيانات\u{2069} on that host."
         );
     }
 
