@@ -5036,6 +5036,13 @@ first resolves exactly what it would do (the launch, the target session, the who
 (`approvals::ask`), then rechecks that the request's connection is still the one serving its host before acting, so an
 approval never carries over to whatever replaced that connection during the wait.
 
+NOTE: running-agent prompts are turned off (SPEC.md, Agent-spawned sessions). The helm's agent request handler refuses
+every `AgentVerb::Prompt` first, ahead of its liveness and validation checks, while
+`agent_requests::AGENT_PROMPTS_ENABLED` is false; flipping that constant is the helm side of a re-enable. This and the
+next paragraph describe the dormant path that the re-enable restores. It still compiles and ships unchanged, protocol
+included; the helm's unit tests reach it through a test-only handler, and its end-to-end delivery tests are ignored
+until then.
+
 Running-agent prompts use their own `AgentVerb::Prompt`, `AgentReply::Prompted` and approval kind. The helm resolves the
 target before asking, then reads `PromptTargetInfo` from that routed supervisor. Its `PromptTarget` reply carries the
 current `SessionInfo` and an attachment snapshot across every terminal belonging to that session, including views on

@@ -1835,6 +1835,12 @@ fn initial_prompt_flags_refuse_controls_conflicts_and_oversized_files() {
 
 // Running-agent prompts use the same bounded literal-message parser as create,
 // but their command surface must not grow any of create's launch choices.
+//
+// The real helm currently refuses every prompt (`AGENT_PROMPTS_ENABLED` in
+// the helm's `agent_requests`) and the verb is hidden from help, but it still
+// parses. These tests answer from a scripted relay instead of a helm, so they
+// keep covering the CLI half a re-enable would ship: parsing, the request it
+// sends, and how replies are reported.
 
 /// Each source must send its literal contents to the exact selected target.
 /// Empty text is legal under the shared validator; source presence, rather

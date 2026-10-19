@@ -25,6 +25,8 @@
 //! `templates::store_template`/`remove_template` for the template writes.
 //! Prompt delivery has no REST counterpart: [`agent_prompt`] routes the
 //! approved message to the owning supervisor's confirmed input operation.
+//! That path is dormant in this build: while [`AGENT_PROMPTS_ENABLED`] is
+//! off, `handle` refuses every prompt request before anything else.
 //! Not for economy:
 //! the point of routing an agent's questions (and its actions) through the
 //! helm at all is that the agent and the user see, and act on, one fleet.
@@ -247,6 +249,10 @@ pub type AgentRequestSlot = Arc<std::sync::OnceLock<Arc<dyn AgentRequestHandler>
 /// moments, and an agent deserves a sentence rather than a dead socket.
 pub(crate) struct HelmAgentRequests {
     state: Weak<AppState>,
+    /// Whether [`AgentVerb::Prompt`] is carried out or refused up front.
+    /// Production always takes [`AGENT_PROMPTS_ENABLED`]; only the unit
+    /// tests that keep the dormant delivery path covered turn it on.
+    prompts_enabled: bool,
 }
 
 impl HelmAgentRequests {
@@ -260,9 +266,60 @@ impl HelmAgentRequests {
     pub(crate) fn for_state(state: &Arc<AppState>) -> Arc<dyn AgentRequestHandler> {
         Arc::new(HelmAgentRequests {
             state: Arc::downgrade(state),
+            prompts_enabled: AGENT_PROMPTS_ENABLED,
+        })
+    }
+
+    /// [`Self::for_state`] with agent prompts carried out even while
+    /// [`AGENT_PROMPTS_ENABLED`] is off.
+    ///
+    /// Test-only, so the approval binding, connection rechecks and delivery
+    /// that a re-enable would ship keep their unit coverage while no
+    /// production handler can reach them. Nothing outside tests may build a
+    /// handler this way: the switch is the constant, not this constructor.
+    #[cfg(test)]
+    fn with_prompts_enabled(state: &Arc<AppState>) -> Arc<dyn AgentRequestHandler> {
+        Arc::new(HelmAgentRequests {
+            state: Arc::downgrade(state),
+            prompts_enabled: true,
         })
     }
 }
+
+/// Whether the helm carries out `farhelm agent prompt` (a message pasted
+/// into another session's running Claude or Codex agent). Off: every such
+/// request is refused with [`AGENT_PROMPTS_OFF_REFUSAL`] before any card,
+/// routing or supervisor contact. Flipping this is the whole re-enable on
+/// the helm side; see TODO.md, "Re-assess letting agents prompt running
+/// sessions", for what has to be fixed or accepted first.
+///
+/// It was turned off before the verb ever shipped, after review found three
+/// ways an approved or trusted prompt could do something the user did not
+/// agree to:
+///
+/// - The owning supervisor's "waiting on a question" refusal reads its
+///   latest status sample, which can be about two seconds old. A permission
+///   or trust question that appears inside that window (or right after a
+///   launch, before the first sample) can receive the pasted message and
+///   its submit key as the answer.
+/// - An approval is not bound to the target's current run. A Restart
+///   while the card waits (a Restart with that changes permissions, say)
+///   delivers to the new run, which may be a YOLO launch the user never
+///   pictured receiving the message. A Replace makes a new session id, so
+///   delivery after one is refused as not found instead.
+/// - An explicitly empty message sends only the submit key, which submits
+///   whatever draft the user has in the target's composer.
+///
+/// The verb itself stays: the CLI still parses it (hidden from agents) so a
+/// caller gets this refusal rather than a usage error, and the wire protocol
+/// is unchanged.
+const AGENT_PROMPTS_ENABLED: bool = false;
+
+/// What an agent prompt gets while [`AGENT_PROMPTS_ENABLED`] is off.
+/// Worded as final rather than "retry": no retry or approval changes it in
+/// this build.
+const AGENT_PROMPTS_OFF_REFUSAL: &str = "sending prompts to other sessions is turned off in this version of Farhelm, so nothing \
+     was sent";
 
 /// The most ENCODED session bytes one `sessions` reply will ever carry.
 ///
@@ -292,6 +349,17 @@ const AGENT_REPLY_BYTE_BUDGET: usize = 6 * 1024 * 1024;
 #[async_trait]
 impl AgentRequestHandler for HelmAgentRequests {
     async fn handle(&self, origin: AgentOrigin, session_id: &str, verb: AgentVerb) -> AgentOutcome {
+        // First, ahead of even the liveness and validation checks, so every
+        // prompt request gets the same final answer and none of them reads
+        // the target, shows a card or reaches a supervisor. `Unauthorized`
+        // is the kind a declined card and the YOLO rule use: a deliberate
+        // refusal that resending the same request will not change.
+        if matches!(verb, AgentVerb::Prompt { .. }) && !self.prompts_enabled {
+            return AgentOutcome::Err {
+                kind: ErrorKind::Unauthorized,
+                message: AGENT_PROMPTS_OFF_REFUSAL.to_string(),
+            };
+        }
         let Some(state) = self.state.upgrade() else {
             return AgentOutcome::Err {
                 kind: ErrorKind::Unavailable,
@@ -4689,6 +4757,66 @@ mod tests {
         (client, task, received, stop)
     }
 
+    /// Spec: the production handler refuses `farhelm agent prompt` with the
+    /// turned-off refusal, as `Unauthorized`, without showing a card and
+    /// without sending the target's supervisor anything, both on a host
+    /// that would ask (a window is open to ask in) and on one whose
+    /// commands run without asking (which would otherwise deliver at once).
+    ///
+    /// Why: agent prompts are switched off ([`AGENT_PROMPTS_ENABLED`])
+    /// because a delivered message can answer a permission question, reach
+    /// a run the user never approved, or submit the user's draft. The
+    /// switch only protects anyone if it sits ahead of the card and the
+    /// supervisor's input path, so this pins where it sits. When prompts
+    /// are re-enabled this test goes, and the tests built on
+    /// [`HelmAgentRequests::with_prompts_enabled`] go back to `for_state`.
+    #[farhelm_testtrace::test]
+    async fn prompt_is_refused_before_any_card_or_supervisor_contact_while_turned_off() {
+        for trusted in [false, true] {
+            let shown = session_info("target", SessionStatus::Running);
+            let (client, peer, mut received, stop) = prompt_peer(shown.clone(), false);
+            let (h, local) = spliced_local_fleet(client, vec![session("asker", 1), shown]).await;
+            h.store
+                .set_commands_without_asking(local, trusted)
+                .await
+                .unwrap();
+            // A window to ask in, so the untrusted case would otherwise put
+            // up a card instead of failing with the no-window refusal.
+            let _gui = h.manager.events().admit(1).unwrap();
+            assert!(
+                h.state.approvals.list().is_empty(),
+                "premise: no card before the request"
+            );
+            let outcome = HelmAgentRequests::for_state(&h.state)
+                .handle(
+                    origin_of(&h, local),
+                    "asker",
+                    AgentVerb::Prompt {
+                        session_id: Some("target".into()),
+                        prompt: "exact message".into(),
+                    },
+                )
+                .await;
+            assert!(
+                matches!(outcome, AgentOutcome::Err { kind: ErrorKind::Unauthorized, ref message } if message == AGENT_PROMPTS_OFF_REFUSAL),
+                "trusted={trusted}: {outcome:?}"
+            );
+            assert!(
+                h.state.approvals.list().is_empty(),
+                "trusted={trusted}: a turned-off prompt must not put up a card"
+            );
+            // Every supervisor exchange on the enabled path awaits its reply,
+            // and the peer records a request before answering it, so a
+            // request sent before `handle` returned would already be here.
+            assert!(
+                received.try_recv().is_err(),
+                "trusted={trusted}: a turned-off prompt must not reach the supervisor"
+            );
+            let _ = stop.send(());
+            join_responder(peer, &outcome).await;
+        }
+    }
+
     /// Cards show authoritative target facts and the full approved text. A
     /// denial must stop after preflight; Allow must send exactly those bytes.
     #[farhelm_testtrace::test]
@@ -4707,7 +4835,7 @@ mod tests {
                 .await
                 .unwrap();
             let _gui = h.manager.events().admit(1).unwrap();
-            let handler = HelmAgentRequests::for_state(&h.state);
+            let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
             let origin = origin_of(&h, local);
             let task = tokio::spawn(async move {
                 handler
@@ -4798,7 +4926,7 @@ mod tests {
                 .unwrap();
             h.store.set_yolo_without_asking(local, false).await.unwrap();
             assert_eq!(h.manager.events().subscriber_count(), 0, "premise: no GUI");
-            let outcome = HelmAgentRequests::for_state(&h.state)
+            let outcome = HelmAgentRequests::with_prompts_enabled(&h.state)
                 .handle(
                     origin_of(&h, local),
                     "asker",
@@ -4854,7 +4982,7 @@ mod tests {
             prompt_peer(session_info("different", SessionStatus::Running), false);
         let (h, local) =
             spliced_local_fleet(client, vec![session("asker", 1), session("target", 2)]).await;
-        let handler = HelmAgentRequests::for_state(&h.state);
+        let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
         for (target, prompt) in [
             (None, "ok"),
             (Some(""), "ok"),
@@ -4947,7 +5075,7 @@ mod tests {
             .await
             .unwrap();
         let _gui = h.manager.events().admit(1).unwrap();
-        let handler = HelmAgentRequests::for_state(&h.state);
+        let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
         let origin = origin_of(&h, local);
         let task = tokio::spawn(async move {
             handler
