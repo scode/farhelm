@@ -3588,7 +3588,10 @@
         // Cards scroll inside one region. An offscreen card's own rectangle
         // can extend beyond that viewport, so use only the visible region's
         // live bounds, never individual card rectangles or cached positions.
-        const linkCoveringRects = () => Array.from(document.querySelectorAll('.approval-cards'))
+        // A tunnel failure persists until dismissed and can cover a destination
+        // while leaving its link clickable beside the notice. Both providers
+        // must recheck that cover at activation, just as they do for cards.
+        const linkCoveringRects = () => Array.from(document.querySelectorAll('.approval-cards, .tunnel-error-notice'))
           .filter(region => region.getClientRects().length && getComputedStyle(region).visibility !== 'hidden')
           .map(region => region.getBoundingClientRect());
         const fileLinks = new window.farhelmTerminalFiles.FileLinksAddon({
