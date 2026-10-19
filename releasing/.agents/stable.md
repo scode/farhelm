@@ -186,10 +186,17 @@ to fix forward, so it starts the moment the pre-tag checks pass.
    bonus coverage separately; bring those results to the maintainer without deciding whether a P1 failure blocks
    promotion. If the notes are not finalized yet, say so in the same message, since a pass leads straight to promotion.
    Then wait for the maintainer's verdict; do not treat silence, or a test that could not run, as a pass.
-   - Pass: the maintainer moves `/latest`, which no agent does. If the notes are still not finalized when they report
-     the pass, remind them before they move it, since promoting would send every ordinary install to a release whose
-     page still reads DRAFT. Once they say it has moved, check that `https://get.farhelm.io/latest` names `vX.Y.Z`, and
-     go on.
+   - Pass: the maintainer moves `/latest`, which no agent does. Hand them exactly this line, with the version filled in,
+     to run from their release management location (outside this repository; agents never run it):
+
+     ```
+     ./bin/set-latest.sh vX.Y.Z && ./bin/deploy.sh
+     ```
+
+     The maintainer asked for this line on 2026-10-18, so that promoting a release costs them only running it, the same
+     as step 7's publish line. If the notes are still not finalized when they report the pass, remind them before they
+     run it, since promoting would send every ordinary install to a release whose page still reads DRAFT. Once they say
+     it has moved, check that `https://get.farhelm.io/latest` names `vX.Y.Z`, and go on.
    - Fail: `/latest` stays on the previous release and the release is never promoted. Fix forward
      (`releasing/.agents/fixing-forward.md`, "Fixing forward") and cut the next patch version. Whether to take the
      staged version off get.farhelm.io is the maintainer's call.
