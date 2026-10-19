@@ -468,15 +468,24 @@ test("Update planning keeps only its own Settings unavailable", async ({ page, r
   }
 });
 
-/** An earlier uninstall refusal occupies the same display slot as Update.
- * Starting Update must retire it before its own planning result is painted. */
-test("Update replaces an earlier uninstall action error with its own refusal", async ({ page, request }, testInfo) => {
+/** Planning refusals leave the narrow row and retain the helm's typed remedy.
+ * The Remove button must enter the ordinary confirmation, never remove a host
+ * from the refusal dialog itself. */
+test("uninstall and Update planning refusals open framed dialogs", async ({ page, request }, testInfo) => {
   const remote = destination(testInfo, "action-error-update");
   const accepted = await startAdd(request, remote);
   await waitForProgress(request, accepted.host_id, "completed");
   for (const [action, body] of [["uninstall", "old uninstall refusal"], ["update", "new update refusal"]]) {
     await page.route(`**/api/hosts/${accepted.host_id}/${action}`, async (route) => {
-      await route.fulfill({ status: 400, headers: { "x-farhelm-build": HELM_BUILD, "content-type": "text/plain" }, body });
+      await route.fulfill({
+        status: 409,
+        headers: {
+          "x-farhelm-build": HELM_BUILD,
+          "content-type": "text/plain",
+          ...(action === "uninstall" ? { "x-farhelm-uninstall-remedy": "remove-host" } : {}),
+        },
+        body,
+      });
     });
   }
   await page.goto("/");
@@ -484,11 +493,165 @@ test("Update replaces an earlier uninstall action error with its own refusal", a
   const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
   await openHostMenu(row);
   await row.locator(".provisioning-uninstall").click();
-  await expect(row.locator(".provisioning-error")).toContainText("old uninstall refusal");
+  const refusal = page.locator(".host-refusal-dialog");
+  await expect(refusal).toContainText("old uninstall refusal");
+  await expect(refusal.locator(".host-refusal-close")).toBeFocused();
+  await expect(row.locator(".provisioning-error")).toHaveCount(0);
+  await refusal.locator(".host-refusal-remove").click();
+  await expect(page.locator(".host-remove-dialog")).toBeVisible();
+  await page.locator(".host-remove-dialog .host-settings-close").click();
   await openHostMenu(row);
   await row.locator(".provisioning-update").click();
-  await expect(row.locator(".provisioning-error")).toContainText("new update refusal");
-  await expect(row.locator(".provisioning-error")).not.toContainText("old uninstall refusal");
+  await expect(refusal).toContainText("new update refusal");
+  await expect(refusal.locator(".host-refusal-remove")).toHaveCount(0);
+  await expect(row.locator(".provisioning-error")).toHaveCount(0);
+});
+
+/** Two planning refusals can arrive together from Update all. Dismissing one
+ * must hand modal focus and background isolation to the next refusal before
+ * the user can send keys to the hosts panel. */
+test("queued Update refusals retain modal focus and isolation", async ({ page, request }, testInfo) => {
+  const first = destination(testInfo, "queued-refusal-one");
+  const second = destination(testInfo, "queued-refusal-two");
+  const one = await startAdd(request, first);
+  const two = await startAdd(request, second);
+  await waitForProgress(request, one.host_id, "completed");
+  await waitForProgress(request, two.host_id, "completed");
+  const refused = new Set<number>();
+  for (const [id, reason] of [[one.host_id, "first update refused"], [two.host_id, "second update refused"]] as const) {
+    await page.route(`**/api/hosts/${id}/update`, async (route) => {
+      if (route.request().postData()) return route.continue();
+      refused.add(id);
+      await route.fulfill({
+        status: 409,
+        headers: { "x-farhelm-build": HELM_BUILD, "content-type": "text/plain" },
+        body: reason,
+      });
+    });
+  }
+  await page.goto("/");
+  await page.getByRole("button", { name: "update all" }).click();
+  await expect.poll(() => refused.size).toBe(2);
+  const refusal = page.locator(".host-refusal-dialog");
+  await expect(refusal).toBeVisible();
+  const firstShown = await refusal.locator(".host-refusal-reason").textContent();
+  expect(["first update refused", "second update refused"]).toContain(firstShown?.trim());
+  await refusal.locator(".host-refusal-close").click();
+  await expect(refusal.locator(".host-refusal-reason")).not.toHaveText(firstShown ?? "");
+  await expect(refusal.locator(".host-refusal-close")).toBeFocused();
+  const backgroundIsolated = await page.locator(`[data-host-id="${one.host_id}"]`).evaluate(
+    (row) => !!row.closest("[inert]"),
+  );
+  expect(backgroundIsolated, "the second modal still isolates the host list").toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(refusal).toHaveCount(0);
+});
+
+/** A one-use plan can expire after the user has read it. Its definite POST
+ * refusal must reopen a dialog, while the provisional uninstall notice is
+ * withdrawn because no run was accepted. */
+test("confirmed uninstall refusal reopens its dialog", async ({ page, request }, testInfo) => {
+  const remote = destination(testInfo, "uninstall-submit-refusal");
+  const accepted = await startAdd(request, remote);
+  await waitForProgress(request, accepted.host_id, "completed");
+  await page.route(`**/api/hosts/${accepted.host_id}/uninstall`, async (route) => {
+    if (route.request().postData()) {
+      await route.fulfill({
+        status: 409,
+        headers: { "x-farhelm-build": HELM_BUILD, "content-type": "text/plain" },
+        body: "the provisioning plan has expired",
+      });
+    } else {
+      // This fixture's simulated remote cannot answer the helm's live
+      // connectivity recheck. The planning reply is the premise for the
+      // confirm-time refusal, which is the boundary this test exercises.
+      await route.fulfill({
+        status: 200,
+        headers: { "x-farhelm-build": HELM_BUILD, "content-type": "application/json" },
+        json: {
+          probe_id: "expiring-uninstall-plan",
+          confirmation: `Farhelm will uninstall from ${remote}.`,
+          plan: { state_dir: "/home/farhelm-e2e/.local/state/farhelm" },
+        },
+      });
+    }
+  });
+  await page.goto("/");
+  const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+  await openHostMenu(row);
+  await row.locator(".provisioning-uninstall").click();
+  await expect(page.locator(".host-uninstall-dialog .provisioning-plan")).toBeVisible();
+  await page.locator(".host-uninstall-dialog .uninstall-confirm").click();
+  const refusal = page.locator(".host-refusal-dialog");
+  await expect(refusal).toContainText("the provisioning plan has expired");
+  await expect(refusal.locator(".host-refusal-close")).toBeFocused();
+  await expect(row.locator(".provisioning-error")).toHaveCount(0);
+  await expect(page.locator(".uninstall-notice")).toHaveCount(0);
+});
+
+/** A remote host can vanish from another window while its confirmed POST is
+ * pending. The definite refusal still belongs to the clicked host, even
+ * though the row that submitted it has unmounted. */
+test("confirmed uninstall refusal survives a vanished host row", async ({ page, request }, testInfo) => {
+  const remote = destination(testInfo, "vanished-uninstall-refusal");
+  const accepted = await startAdd(request, remote);
+  await waitForProgress(request, accepted.host_id, "completed");
+  const feed = await stubFeed(page);
+  const replyGate = routeGate();
+  let hideHost = false;
+  let postArrived = false;
+  await page.route("**/api/hosts", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    if (hideHost) body.hosts = body.hosts.filter((host: Host) => host.id !== accepted.host_id);
+    await route.fulfill({ response, json: body });
+  });
+  await page.route(`**/api/hosts/${accepted.host_id}/uninstall`, async (route) => {
+    if (!route.request().postData()) {
+      // The fake remote cannot satisfy the live uninstall preflight; this
+      // reply establishes a confirmed plan before the host disappears.
+      await route.fulfill({
+        status: 200,
+        headers: { "x-farhelm-build": HELM_BUILD, "content-type": "application/json" },
+        json: {
+          probe_id: "vanishing-host-plan",
+          confirmation: `Farhelm will uninstall from ${remote}.`,
+          plan: { state_dir: "/home/farhelm-e2e/.local/state/farhelm" },
+        },
+      });
+      return;
+    }
+    postArrived = true;
+    await replyGate.wait();
+    await route.fulfill({
+      status: 409,
+      headers: { "x-farhelm-build": HELM_BUILD, "content-type": "text/plain" },
+      body: "the host disappeared before uninstall began",
+    });
+  });
+  try {
+    await page.goto("/");
+    await feed.waitForConnection(1);
+    const row = page.locator(`[data-host-id="${accepted.host_id}"]`);
+    await expect(row, "the host exists before confirmation").toBeVisible();
+    await openHostMenu(row);
+    await row.locator(".provisioning-uninstall").click();
+    await expect(page.locator(".host-uninstall-dialog .provisioning-plan")).toBeVisible();
+    await page.locator(".host-uninstall-dialog .uninstall-confirm").click();
+    await expect.poll(() => postArrived).toBe(true);
+    hideHost = true;
+    await notifyFeed(feed, 2);
+    await expect(row, "the row has unmounted before its POST reply").toHaveCount(0);
+    replyGate.release();
+    const refusal = page.locator(".host-refusal-dialog");
+    await expect(refusal).toContainText("the host disappeared before uninstall began");
+    await expect(refusal).toContainText(remote);
+    await expect(refusal.locator(".host-refusal-close")).toBeFocused();
+  } finally {
+    replyGate.release();
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
 });
 
 /** An open, unscrollable popup must follow progress and retain warning detail.
@@ -2204,7 +2367,9 @@ test("a retarget and a foreign run each invalidate an unsubmitted update", async
   }
 });
 
-test("UPDATE planning refusal shows the concrete reason and stays expanded", async ({
+/** A failed Update plan must show the helm's concrete, peer-safe reason in a
+ * modal without treating planning as a submitted run or changing Details. */
+test("UPDATE planning refusal shows the concrete reason in a dialog", async ({
   page,
   request,
 }, testInfo) => {
@@ -2227,15 +2392,15 @@ test("UPDATE planning refusal shows the concrete reason and stays expanded", asy
   await openHostMenu(row);
   await row.locator(".provisioning-update").dispatchEvent("click");
   await refusal;
-  await expect(row.locator(".provisioning-error")).toContainText(
+  await expect(page.locator(".host-refusal-dialog .host-refusal-reason")).toContainText(
     'injected provisioning inspection failure: host stderr "inspection refused \\u{202e}host\\u{200b}"',
     { timeout: 10_000 },
   );
-  // Planning failure submits nothing and mints no confirmation, but the
-  // diagnostic keeps its own row expanded without touching the checkbox.
+  // Planning failure submits nothing and mints no confirmation. Its modal
+  // does not change the user's global row disclosure preference.
   await expect(row.locator(".provisioning-plan")).toHaveCount(0);
   await expect(row.locator(".provisioning-confirm")).toHaveCount(0);
-  await expect(row.locator(".host-detail")).toBeVisible();
+  await expect(row.locator(".provisioning-error")).toHaveCount(0);
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   expect(updates.plans).toBe(1);
   expect(updates.confirms).toBe(0);
@@ -2504,11 +2669,13 @@ test("a lost submission reply survives a failed retry plan, a refused retry subm
   await expect(row.locator(".provisioning-planning")).toBeVisible();
   releaseRetryPlan();
   await expect(row.locator(".provisioning-planning")).toHaveCount(0);
+  await expect(page.locator(".host-refusal-dialog")).toContainText("retry inspection refused");
   await expect(row.locator(".provisioning-error")).toContainText("its reply was lost");
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
   expect(updates.plans).toBe(2);
   expect(updates.confirms).toBe(1);
+  await page.locator(".host-refusal-dialog .host-refusal-close").click();
 
   // The next retry plans successfully but its submission is definitely
   // refused. The submitting indicator proves the second POST is in flight;
@@ -2548,6 +2715,7 @@ test("a lost submission reply survives a failed retry plan, a refused retry subm
   await expect(row.locator(".provisioning-planning")).toBeVisible();
   releaseSecondRetryPlan();
   await expect(row.locator(".provisioning-planning")).toHaveCount(0);
+  await expect(page.locator(".host-refusal-dialog")).toContainText("second retry inspection refused");
   await expect(row.locator(".provisioning-error")).toContainText("its reply was lost");
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
@@ -4217,6 +4385,7 @@ test("a competing run during retry planning preserves the sticky update warning"
   releaseFailedPlan();
   await failedPlanReply;
   await expect(row.locator(".provisioning-planning")).toHaveCount(0);
+  await expect(page.locator(".host-refusal-dialog")).toContainText("retry inspection refused");
   await expect(row.locator(".provisioning-warning")).toContainText("accepted the update");
   await expect(row.locator(".host-detail")).toBeVisible();
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();

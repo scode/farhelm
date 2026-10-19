@@ -1400,6 +1400,8 @@ impl ProvisioningService {
         // inspection. That includes the resolution check: a dangling link
         // would otherwise get "cannot tell where it leads", without the
         // pointer to Remove, which is what a user with this layout needs.
+        // This one refusal is typed so the client can offer Remove without
+        // trusting a remote diagnostic's wording as an action signal.
         // The session and identity checks above run before the inspection
         // exists, so such a user may first be asked to stop sessions before
         // hearing that uninstall cannot run on this layout at all.
@@ -1408,12 +1410,14 @@ impl ProvisioningService {
                 || "a target the host cannot resolve".to_string(),
                 |target| target.display().to_string(),
             );
-            return Err(refused(format!(
-                "Farhelm's lib directory {} on this host is a symbolic link to {link_target}; removing \
+            return Err(anyhow::Error::new(ProvisioningRequestError::RemoveInstead(
+                format!(
+                    "Farhelm's lib directory {} on this host is a symbolic link to {link_target}; removing \
                  it would remove only the link and leave the installation in place, so uninstall \
                  does not run on this layout. To stop using this host without uninstalling, \
                  remove it from the list instead, which leaves the host as it is",
-                lib_dir.path.display()
+                    lib_dir.path.display()
+                ),
             )));
         }
         let unit = &self.layout.unit_name;

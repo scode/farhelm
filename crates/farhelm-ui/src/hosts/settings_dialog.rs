@@ -139,6 +139,13 @@ pub(crate) fn return_focus_to_row(id: HostId) {
     ));
 }
 
+/// Release a refusal's isolation when another modal is about to replace it.
+/// The next dialog chooses its own initial focus; scheduling row focus here
+/// could move the keyboard behind that new modal one frame later.
+pub(crate) fn leave_refusal_for_handoff() {
+    document::eval(&modal_isolation::release_js(DIALOG_SELECTOR));
+}
+
 /// Move focus into the freshly mounted dialog, then isolate it.
 ///
 /// Focus goes first because `modal_isolation::install_js` requires it (making
@@ -428,7 +435,8 @@ fn commands_help(commands_without_asking: bool) -> &'static str {
 /// add flow has no host yet, so it uses the default host mark. A supplied
 /// tile replaces that mark for an application-wide dialog; it changes only
 /// the presentation, leaving host identity and closing behavior to the caller.
-/// A supplied summary replaces the status line, with or without a host.
+/// A supplied summary replaces the status line, with or without a host;
+/// callers reporting a refusal can put that summary in the danger tone.
 /// Titles remain caller-rendered markup so peer values keep
 /// their escaping and direction isolation. Dismiss runs the caller's cancel
 /// path; this header must not decide when an operation permits cancellation.
@@ -438,6 +446,7 @@ pub(crate) fn HostDialogHeader(
     tile: Option<Element>,
     title: Element,
     summary: Option<String>,
+    summary_danger: Option<bool>,
     dismiss_label: String,
     dismiss_tooltip: String,
     on_dismiss: EventHandler<()>,
@@ -467,7 +476,7 @@ pub(crate) fn HostDialogHeader(
             }
             div { class: "host-settings-heading",
                 h2 { class: "host-settings-title", {title} }
-                div { class: "host-settings-summary",
+                div { class: if summary_danger.unwrap_or(false) { "host-settings-summary host-settings-summary-danger" } else { "host-settings-summary" },
                     if let Some(summary) = summary {
                         "{summary}"
                     } else if let Some(host) = host {

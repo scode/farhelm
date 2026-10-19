@@ -3388,6 +3388,9 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   font-size: 12px;
 }
 .host-settings-summary .host-status { margin: 0; gap: 6px; }
+/* A refusal keeps the host header's status slot, but makes its outcome clear
+   before the reader reaches the helm's longer reason in the body. */
+.host-settings-summary-danger { color: var(--danger); }
 .host-settings-version { overflow-wrap: anywhere; }
 .host-settings-dismiss {
   flex-shrink: 0;

@@ -84,6 +84,115 @@ pub(crate) mod settings_dialog;
 
 use settings_dialog::SettingsField;
 
+/// A host action's definite refusal, retained until its modal is dismissed.
+/// The helm owns the reason; only the typed planning reply may offer Remove.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HostRefusal {
+    pub(crate) action: HostRefusalAction,
+    pub(crate) reason: String,
+    pub(crate) remove_instead: bool,
+}
+
+/// Retain the host identity from the request when its row disappears before
+/// the refusal is shown. The panel owns this snapshot with the modal, so a
+/// later list refresh cannot erase a definite answer from the helm.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HostRefusalEntry {
+    pub(crate) host: Host,
+    pub(crate) refusal: HostRefusal,
+}
+
+impl HostRefusalEntry {
+    /// Freeze the identity beside the refusal while a host-list refresh may
+    /// replace or remove its row before the modal is dismissed.
+    pub(crate) fn new(host: &Host, refusal: HostRefusal) -> Self {
+        Self {
+            host: host.clone(),
+            refusal,
+        }
+    }
+}
+
+/// Identifies the action the user requested without interpreting the helm's prose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HostRefusalAction {
+    Setup,
+    Update,
+    Uninstall,
+}
+
+/// Present a definite host-action refusal in the same framed modal as its
+/// confirmation. Close is the initial and Enter action; Remove is offered
+/// only when the helm marks the uninstall planning reply with that remedy.
+#[component]
+fn HostRefusalDialog(
+    host: Host,
+    refusal: HostRefusal,
+    on_close: EventHandler<()>,
+    on_remove: EventHandler<()>,
+) -> Element {
+    let name = gui_host_name(&host.name, host.kind.is_this_machine());
+    let action = match refusal.action {
+        HostRefusalAction::Setup => "set up host",
+        HostRefusalAction::Update => "update host",
+        HostRefusalAction::Uninstall => "uninstall Farhelm",
+    };
+    rsx! {
+        div { class: "host-settings-backdrop", role: "presentation",
+            div {
+                class: "host-settings-dialog host-refusal-dialog host-dialog-framed",
+                role: "dialog",
+                aria_modal: "true",
+                aria_label: "{action} · {name}",
+                tabindex: "-1",
+                onmounted: move |_| settings_dialog::install_dialog_with_selector(
+                    ".host-refusal-dialog", ".host-refusal-close",
+                    Some(".host-refusal-close"), Some(".host-refusal-close"),
+                ),
+                onkeydown: move |evt: KeyboardEvent| {
+                    if evt.key() == Key::Escape && !evt.is_composing() {
+                        on_close.call(());
+                    }
+                },
+                settings_dialog::HostDialogHeader {
+                    host: Some(host),
+                    title: rsx! { "{action} · " span { class: "peer-value", dir: "ltr", "{name}" } },
+                    summary: "Farhelm refused this action",
+                    summary_danger: true,
+                    dismiss_label: "close host refusal",
+                    dismiss_tooltip: "close this refusal",
+                    on_dismiss: on_close,
+                }
+                div { class: "host-settings-body", tabindex: "0", role: "region", aria_label: "reason for refusal",
+                    PeerLine {
+                        class: "host-refusal-reason",
+                        parts: vec![DetailPart::Peer(refusal.reason)],
+                    }
+                }
+                div { class: "host-settings-footer host-dialog-footer",
+                    div { class: "host-dialog-answers",
+                        button {
+                            r#type: "button",
+                            class: "btn btn-neutral host-refusal-close",
+                            autofocus: true,
+                            onclick: move |_| on_close.call(()),
+                            "close"
+                        }
+                        if refusal.remove_instead {
+                            button {
+                                r#type: "button",
+                                class: "btn btn-danger host-refusal-remove",
+                                onclick: move |_| on_remove.call(()),
+                                "remove"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Name a confirmed local host consistently across the GUI without changing its registry name.
 ///
 /// An alias stays the name the user chose. Callers with only an unconfirmed
@@ -1080,6 +1189,11 @@ pub(crate) fn HostsPanel(
     // host must not blank out an adopt refusal on another that the user has
     // not read yet.
     let mut errors = use_signal(HashMap::<HostId, String>::new);
+    // Planning and confirmed-action refusals remain visible independently of
+    // the global row disclosure. The host-list order chooses the one modal
+    // shown when several Updates fail together; each entry also keeps its
+    // host snapshot if a later list read no longer has that row.
+    let mut refusals = use_signal(HashMap::<HostId, HostRefusalEntry>::new);
     // Committed-but-unvalidated replies, kept apart from `errors` because
     // they mean the opposite thing — see this component's docs.
     let mut warnings = use_signal(HashMap::<HostId, String>::new);
@@ -1313,6 +1427,21 @@ pub(crate) fn HostsPanel(
             host,
             Box::pin(async move { remove_host(&base, host).await.map(|()| Commit::Confirmed) }),
         );
+    });
+
+    // Menu Remove and a typed uninstall remedy enter the same confirmation
+    // path, including the remembered skip-confirmation preference.
+    let on_remove_start = use_callback(move |id: HostId| {
+        if ops.busy_now() || provisioning_busy_hosts.peek().contains(&id) {
+            return;
+        }
+        editing.set(None);
+        settings_open.set(None);
+        host_menu_open.set(None);
+        remove_open.set(Some(id));
+        if preferences.0.peek().skip_host_remove_confirmation == Some(true) {
+            on_remove_confirm.call((id, false));
+        }
     });
 
     let edit_base = base.clone();
@@ -1550,6 +1679,28 @@ pub(crate) fn HostsPanel(
     // Cosmetic, not the guard — every handler below claims the token for
     // itself (see the `ops` module).
     let busy = ops.busy();
+    let visible_refusal = if !adding()
+        && remove_open().is_none()
+        && settings_open().is_none()
+        && !provisioning_menu_states
+            .read()
+            .values()
+            .any(|state| state.confirmation_may_open)
+    {
+        let in_list = read.hosts().and_then(|list| {
+            list.iter()
+                .find_map(|host| refusals.read().get(&host.id).cloned())
+        });
+        in_list.or_else(|| {
+            refusals
+                .read()
+                .values()
+                .min_by_key(|entry| entry.host.id)
+                .cloned()
+        })
+    } else {
+        None
+    };
 
     // The add dialog's setup submission, run in THIS component's scope
     // rather than the dialog's. A confirmed setup closes the dialog at once
@@ -1850,6 +2001,7 @@ pub(crate) fn HostsPanel(
                                     },
                                     on_changed,
                                     uninstall_notices,
+                                    refusals,
                                 }
                             },
                             on_retry: on_retry.clone(),
@@ -1878,25 +2030,7 @@ pub(crate) fn HostsPanel(
                                 host_menu_open.set(None);
                                 settings_open.set(Some(id));
                             },
-                            on_remove_start: move |id: HostId| {
-                                if ops.busy_now()
-                                    || provisioning_busy_hosts.peek().contains(&id)
-                                {
-                                    return;
-                                }
-                                editing.set(None);
-                                settings_open.set(None);
-                                // See `on_settings_start` just above: the
-                                // same single-owner close, past the same
-                                // guard.
-                                host_menu_open.set(None);
-                                if preferences.0.peek().skip_host_remove_confirmation == Some(true) {
-                                    remove_open.set(Some(id));
-                                    on_remove_confirm.call((id, false));
-                                } else {
-                                    remove_open.set(Some(id));
-                                }
-                            },
+                            on_remove_start: move |id: HostId| on_remove_start.call(id),
                             on_provisioning: move |(id, request): (HostId, ActionRequest)| {
                                 if provisioning_busy_hosts.peek().contains(&id) {
                                     return;
@@ -1986,6 +2120,35 @@ pub(crate) fn HostsPanel(
                         }
                     },
                     on_cancel: move |_| remove_open.set(None),
+                }
+            }
+            if let Some(entry) = visible_refusal {
+                HostRefusalDialog {
+                    key: "{entry.host.id}",
+                    host: entry.host.clone(),
+                    refusal: entry.refusal,
+                    on_close: {
+                        let id = entry.host.id;
+                        move |_| {
+                            // A queued refusal gets a freshly mounted modal
+                            // and its own focus installation. Only the last
+                            // dismissal returns focus behind the backdrop.
+                            if refusals.read().len() > 1 {
+                                settings_dialog::leave_refusal_for_handoff();
+                            } else {
+                                settings_dialog::return_focus_to_row(id);
+                            }
+                            refusals.write().remove(&id);
+                        }
+                    },
+                    on_remove: {
+                        let id = entry.host.id;
+                        move |_| {
+                            settings_dialog::leave_refusal_for_handoff();
+                            refusals.write().remove(&id);
+                            on_remove_start.call(id);
+                        }
+                    },
                 }
             }
         }

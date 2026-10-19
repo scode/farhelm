@@ -67,6 +67,12 @@ pub const CREATE_OUTCOME_DEFINITELY_UNACCEPTED: &str = "definitely-unaccepted";
 pub const YOLO_CONFIRMATION_HEADER: &str = "x-farhelm-yolo-confirmation";
 /// The one value of [`YOLO_CONFIRMATION_HEADER`].
 pub const YOLO_CONFIRMATION_REQUIRED: &str = "confirmation-required";
+/// Marks an uninstall planning refusal whose safe next action is to remove
+/// the host from Farhelm's list. Only the helm sets this header; a remote
+/// diagnostic in the response body cannot offer a destructive UI action.
+pub const UNINSTALL_REMEDY_HEADER: &str = "x-farhelm-uninstall-remedy";
+/// The one value of [`UNINSTALL_REMEDY_HEADER`].
+pub const UNINSTALL_REMEDY_REMOVE: &str = "remove-host";
 /// The host-list `cause` for a local row whose supervisor is not running.
 ///
 /// The one unreachable cause a user can fix with a command on the machine they
