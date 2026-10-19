@@ -2454,6 +2454,10 @@ the source's supervisor reports it, which the helm does not trust, and a session
 been composed differently, so such a launch is refused like a command launch. There is no override an agent can pass:
 the command line has no `--confirm-yolo`, and the helm ignores one in any request from a session.
 
+A wrapper prefix is not tied to an agent type: whoever composes the launch, directly or through an agent, chooses both
+and is responsible for matching them. A named template's prefix remains user-configured if a later command-line flag
+changes the agent type; that combination needs no separate wrapper approval.
+
 A wrapper prefix from a named template is part of the composed agent command. A prefix an agent supplies in its own
 flags, or inherits through clone or `--inherit-agent`, is the agent's own choice: on a host that asks before YOLO
 launches, it needs an Allow or Deny card even when ordinary agent commands from that host run without asking. The card
