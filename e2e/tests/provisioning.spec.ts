@@ -64,7 +64,7 @@ type Host = {
 type ProbeReply =
   | { result: "discovered"; host_id: number }
   | { result: "manual"; reason: string }
-  | { result: "provisionable"; probe_id: string; confirmation: string };
+  | { result: "provisionable"; probe_id: string; confirmation: string; steps?: { lead: string; steps: { id: string; name: string; paths: { full: string; short: string }[] }[]; kept: string | null } };
 
 type Accepted = { host_id: number; run_id: string };
 
@@ -591,38 +591,32 @@ async function expectHostAnswers(dialog: Locator, labels: string[], phone: boole
 }
 
 /**
- * A long real helm plan catches both lost terminating newlines and block
- * styling that introduces extra ones. Measuring individual glyph ranges
- * proves a wrapped continuation hangs after the step marker, not just that
- * the stylesheet declares an indent.
+ * The numbered plan still copies the helm's exact text, including its final
+ * newline. Short path chips must stay inside the step column, even when the
+ * full host path is much longer than the available dialog width.
  */
-async function expectPlanCopyAndIndent(plan: Locator, confirmation: string): Promise<void> {
+async function expectPlanCopyAndRail(page: Page, plan: Locator, confirmation: string): Promise<void> {
   expect(confirmation.endsWith("\n"), "fixture plan retains the helm's terminator").toBe(true);
-  const result = await plan.evaluate((element) => {
-    const selection = window.getSelection()!;
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    const copied = selection.toString();
-    selection.removeAllRanges();
-    const wrapped = Array.from(element.querySelectorAll(".peer-plan-step")).flatMap((line) => {
-      const node = line.firstChild!;
-      const rows = new Map<number, number>();
-      for (let offset = 0; offset < (node.textContent?.length ?? 0); offset++) {
-        const glyph = document.createRange();
-        glyph.setStart(node, offset);
-        glyph.setEnd(node, offset + 1);
-        const rect = glyph.getBoundingClientRect();
-        if (rect.width) rows.set(rect.top, Math.min(rows.get(rect.top) ?? Infinity, rect.left));
-      }
-      return rows.size > 1 ? [Array.from(rows.values())] : [];
-    });
-    return { copied, wrapped };
+  await page.evaluate(() => {
+    (window as any).__planCopies = [];
+    (window as any).__farhelmNativeClipboardWrite = (value: string) => {
+      (window as any).__planCopies.push(value);
+    };
   });
-  expect(result.copied, "native selected copy text must equal the real helm reply").toBe(confirmation);
-  expect(result.wrapped.length, "fixture needs at least one visibly wrapped step").toBeGreaterThan(0);
-  for (const rows of result.wrapped) for (const left of rows.slice(1)) expect(left - rows[0]).toBeGreaterThan(8);
+  await plan.locator(".provisioning-copy-plan").click();
+  await expect.poll(() => page.evaluate(() => (window as any).__planCopies),
+    { message: "Copy plan sends the exact helm confirmation" }).toEqual([confirmation]);
+  const result = await plan.evaluate((element) => {
+    const chip = element.querySelector(".provisioning-plan-path")!;
+    const detail = chip.closest(".provisioning-plan-detail")!;
+    const number = detail.parentElement!.querySelector(".provisioning-plan-number")!;
+    const chipBox = chip.getBoundingClientRect();
+    const detailBox = detail.getBoundingClientRect();
+    return { chipLeft: chipBox.left, chipRight: chipBox.right, detailLeft: detailBox.left, detailRight: detailBox.right, numberRight: number.getBoundingClientRect().right };
+  });
+  expect(result.detailLeft, "the step's details stay to the right of its number").toBeGreaterThan(result.numberRight);
+  expect(result.chipLeft, "the chip starts within the step column").toBeGreaterThanOrEqual(result.detailLeft - 1);
+  expect(result.chipRight, "the chip fits within the step column").toBeLessThanOrEqual(result.detailRight + 1);
 }
 
 for (const phone of [false, true]) {
@@ -632,8 +626,8 @@ for (const phone of [false, true]) {
    * Initial focus keeps its ring without a covering tooltip, but subsequent
    * hover and keyboard navigation must still explain the answers.
    * Dismissing through the new header must retire the offer without a write.
-   * A short viewport also proves keyboard access to the overflowing text-only
-   * plan: WebKit needs a tab stop on the scroll owner, not on the footer.
+   * A short viewport also proves keyboard access to the overflowing plan:
+   * WebKit needs a tab stop on the scroll owner, not on the footer.
    */
   test(`host-setup-layout ${phone ? "phone" : "desktop"} keeps answers and exact plan text`, async ({ page, request }, testInfo) => {
     const remote = destination(testInfo, `layout-${phone ? "phone" : "desktop"}`);
@@ -662,7 +656,15 @@ for (const phone of [false, true]) {
     await expectQuietInitialFocus(page, dialog.getByRole("button", { name: "set up", exact: true }));
     expect((await dialog.boundingBox())!.width).toBe(before.width);
     await expectHostAnswers(dialog, ["cancel", "set up, don't ask again", "set up"], phone);
-    await expectPlanCopyAndIndent(dialog.locator(".provisioning-plan"), planned.confirmation);
+    const plan = dialog.locator(".provisioning-plan");
+    expect(planned.steps, "the real helm sends the ordered step descriptions").toBeDefined();
+    await expect(plan.locator(".provisioning-plan-step")).toHaveCount(planned.steps!.steps.length);
+    await expect(plan.locator(".provisioning-plan-step-name")).toHaveText(planned.steps!.steps.map((step) => step.name));
+    await expect(plan.locator(".provisioning-plan-path").first()).toHaveAttribute("data-tooltip", planned.steps!.steps[0].paths[0].full);
+    // Host paths may contain repeated ordinary spaces, which must remain
+    // visible as separate characters instead of naming a different path.
+    expect(await plan.locator(".provisioning-plan-path").first().evaluate((node) => getComputedStyle(node).whiteSpace)).toBe("pre-wrap");
+    await expectPlanCopyAndRail(page, plan, planned.confirmation);
     await testInfo.attach(`host-setup-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
     await page.setViewportSize({ width: phone ? 390 : 1100, height: 420 });
     await expectKeyboardScroll(page, dialog.locator(".host-settings-dismiss"), dialog.getByRole("region", { name: "host setup plan", exact: true }));
@@ -676,6 +678,11 @@ for (const phone of [false, true]) {
   });
 }
 
+/**
+ * Discovery must display the helm's concrete steps without acting on them.
+ * A home path containing direction and zero-width controls tests the full-path
+ * hover boundary even when the visible chip uses the shorter ~/… spelling.
+ */
 test("real discovery offers one peer-safe concrete plan and mutates nothing before confirmation", async ({
   page,
   request,
@@ -689,8 +696,11 @@ test("real discovery offers one peer-safe concrete plan and mutates nothing befo
 
   const plan = page.locator(".add-host-form .provisioning-plan");
   await expect(plan).toContainText(remote);
-  await expect(plan).toContainText("<U+202E>");
-  await expect(plan).toContainText("<U+200B>");
+  // Home paths shrink to ~/… in the rail, but the full path remains on hover.
+  // That attribute crosses the same peer-escaping boundary as visible text.
+  await expect(plan.locator(".provisioning-plan-path").first()).toHaveAttribute(
+    "data-tooltip", /<U\+202E>.*<U\+200B>/,
+  );
   await expect(page.getByRole("button", { name: "set up", exact: true })).toBeVisible();
   expect((await hosts(request)).some((host) => host.destination === remote)).toBe(false);
   expect((await backendEvents()).map((event) => event.event)).toEqual(["probe", "inspect"]);

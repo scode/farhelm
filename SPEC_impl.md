@@ -4206,11 +4206,15 @@ show the full concrete action list before touching the host for initial setup.
 
 ADD and UPDATE both retain that concrete plan behind an opaque, one-use confirmation id. Planning is inspection-only;
 consuming the id revalidates the host and registry facts the plan relied on, and only then admits the host-scoped run.
-Setup shows the rendered plan and consumes the id on explicit confirmation; a remote update consumes it automatically
-after the user's Update click, which is the authorization — the wire keeps the same single-consumption authority either
-way, and the UI never replays a spent token. Discovery records the resolved supervisor binary, state directory, and
-identity together so a later helm dials the same installation that answered the probe. UPDATE starts from those recorded
-coordinates rather than assuming the standard layout.
+Setup shows the helm's ordered action descriptions in a numbered dialog and consumes the id on explicit confirmation.
+Each path chip uses the helm's home-relative spelling where available, with the full host path on hover; Copy plan
+copies the helm's exact plain-text confirmation, since selecting separate names and chips cannot produce that text. The
+helm derives the dialog entries and progress entries from the same frozen action list, so the UI never supplies its own
+action wording. A remote update consumes its plan automatically after the user's Update click, which is the
+authorization — the wire keeps the same single-consumption authority either way, and the UI never replays a spent token.
+Discovery records the resolved supervisor binary, state directory, and identity together so a later helm dials the same
+installation that answered the probe. UPDATE starts from those recorded coordinates rather than assuming the standard
+layout.
 
 The supervisor-unit ownership rule in SPEC.md is enforced twice on remote hosts. The reach check reports whether the
 user-unit directory already holds a `farhelm-supervisor.service` whose first line is setup's managed-by marker (the same
@@ -4222,25 +4226,25 @@ confirmed later and setup may have run on the host in between. The local executo
 never installs a unit on the helm's own machine.
 
 UNINSTALL is the third operation on the same machinery: `POST /api/hosts/{id}/uninstall` plans without a body and
-consumes the plan's id from a body, like update's route, but the user sees and confirms the rendered plan, like setup's.
-Its actions disable the supervisor unit, remove the unit file, reload the user manager, stop the unit, remove the lib
-directory, and finally forget the host. Removing the file before stopping keeps the supervisor answering until nothing
-can start it again: up to the unit file's removal the host stays connected and the ordinary checks apply, and after it a
-retry may proceed without a connection. Reloading after the file is gone makes systemd forget the unit's
-`KillMode=process` and use its default `control-group`: the stop ends the supervisor and the private tmux server,
-including any ended sessions' retained panes (this default behavior was verified on a real user manager when uninstall
-was built). The same stop action then ends any server still reachable at this host's private state-directory socket.
-That covers an inactive supervisor whose process-only policy left tmux alive before systemd forgot its removed unit. The
-tmux client is the accepted host executable when available, otherwise the private lib-directory executable; both it and
-the socket are frozen in the plan before confirmation. An absent server skips this cleanup, including a retry after the
-lib directory was removed; any other tmux failure leaves the host listed so uninstall can be retried. The socket cleanup
-reaches the named server even outside the unit's control group; it does not scan for other processes or servers. The
-disable command may reload implicitly; the explicit reload after file removal ensures the same stop behavior on every
-retry, including one whose preceding stop failed. Only the removals still outstanding are planned (the unit file's two
-steps when it exists, the lib directory's when it exists), and each host command treats work already done as a skip, so
-a failed run continues from wherever it stopped with no process-local memory of how far it got, which would not survive
-a helm restart. Every path comes from the plan, frozen from the same layout and overrides an install uses, never
-re-derived at run time.
+consumes the plan's id from a body, like update's route, but the user sees and confirms the same numbered plan as setup,
+with the kept-data note outside the action rail. Its actions disable the supervisor unit, remove the unit file, reload
+the user manager, stop the unit, remove the lib directory, and finally forget the host. Removing the file before
+stopping keeps the supervisor answering until nothing can start it again: up to the unit file's removal the host stays
+connected and the ordinary checks apply, and after it a retry may proceed without a connection. Reloading after the file
+is gone makes systemd forget the unit's `KillMode=process` and use its default `control-group`: the stop ends the
+supervisor and the private tmux server, including any ended sessions' retained panes (this default behavior was verified
+on a real user manager when uninstall was built). The same stop action then ends any server still reachable at this
+host's private state-directory socket. That covers an inactive supervisor whose process-only policy left tmux alive
+before systemd forgot its removed unit. The tmux client is the accepted host executable when available, otherwise the
+private lib-directory executable; both it and the socket are frozen in the plan before confirmation. An absent server
+skips this cleanup, including a retry after the lib directory was removed; any other tmux failure leaves the host listed
+so uninstall can be retried. The socket cleanup reaches the named server even outside the unit's control group; it does
+not scan for other processes or servers. The disable command may reload implicitly; the explicit reload after file
+removal ensures the same stop behavior on every retry, including one whose preceding stop failed. Only the removals
+still outstanding are planned (the unit file's two steps when it exists, the lib directory's when it exists), and each
+host command treats work already done as a skip, so a failed run continues from wherever it stopped with no
+process-local memory of how far it got, which would not survive a helm restart. Every path comes from the plan, frozen
+from the same layout and overrides an install uses, never re-derived at run time.
 
 The checks run at planning and again under the run's lock at confirmation, by planning again and requiring the same
 plan, so one piece of code decides every fact the plan rests on. A connected host needs a fresh session list (a live

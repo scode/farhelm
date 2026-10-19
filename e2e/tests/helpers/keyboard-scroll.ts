@@ -2,7 +2,7 @@ import { expect } from "./evidence";
 import { type Locator, type Page } from "@playwright/test";
 
 /**
- * A text-only scroll region must be reachable by Tab and scroll through native
+ * A scroll region must be reachable by Tab and scroll through native
  * key input. Focusing the region directly or assigning scrollTop would conceal
  * WebKit's missing automatic tab stop, the regression this helper checks.
  * The adjacent control establishes the focus origin; no pointer enters the body.

@@ -59,7 +59,7 @@ use web_time::Instant;
 use dioxus::prelude::*;
 
 use crate::api::{
-    PreferenceValue, ProbeResponse, ProvisioningAccepted, ProvisioningOperation,
+    PlanSteps, PreferenceValue, ProbeResponse, ProvisioningAccepted, ProvisioningOperation,
     ProvisioningStatus, ProvisioningSubmission, ProvisioningView, SubmissionError,
     fetch_provisioning, plan_host_uninstall, plan_host_update, probe_local_host, probe_ssh_host,
     provision_host, store_preference, uninstall_host, update_host,
@@ -68,7 +68,7 @@ use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::settings_dialog;
 use crate::list::SharedPreferences;
 use crate::ops::{OpGuard, OpLock, ReadGate};
-use crate::peer::{DetailPart, PeerBlock, PeerLine};
+use crate::peer::{DetailPart, PeerBlock, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{ApiBase, Host, HostId, HostKind};
 
@@ -740,6 +740,7 @@ struct PendingPlan {
     binding: HostBinding,
     probe_id: String,
     confirmation: String,
+    steps: Option<PlanSteps>,
     /// The data directory an UNINSTALL plan keeps, for the success notice;
     /// `None` for every other operation.
     kept_state_dir: Option<String>,
@@ -747,7 +748,8 @@ struct PendingPlan {
 
 /// What preparing a run established without yet mutating the target.
 enum Preparation {
-    Plan(PendingPlan),
+    /// Keep the larger plan payload off the short refusal/discovery result path.
+    Plan(Box<PendingPlan>),
     /// ADD found a supervisor and registered it as-is, so there is no run to
     /// confirm or follow.
     Discovered,
@@ -758,15 +760,83 @@ enum Preparation {
     Unvalidated(String),
 }
 
-/// Render the exact confirmation text returned by the helm.
+/// Show the helm's ordered actions without reconstructing their wording.
+///
+/// Each path uses the helm's short spelling in the narrow dialog and exposes
+/// its full spelling on hover. Copy uses the untouched confirmation string:
+/// escaped display text and separate chips cannot reproduce those bytes by
+/// native selection. Older replies without steps retain the text renderer.
+#[component]
+fn PlanStepList(confirmation: String, steps: Option<PlanSteps>) -> Element {
+    let Some(steps) = steps else {
+        return rsx! { PeerBlock { class: "provisioning-plan", text: confirmation } };
+    };
+    rsx! {
+        div { class: "provisioning-plan provisioning-stepper-plan",
+            div { class: "provisioning-plan-heading",
+                PeerLine {
+                    class: "provisioning-plan-lead",
+                    parts: vec![DetailPart::Peer(steps.lead)],
+                }
+                button {
+                    r#type: "button",
+                    class: "btn btn-neutral provisioning-copy-plan",
+                    "data-tooltip": "copy the complete host plan",
+                    onclick: move |_| crate::session_view::copy_to_clipboard(&confirmation),
+                    "copy plan"
+                }
+            }
+            ol { class: "provisioning-plan-steps",
+                for (index, step) in steps.steps.into_iter().enumerate() {
+                    li { key: "{step.id}", class: "provisioning-plan-step",
+                        span { class: "provisioning-plan-number", aria_hidden: "true", "{index + 1}" }
+                        div { class: "provisioning-plan-detail",
+                            PeerLine {
+                                class: "provisioning-plan-step-name",
+                                parts: vec![DetailPart::Peer(step.name)],
+                            }
+                            if !step.paths.is_empty() {
+                                div { class: "provisioning-plan-paths",
+                                    for path in step.paths {
+                                        span {
+                                            class: "provisioning-plan-path peer-value",
+                                            dir: "ltr",
+                                            "data-tooltip": "{display_peer(&path.full)}",
+                                            "{display_peer(&path.short)}"
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(explanation) = step.explanation {
+                                PeerLine {
+                                    class: "provisioning-plan-explanation",
+                                    parts: vec![DetailPart::Peer(explanation)],
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(kept) = steps.kept {
+                PeerLine {
+                    class: "provisioning-plan-kept",
+                    parts: vec![DetailPart::Peer(kept)],
+                }
+            }
+        }
+    }
+}
+
+/// Present a helm-authored plan through the shared stepper.
 ///
 /// This component deliberately does not walk `ProvisioningPlan.actions`.
-/// The server's string was rendered from the same value execution consumes,
-/// including paths, unit names, and the conditional linger promise. A second
-/// renderer here would be a second list of promises that could drift.
+/// The server's steps and copyable text come from the same frozen actions the
+/// run consumes. This defensive update path shares the setup presentation so
+/// it cannot invent different promises for the same action.
 #[component]
 pub(crate) fn PlanConfirmation(
     confirmation: String,
+    steps: Option<PlanSteps>,
     busy: bool,
     confirm_label: &'static str,
     on_confirm: EventHandler<()>,
@@ -774,7 +844,7 @@ pub(crate) fn PlanConfirmation(
 ) -> Element {
     rsx! {
         div { class: "provisioning-confirmation",
-            PeerBlock { class: "provisioning-plan", text: confirmation }
+            PlanStepList { confirmation, steps }
             div { class: "provisioning-confirm-actions",
                 button {
                     r#type: "button",
@@ -808,7 +878,7 @@ pub(crate) fn PlanConfirmation(
 /// host dialog frame, so only the plan scrolls. The helm supplies the plan;
 /// this component owns presentation, never its actions or authorization. The
 /// caller supplies an already escaped display name and its cancel lifecycle.
-/// The text-only plan has its own named tab stop: WebKit does not make
+/// The plan body has its own named tab stop: WebKit does not make
 /// scrolling regions keyboard-reachable just because they overflow.
 ///
 /// `busy` disables only the two answers that would submit. Cancel stays
@@ -817,6 +887,7 @@ pub(crate) fn PlanConfirmation(
 #[component]
 pub(crate) fn SetupPlanConfirmation(
     confirmation: String,
+    steps: Option<PlanSteps>,
     name: String,
     host: Option<Host>,
     local: bool,
@@ -835,7 +906,7 @@ pub(crate) fn SetupPlanConfirmation(
             on_dismiss: on_cancel,
         }
         div { class: "host-settings-body", tabindex: "0", role: "region", aria_label: "host setup plan",
-            PeerBlock { class: "provisioning-plan", text: confirmation }
+            PlanStepList { confirmation, steps }
             if let Some(error) = error { {error} }
         }
         div { class: "host-settings-footer host-dialog-footer",
@@ -878,18 +949,18 @@ pub(crate) fn SetupPlanConfirmation(
 
 /// Render the helm's uninstall plan with its two answers.
 ///
-/// The text is the helm's, rendered from the plan the run will consume (see
-/// [`PlanConfirmation`] for why the UI never re-renders it), and it already
-/// names what goes and what stays. The confirm button is in the danger tier
+/// The helm-authored steps name what goes and the separate note names what
+/// stays. The confirm button is in the danger tier
 /// because the removal cannot be undone from Farhelm. Confirm takes initial
 /// focus when enabled so a new Enter accepts the requested plan. These frame siblings
 /// pin the actual host identity and answers around the scrollable plan. Header
 /// dismissal uses the caller's Cancel path, including its row-focus return.
-/// The plan's named tab stop lets keyboard users scroll its text in WebKit
+/// The plan's named tab stop lets keyboard users scroll its steps in WebKit
 /// without moving the pinned answers or accepting the uninstall.
 #[component]
 pub(crate) fn UninstallConfirmation(
     confirmation: String,
+    steps: Option<PlanSteps>,
     host: Host,
     busy: bool,
     on_confirm: EventHandler<()>,
@@ -905,7 +976,7 @@ pub(crate) fn UninstallConfirmation(
             on_dismiss: on_cancel,
         }
         div { class: "host-settings-body", tabindex: "0", role: "region", aria_label: "host uninstall plan",
-            PeerBlock { class: "provisioning-plan", text: confirmation }
+            PlanStepList { confirmation, steps }
         }
         div { class: "host-settings-footer host-dialog-footer",
             div { class: "host-dialog-answers",
@@ -942,23 +1013,25 @@ async fn prepare(
     match operation {
         ProvisioningOperation::Update => {
             let planned = plan_host_update(base, host.id).await?;
-            Ok(Preparation::Plan(PendingPlan {
+            Ok(Preparation::Plan(Box::new(PendingPlan {
                 operation,
                 binding,
                 probe_id: planned.probe_id,
                 confirmation: planned.confirmation,
+                steps: planned.steps,
                 kept_state_dir: None,
-            }))
+            })))
         }
         ProvisioningOperation::Uninstall => {
             let planned = plan_host_uninstall(base, host.id).await?;
-            Ok(Preparation::Plan(PendingPlan {
+            Ok(Preparation::Plan(Box::new(PendingPlan {
                 operation,
                 binding,
                 probe_id: planned.probe_id,
                 confirmation: planned.confirmation,
+                steps: planned.steps,
                 kept_state_dir: Some(planned.plan.state_dir),
-            }))
+            })))
         }
         ProvisioningOperation::Add => {
             let probed = match host.kind {
@@ -988,13 +1061,15 @@ async fn prepare(
                 ProbeResponse::Provisionable {
                     probe_id,
                     confirmation,
-                } => Preparation::Plan(PendingPlan {
+                    steps,
+                } => Preparation::Plan(Box::new(PendingPlan {
                     operation,
                     binding,
                     probe_id,
                     confirmation,
+                    steps,
                     kept_state_dir: None,
-                }),
+                })),
                 ProbeResponse::Manual { reason } => Preparation::Manual(reason),
                 ProbeResponse::Unvalidated(problem) => Preparation::Unvalidated(problem),
             })
@@ -2034,7 +2109,7 @@ pub(crate) fn ProvisioningPanel(
                         local_auto_retry.set(true);
                     }
                     auto_submit_add.set(!is_local_add && remembered_answer);
-                    pending.set(Some(plan));
+                    pending.set(Some(*plan));
                     on_reveal_details.call(());
                 }
                 Ok(Preparation::Discovered) => {
@@ -2141,7 +2216,7 @@ pub(crate) fn ProvisioningPanel(
                             epoch: epoch_now,
                             binding: requested,
                             phase: IntentPhase::WaitingForClaim,
-                            plan: Some(plan),
+                            plan: Some(*plan),
                         }));
                     } else {
                         // Defensive: only remote updates skip
@@ -2150,7 +2225,7 @@ pub(crate) fn ProvisioningPanel(
                         // it ever does, the plan confirms explicitly
                         // rather than submitting itself.
                         intent.set(None);
-                        pending.set(Some(plan));
+                        pending.set(Some(*plan));
                         on_reveal_details.call(());
                     }
                 }
@@ -2831,6 +2906,7 @@ pub(crate) fn ProvisioningPanel(
                             },
                             SetupPlanConfirmation {
                                 confirmation: plan.confirmation,
+                                steps: plan.steps,
                                 name: crate::hosts::gui_host_name(&host.name, host.kind == HostKind::Local),
                                 host: Some(host.clone()),
                                 local: host.kind == HostKind::Local,
@@ -2874,6 +2950,7 @@ pub(crate) fn ProvisioningPanel(
                             },
                             UninstallConfirmation {
                                 confirmation: plan.confirmation,
+                                steps: plan.steps,
                                 host: host.clone(),
                                 busy: page_busy,
                                 on_confirm: move |_| confirm.call(false),
@@ -2889,6 +2966,7 @@ pub(crate) fn ProvisioningPanel(
                 } else {
                     PlanConfirmation {
                         confirmation: plan.confirmation,
+                        steps: plan.steps,
                         busy: page_busy,
                         confirm_label: "confirm update",
                         on_confirm: move |_| confirm.call(false),
