@@ -42,9 +42,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`capture-marker-collision-misframes-replay.md`](capture-marker-collision-misframes-replay.md) — Terminal text can
   imitate capture delimiters, truncating replay or entering diagnostics; confidentiality impact is unverified.
 
-- [`session-accessible-names-use-raw-titles.md`](session-accessible-names-use-raw-titles.md) — Session accessible names
-  retain raw title formatting; destructive-target confusion remains unverified and prior scope coverage is ambiguous.
-
 - [`approval-session-id-display-collision.md`](approval-session-id-display-collision.md) — Approval cards can display
   distinct session IDs identically; mistaken authorization remains unverified.
 

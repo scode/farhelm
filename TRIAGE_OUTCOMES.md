@@ -16086,7 +16086,10 @@
 - Completion criteria: escape the title before shortening it in those four names, with a unit test using a direction
   override and a zero-width space. SPEC.md may say "including accessible names" in the escaping rule. Complexity gate:
   if not cheap, discard instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/session-header-and-row-fixes.md`.
+- Execution: complete in change `oykmzkonrxwmslpyzzktrrzrosvpsyqp`, bookmark
+  `plan/session-header-and-row-fixes/03-accessible-titles`; existing escaping and shortening helpers met the cheap-fix
+  gate. Draft PR https://github.com/scode/farhelm/pull/2359/changes. The rename fallback is not displayed; the actual
+  rename dialog already has generic names.
 
 ## approval-session-id-display-collision.md
 

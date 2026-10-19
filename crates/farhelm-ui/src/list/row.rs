@@ -199,7 +199,7 @@ fn row_class(stale: bool, selected: bool, menu_open: bool) -> &'static str {
     }
 }
 
-/// The row menu toggle's accessible name: the session's identity, clamped.
+/// Name the row's actions with the same escaped title its visible text shows.
 ///
 /// Every row renders an identical "⋯" toggle, so the NAME is the only
 /// thing assistive technology can distinguish the buttons by — an
@@ -207,10 +207,10 @@ fn row_class(stale: bool, selected: bool, menu_open: bool) -> &'static str {
 /// clamp exists because a title has no length bound (tens of KB is
 /// legal) and an accessible name is read aloud in full; 64 characters
 /// is plenty to tell sessions apart, and the ellipsis says something
-/// was cut. Char-based, not byte-based, so a multi-byte title can never
-/// split a codepoint.
+/// was cut. Escape before clamping so hidden characters are visible and
+/// the shared clamp can preserve whole escape tokens at its boundary.
 fn menu_label(title: &str) -> String {
-    format!("session actions for {}", clamp_title(title))
+    format!("session actions for {}", clamp_title(&display_peer(title)))
 }
 
 /// Split the header's saved launch facts into peer and app-authored runs.
@@ -1110,14 +1110,20 @@ pub(super) fn SessionRow(
     let showing_menu_items = !(confirming || confirming_replace);
     // The accessible name for the panel's prompt states. Only read when
     // one of them is showing; the menu state names its inner list
-    // instead. Same clamp as the toggle's own name, for the same reason
-    // (see `clamp_title`).
+    // instead. Escape before shortening, as the toggle does, so its spoken
+    // title has the same spelling as the visible confirmation quote.
     let prompt_label = if confirming {
-        format!("delete confirmation for {}", clamp_title(&session.title))
+        format!(
+            "delete confirmation for {}",
+            clamp_title(&display_peer(&session.title))
+        )
     } else if confirming_replace {
-        format!("replace confirmation for {}", clamp_title(&session.title))
+        format!(
+            "replace confirmation for {}",
+            clamp_title(&display_peer(&session.title))
+        )
     } else {
-        format!("rename {}", clamp_title(&session.title))
+        format!("rename {}", clamp_title(&display_peer(&session.title)))
     };
     // The separator earns its place only when something actually
     // precedes delete. Rename is unconditional today, so this is always
@@ -2725,41 +2731,42 @@ mod tests {
         );
     }
 
-    /// `menu_label` composes `"session actions for …"` around whatever
-    /// `clamp_title` returns, and does no clamping of its own.
+    /// An ordinary title keeps the session wording around its accessible name.
     ///
-    /// The clamp CONTRACT itself — the character-count cut, the ellipsis,
-    /// the multi-byte and escape-token boundary safety — is pinned once in
-    /// `menu_panel::tests::clamp_title_cuts_long_values_with_an_ellipsis`,
-    /// shared by every caller that clamps a row identity (the toggle, the
-    /// menu, and this row's own two prompt states besides). Repeating that
-    /// contract here would fail for the same helper regression and tell a
-    /// reader nothing `menu_panel`'s own test does not already say; this
-    /// test's only job is the composition around it.
+    /// The shared clamp's length, multibyte, and escape-token boundaries
+    /// are covered by `menu_panel`'s tests. This test keeps the wording
+    /// around a plain title stable; the real-row test below checks that
+    /// callers escape peer text before applying that shared clamp.
     #[farhelm_testtrace::test]
     fn menu_label_wraps_the_clamped_title_in_session_wording() {
         assert_eq!(menu_label("short"), "session actions for short");
     }
 
-    /// Why this matters: agents may rename any session, and a title with an
-    /// invisible character or a direction override could render identically
-    /// to another session's, or make the delete and replace confirmations
-    /// quote a different title than the one they act on. Spec: the row's
-    /// visible title, its hover card, and both confirmation quotes show
-    /// the escaped form (`display_peer`) and never the raw control
-    /// characters. The folder line follows the same rule after home
+    /// Every row title surface escapes peer formatting, including accessible names.
+    ///
+    /// Agents may rename any session, so the visible row, its hover card,
+    /// and both confirmation quotes must use the same escaped spelling as
+    /// the names exposed to assistive technology. The toggle, menu, Delete,
+    /// and Replace names escape before shortening; a long fixture makes
+    /// the shortened name differ from one escaped only after the raw title
+    /// was cut. The folder line follows the same rule after home
     /// abbreviation; an absent folder stays blank rather than gaining a
     /// placeholder that the row did not previously show.
     #[farhelm_testtrace::test]
     fn titles_and_folders_render_escaped_without_filling_an_empty_folder() {
+        const SPOOF: &str = "build\u{200B} \u{202E}lanif";
+        const LONG_SPOOF: &str = concat!(
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "\u{202E}\u{200B}more title text beyond the boundary",
+        );
         std::thread_local! {
             static PROMPT: std::cell::Cell<(bool, bool)> = const { std::cell::Cell::new((false, false)) };
             static CWD: std::cell::Cell<&'static str> = const { std::cell::Cell::new("") };
+            static TITLE: std::cell::Cell<&'static str> = const { std::cell::Cell::new(SPOOF) };
         }
-        const SPOOF: &str = "build\u{200B} \u{202E}lanif";
 
-        /// Render the real row for each supplied folder and confirmation state;
-        /// inspecting its text mutations keeps Rust debug escaping out of the proof.
+        /// Render an open row menu or confirmation with the supplied peer text.
+        /// Inspecting mutation payloads keeps Rust debug escaping out of the proof.
         fn app() -> Element {
             let on_open = use_callback(|_: Session| {});
             let on_clone = use_callback(|_: Session| {});
@@ -2780,7 +2787,7 @@ mod tests {
             let on_bell_clear = use_callback(|_: (String, u64)| {});
             let (confirming, confirming_replace) = PROMPT.with(std::cell::Cell::get);
             let session = Session {
-                title: SPOOF.to_string(),
+                title: TITLE.with(std::cell::Cell::get).to_string(),
                 cwd: CWD.with(std::cell::Cell::get).to_string(),
                 ..row_specimen("spoofed")
             };
@@ -2795,8 +2802,9 @@ mod tests {
                         confirming_replace,
                         renaming: false,
                         nav_disabled: false,
-                        // The confirmations live inside the actions menu.
-                        menu_open: confirming || confirming_replace,
+                        // The ordinary menu and its confirmations expose
+                        // different accessible names on the same row.
+                        menu_open: true,
                         composer_transfer_open: false,
                         selected: false,
                         locality: HostLocality::Unknown,
@@ -2828,31 +2836,49 @@ mod tests {
             }
         }
 
-        let escaped = display_peer(SPOOF);
-        let quoted = format!("\"{escaped}\"");
-        // Premise: escaping changes this title.
-        assert_ne!(escaped, SPOOF);
-        for (prompt, cwd, shown) in [
-            ((false, false), "/home/example/project", "~/project"),
-            ((false, false), "", ""),
+        let long_accessible_title = format!("{}<U+202E>…", "x".repeat(50));
+        // Escaping expands the second control character across the cut.
+        // This fixture must distinguish the order of the two operations.
+        assert_ne!(
+            display_peer(&clamp_title(LONG_SPOOF)),
+            long_accessible_title
+        );
+        for (title, prompt, cwd, shown) in [
+            (SPOOF, (false, false), "/home/example/project", "~/project"),
+            (SPOOF, (false, false), "", ""),
             (
+                SPOOF,
                 (false, false),
                 "/home/example/build\u{200B} \u{202E}lanif",
                 "~/build<U+200B> <U+202E>lanif",
             ),
             (
+                SPOOF,
                 (true, false),
                 "/home/example/build\u{200B} \u{202E}lanif",
                 "~/build<U+200B> <U+202E>lanif",
             ),
             (
+                SPOOF,
                 (false, true),
                 "/home/example/build\u{200B} \u{202E}lanif",
                 "~/build<U+200B> <U+202E>lanif",
             ),
+            (LONG_SPOOF, (false, false), "", ""),
+            (LONG_SPOOF, (true, false), "", ""),
+            (LONG_SPOOF, (false, true), "", ""),
         ] {
+            let escaped = display_peer(title);
+            let quoted = format!("\"{escaped}\"");
+            assert_ne!(escaped, title, "the fixture must need escaping");
+            let accessible_title = if title == SPOOF {
+                "build<U+200B> <U+202E>lanif"
+            } else {
+                &long_accessible_title
+            };
             CWD.with(|cell| cell.set(cwd));
             PROMPT.with(|cell| cell.set(prompt));
+            TITLE.with(|cell| cell.set(title));
             let mut dom = VirtualDom::new(app);
             // The actual text payloads the DOM receives, not a Debug dump
             // (which would escape the very characters under test).
@@ -2876,8 +2902,8 @@ mod tests {
                     "the folder keeps home abbreviation and shows hidden characters: {texts:?}",
                 );
             }
-            // Isolation: every title surface is a `PeerTitle`, whose class and
-            // `dir` reach the DOM as dynamic attributes.
+            // The row and confirmation titles use `PeerTitle`, whose class
+            // and direction reach the DOM as dynamic attributes.
             let attribute = |name: &str, wanted: &dyn Fn(&str) -> bool| {
                 edits
                     .iter()
@@ -2890,6 +2916,29 @@ mod tests {
                     })
                     .count()
             };
+            let actions_name = format!("session actions for {accessible_title}");
+            assert_eq!(
+                attribute("aria-label", &|value: &str| value == actions_name),
+                if prompt.0 || prompt.1 { 1 } else { 2 },
+                "{prompt:?}: the toggle and ordinary menu use the escaped, shortened title"
+            );
+            for (prefix, active) in [
+                ("delete confirmation for", prompt.0),
+                ("replace confirmation for", prompt.1),
+            ] {
+                let name = format!("{prefix} {accessible_title}");
+                assert_eq!(
+                    attribute("aria-label", &|value: &str| value == name),
+                    usize::from(active),
+                    "{prompt:?}: only the mounted confirmation has this escaped name"
+                );
+            }
+            assert_eq!(
+                attribute("aria-label", &|value: &str| value.contains('\u{202E}')
+                    || value.contains('\u{200B}')),
+                0,
+                "{prompt:?}: a raw control character reached an accessible name"
+            );
             let isolated_titles = attribute("class", &|value: &str| {
                 value.split(' ').any(|class| class == "peer-value")
                     && (value.contains("session-title") || value.contains("confirm-title"))
@@ -2914,8 +2963,8 @@ mod tests {
                 "{prompt:?}: the row shows the escaped title: {texts:?}"
             );
             // The card's second title is a DOM peer span, so it gets the
-            // same escaping and isolation as the visible title. Neither
-            // title puts peer text into a tooltip attribute anymore.
+            // same escaping and isolation as the visible title. The open
+            // menu header alone keeps a separate title tooltip.
             assert_eq!(
                 attribute("class", &|value: &str| value
                     .contains("session-summary-title")),
@@ -2935,8 +2984,8 @@ mod tests {
             );
             assert_eq!(
                 attribute("data-tooltip", &|value: &str| value == escaped),
-                0,
-                "{prompt:?}: the title no longer has redundant hover text"
+                usize::from(!(prompt.0 || prompt.1)),
+                "{prompt:?}: only the ordinary menu header has a title tooltip"
             );
             assert_eq!(
                 attribute("data-tooltip", &|value: &str| value.contains('\u{202E}')
