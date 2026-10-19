@@ -24,7 +24,8 @@
 
 use farhelm_proto::launcher::{
     LaunchCatalogModel, LaunchTemplate, LauncherKind, LauncherState, TemplateContext,
-    TemplateDestination, TemplateFields, TemplateRefusal, apply_template, apply_templates,
+    TemplateDestination, TemplateFields, TemplateNameKind, TemplateRefusal, apply_template,
+    apply_templates,
 };
 use farhelm_proto::{CommandLaunch, ErrorKind, LaunchRequest, LaunchSelection, SessionLaunch};
 
@@ -46,6 +47,9 @@ pub(crate) struct Resolution {
     /// is the agent's own choice and needs a direct answer on guarded hosts.
     pub(crate) agent_wrapper_supplied: bool,
     pub(crate) title: Option<String>,
+    /// Only a template Base may number an occupied checkout title. The
+    /// request's own title is always Fixed, even from an older CLI.
+    pub(crate) title_kind: Option<TemplateNameKind>,
     /// The install identity a template set as the host, if one did. The
     /// caller uses it only when no `--host` was given.
     pub(crate) template_host: Option<String>,
@@ -173,10 +177,15 @@ pub(crate) fn resolve(
                 invalid(refusal.to_string())
             }
         })?;
-    let flags = LaunchTemplate {
+    let mut flags = LaunchTemplate {
         name: String::new(),
         fields: edits.clone(),
     };
+    // A request title is an exact name, as a hand edit is in the GUI. Set
+    // the policy here so the CLI need not know about template name kinds.
+    if flags.fields.name.is_some() {
+        flags.fields.name_kind = Some(TemplateNameKind::Fixed);
+    }
     let state = apply_template(&state, &flags, &context).map_err(flag_refusal)?;
 
     let (cwd, github_repo) = match state.destination {
@@ -262,6 +271,7 @@ pub(crate) fn resolve(
         launch,
         agent_wrapper_supplied,
         title: state.name,
+        title_kind: state.name_kind,
         template_host: state.host,
     })
 }
@@ -411,6 +421,7 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.cwd, "/srv/a");
         assert_eq!(resolved.title.as_deref(), Some("from-template"));
+        assert_eq!(resolved.title_kind, Some(TemplateNameKind::Base));
         let SessionLaunch::Agent { selection, .. } = &resolved.launch else {
             panic!("an agent launch: {:?}", resolved.launch);
         };
@@ -433,6 +444,54 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.cwd, "/srv/b", "an explicit --cwd wins");
         assert_eq!(resolved.title.as_deref(), Some("explicit"));
+        assert_eq!(resolved.title_kind, Some(TemplateNameKind::Fixed));
+    }
+
+    /// Template policy applies with its name, but an agent's own title is
+    /// always exact. The helm enforces that even if an old CLI omits kind or
+    /// a peer supplies Base alongside its explicit title.
+    #[farhelm_testtrace::test]
+    fn template_name_kinds_survive_resolution_but_request_titles_are_fixed() {
+        for kind in [TemplateNameKind::Base, TemplateNameKind::Fixed] {
+            let stored = [template(
+                "named",
+                TemplateFields {
+                    name: Some("review".into()),
+                    name_kind: Some(kind),
+                    agent: Some(LaunchHarness::Codex),
+                    destination: folder("/work"),
+                    ..Default::default()
+                },
+            )];
+            let named = resolve(
+                &stored,
+                &["named".into()],
+                &TemplateFields::default(),
+                &[],
+                false,
+                false,
+            )
+            .unwrap();
+            assert_eq!(named.title.as_deref(), Some("review"));
+            assert_eq!(named.title_kind, Some(kind));
+            for supplied in [None, Some(TemplateNameKind::Base)] {
+                let explicit = resolve(
+                    &stored,
+                    &["named".into()],
+                    &TemplateFields {
+                        name: Some("exact".into()),
+                        name_kind: supplied,
+                        ..Default::default()
+                    },
+                    &[],
+                    false,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(explicit.title.as_deref(), Some("exact"));
+                assert_eq!(explicit.title_kind, Some(TemplateNameKind::Fixed));
+            }
+        }
     }
 
     /// Spec: with no template, `--command` and its YOLO answer make a

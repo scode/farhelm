@@ -131,8 +131,12 @@ fn render(agent: &Command) -> String {
          Create needs a launch, a destination and a host. Use --cwd DIR for an existing\n\
          directory, or --gh OWNER/REPO (--github is an alias) for a new managed checkout;\n\
          never both. --gh acme/web --title 'Fix parser' creates directory web-fix-parser. Without\n\
-         a title Farhelm picks the next free web-N. A taken or over-long name is refused,\n\
-         never suffixed. The checkout folder and post-clone command come from helm settings.\n\
+         a title Farhelm picks the next free web-N. Your own --title is exact: a taken\n\
+         or over-long name is refused. A template's base title instead tries its literal\n\
+         name, then -2 through -50 when taken, before the approval card shows the chosen\n\
+         title and folder. Fixed template titles stay exact. Keyed retries recover the\n\
+         original checkout before searching again. The checkout folder and post-clone\n\
+         command come from helm settings.\n\
          An agent launch is --agent TYPE with optional --model, --effort, --permissions\n\
          and --wrapper COMMAND; Farhelm composes its command.\n\
          A wrapper is a shell-quoted list of words placed before that command, with no\n\

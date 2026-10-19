@@ -710,16 +710,17 @@ The untouched Clone name is computed at every launch-related read, so display, p
 agree without destroying the copied title needed when returning to a folder. One naming source is active at a time: the
 untouched Clone default or a template's base/fixed name. Applying a name template replaces the Clone series, and typing
 clears the template source. Occupied-name previews advance a Clone default through `-clone`, then `-clone-2` through
-`-clone-50`, or a template base through its raw base, then `-2` through `-50`; fixed names never advance. Snapshots
-retain the template's unnumbered base and kind while display, preview and submission use its resolved name. Folder
-destinations use the base unchanged. At the cap the conflict stays visible. Changing host installation or repository
-resets the search. The preview API classifies an unmarked 409 as occupied, separately from the helm's stale-precondition
-409, transport errors and other refusals; new conflict responses must revisit that classification. The existing
-preview-authority generation checks reject late results before they can advance a name. A retained attempt matching the
-current intent and installation freezes its name for reconciliation; the occupied directory may be its own accepted
-allocation. Editing the launch while an ambiguous attempt is retained can advance the default away from that attempt,
-even if the edit is later undone; reselecting the repository restarts the search and restores the opportunity to
-reconcile its name. Re-preview never submits a launch by itself.
+`-clone-50`, or a template base through its raw base, then `-2` through `-50`; fixed names never advance. The pure
+`CheckoutNameSequence` in `farhelm-proto::github_checkout` owns that shared series and cap; GUI source/target state
+stays in the form. Snapshots retain the template's unnumbered base and kind while display, preview and submission use
+its resolved name. Folder destinations use the base unchanged. At the cap the conflict stays visible. Changing host
+installation or repository resets the search. The preview API classifies an unmarked 409 as occupied, separately from
+the helm's stale-precondition 409, transport errors and other refusals; new conflict responses must revisit that
+classification. The existing preview-authority generation checks reject late results before they can advance a name. A
+retained attempt matching the current intent and installation freezes its name for reconciliation; the occupied
+directory may be its own accepted allocation. Editing the launch while an ambiguous attempt is retained can advance the
+default away from that attempt, even if the edit is later undone; reselecting the repository restarts the search and
+restores the opportunity to reconcile its name. Re-preview never submits a launch by itself.
 
 Search is the composer's one initial and post-selection focus target on both tabs. Its command-tab result set is built
 without the retained structured harness or model, so it can expose globally owned models but cannot offer an effort that
@@ -3873,6 +3874,13 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
   follow: stdout is the new session's id and nothing else, matching `farhelm spawn`'s contract, with one confirmation
   line on stderr (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells).
+  `agent_launch::Resolution` carries the template name kind; applying request flags sets a request's own title to Fixed
+  in the helm, including for older CLIs. For a managed destination, `create_checkout_for_agent` first completes keyed
+  recovery, then previews a Base through the shared `CheckoutNameSequence` before approval. Only a supervisor-reply
+  Conflict advances: this endpoint maps Occupied to Conflict, while helm conflicts such as a missing install identity
+  refuse immediately. Other errors and the cap refuse too. Approval and create carry the resolved title and accepted
+  path; no create is retried automatically, and the keyed request identity stays the original intent.
+
   The id is the one agent output meant to be captured as a SINGLE VALUE — an agent takes it and hands it back as
   `--session` — so a confirmation on stdout would make the two verbs that need parsing the two that cannot be. The
   listings are parsed too (the relay fixture reads the hosts table, and `docs/old_readme.md` shows the same), but they
