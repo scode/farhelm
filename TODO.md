@@ -194,6 +194,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md, Agent-spawned sessions,
   keeps the design.
 
+- **Say why Enter in the session launcher did nothing.** When pressing Enter in the session launcher does not launch,
+  for whatever reason, show the reason instead of silently doing nothing. The launcher already explains a refused launch
+  when its prerequisites are missing (the Launch button's tooltip, and a message after an attempt), so the cases that
+  still stay silent are outside that check; which case prompted this entry was not recorded. Start by listing every way
+  an Enter in the launcher can end without a launch or a message.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
