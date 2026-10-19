@@ -5059,8 +5059,7 @@ impl Supervisor {
             } else {
                 Self::browse_directory_blocking(&cwd)?
             };
-            listing.managed_checkout =
-                crate::working_copies::cwd_is_managed(&conn.lock(), &listing.cwd)?;
+            listing.managed_checkout = crate::working_copies::cwd_is_managed(&conn, &listing.cwd)?;
             Ok(listing)
         })
         .await

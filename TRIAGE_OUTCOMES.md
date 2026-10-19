@@ -15729,7 +15729,10 @@
   more than the small change sketched (reusing the existing identity comparison in that read), stop and record the item
   as covered by SPEC.md's 2026-10-11 out-of-band acceptance instead, with no code change. Either way, remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/workspace-trust-destination.md`.
+- Execution: change `nusnoltoqutlxxqpmxytotkytqunrslm`, bookmark
+  `plan/workspace-trust-destination/03-checkout-trust-identity`. The gate held: the membership snapshot reuses the
+  existing identity comparison after releasing the database lock, with no new ownership mechanism. Draft PR
+  [#2354](https://github.com/scode/farhelm/pull/2354/changes).
 
 ## unusable-directory-launches-in-home.md
 

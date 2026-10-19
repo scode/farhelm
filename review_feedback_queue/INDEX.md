@@ -60,9 +60,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`tunnel-port-can-divert-local-traffic.md`](tunnel-port-can-divert-local-traffic.md) — A consented tunnel can take a
   Mac port a later local service expects, without that consequence in the warning.
 
-- [`reused-checkout-path-grants-trust.md`](reused-checkout-path-grants-trust.md) — Replacing a managed checkout at its
-  recorded path can make ordinary content appear eligible for automatic trust.
-
 - [`summary-card-omits-observed-yolo.md`](summary-card-omits-observed-yolo.md) — The main session summary can still say
   guarded after YOLO is observed; consequential reliance remains unverified.
 

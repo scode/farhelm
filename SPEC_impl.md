@@ -2158,15 +2158,17 @@ can still reproduce a launch exactly. Fresh checkout intent already proves manag
 resolved launch in its existing create fingerprint. For an existing directory, enabled trust uses the pinned target
 host's bounded `BrowseDirectory` reply in its default-off `membership_only` mode. Protocol 55 adds that mode and its
 required `managed_checkout` reply boolean: the supervisor canonicalizes the accepted cwd and reads allocated registry
-ancestors using the same component predicate as admission. The focused mode skips child enumeration and the picker's
-printable-label restriction, preserving ordinary launch support for unreadable directory listings and control-character
-paths. When trust is granted, the helm carries that canonical cwd through approval, dispatch and history; a submitted
-symlink cannot redirect the trusted launch during an approval wait. Disabled and unmanaged destinations keep their
-submitted spelling. Plain Restart and Replace retain their stored launch behavior. The session list is not an ownership
-inventory, since nested memberships project only their innermost checkout. The read grants no lease; ordinary create
-admission still validates the destination. A missing ownership field would silently change trust behavior, so protocol
-skew refuses the peer until its ordinary supervisor update rather than treating an old reply as unmanaged. The normal
-skew-aware update path remains unchanged.
+ancestors using the same component predicate as admission. Each matching ancestor must also pass the existing recorded
+directory-identity comparison; the database lock is released before these filesystem observations. A missing, replaced
+or unconfirmed-remount directory supplies no managed membership. The focused mode skips child enumeration and the
+picker's printable-label restriction, preserving ordinary launch support for unreadable directory listings and
+control-character paths. When trust is granted, the helm carries that canonical cwd through approval, dispatch and
+history; a submitted symlink cannot redirect the trusted launch during an approval wait. Disabled and unmanaged
+destinations keep their submitted spelling. Plain Restart and Replace retain their stored launch behavior. The session
+list is not an ownership inventory, since nested memberships project only their innermost checkout. The read grants no
+lease; ordinary create admission still validates the destination. A missing ownership field would silently change trust
+behavior, so protocol skew refuses the peer until its ordinary supervisor update rather than treating an old reply as
+unmanaged. The normal skew-aware update path remains unchanged.
 
 `SessionInfo.workspace_trust_prompt` is separate from the retained Claude-only flag. The ticker reads Claude and Codex
 through their integration readers and Muse through the exhaustive launch-harness seam, because Muse shares Generic's
