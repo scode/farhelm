@@ -15703,7 +15703,9 @@
   PR; a regression test modeled on `agent_clone_normalizes_trust_for_the_target_before_dispatch`; SPEC.md "Managed
   checkouts" states that an inherited spawn's trust follows its destination. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/workspace-trust-destination.md`.
+- Execution: change `qvnrytqksosxzmvyxqxsvlwzppqmzlsm`, bookmark
+  `plan/workspace-trust-destination/01-inherited-spawn-trust`; malformed stored trust segments are refused, preserving
+  the source's other command words. Draft PR [#2349](https://github.com/scode/farhelm/pull/2349/changes).
 
 ## reused-checkout-path-grants-trust.md
 
