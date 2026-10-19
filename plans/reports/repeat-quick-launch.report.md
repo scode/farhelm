@@ -159,3 +159,99 @@ Each PR had the required single fresh-context gpt-6.1-sol review at high effort,
 checklist. PR1's missing preview revision signal and two browser coverage gaps were corrected and reconciled. PR2's
 documentation omission was corrected. PR3's explicit-Base write reply was normalized and its regression passed. PR4's
 review found no remaining issue. No review swarm was used. Commit/PR wording went through separate cold reads.
+
+### Landing
+
+Landed as #2325, #2328, #2330 and #2332, merged bottom-up, with one small styling fix made during the landing (below).
+No other plan landed in the same round.
+
+#### Going back to an older version breaks more than the report says
+
+The report says that once any template has a fixed name, an older build cannot list or use any template. Reading the
+code, an older helm loses more than that, because one template it cannot read fails its whole template list, and it
+reads that list in more places than the launcher:
+
+- every `farhelm agent create` and every plain `farhelm spawn` fails, even one with no `--template`;
+- agents cannot edit, delete or list templates, so an agent cannot remove the fixed-name template either.
+
+Still working on the older helm: starting a session from New Session in the app by filling in the form yourself,
+`farhelm spawn --inherit-agent`, and `farhelm agent clone`. The way out is the report's: switch the template back to a
+base name, or delete it, on the newer build before going back. This was found by reading the code, not reproduced on an
+older build.
+
+No decision is needed for the changelog: the repository's changelog rule is that no entry mentions that a release cannot
+be downgraded from, so this stays out of the draft like the narrower version the maintainer already accepted.
+
+#### Release relevance
+
+The supervisor connection protocol goes from 60 to 61. Protocol 60 shipped in 0.30.0-rc.1, so anyone on rc.1 gets a
+supervisor update with the next release that includes this plan. The open 0.30.0-rc.2 release PR (#2333) is based on a
+main from before this plan, so rc.2 as it stands does not include it; whether rc.2 should be rebased to pick it up is a
+release decision.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained the plan that shows host setup and removal as numbered steps and keeps host refusals
+in dialogs (#2298 through #2317), three fixes to dragging the Mac app's window (#2318, #2319, #2320), the switch that
+stops agents from sending prompts to running sessions (#2336), and docs, instructions and plan bookkeeping. During the
+round, before the stack merged, main also gained a trailing code review record (#2334), which adds findings to the
+review queue and changes no code. A fresh-context reviewer and I read each against the stack:
+
+- The host dialogs and the window-drag fixes touch the hosts panel, host setup and the Mac window frame; none of them
+  touch templates, how the launcher names sessions, or agent creates. The new launcher styles do not collide with the
+  host dialogs' styles.
+- #2336 removed the prompt command from the instructions that Farhelm gives agents; this stack adds a paragraph on
+  choosing base or fixed names to the same instructions. Both changes survive on the merged result.
+- The template shortcuts that landed earlier in the day (number keys and ⚡ in the launcher, sequences, Cmd-J) apply
+  templates through the same shared step this stack extended, so they number base names the same way, and applying a
+  template still clears what the launcher kept from an earlier launch whose reply was lost, so a template shortcut
+  starts a new launch instead of replaying that one, as those shortcuts need.
+- No other open work changes the protocol.
+
+The only rebase conflict was in TODO.md, between this stack's removal of its own entry and other edits on main; both
+sides' changes are kept. The landed code is identical to what was tested after the landing fix below.
+
+#### Fixes made during the landing
+
+- The launcher's marker beside the Name label (the small badge saying a template supplied the name and that it will be
+  numbered) used a hard-coded fully rounded corner. The UI's JavaScript tests include a check that the stylesheet uses
+  only its named values, and it rejected this; the executor had not run those tests. The marker now uses the
+  stylesheet's rounding for small badges, 8 pixels. On a marker about 17 pixels tall that is nearly fully round, so it
+  should look the same; no screenshot was taken. Fixed in #2325's commit.
+
+#### Possible follow-ups
+
+- When a template's base name is taken, the launcher tries the next number in the background before showing the preview.
+  The executor's browser tests ran this against a local host only. On a slow SSH host it may take visibly longer before
+  Launch is enabled; this was not tried. Trying a repeated quick launch against a real remote host would settle it.
+- Unrelated to this plan: `dprint check` fails on main because of a formatting issue in the UI crate's `Cargo.toml` that
+  came with the Mac window-drag fix #2318. A CI run, which happens only on demand, would report it in its dprint job.
+
+#### Checks
+
+- Run now, on the rebased stack: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, and the isolated
+  test-sleep check (304 delays, none without a reason). Through the test recorder with pinned nextest and tmux, four
+  slots and no retries, the whole protocol, helm, supervisor and UI libraries, the `farhelm` binary's own tests, the
+  agent command-line test file, and the managed-checkout, agent-listing and structured-launch end-to-end tests: 3327
+  passed, run `dfd0f447-75b1-4cbb-9ef5-aac956e44d4e`. The executor had run selected tests only; these are whole
+  libraries because the stack changes the protocol and template handling across all of them. The run's output has no
+  runtime `SKIPPED` marker, so the end-to-end tests ran rather than returning early.
+- `node --test` in the UI's JavaScript test directory through the recorder failed once on the stack as delivered (run
+  `b4167102-447a-4810-a122-d144ee3e8516`, the marker's rounding above) and passed after the fix: 310 passed, run
+  `ef7bee95-6d5c-4a01-8a2f-d5865f4be13d`. The Rust results above still apply after the fix, since it changed one
+  stylesheet value that no Rust test reads.
+- After the fix: the website build, the release web build, and
+  `npx playwright test templates.spec.ts quick-launch.spec.ts launcher-template-shortcuts.spec.ts template-list-shortcut.spec.ts github-checkouts.spec.ts approval-layout.spec.ts save-template.spec.ts`
+  through the recorder on both engines, one worker, no retries: 244 passed, run `0c748a23-78e0-4fbe-80ba-2e0acd773e96`.
+  No `save-template.spec.ts` exists, so that name selected nothing; the Save as template cases live in the templates and
+  checkout files, which ran. These cover the stack's launcher numbering, the Templates editor, Save as template, and the
+  template shortcuts and approvals that share its code.
+- On the merged main: `python3 releasing/check-changelog.py format` passed; `dprint check` passed for every file except
+  the unrelated `Cargo.toml` above.
+- Skipped: the full workspace and browser suites, installer, provisioning, desktop runtime and doctests, for the
+  report's reasons, and `python3 scripts/check-agents-md.py`, since the stack changes none of the repository's own
+  agent-instruction files (the instructions Farhelm gives agents are covered by the `farhelm` binary's tests above).
+  Nothing that landed since the stack was based changes those areas in a way this stack depends on.
+
+Nothing else in the executor's report became untrue at landing.
