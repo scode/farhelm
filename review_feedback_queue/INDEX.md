@@ -81,9 +81,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`agent-approval-omits-workspace-trust.md`](agent-approval-omits-workspace-trust.md) — Agent launch approval cards no
   longer explain the effective managed-checkout trust choice in plain language.
 
-- [`template-wrapper-follows-different-agent.md`](template-wrapper-follows-different-agent.md) — An agent can pair a
-  saved template wrapper with a different agent type without a fresh wrapper approval.
-
 - [`download-opens-without-hover-hint.md`](download-opens-without-hover-hint.md) — A policy change can make a Cmd-click
   open a file whose hover offered only a download.
 

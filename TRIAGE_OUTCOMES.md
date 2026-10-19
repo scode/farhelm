@@ -15777,7 +15777,10 @@
 - Completion criteria: SPEC.md (wrappers or agent-spawned sessions) states the principle, so the command-line behavior
   and the absent wrapper card are covered; no code change. If the report's open decision is still presented as
   unresolved somewhere maintained, point it at this outcome. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/agent-spawned-session-rules.md`.
+- Execution: complete in change `zstnqsvm`, bookmark `plan/agent-spawned-session-rules/01-wrapper-agent-rule`,
+  https://github.com/scode/farhelm/pull/2346/changes. The specification states that a template's wrapper remains
+  user-configured when an agent-type flag changes the pairing. The finished agent-wrappers report is retained unchanged
+  under the plans editing rules.
 
 ## prompt-approval-can-cross-agent-runs.md
 
