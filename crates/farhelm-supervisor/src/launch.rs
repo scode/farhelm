@@ -1035,6 +1035,25 @@ pub(crate) fn append_tab_browser(
     }
 }
 
+/// Refuse a session program whose folder would split into multiple PATH entries.
+///
+/// Startup supplies the effective session program: the app forwarder in the
+/// versioned Mac layout, otherwise the supervisor's executable. Check before
+/// creating supervisor state; quoting cannot preserve a colon inside PATH.
+/// The program's filename is not part of that entry and may contain a colon.
+pub fn validate_session_program_path(program: &Path) -> anyhow::Result<()> {
+    let folder = program
+        .parent()
+        .context("resolving the session program's folder")?;
+    if folder.as_os_str().as_encoded_bytes().contains(&b':') {
+        anyhow::bail!(
+            "the Farhelm program folder, {}, contains ':' and cannot be used as one PATH entry",
+            folder.display()
+        );
+    }
+    Ok(())
+}
+
 /// The environment and PATH contract every child process the launch shim
 /// creates shares: the supervisor binary's directory wins PATH resolution
 /// (so every child — agent, `git`, post-clone hook — invoking `farhelm`

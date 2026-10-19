@@ -5478,6 +5478,7 @@ impl Supervisor {
         let session_farhelm_exe = versioned_program
             .as_ref()
             .map_or_else(|| farhelm_exe.clone(), |program| program.forwarder.clone());
+        crate::launch::validate_session_program_path(&session_farhelm_exe)?;
         let session_farhelm_exe_str = session_farhelm_exe
             .to_str()
             .expect("derived from a UTF-8 path by replacing ASCII components")
@@ -31843,6 +31844,49 @@ exit 0
                 "the refusal names the state directory and the reason: {refusal}"
             );
         }
+    }
+
+    /// Colon-bearing program folders fail before startup creates any state.
+    ///
+    /// A colon would silently add command-search directories, including relative
+    /// ones, to every session. Exercise the real constructor for ordinary and
+    /// versioned app paths, and require the refusal to name the effective PATH
+    /// folder (the forwarder folder for the app). A colon in only the program
+    /// filename does not split PATH and must remain allowed by the shared check.
+    #[farhelm_testtrace::test]
+    async fn a_colon_in_the_session_program_folder_is_refused_at_startup() {
+        let state = StateDir::new();
+        let state_dir = state.path().join("not-created");
+        assert!(
+            !state_dir.exists(),
+            "fixture starts without supervisor state"
+        );
+        for (program, folder) in [
+            ("program:folder/farhelm", "program:folder"),
+            (
+                "Farhelm:bundle.app/Contents/Versions/0.30.0/farhelm",
+                "Farhelm:bundle.app/Contents/MacOS",
+            ),
+        ] {
+            let exe = state.path().join(program);
+            let folder = state.path().join(folder);
+            let refusal = match Supervisor::new_with_exe(&state_dir, exe).await {
+                Err(error) => format!("{error:#}"),
+                Ok(_) => panic!("a colon-bearing PATH folder must refuse startup"),
+            };
+            assert!(
+                refusal.contains("contains ':'")
+                    && refusal.contains("PATH entry")
+                    && refusal.contains(&folder.display().to_string()),
+                "the refusal names the PATH folder and reason: {refusal}"
+            );
+            assert!(
+                !state_dir.exists(),
+                "refusal must leave no supervisor state"
+            );
+        }
+        crate::launch::validate_session_program_path(&state.path().join("farhelm:custom"))
+            .expect("a colon in the filename does not split its parent folder");
     }
 
     /// The opt-out a supervisor was STARTED with reaches the launch

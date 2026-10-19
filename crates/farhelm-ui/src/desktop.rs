@@ -422,6 +422,15 @@ impl DesktopBootstrap {
         ))? {
             farhelm_helm::LocalSupervisorDiscovery::Answering => None,
             farhelm_helm::LocalSupervisorDiscovery::Absent => Some({
+                // Resolve a relative developer override before checking the
+                // session PATH folder: its working directory can supply a colon.
+                // Returning the refusal here gives startup's existing alert the
+                // same folder and reason as the child would report on stderr.
+                let absolute = std::path::absolute(&farhelm)
+                    .context("resolving the managed supervisor program path")?;
+                let session_program = farhelm_supervisor::app_bundle::versioned_program(&absolute)
+                    .map_or_else(|| absolute.clone(), |program| program.forwarder);
+                farhelm_supervisor::launch::validate_session_program_path(&session_program)?;
                 run_tmux_preflight_or_exit(
                     supervisor_tmux.as_deref(),
                     ambient_tmux.as_deref(),

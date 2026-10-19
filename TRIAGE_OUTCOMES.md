@@ -16076,7 +16076,10 @@
   contains `:`, with a message naming the folder; the desktop app shows that clearly instead of a bare child exit; a
   test modeled on the non-UTF-8 startup refusal; SPEC.md "Supported user environments" gains a sentence beside the `$`
   refusal. Complexity gate: if it is not that small, discard instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/supervisor-colon-path-refusal.md`.
+- Execution: complete in change `rquzzryupktvqtnykrumlqmtzmstpyov`, bookmark
+  `plan/supervisor-colon-path-refusal/01-colon-path-refusal`;
+  [PR #2361](https://github.com/scode/farhelm/pull/2361/changes). The small-refusal gate held: one shared path check, a
+  supervisor startup call and the separately authorized desktop startup call; no launch redesign.
 
 ## header-copy-warning-follows-refreshed-value.md
 
