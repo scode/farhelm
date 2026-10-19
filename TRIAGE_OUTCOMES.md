@@ -15969,7 +15969,17 @@
   finish, release the old one, and check whether a later lookup counts bytes that differ from the signed archive member
   as a cache hit. Bring the evidence back to the user for a decision; record the result here. The feedback item stays
   until that decision is executed.
-- Execution: planned in `plans/queue/payload-lock-reproduction.md`.
+- Execution: investigation against main `41e332436529d88d932324dcde0ef08172b0a535`, using scratch-only hooks; recorder
+  run `33f2852b-5691-4c8e-a70d-089d4669ecf0`. A real embedded helm returned after readiness while a directly invoked
+  signed-fixture extraction stayed parked; a successor acquired its state-directory claim before that worker resumed. A
+  new payload source then finished on the same cache. After staging, the old worker failed opening the removed staging
+  file for hashing; after hashing and after checksum-marker publication, it failed renaming the removed staging file. At
+  all three points, a later independent source reported a network-free cache hit whose bytes matched the signed archive
+  member. No incorrect cache hit was observed in these schedules; this is not a proof over every interleaving. The
+  source was invoked directly rather than through accepted provisioning, and a full desktop startup failure or runtime
+  destruction was not reproduced. Awaiting a new decision; feedback file kept. Change
+  `ysxrrvxzlzxxpszrwqxnkxutvmzqnonv`, bookmark `plan/payload-lock-reproduction/01-payload-race-evidence`,
+  https://github.com/scode/farhelm/pull/2356/changes.
 
 ## cancelled-startup-loses-archive-location.md
 
