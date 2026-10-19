@@ -144,3 +144,67 @@ changed #2305 and #2317 units with the complete test-authoring checklist. #2305 
 Remove dismissal finding was accepted, reproduced, corrected in the same PR and reconciled by its reviewer. A separate
 review at the executing model confirmed the correction uses the existing live guard without adding another coordination
 mechanism. No finding remains open. Commit and PR wording is unchanged from its previous cold-read gate.
+
+### Landing
+
+Landed on its own in round 100, as #2298, #2303, #2305, #2307, #2311 and #2317, merged bottom-up, after the previous
+landing blocked it and the maintainer sent it back. Unchanged from what the report describes.
+
+#### What landed since the stack was based, and whether it interacted
+
+The round-99 landing found that the stack plays correctly with the day's template-shortcut, launch-sequence and Cmd-J
+changes: the new numbered confirmations and refusal dialogs count as open dialogs, so those shortcuts wait while one is
+shown, and the dialog focus rules come from the shared dialog setup. It found one interaction that is not handled; see
+Possible follow-ups. Since the redelivery's base, only plan bookkeeping and a triage record (#2331) reached main. During
+the round, before the stack merged, main also gained three fixes to dragging the Mac app's window by its top band
+(#2318, #2319, #2320) and a landing instruction, none of which touch the hosts panel. The landing rebase was clean.
+
+A fresh-context reviewer checked what changed since the block:
+
+- The five updated browser tests still check what each was for (the page unlocking during a run, Update holding off a
+  host already being set up, the retry destination, keeping the host, a failed removal staying visible) against the new
+  step list and refusal dialogs.
+- The suspected "setting up 0/0" regression was a contradictory test, as the report says: a real helm never reports a
+  running setup with no steps, because every planned action becomes a step and every plan ends with a final step.
+- The Remove dialog fix is correct: a dismissal that arrives right after confirming can no longer unlock the page behind
+  a still-open dialog. It does not change the dialog focus rules or how template shortcuts recognise an open dialog.
+
+#### Fixes made during the landing
+
+None. The two small edits the previous landing made locally (hover text on the refusal dialog's buttons, and a TODO.md
+entry that still pointed at an entry this plan removes) were redone by the executor, as the maintainer's answer asked.
+
+#### Possible follow-ups
+
+- Refusal dialogs can now arrive by themselves, for example after a one-click Update or "update all". If another dialog
+  is open at that moment (Settings, New session, Templates, the Cmd-J list), both can stop responding to clicks until
+  Escape, and closing the refusal can put focus on a host row behind the other dialog. This is the same kind of problem
+  as the queued review finding "Delayed host confirmations can disable another open dialog", now reachable from more
+  actions; it was not fixed at landing, and that queue item does not mention it yet. Found by reading the code, not
+  reproduced.
+- The changelog draft says Update shows a numbered confirmation; normally it does not, so release curation should reword
+  that sentence.
+- The rewritten test for menus staying attached during a host's setup now folds the progress before the failure, so it
+  no longer covers a setup row that opened by itself and was never folded. In that case, by reading the code, a failure
+  makes the row taller without anything the menus watch changing, so an open menu on a row below can end up detached
+  from its button. It still acts on its own host, so it looks wrong rather than doing the wrong thing. The test also
+  never checks that the row's detail is actually open after the failure.
+
+#### Checks
+
+- Run now, on the rebased stack (the landed code is identical to it): `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated test-sleep
+  check (304 delays, none without a reason); through the test recorder with pinned nextest and tmux, four slots and no
+  retries, the whole helm and UI libraries: 1743 passed, run `a648d3c2-423e-445d-9795-e75eb49ed515`; `node --test` in
+  the UI's JavaScript test directory through the recorder: 306 passed, run `a529d7e7-316d-45ae-92b1-53942d5393c8`; then
+  fresh `cargo build` and web builds and
+  `npx playwright test provisioning.spec.ts terminal-multihost.spec.ts settings.spec.ts tooltip-coverage.spec.ts modal-focus.spec.ts`
+  through the recorder on both engines, one worker, no retries: 276 passed, run `ef8811c0-9363-405b-b37c-98a7dfa397e3`.
+  The two host files ran in full.
+- Reused: from the previous landing on the earlier version of this stack, the protocol library and the `farhelm`
+  binary's tests (run `d854fd00-a793-42fd-b941-8a4ae02b811b`, where only an unrelated, already known UI timing test
+  failed once under load) and the website build, since the redelivery changed no protocol, command-line or website
+  files.
+- Skipped: everything else the report skipped, for the reasons it gives.
+
+Nothing in the executor's report became untrue at landing.
