@@ -4,21 +4,19 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.30.0 - 2026-10-18
 
-**DRAFT release notes - not yet finalized**
-
 ### 💥 Breaking
 
 - This release *requires* you to update your remote hosts. (#2192, #2206, #2227, #2255, #2257, #2265, #2271, #2273, #2325)
-- Workspace trust for Codex, Muse and Pi is no longer chosen in the session launcher. It now comes from separate Settings switches, off by default, that apply only to managed checkouts. The `--trust` command-line option is gone, so scripts that pass it need it removed, and the trust saved in older templates is ignored. Codex and Muse show a hint beside their trust question that opens the matching setting. (#2255, #2256)
+- Workspace trust, which lets Codex, Muse and Pi load a project folder's own settings and extensions without asking first, is no longer chosen in the session launcher. It now comes from separate Settings switches, off by default, that apply only to managed checkouts. The `--trust` command-line option is gone, so scripts that pass it need it removed, and the trust saved in older templates is ignored. Codex and Muse show a hint beside their trust question that opens the matching setting. (#2255, #2256)
 
 ### 🚀 Added
 
 - You can now give a new session an initial prompt in the session launcher, in a launch template or on the command line, and the agent receives it once when it starts. Goose, Pi and custom commands do not take prompts. (#2200, #2202, #2203, #2238, #2295)
-- You can now set a wrapper prefix, a command that runs the agent for you, in the session launcher or a launch template, and keep Farhelm's agent status, conversation tracking and Restart. Agents can pass `--wrapper` too; on hosts that ask before YOLO launches, a wrapper an agent supplies needs your approval. (#2271, #2272)
+- You can now set a wrapper prefix, a command that runs the agent for you (for example `nice -n 10`, to run the agent at a lower priority), in the session launcher or a launch template, and keep Farhelm's agent status, conversation tracking and Restart. Agents can pass `--wrapper` too; on hosts that ask before YOLO launches, a wrapper an agent supplies needs your approval. (#2271, #2272)
 - You can now combine launch templates from the keyboard: Cmd+X in the Mac app, or Ctrl+Shift+X elsewhere, followed by their number keys and Enter. A template that leaves some choices open can have a number key too; pressed alone, it opens the session launcher. (#2225, #2228)
-- While New, Clone or Replace with is open, your template shortcuts now fill in the session launcher with their saved choices, so you can press several, review the result and launch when ready. (#2310)
+- Your template shortcuts now also work while the session launcher is open: each press fills in that template's choices, and nothing starts until you choose Launch. (#2310)
 - Cmd+J on a Mac, or Ctrl+Shift+J elsewhere, opens a list of your templates: type a name and press Enter to start from that template. Browsers may keep the key for their own shortcut; the desktop app does not. (#2316)
-- Quick launch now offers to name the new session while its agent starts; Enter or Escape keeps the default name, and a Settings switch turns the offer off. (#2233, #2234)
+- Quick launch now offers to name the new session once it has already started, so naming never holds up the launch. Enter or Escape keeps the default name, and a Settings switch turns the offer off. (#2233, #2234)
 - Cmd+W in the Mac app, or Ctrl+Shift+Backspace in a browser, now deletes the open session, with the same confirmation as its Delete button. Cmd+L, or Ctrl+Shift+L in a browser, renames it. Cmd+W no longer closes the Mac app; the close button and Cmd+Q still do. (#2221, #2230)
 - In the session launcher, you can now type `guarded` to pick Guarded permissions, `perms:` to find the approval modes your agent offers, and `effort:default` to go back to the agent's default effort. (#2297, #2301)
 - Agents can now delete other sessions with your approval, and stop their agent first when they ask to. (#2192)
@@ -38,8 +36,8 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ### 🔧 Fixes worth highlighting
 
-- Starting a session from a template now numbers its session name when the template's managed-checkout folder is already taken, instead of refusing, so you can reuse the template. This applies to existing templates too; a template set to a fixed name still reports the clash. (#2325, #2328, #2330, #2332)
-- Sessions can now start in fresh GitHub checkouts on hosts that use Git's `safe.bareRepository=explicit` setting, without relaxing it. (#2199)
+- You can now press the same quick-launch key several times in a row to start several sessions from one template, even when the template clones into a managed checkout. Each new session gets its own checkout and the template's name with a number added, such as `review-2`; before, the second press was refused because the folder was taken. This applies to existing templates too; a template set to a fixed name still reports the clash. (#2325, #2328, #2330, #2332)
+- Sessions in fresh GitHub checkouts failed to start on hosts where Git's `safe.bareRepository` setting is `explicit`, a security setting that stops Git from using a bare repository unless it is named outright. Farhelm keeps a bare copy of each repository to clone from, and now names it outright, so these sessions start without you having to relax the setting. (#2199)
 - Retrying Replace from another button, or after reopening the session, no longer starts an extra agent when the first attempt had already created the replacement. (#2205)
 - Terminal links whose destination hover is covered by an approval card, or cut off by the window, now refuse to open, so you always see where a link goes before it opens. (#2254)
 - On a Mac with a Force Touch trackpad, dragging the window by its header now works every time. (#2318)
