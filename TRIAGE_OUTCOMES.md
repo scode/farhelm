@@ -15837,7 +15837,12 @@
   the existing conflict error and an immediate refresh of the creating host; the in-memory path also refuses to record
   an ID the database gives to another host. Simulated-host tests cover the no-identity and answer-then-disconnect cases.
   SPEC_impl.md says the refusal holds whichever storage path is used. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Superseded 2026-10-18: the user dropped this targeted fix ("no small stuf flets just do thew hole redesign") in favor
+  of the entry-prefixed session identity redesign recorded under `pending-approval-can-cross-host-entries.md`, which
+  makes a Create reply unable to name another host entry's session at all. This item is executed by that outcome; its
+  completion criteria above no longer apply.
+- Execution: folded into `pending-approval-can-cross-host-entries.md`; that outcome's change removes this feedback file
+  and its index entry.
 
 ## tunnel-error-notice-obscures-link-disclosure.md
 
@@ -16104,4 +16109,52 @@
   on the Mac when free, so a Mac program expecting that port may reach the remote host instead; SPEC.md's list of what
   the warning explains and the docs page that repeats the warning say the same; edit the tunnel feature's existing
   changelog fragment if it is unreleased. Remove the feedback file and its index entry.
+- Execution: `pending`.
+
+## pending-approval-can-cross-host-entries.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading current main (9ba6b0e9); nothing was run. Session IDs are minted by each host's
+  supervisor and the helm keys them fleet-wide (unique index on the bare ID, every per-session route and owner lookup by
+  ID alone), with first claim wins and contested IDs refused. Agent Stop, Rename and Restart approvals look up the owner
+  before the card and again by ID after approval (`agent_requests.rs` around 346–418, `sessions.rs` around 2536–2538);
+  GUI Delete has no host check and plain Replace compares hosts only when "replace with" names one. Removing and
+  re-adding a host, or adopting a new identity for it, clears that host's remembered sessions and resets first claim
+  wins, so a waiting approval or confirmation shown for host entry A can be sent to a session on entry B; a dishonest
+  host can arrange this because it sees every session ID in the fleet. Rejecting foreign IDs per connection cannot close
+  it, because the helm learns a host's sessions only from that host. Host entries already carry a helm-assigned,
+  never-reused number, and the helm already refuses to connect two entries to one installation identity, but that
+  refusal no longer applies once the honest entry is removed.
+- Decision: on 2026-10-18 the user first leaned towards accepting this in the spec, then asked whether session IDs and
+  other identities could be prefixed by a host UUID so that "the host identity, as determined by the Helm, can never be
+  duplicated by a dishonest host" and "any reference to a session is durably associated with that exact host identity".
+  After the session explained that the prefix should be a helm-assigned host-entry UUID rather than the supervisor's
+  self-reported installation identity, and that this is the redesign it had sized earlier, the user chose it: "costs are
+  fine. for the agents/cli, just strat requiring the full id", a UUID rather than the sequential entry number ("a good
+  property to have and it doesn't seem to add any real complexity"), and "no small stuf flets just do thew hole redesign
+  as part of fix spec+code here", which folds `create-reply-foreign-id-bypasses-cache-refusal.md` into this outcome. For
+  an agent naming itself, they chose option (a): the helm accepts a bare ID only when it is the requesting session's own
+  ID. They accepted the upgrade costs below. Principle for the spec: a session is identified to the helm, its clients
+  and agents by its host entry's helm-assigned UUID together with the supervisor's session ID; nothing a host reports
+  can choose or reuse another entry's prefix, and a reference to a session never reaches a different host entry.
+- Completion criteria:
+  - Every host entry gets a random UUID assigned by the helm, never reused and never taken from anything a host reports.
+  - The helm, its REST and event routes, the UI's selection and per-session state, pins, seen state, notification state,
+    approval keys and agent commands identify a session by entry UUID plus session ID (one opaque string where that
+    keeps call sites simple). A Create, clone or interrupted-create reply can only name a session on the entry that made
+    it. Two entries reporting the same bare session ID are two different sessions, so the accepted exception where a
+    contested ID blocks access (SPEC.md, session ownership) is removed from the spec.
+  - Waiting approval cards and GUI Delete and Replace confirmations act only on the entry they were shown for; a host
+    removed and re-added gets a new entry UUID, so stale ones are refused.
+  - Agents and the CLI must use the full ID; a bare ID is refused with a pointer to `farhelm agent sessions`, except
+    that the helm accepts a bare ID equal to the requesting session's own ID and resolves it on the requesting entry.
+  - The helm-to-supervisor protocol keeps bare session IDs; supervisors need no change, so sessions keep running across
+    the update and supervisors from older releases keep working and update through the normal path (SPEC.md "Upgrade
+    compatibility and client scale").
+  - The helm's database migration assigns entry UUIDs and re-keys cached sessions and per-session state using each
+    session's cached owner; state for IDs two entries both claim is dropped rather than guessed. Accepted by the user:
+    the migration is one-way (no downgrade), contested-ID pins and seen state are lost, and an approval card waiting at
+    the moment of the update may get no answer.
+  - SPEC.md and SPEC_impl.md state the principle and the rules above; the agent instructions describe full IDs.
+  - Remove this feedback file and `create-reply-foreign-id-bypasses-cache-refusal.md`, with their index entries.
 - Execution: `pending`.
