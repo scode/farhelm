@@ -195,10 +195,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   keeps the design.
 
 - **Say why Enter in the session launcher did nothing.** When pressing Enter in the session launcher does not launch,
-  for whatever reason, show the reason instead of silently doing nothing. The launcher already explains a refused launch
-  when its prerequisites are missing (the Launch button's tooltip, and a message after an attempt), so the cases that
-  still stay silent are outside that check; which case prompted this entry was not recorded. Start by listing every way
-  an Enter in the launcher can end without a launch or a message.
+  for whatever reason, show the reason instead of silently doing nothing. The case that prompted this: Clone on a
+  session, type `asdf` into the launcher's text field at the top, press Enter, and nothing happens. The launcher already
+  explains a refused launch when its prerequisites are missing (the Launch button's tooltip, and a message after an
+  attempt), but that does not cover this. The work is to find every other case like it, any way an Enter in the launcher
+  can end without a launch or a message, and give each one a reason. For the `asdf` case specifically, one suggested
+  behavior is to treat bare text as `name:asdf` (what the maintainer meant there); that is decided when the entry is
+  planned.
 
 ## Doc todo
 
