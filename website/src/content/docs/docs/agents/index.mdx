@@ -25,7 +25,7 @@ export const groups = [
   ] },
   { name: 'Status', caps: [
     { key: 'status', label: 'Shows working or idle', desc: 'The session list shows whether the agent is working right now or idle.' },
-    { key: 'waiting', label: 'Shows when it waits for you', desc: 'The session list shows when the agent has stopped to ask you something, and Farhelm can play a bell.' },
+    { key: 'waiting', label: 'Shows when it waits for you', desc: 'The session list shows when the agent has stopped to ask you something, and Farhelm can play a bell or send you an ntfy alert.' },
   ] },
   { name: 'Conversation', caps: [
     { key: 'resume', label: 'Restart resumes the conversation', desc: 'Farhelm follows which conversation the agent is in, so restart and restart with pick it back up, even after a reboot.' },
@@ -154,5 +154,5 @@ because Farhelm cannot promise a safety check. The same applies to older Claude,
 restart, plain Replace and copies keep their old command. Use **Clone**, **Replace with** or **Restart with** to build
 a new guarded launch. On a host that asks first, plain Replace of an older session asks for confirmation too.
 
-After this upgrade, [update your remote hosts](/docs/using/manage-hosts/) before starting sessions there. Launches saved
-as guarded cannot be read by older Farhelm releases.
+Guarded launches need Farhelm 0.29.0 or later on the host. If a remote host runs an older release,
+[update it](/docs/using/manage-hosts/) before starting sessions there.

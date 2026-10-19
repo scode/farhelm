@@ -36,8 +36,8 @@ The destination is what you would type after `ssh`, such as `dev@build-box` or a
 alias is only for display: it changes how the host is shown everywhere in Farhelm, up to 64 characters, and nothing on
 the host itself. Your Mac's destination cannot be changed. **Start YOLO sessions without asking** is the same choice the
 YOLO confirmation offers when you [start a session](/docs/using/start-a-session/#confirm-a-yolo-launch). **Run farhelm
-commands without asking** decides whether agents in this host's sessions ask you before they start, stop, or change
-sessions, or change your launch templates; [Approve what agents do](/docs/using/approve-agent-requests/) explains it.
+commands without asking** decides whether agents in this host's sessions ask you before they start, stop, change, or
+delete sessions, or change your launch templates; [Approve what agents do](/docs/using/approve-agent-requests/) explains it.
 
 **Open links without asking** and **Open local-network links without asking** are separate permissions for opening this
 host's sessions' links in your browser. Both start off, and the second includes your machine and private network. [Open
@@ -50,8 +50,9 @@ appears beside its sessions, in the host list and quick switcher, and in the ses
 as you make it and appears in your other open Farhelm windows. Your Mac starts with a red laptop mark, which you can change.
 
 In Settings, **color terminal frames by host** under **sessions** adds a thin frame around every terminal in its host's
-color. It starts off. The terminal background and text colors stay the same. The switch is shared across your devices;
-other open windows pick up a switch change when they reload.
+color. It starts off. The terminal background and text colors stay the same. The switch is kept by the
+[helm](/docs/how-it-works/the-pieces/), so it applies in every Farhelm window; other open windows pick up a change when
+they reload.
 
 ## Update a host
 
@@ -113,7 +114,12 @@ are covered in [Start a session](/docs/using/start-a-session/#start-from-a-manag
 [Read the session list](/docs/using/session-list/#terminal-links), and the sounds on the same page under [Sounds when an
 agent needs you](/docs/using/session-list/#sounds-when-an-agent-needs-you). In the Farhelm app on your Mac the dialog
 has one more section, **updates**, with **install updates automatically**, which is about updating Farhelm itself; see
-[Turn automatic updates off](/docs/using/update-and-uninstall/#turn-automatic-updates-off).
+[Turn automatic updates off](/docs/using/update-and-uninstall/#turn-automatic-updates-off). The rest of the dialog is
+covered with the feature it belongs to: **name sessions on quick launch** in
+[Launch templates](/docs/using/launch-templates/#quick-launch), the managed-checkout trust switches in
+[Start a session](/docs/using/start-a-session/#trust-in-managed-checkouts), **ntfy alerts** in
+[Read the session list](/docs/using/session-list/#ntfy-alerts), and, in the Mac app, tunnels in
+[Work in a session](/docs/using/work-in-a-session/#open-a-remote-localhost-link).
 
 The separate **skip session confirmations** switch covers [session actions and shell-tab
 close](/docs/using/stop-restart-resume/#stop-or-delete), without changing these host choices or YOLO and trash questions.

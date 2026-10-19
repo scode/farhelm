@@ -14,16 +14,21 @@ This page is planned but not written yet. The text below says what it will cover
 
 :::
 
-What Farhelm exposes and trusts: SSH as the only network path between machines, a web UI that listens only on loopback,
-no relay or account, and nothing that needs root. Also how much the helm is trusted with on each host, since it can run
-commands there. The SSH prerequisite for adding a host is in [Add a remote host](/docs/get-started/add-a-remote-host/).
-It will also cover the connections that leave your machines: setting up or updating a host downloads Farhelm's release
-files from get.farhelm.io, which hands them over from GitHub, feedback you choose to send goes over HTTPS to a feedback
-service the project runs ([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks
-get.farhelm.io for new releases and downloads them, checking each one's signature, by itself unless you turn that off
-([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). And downloading a file from a session's terminal:
-the helm can read any file the session's account can read on that host. In the desktop app, Cmd-click (Ctrl-click on
-Linux) also opens the saved copy in its default app for `.md`, `.txt` and `.json` files by default. The
+What Farhelm exposes and trusts: SSH as the only network path between machines, a web UI that listens only on loopback
+and that a link on a page from another local port cannot open, no relay or account, and nothing that needs root. Also
+how much the helm is trusted with on each host, since it can run commands there, and what an agent on one host can do to
+sessions on others through Farhelm, with your approval or a host's **Run farhelm commands without asking**
+([Approve what agents do](/docs/using/approve-agent-requests/)). The SSH prerequisite for adding a host is in
+[Add a remote host](/docs/get-started/add-a-remote-host/). It will also cover the connections that leave your machines:
+setting up or updating a host downloads Farhelm's release files from get.farhelm.io, which hands them over from GitHub,
+feedback you choose to send goes over HTTPS to a feedback service the project runs
+([Send feedback](/docs/using/send-feedback/)), and the Farhelm app on your Mac checks get.farhelm.io for new releases
+and downloads them, checking each one's signature, by itself unless you turn that off
+([Update or uninstall Farhelm](/docs/using/update-and-uninstall/)). If you set up
+[ntfy alerts](/docs/using/session-list/#ntfy-alerts), your helm sends a waiting session's name and its host's name to
+the ntfy server you chose, where anyone who knows the topic can read them. And downloading a file from a session's
+terminal: the helm can read any file the session's account can read on that host. In the desktop app, Cmd-click
+(Ctrl-click on Linux) also opens the saved copy in its default app for `.md`, `.txt` and `.json` files by default. The
 [desktop setting](/docs/using/session-list/#terminal-links) can allow any file type you add, including one that may run
 code in its default app. The dialog warns beside each type Farhelm does not recognize as safe. An opened HTML-like page
 can run browser scripts and send requests to services on your computer, including localhost on other ports. Plain clicks

@@ -159,8 +159,8 @@ test("effort and permissions", async ({ page, request }) => {
   });
   await director.callout(
     permissions,
-    "guarded, the default, lets the agent's own safety mode approve or block actions. yolo turns its checks off, so the agent acts without asking you.",
-    { side: "right", dx: 290, dy: 60 },
+    "guarded lets the agent approve its own actions through a safety check, which can still refuse or ask you. yolo skips those checks: the agent runs commands and changes files without asking. custom passes your own flags and counts as yolo.",
+    { side: "right", dx: 290, dy: 95 },
   );
   await shot(page, `${PAGE}/effort-and-permissions`, [effort, permissions]);
 });

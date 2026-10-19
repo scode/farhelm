@@ -26,4 +26,5 @@ Farhelm does not use that name, because other tools install a command called `ag
 - YOLO starts Cursor with `--force`, which still refuses commands your Cursor configuration explicitly denies.
 - There is no effort choice. Pick a model variant, or put Cursor's own parameters in a custom model name, instead.
 - Restart is not available, so to get back to an earlier conversation, use Cursor's own conversation picker in the
-  terminal.
+  terminal, or start a session with its **chat id** in the
+  [session launcher](/docs/using/start-a-session/#continue-a-conversation-you-know).

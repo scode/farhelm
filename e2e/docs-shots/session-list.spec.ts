@@ -26,8 +26,8 @@ test("a row", async ({ page, request }) => {
   );
   await director.callout(
     row.locator(".session-agent"),
-    "Which agent, and its permissions: a slashed shield is YOLO, a plain shield means the agent asks for approval.",
-    { side: "right", dx: 70, dy: 20 },
+    "Which agent, and its permissions: an amber slashed shield is YOLO; a green shield is guarded, where a safety check can refuse an action or ask you.",
+    { side: "right", dx: 70, dy: 60 },
   );
   // Below the row rather than beside it: the right-hand space already holds
   // the other two, and an arrow from there would cross one of them.
