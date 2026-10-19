@@ -250,14 +250,81 @@ fn take_click_detail() -> Option<ClickReport> {
     CLICK_DETAIL.lock().ok().and_then(|mut slot| slot.take())
 }
 
+/// Hand the press being handled to AppKit as a native window drag, as a real
+/// left mouse-down, even when AppKit's current event is no longer one.
+///
+/// Tao's `drag_window` (and Dioxus's `drag`, which wraps it) passes
+/// `NSApp.currentEvent` to `performWindowDragWithEvent:`, assuming the press is
+/// still current when the Dioxus handler runs. It often is not. On a Force
+/// Touch trackpad AppKit delivers pressure events (`NSEventTypePressure`) while
+/// the button is down, and by the time the press has crossed the webview and
+/// the click-detail bridge it is common for one of those, or a mouse-dragged
+/// event, to have become current. AppKit silently ignores a drag started from
+/// anything but a mouse-down, so on such a Mac many presses on the drag region
+/// did nothing (observed in 2026-10: in one logged session, three of eight
+/// presses found a pressure or mouse-dragged event current, and before this
+/// workaround each such press left the window where it was; a press that
+/// found its own mouse-down current dragged normally). When the current event is not a left
+/// mouse-down, this builds one at the pointer's present location in this
+/// window, which is what Tao itself does for one other event type, and drags
+/// from that.
+///
+/// Does nothing in fullscreen, where AppKit owns the window frame; Dioxus's
+/// `drag` had the same guard, and nothing else enforces it for a drag.
+#[cfg(all(native_desktop, target_os = "macos"))]
+fn start_native_drag(window: &dioxus::desktop::tao::window::Window) {
+    use dioxus::desktop::tao::platform::macos::WindowExtMacOS;
+    use objc2_app_kit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSWindow};
+
+    if window.fullscreen().is_some() {
+        return;
+    }
+    // Dioxus runs event handlers on the main thread; anything else is a bug
+    // elsewhere, and doing nothing is the safe answer to it.
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    // SAFETY: Tao owns this NSWindow for the window's whole lifetime and
+    // exposes its pointer for exactly this kind of platform call. It is only
+    // borrowed here, on the main thread, for the duration of this function.
+    let Some(ns_window) = (unsafe { (window.ns_window() as *const NSWindow).as_ref() }) else {
+        return;
+    };
+    let current = NSApplication::sharedApplication(mtm).currentEvent();
+    let press = match current {
+        Some(event) if event.r#type() == NSEventType::LeftMouseDown => event,
+        other => {
+            // Only the event type is safe to ask of an arbitrary event: AppKit
+            // throws when, say, a pressure event is asked for a click count.
+            let timestamp = other.as_ref().map_or(0.0, |event| event.timestamp());
+            let location = ns_window.convertPointFromScreen(NSEvent::mouseLocation());
+            let Some(event) = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+                NSEventType::LeftMouseDown,
+                location,
+                NSEventModifierFlags(0),
+                timestamp,
+                ns_window.windowNumber(),
+                None,
+                0,
+                1,
+                1.0,
+            ) else {
+                return;
+            };
+            event
+        }
+    };
+    ns_window.performWindowDragWithEvent(&press);
+}
+
 /// Give empty sidebar-header space a native drag action, never its controls.
 ///
 /// This separate, non-focusable element has no interactive descendants. A
 /// parent-level mouse handler would also receive clicks from the settings
 /// gear or the version label, stealing normal control activation and text selection —
 /// and it would break the bridge pairing, which assumes exactly one Rust
-/// press handler consumes each POST. Dioxus's native drag helper ignores
-/// dragging while the window is fullscreen.
+/// press handler consumes each POST. Dragging goes through
+/// [`start_native_drag`], which ignores presses while the window is fullscreen.
 ///
 /// Double-click maximize/restore is decided HERE, on the primary mousedown,
 /// from the bridge report POSTed ahead of the event (see
@@ -283,12 +350,13 @@ pub(crate) fn WindowDragRegion() -> Element {
                     let report = take_click_detail();
                     let primary =
                         event.trigger_button() == Some(dioxus::html::input_data::MouseButton::Primary);
-                    // `drag` guards fullscreen internally; `toggle_maximized`
-                    // does not, so the guard lives in the decision.
+                    // `start_native_drag` guards fullscreen itself;
+                    // `toggle_maximized` does not, so the guard lives in the
+                    // decision.
                     let fullscreen = window.window.fullscreen().is_some();
                     match decide_press(primary, report, fullscreen) {
                         PressAction::ToggleMaximized => window.toggle_maximized(),
-                        PressAction::Drag => window.drag(),
+                        PressAction::Drag => start_native_drag(&window.window),
                         PressAction::None => {}
                     }
                 }

@@ -2025,6 +2025,8 @@ dependencies = [
  "gio",
  "gloo-timers",
  "mime_guess",
+ "objc2",
+ "objc2-app-kit",
  "percent-encoding",
  "raw-window-handle 0.6.2",
  "reqwest 0.13.5",
