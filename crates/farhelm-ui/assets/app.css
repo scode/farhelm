@@ -6657,6 +6657,30 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   box-sizing: border-box;
 }
 
+/* Keep the name's source beside its label; the resolved field still uses the
+   whole column, and long bases in the explanatory note may wrap on phones. */
+.launch-composer-name-caption {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.launch-composer-name-policy {
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-lg);
+  background: var(--well);
+  color: var(--fg-dim);
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.launch-composer-name-taken {
+  color: var(--fg-dim);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 /* Launch is the one saturated fill in the composer. It takes the accent at
    border weight as its FILL (brighter than `--accent-fill`, which is a
    surface tint), so it reads as the single action while everything around it

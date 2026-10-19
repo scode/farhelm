@@ -13,6 +13,7 @@ import {
   FAKE_AGENT,
   hideSeenState,
   localHostId,
+  listSessions,
   openRowMenu,
   setLocalYoloWithoutAsking,
   type SessionRow,
@@ -729,6 +730,9 @@ test("composer search survives a held terminal reveal", async ({ page, request }
   }
 });
 
+/** A copied command and directory belong to the new session only. Check
+ * both the submitted command and persisted directories: correct draft text
+ * alone would miss a submit path that still reads the original seed. */
 test("clone pre-fills the create form from a typed-command row, and the edited copy leaves the original untouched", async ({
   page,
   request,
@@ -792,13 +796,16 @@ test("clone pre-fills the create form from a typed-command row, and the edited c
     const cloned = row(page, cloneId);
     await expect(cloned).toBeVisible({ timeout: 20_000 });
     await expect(cloned.locator(".session-title")).toHaveText(title);
-    await expect(cloned.locator(".session-cwd")).toHaveAttribute("data-tooltip", newCwd);
+    await expect(cloned.locator(".session-cwd-text")).toHaveText(newCwd);
 
     // The original row: same directory, same title, still there — cloning
     // must not have touched it.
     await expect(source).toBeVisible();
-    await expect(source.locator(".session-cwd")).toHaveAttribute("data-tooltip", originalCwd);
+    await expect(source.locator(".session-cwd-text")).toHaveText(originalCwd);
     await expect(source.locator(".session-title")).toHaveText(title);
+    const sessions = (await listSessions(request)).sessions;
+    expect(sessions.find(session => session.id === cloneId)).toMatchObject({ cwd: newCwd, title });
+    expect(sessions.find(session => session.id === original.id)).toMatchObject({ cwd: originalCwd, title });
   } finally {
     if (cloneId) await cleanupSession(request, cloneId);
     await cleanupSession(request, original.id);

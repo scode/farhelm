@@ -13,7 +13,7 @@ import { cleanupSession, commandLaunch, createSession, FAKE_AGENT, listHosts, lo
 import { routeGate } from "./helpers/route-gate";
 import { answerCard, setLocalCommandsWithoutAsking } from "./helpers/approvals";
 
-// Two tests here mark a template as the helm-wide quick launch. Later specs
+// Tests here mark a template as the helm-wide quick launch. Later specs
 // share this helm, so clear the mark even when a test body is abandoned
 // before its own `finally` runs; a leaked helm-wide preference has cascaded
 // into unrelated failures before. No mark is the default.
@@ -25,26 +25,32 @@ import { attachSession, waitForTermText, answerYolo, termText } from "./helpers/
 
 const run = promisify(execFile);
 
-for (const collide of [false, true]) {
+for (const { collide, base } of [
+  { collide: false, base: null }, { collide: true, base: null },
+  { collide: false, base: "app-review" }, { collide: true, base: "app-review" },
+]) {
   /** The hidden composer must obtain the actual current preview before it
    * submits. A real clone proves the success path; occupying that exact offer
    * proves that the shortcut spends its attempt and exposes the ordinary retry
    * instead of silently choosing another directory. Naming the accepted session
-   * changes its title while the managed checkout keeps the offered folder. */
-  test(`quick launch waits for a managed preview and ${collide ? "reveals its path race" : "starts directly"}`, async ({ page, request }) => {
+   * changes its title while the managed checkout keeps the offered folder.
+   * Reusing a named template must then allocate its next checkout without
+   * revealing New, while the first session and checkout still exist. */
+  test(`quick launch waits for a managed preview and ${collide ? "reveals its path race" : "starts directly"}${base ? " for a template base name" : ""}`, async ({ page, request }) => {
     const fixture = await checkoutFixture(collide ? "quick-race" : "quick-managed");
     const name = `quick-checkout-${Date.now()}`;
     const ids: string[] = [];
     const gate = routeGate();
     let previews = 0;
     const bodies: any[] = [];
-    const occupied = path.join(fixture.root, `${fixture.repoName}-1`);
+    const occupied = path.join(fixture.root, `${fixture.repoName}-${base ?? "1"}`);
     try {
       const local = (await listHosts(request)).find(host => host.kind === "local");
       expect(local?.identity, "the checkout template selects the actual connected install").toBeTruthy();
       const stored = await request.put(`/api/templates/${name}`, { data: {
         kind: "agent", agent: "codex", permissions: "guarded", host: local!.identity,
         destination: { github: fixture.repo },
+        ...(base ? { name: base } : {}),
       } });
       expect(stored.ok(), await stored.text()).toBe(true);
       await patchPreferences(request, { quick_launch_template: name });
@@ -84,7 +90,7 @@ for (const collide of [false, true]) {
       if (collide) {
         await expect(form).toBeVisible();
         await expect(form.locator(".create-session-error")).toContainText("nothing was accepted");
-        await expect(form.locator(".launch-composer-checkout-preview")).toContainText(path.join(fixture.root, `${fixture.repoName}-2`));
+        await expect(form.locator(".launch-composer-checkout-preview")).toContainText(path.join(fixture.root, `${fixture.repoName}-${base ? `${base}-2` : "2"}`));
         await expect(form.locator(".create-session-submit")).toBeEnabled();
         expect(bodies).toHaveLength(1);
         await expect(page.locator(".rename-dialog")).toHaveCount(0);
@@ -96,7 +102,8 @@ for (const collide of [false, true]) {
         expect(bodies[0]).toMatchObject({ launch: { harness: "codex", permissions: "guarded" }, github_checkout: { repo: fixture.repo } });
         const dialog = page.locator(".rename-dialog");
         const field = dialog.locator(".rename-input");
-        const defaultTitle = `${fixture.repoName}-1`;
+        const defaultTitle = base ?? `${fixture.repoName}-1`;
+        if (base) expect(bodies[0].title).toBe(base);
         await expect(dialog).toBeVisible();
         await expect(field).toHaveValue(defaultTitle);
         await expect(field).toBeFocused();
@@ -111,7 +118,24 @@ for (const collide of [false, true]) {
         const session = await assertCheckout(page, request, fixture, ids[0], occupied, true);
         expect(session.title).toBe(title);
         expect(await fs.readdir(fixture.root), "naming leaves the checkout's generated folder intact")
-          .toEqual([defaultTitle]);
+          .toEqual([path.basename(occupied)]);
+        if (base) {
+          await expect(page.locator(".quick-launch-trigger")).toBeEnabled();
+          await page.keyboard.press(mac ? "Meta+p" : "Control+Shift+p");
+          await expect.poll(() => ids.length, { message: "the same template accepts its second launch" }).toBe(2);
+          await expect(form).toHaveCount(0);
+          expect(bodies).toHaveLength(2);
+          expect(bodies[1].title).toBe(`${base}-2`);
+          await expect(dialog).toBeVisible();
+          await expect(field).toHaveValue(`${base}-2`);
+          await expect(field).toBeFocused();
+          await page.keyboard.press("Escape");
+          await expect(dialog).toHaveCount(0);
+          const second = path.join(fixture.root, `${fixture.repoName}-${base}-2`);
+          const secondSession = await assertCheckout(page, request, fixture, ids[1], second, true);
+          expect(secondSession.title).toBe(`${base}-2`);
+          expect((await fs.readdir(fixture.root)).sort()).toEqual([path.basename(occupied), path.basename(second)].sort());
+        }
       }
     } finally {
       gate.release();
@@ -123,6 +147,168 @@ for (const collide of [false, true]) {
     }
   });
 }
+
+/** A template name is a reusable base: an existing checkout must not strand
+ * the hidden launcher. The occupied folder contains unrelated bytes, so a
+ * successful suffix must create a different checkout and preserve them. This
+ * also locks in the title/path agreement before the naming UI is exercised. */
+test("quick launch numbers a template base name when its checkout is taken", async ({ page, request }) => {
+  const fixture = await checkoutFixture("quick-base-name");
+  const name = `quick-base-${Date.now()}`;
+  const base = "app-review";
+  const occupied = path.join(fixture.root, `${fixture.repoName}-${base}`);
+  const sentinel = path.join(occupied, "foreign");
+  const ids: string[] = [];
+  const previewRefusals: string[] = [];
+  try {
+    await fs.mkdir(occupied);
+    await fs.writeFile(sentinel, "keep occupied checkout\n");
+    const local = (await listHosts(request)).find(host => host.kind === "local");
+    expect(local?.identity, "the template targets the owned connected supervisor").toBeTruthy();
+    const saved = await request.put(`/api/templates/${name}`, { data: {
+      kind: "agent", agent: "codex", permissions: "guarded", host: local!.identity,
+      name: base, destination: { github: fixture.repo },
+    } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    const catalog = await request.get("/api/templates");
+    expect(catalog.ok(), await catalog.text()).toBe(true);
+    expect((await catalog.json()).templates.find((template: any) => template.name === name)?.fields)
+      .toMatchObject({ name: base, destination: { github: fixture.repo } });
+    expect(await fs.readFile(sentinel, "utf8"), "the unsuffixed checkout is occupied before the chord")
+      .toBe("keep occupied checkout\n");
+    const premise = await request.post("/api/github-checkout-preview", { data: {
+      host: local!.id, expected_incarnation: local!.incarnation, repo: fixture.repo, title: base,
+    } });
+    expect(premise.status(), await premise.text()).toBe(409);
+    expect(await premise.text(), "the live helm must refuse this exact occupied name, with its checkout root configured")
+      .toContain("a directory with that checkout name already exists");
+    await patchPreferences(request, { quick_launch_template: name });
+    await page.route("**/api/github-checkout-preview", async route => {
+      if (route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch();
+      if (!response.ok()) previewRefusals.push(await response.text());
+      await route.fulfill({ response });
+    });
+    await page.route("**/api/sessions", async route => {
+      if (route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch();
+      if (response.ok()) ids.push((await response.json()).id);
+      await route.fulfill({ response });
+    });
+    await page.goto("/");
+    await expect(page.locator(".quick-launch-trigger")).toBeEnabled();
+    const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+    await page.keyboard.press(mac ? "Meta+p" : "Control+Shift+p");
+    const form = page.locator(".create-session-form");
+    await expect.poll(async () => ({
+      created: ids.length,
+      occupiedBytes: await fs.readFile(sentinel, "utf8"),
+      launcherRevealed: await form.isVisible(),
+      previewRefusals,
+    }), { message: "the occupied named checkout stays intact while quick launch finds the next name", timeout: 20_000 })
+      .toMatchObject({ created: 1, occupiedBytes: "keep occupied checkout\n", launcherRevealed: false });
+    await expect(form).toHaveCount(0);
+    const expected = path.join(fixture.root, `${fixture.repoName}-${base}-2`);
+    const naming = page.locator(".rename-dialog");
+    await expect(naming).toBeVisible();
+    await expect(naming.locator(".rename-input")).toHaveValue(`${base}-2`);
+    await expect(naming.locator(".rename-input")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(naming).toHaveCount(0);
+    const session = await assertCheckout(page, request, fixture, ids[0], expected, true);
+    expect(session.title).toBe(`${base}-2`);
+    expect(await fs.readFile(sentinel, "utf8")).toBe("keep occupied checkout\n");
+    await expect(page.locator(".rename-dialog")).toHaveCount(0);
+  } finally {
+    await page.unrouteAll({ behavior: "wait" });
+    for (const id of ids.reverse()) await cleanupSession(request, id);
+    await patchPreferences(request, { quick_launch_template: null });
+    await request.delete(`/api/templates/${name}`);
+    await fixture.close(request);
+  }
+});
+
+/** Template bases remain defaults only until a person takes over the name.
+ * Fixed template names must take the same refusal path as that hand edit;
+ * switching to a folder removes numbering without losing the source base.
+ * The hidden quick-launch path must reveal the same fixed-name conflict
+ * without ever posting a create request. */
+test("template name numbering yields to typed and fixed names", async ({ page, request }) => {
+  const fixture = await checkoutFixture("name-policies");
+  const stamp = Date.now();
+  const names = [`base-policy-${stamp}`, `fixed-policy-${stamp}`, `name-only-policy-${stamp}`];
+  const base = "app-review";
+  const occupied = path.join(fixture.root, `${fixture.repoName}-${base}`);
+  try {
+    await fs.mkdir(occupied);
+    await fs.writeFile(path.join(occupied, "foreign"), "preserve name conflict\n");
+    const local = (await listHosts(request)).find(host => host.kind === "local");
+    expect(local?.identity).toBeTruthy();
+    for (const [index, name] of names.entries()) {
+      const saved = await request.put(`/api/templates/${name}`, { data: index === 2 ? { name: base } : {
+        kind: "agent", agent: "codex", permissions: "guarded", host: local!.identity,
+        destination: { github: fixture.repo }, name: base,
+        ...(index === 1 ? { name_kind: "fixed" } : {}),
+      } });
+      expect(saved.ok(), await saved.text()).toBe(true);
+    }
+    const form = await openComposer(page, local!.id);
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    await search.fill(`tl:${names[0]}`);
+    await form.getByRole("option", { name: `Template: ${names[0]}`, exact: true }).click();
+    const field = form.getByLabel("name (optional)", { exact: true });
+    await expect(field).toHaveValue(`${base}-2`);
+    await expect(form.locator(".launch-composer-name-policy")).toHaveText("from template · numbered if taken");
+    await expect(form.locator(".launch-composer-name-taken")).toHaveText(`(${base} is taken)`);
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    await form.getByRole("group", { name: "destination type" }).getByRole("button", { name: "folder", exact: true }).click();
+    await expect(field).toHaveValue(base);
+    await expect(form.locator(".launch-composer-name-policy")).toHaveCount(0);
+    await form.getByRole("group", { name: "destination type" }).getByRole("button", { name: "managed checkout", exact: true }).click();
+    await selectRepo(form, fixture.repo);
+    await expect(field).toHaveValue(`${base}-2`);
+    await field.fill(base);
+    await expect(form.locator(".launch-composer-name-policy")).toHaveCount(0);
+    await expect(form.locator(".launch-composer-checkout-preview")).toContainText("a directory with that checkout name already exists");
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
+    await search.fill(`tl:${names[1]}`);
+    await form.getByRole("option", { name: `Template: ${names[1]}`, exact: true }).click();
+    await expect(field).toHaveValue(base);
+    await expect(form.locator(".launch-composer-name-policy")).toHaveCount(0);
+    await expect(form.locator(".launch-composer-checkout-preview")).toContainText("a directory with that checkout name already exists");
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
+    expect(await fs.readFile(path.join(occupied, "foreign"), "utf8")).toBe("preserve name conflict\n");
+    await search.fill(`tl:${names[2]}`);
+    await form.getByRole("option", { name: `Template: ${names[2]}`, exact: true }).click();
+    await expect(field).toHaveValue(`${base}-2`);
+    await expect(form.locator(".launch-composer-name-policy")).toBeVisible();
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await patchPreferences(request, { quick_launch_template: names[1] });
+    let creates = 0;
+    await page.route("**/api/sessions", async route => {
+      if (route.request().method() !== "POST") return route.continue();
+      creates++;
+      await route.abort();
+    });
+    await page.goto("/");
+    await expect(page.locator(".quick-launch-trigger")).toBeEnabled();
+    const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+    await page.keyboard.press(mac ? "Meta+p" : "Control+Shift+p");
+    await expect(form).toBeVisible();
+    await expect(field).toHaveValue(base);
+    await expect(form.locator(".launch-composer-name-policy")).toHaveCount(0);
+    await expect(form.locator(".launch-composer-checkout-preview")).toContainText("a directory with that checkout name already exists");
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
+    expect(creates, "a fixed-name conflict never submits from the hidden launcher").toBe(0);
+    expect(await fs.readFile(path.join(occupied, "foreign"), "utf8")).toBe("preserve name conflict\n");
+  } finally {
+    await page.unrouteAll({ behavior: "wait" });
+    await patchPreferences(request, { quick_launch_template: null });
+    for (const name of names) await request.delete(`/api/templates/${name}`);
+    await fixture.close(request);
+  }
+});
 
 /** Compare every owned byte, link and directory across an archival rename.
  * Git metadata and untracked work are included: checking only the tracked

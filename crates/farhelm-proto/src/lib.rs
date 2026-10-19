@@ -193,6 +193,9 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// peer can never run a launch while silently dropping part of what it was
 /// told (a YOLO answer, a resume command). Any new launch field therefore
 /// earns the next bump.
+/// Template fields also refuse unknown fields and travel inside agent control
+/// replies; adding one has the same strict-decoder constraint even though the
+/// template itself is stored only by the helm.
 ///
 /// The browser edge cannot use the hello, having none: it is gated on the
 /// helm's build stamp instead (farhelm-ui's `skew` module), which refuses
@@ -207,7 +210,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_60` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_61` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -218,7 +221,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 60;
+pub const PROTOCOL_VERSION: u32 = 61;
 
 /// Browser saves buffer the body, so both hosts enforce this decimal 100 MB cap.
 pub const DOWNLOAD_LIMIT_BYTES: u64 = 100_000_000;
@@ -5141,8 +5144,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_60() {
-        assert_eq!(PROTOCOL_VERSION, 60);
+    fn protocol_version_is_pinned_at_61() {
+        assert_eq!(PROTOCOL_VERSION, 61);
     }
 
     /// A follow-up is an approved mutation even though its success has no
