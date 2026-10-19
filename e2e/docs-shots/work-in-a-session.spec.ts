@@ -13,16 +13,18 @@ const PAGE = "work-in-a-session";
 
 test("header", async ({ page, request }) => {
   const { director } = await open(page, request);
-  const header = page.locator("header.titlebar");
-  await expect(header).toBeVisible();
-  const copies = header.locator(".header-copy");
+  // The session's details sit in a slim bar under its terminal; the shot
+  // keeps the name "header" from when they headed the session.
+  const details = page.locator(".session-details");
+  await expect(details).toBeVisible();
+  const copies = details.locator(".header-copy");
+  // Above the bar, over the terminal's empty lower half: under it there is
+  // nothing but the window's edge.
   await director.callout(copies.first(), "Click to copy the session's directory, or next to it, the command it runs.", {
-    side: "bottom",
+    side: "top",
     dx: 40,
   });
-  // Only the left part of the header: the action buttons at its far end are
-  // the Stop, restart, and resume page's to show.
-  await shot(page, `${PAGE}/header`, [header.locator(".title"), copies.last()], {
+  await shot(page, `${PAGE}/header`, [details.locator(".status-badge"), copies.last()], {
     maxWidth: 930,
   });
 });

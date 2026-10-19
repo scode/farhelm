@@ -864,3 +864,337 @@ test("v0.29.0 file hover", async ({ page, request }) => {
   );
   await shot(page, name, [target], { pad: 60, maxWidth: 930, keepPointer: true });
 });
+
+// v0.30.0. The shots follow the entries a reader can see: trust for Codex,
+// Muse and Pi moved into Settings (#2256), the session launcher gained an
+// initial prompt, a wrapper prefix and typed permission words (#2200, #2272,
+// #2297), templates gained a key sequence and a list of their own (#2225,
+// #2316), quick launch gained a naming switch (#2234), the local host gained
+// its own mark and terminals a host-colored frame (#2266, #2269), host
+// confirmations list their steps (#2298), the open session's details moved
+// under the terminal (#2253).
+//
+// Each shot is listed under a number only its own entry cites, as for
+// v0.29.0: #2255 and #2271 are also cited by the entry about updating remote
+// hosts, so the trust and wrapper shots are listed under #2256 and #2272.
+// Several entries are not photographed because their pictures need something
+// no shot may do or stage. The naming offer after a quick launch, an agent's
+// approval cards, the trust hint above a session's terminal and the outage
+// card all need a launched or live session, or a host that has gone away; the
+// tunnels and the downloaded file types are Mac app settings, which the web
+// UI does not show. A session's hover summary (#2300) is left out because it
+// shows when the session started, which staging does not rewrite: next to
+// the staged last-active time it would read as starting after it was last
+// active. The key sequence is photographed before any key is
+// pressed: the staged fleet binds no number keys, and binding one, even in
+// transit, would be a rewrite docs/docs-shots/SPEC.md does not allow. Nothing
+// here launches a session, binds a key, or saves a setting.
+
+/** v0.30.0: trust for Codex, Muse and Pi, now switches in Settings. */
+test("v0.30.0 agent trust", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-agent-trust`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  const codex = dialog.locator("#checkout-codex-trust");
+  const muse = dialog.locator("#checkout-muse-trust");
+  const pi = dialog.locator("#checkout-pi-trust");
+  // Each switch is locked until the helm's saved choice has been read; the
+  // staged fleet has saved none, so all three show the default, off.
+  for (const block of [codex, muse, pi]) {
+    const answer = block.getByRole("checkbox").first();
+    await expect(answer).toBeEnabled();
+    await expect(answer).not.toBeChecked();
+  }
+  await codex.scrollIntoViewIfNeeded();
+  // The dialog focuses its first switch on opening, whose hover text would
+  // otherwise float over the section; focusing the dialog itself hides it.
+  await dialog.focus();
+  // One callout in the left margin, aimed at the whole row so it sits beside
+  // it rather than over its label, and moved down to sit level with Codex's
+  // block: two callouts are taller together than the block, and the crop
+  // would grow to take in the settings above and below it.
+  await director.callout(
+    codex.locator("label").first(),
+    "Trust for Codex, Muse and Pi is now a switch here instead of a launcher choice: off by default, managed checkouts only. Codex and Muse show a hint beside their trust question that opens it.",
+    { side: "left", dy: 70 },
+  );
+  // Codex's block alone: Muse's and Pi's below it repeat its shape.
+  await shot(page, name, [codex], { pad: 8, maxWidth: 930 });
+});
+
+/** Open the session launcher with Claude chosen, the way most of these shots start. */
+async function openLauncherWithClaude(page: Page) {
+  const form = await openLauncher(page);
+  const claude = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true });
+  await claude.click();
+  await expect(claude).toHaveAttribute("aria-pressed", "true");
+  // The click leaves the pointer resting on the button, whose hover text
+  // would show in the picture.
+  await page.mouse.move(0, 0);
+  return form;
+}
+
+/** v0.30.0: an initial prompt, typed in the session launcher. */
+test("v0.30.0 initial prompt", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-initial-prompt`;
+  skipFrozenReleaseShot(name);
+  // Wide, so the launcher leaves a left margin for the callout.
+  await page.setViewportSize({ width: 1600, height: 1300 });
+  const { director } = await open(page, request);
+  const form = await openLauncherWithClaude(page);
+  const choice = form.locator(".initial-prompt-choice");
+  const prompt = choice.getByLabel("initial prompt", { exact: true });
+  // Typed to show what goes there. Nothing launches: only the launcher's own
+  // launch button would start a session, and Enter in this field only
+  // starts a new line.
+  await prompt.fill("Find out why the attach test fails on CI and fix it.");
+  await form.focus();
+  await director.callout(
+    prompt,
+    "The agent gets this as its first message when the session starts, once. Templates and the command line can carry one too. Goose, Pi and custom commands do not take one.",
+    { side: "left" },
+  );
+  // A narrow pad keeps the launcher fields above and below out of the crop.
+  await shot(page, name, [choice], { pad: 6, maxWidth: 930 });
+});
+
+/** v0.30.0: a wrapper prefix, typed in the session launcher. */
+test("v0.30.0 wrapper prefix", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-wrapper-prefix`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1600, height: 1300 });
+  const { director } = await open(page, request);
+  const form = await openLauncherWithClaude(page);
+  const choice = form.locator(".launch-composer-wrapper-choice");
+  const wrapper = choice.locator(".launch-composer-wrapper");
+  // Typed, not launched, as on the initial prompt shot; Enter here would
+  // launch, so the shot never presses it. The wrapper is the release
+  // notes' own example.
+  await wrapper.fill("nice -n 10");
+  await expect(wrapper).toHaveAttribute("aria-invalid", "false");
+  await form.focus();
+  await director.callout(
+    wrapper,
+    "A command that runs the agent for you, here at a lower priority. Farhelm still shows the agent's status, follows its conversation, and can restart it.",
+    // Moved down, beside the field and its help, so the callout does not
+    // reach up to the initial prompt above and pull it into the crop.
+    { side: "left", dy: 50 },
+  );
+  // A narrow pad keeps the launcher fields above and below out of the crop.
+  await shot(page, name, [choice], { pad: 3, maxWidth: 930 });
+});
+
+/** v0.30.0: typed permission words in the session launcher's search. */
+test("v0.30.0 launcher permission words", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-permission-words`;
+  skipFrozenReleaseShot(name);
+  // Narrow enough that the launcher, and so its search box, fits the docs'
+  // text column.
+  await page.setViewportSize({ width: 930, height: 1100 });
+  const { director } = await open(page, request);
+  const form = await openLauncherWithClaude(page);
+  const search = form.locator(".launch-composer-search input[role=combobox]");
+  // Typed and left: Enter would apply the highlighted choice, and a second
+  // Enter in the then empty box would launch, so the shot presses neither.
+  await search.fill("perms:");
+  const results = form.locator(".launch-composer-search-results");
+  const group = results.getByRole("group", { name: "Permissions" });
+  await expect(group.getByRole("option")).toHaveCount(3);
+  await director.callout(
+    results,
+    "perms: lists the approval modes the chosen agent offers. guarded on its own picks Guarded, and effort:default goes back to the agent's own effort.",
+    // Under the results, over the launcher's lower controls, which this shot
+    // is not about; beside the search box there is no room.
+    { side: "bottom", dy: 10 },
+  );
+  await shot(page, name, [search, results], { maxWidth: 930 });
+});
+
+/** v0.30.0: Ctrl+Shift+X starts a sequence of template keys. */
+test("v0.30.0 template sequence", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-template-sequence`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1000 });
+  const { director } = await open(page, request);
+  // The sequence's keys are listened for only once the page has read its
+  // preferences, which this trigger waits on.
+  await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+  // The staged fleet is the web UI on Linux, so the prefix is Ctrl+Shift+X;
+  // in the Mac app it is Cmd+X, as the callout says. Nothing after it is
+  // pressed, so nothing launches.
+  await page.keyboard.press("Control+Shift+KeyX");
+  const indicator = page.locator(".launch-sequence-indicator");
+  await expect(indicator).toContainText("press number keys");
+  await director.callout(
+    indicator,
+    "Cmd+X in the Mac app, Ctrl+Shift+X elsewhere, then the number keys of the templates to combine and Enter. With the session launcher open, the same keys fill it in instead.",
+    { side: "top", dy: -20 },
+  );
+  await shot(page, name, [indicator], { maxWidth: 930 });
+});
+
+/** v0.30.0: Ctrl+Shift+J lists the templates to start one from. */
+test("v0.30.0 template list", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-template-list`;
+  skipFrozenReleaseShot(name);
+  // Narrow enough that the whole dialog fits the docs' text column, as on
+  // the quick switcher shot it borrows its look from.
+  await page.setViewportSize({ width: 930, height: 1000 });
+  const { director } = await open(page, request);
+  await expect(page.locator(".quick-switcher-template-trigger")).toHaveCount(1);
+  await page.keyboard.press("Control+Shift+j");
+  const dialog = page.getByRole("dialog", { name: "template launcher" });
+  await expect(dialog).toBeVisible();
+  const search = dialog.getByRole("combobox", { name: "search templates" });
+  await expect(search).toBeFocused();
+  // Clicking into the box makes its focus a pointer focus, which hides its
+  // hover text the way a click does in the app. Enter would start the
+  // highlighted template, so the shot never presses it.
+  await search.click();
+  await expect(page.locator(".farhelm-tooltip").filter({ visible: true })).toHaveCount(0);
+  await expect(dialog.locator(".quick-switcher-template")).toHaveCount(3);
+  await director.callout(
+    dialog,
+    "Cmd+J on a Mac, Ctrl+Shift+J elsewhere. Type part of a template's name and press Enter to start it; one that leaves choices open opens the session launcher to finish.",
+    { side: "bottom", dy: 10 },
+  );
+  await shot(page, name, [dialog], { maxWidth: 930 });
+});
+
+/** v0.30.0: Settings turns off the offer to name a quick-launched session. */
+test("v0.30.0 quick launch naming", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-quick-launch-naming`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  const sessions = dialog.getByRole("region", { name: "sessions" });
+  const offer = sessions.getByRole("checkbox", { name: "name sessions on quick launch", exact: true });
+  await expect(offer).toBeChecked();
+  await dialog.focus();
+  await director.callout(
+    sessions.locator("label").filter({ has: page.getByRole("checkbox", { name: "name sessions on quick launch", exact: true }) }),
+    "On by default: after a quick launch, Farhelm offers to name the new session while its agent starts. Enter or Escape keeps the default name.",
+    { side: "left" },
+  );
+  await shot(page, name, [sessions.locator("label").nth(1), sessions.locator("#quick-launch-naming-help")], {
+    pad: 12,
+    maxWidth: 930,
+  });
+});
+
+/** v0.30.0: Settings colors each terminal's frame by its host. */
+test("v0.30.0 terminal frames", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-terminal-frames`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  const sessions = dialog.getByRole("region", { name: "sessions" });
+  const frames = sessions.getByRole("checkbox", { name: "color terminal frames by host", exact: true });
+  await expect(frames).not.toBeChecked();
+  await dialog.focus();
+  await director.callout(
+    sessions.locator("label").filter({ has: page.getByRole("checkbox", { name: "color terminal frames by host", exact: true }) }),
+    "Off by default. On: the thin frame around each session's terminal takes its host's color, so you can tell at a glance where it runs.",
+    { side: "left" },
+  );
+  await shot(page, name, [sessions.locator("label").nth(2), sessions.locator("#terminal-frame-color-help")], {
+    pad: 12,
+    maxWidth: 930,
+  });
+});
+
+/** v0.30.0: the open session's details in a slim bar under its terminal. */
+test("v0.30.0 session details", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-session-details`;
+  skipFrozenReleaseShot(name);
+  // Sized so the open session, beside the session list, is as wide as the
+  // docs' text column, and only as tall as its transcript needs.
+  await page.setViewportSize({ width: 1270, height: 650 });
+  const { director } = await open(page, request);
+  const topbar = page.locator("header.session-topbar");
+  const details = page.locator(".session-details");
+  await expect(topbar.locator(".tab-strip")).toBeVisible();
+  await expect(details).toBeVisible();
+  // Both inside the terminal, right of the transcript's lines (dx), where it
+  // is empty, so neither covers the parts it is about or the agent's text.
+  await director.callout(
+    topbar,
+    "The terminal tabs and the session's buttons share one row at the top.",
+    { side: "bottom", dx: 250, dy: 20 },
+  );
+  // Aimed at the command, the bar's last field, so the arrow lands on the
+  // bar's contents rather than its empty right end.
+  await director.callout(
+    details.locator(".header-copy").last(),
+    "The session's name, host, directory and command sit in a slim bar under the terminal. Click the directory or the command to copy it.",
+    { side: "top", dx: 60, dy: -20 },
+  );
+  await shot(page, name, [page.locator(".app-main .layout")], { pad: 0 });
+});
+
+/** v0.30.0: the local host's own icon and color, in its settings. */
+test("v0.30.0 local host appearance", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-local-host-appearance`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  const { director } = await open(page, request);
+  const row = page.locator('.host-row[data-host-kind="local"]');
+  await openHostMenu(row);
+  await row.locator(".host-settings").click();
+  const dialog = page.locator(".host-settings-dialog");
+  const appearance = dialog.locator(".host-settings-appearance");
+  await expect(appearance).toBeVisible();
+  // Photographed, never clicked: a click on an icon or a color saves it.
+  // The local host starts as the red laptop.
+  await expect(appearance.getByRole("button", { name: "laptop", exact: true })).toHaveAttribute("aria-pressed", "true");
+  // In the left margin, level with what each explains, as on the v0.26.1
+  // remote host shot: to the right, the crop would pass the docs' text column.
+  await director.callout(
+    dialog.locator(".host-settings-mark"),
+    "The machine the helm runs on, your Mac, now has a mark of its own, like a remote host.",
+    { side: "left" },
+  );
+  await director.callout(
+    appearance.locator(".host-appearance-icons"),
+    "Pick its icon and color here. A click saves at once, and its sessions show the new mark.",
+    { side: "left", dy: 30 },
+  );
+  await shot(page, name, [dialog.locator(".host-settings-header"), appearance], { maxWidth: 930 });
+});
+
+/**
+ * v0.30.0: a host's setup confirmation as numbered steps. The add-host check
+ * answers for the scenario's invented add_host, as on the v0.27.0 setup
+ * shot, and nothing confirms the setup.
+ */
+test("v0.30.0 host steps", async ({ page, request }) => {
+  const name = `${PAGE}/v0-30-0-host-steps`;
+  skipFrozenReleaseShot(name);
+  // Tall, so all of the plan's steps fit without scrolling.
+  await page.setViewportSize({ width: 1300, height: 1500 });
+  const { scenario, director } = await open(page, request);
+  if (!scenario.add_host) throw new Error("the docs scenario needs an add_host");
+  await page.locator(".add-host-button").click();
+  const dialog = page.locator(".host-add-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.locator(".add-host-ssh").fill(scenario.add_host.ssh);
+  await dialog.locator(".add-host-submit").click();
+  const plan = dialog.locator(".provisioning-plan");
+  await expect(plan).toContainText(scenario.add_host.ssh);
+  const steps = plan.locator(".provisioning-plan-step");
+  await expect(steps.first()).toBeVisible();
+  // In the left margin, level with the first step. The steps' file names
+  // carry a per-run suffix, so the callout does not quote them.
+  await director.callout(
+    steps.first(),
+    "Every step setup will run, numbered, with the files each one writes. Update and uninstall list theirs the same way.",
+    { side: "left" },
+  );
+  // A narrow pad keeps the dialog's heading, just above the plan, out of the
+  // crop.
+  await shot(page, name, [plan], { pad: 8, maxWidth: 930 });
+});

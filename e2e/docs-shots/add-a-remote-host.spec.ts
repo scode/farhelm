@@ -47,6 +47,11 @@ test("add dialog", async ({ page, request }) => {
 });
 
 test("setup plan", async ({ page, request }) => {
+  // Tall enough that the whole plan fits and the dialog, which grows with
+  // it up to the window's height, leaves room below its answers for the
+  // callouts about them. At the default height the numbered plan fills the
+  // window and those callouts land on the answers.
+  await page.setViewportSize({ width: 1600, height: 1500 });
   const { scenario, director } = await open(page, request);
   if (!scenario.add_host) throw new Error("the docs scenario needs an add_host");
   const dialog = await openAddDialog(page);

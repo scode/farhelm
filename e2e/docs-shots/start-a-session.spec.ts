@@ -140,33 +140,29 @@ test("harness and model", async ({ page, request }) => {
   await shot(page, `${PAGE}/harness-and-model`, [harness, model]);
 });
 
-test("effort, permissions, and trust", async ({ page, request }) => {
+test("effort and permissions", async ({ page, request }) => {
   const { director } = await open(page, request);
   const form = await openLauncher(page);
   await form.locator(".launch-composer-harness-choice button", { hasText: /^Codex$/ }).click();
   const effort = form.locator(".launch-composer-effort-choice");
   const permissions = form.locator(".launch-composer-permissions-choice");
-  const trust = form.locator(".launch-composer-trust-choice");
-  await expect(trust).toBeVisible();
+  await expect(permissions).toBeVisible();
   // The overlay does not keep callouts apart, and these controls are close
   // together and of different widths. Each callout is pushed right (dx) to a
   // shared column beside the widest control and nudged up or down (dy) so
-  // the three boxes stack without overlapping.
+  // the boxes stack without overlapping. Trust is not here: it moved to
+  // Settings, which the page links to.
   await director.callout(effort, "How much effort the model puts in. default leaves it to the agent.", {
     side: "right",
     dx: 160,
-    dy: -20,
+    dy: -40,
   });
   await director.callout(
     permissions,
-    "default keeps the agent's approval prompts. yolo turns them off: the agent runs commands and changes files without asking you.",
-    { side: "right", dx: 290, dy: 25 },
+    "guarded, the default, lets the agent's own safety mode approve or block actions. yolo turns its checks off, so the agent acts without asking you.",
+    { side: "right", dx: 290, dy: 60 },
   );
-  await director.callout(trust, "Whether the agent treats this directory as trusted. Only some agents have it.", {
-    side: "right",
-    dy: 45,
-  });
-  await shot(page, `${PAGE}/effort-permissions-trust`, [effort, permissions, trust]);
+  await shot(page, `${PAGE}/effort-and-permissions`, [effort, permissions]);
 });
 
 test("search", async ({ page, request }) => {

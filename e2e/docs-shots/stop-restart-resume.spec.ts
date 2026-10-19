@@ -18,7 +18,9 @@ const PAGE = "stop-restart-resume";
 
 test("header actions", async ({ page, request }) => {
   const { director } = await open(page, request);
-  const header = page.locator("header.titlebar");
+  // The row at the top of the open session, which holds its terminal tabs
+  // and, at its far end, these buttons.
+  const header = page.locator("header.session-topbar");
   await expect(header).toBeVisible();
   await director.callout(
     header.locator(".restart-primary"),

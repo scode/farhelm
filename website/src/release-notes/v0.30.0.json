@@ -1,0 +1,59 @@
+{
+  "screenshots": [
+    {
+      "entry": 2256,
+      "name": "release-notes/v0-30-0-agent-trust",
+      "alt": "The Codex trust switch in Settings, explained as off by default and applying only to managed checkouts, with the switch that shows Codex's hint beside its trust question."
+    },
+    {
+      "entry": 2200,
+      "name": "release-notes/v0-30-0-initial-prompt",
+      "alt": "The session launcher's initial prompt field with a prompt typed, explained as the agent's first message when the session starts."
+    },
+    {
+      "entry": 2272,
+      "name": "release-notes/v0-30-0-wrapper-prefix",
+      "alt": "The session launcher's wrapper prefix field with nice -n 10 typed, explained as running the agent while Farhelm keeps its status, conversation and Restart."
+    },
+    {
+      "entry": 2225,
+      "name": "release-notes/v0-30-0-template-sequence",
+      "alt": "The note Ctrl+Shift+X brings up, asking for template number keys and Enter, explained along with Cmd+X in the Mac app."
+    },
+    {
+      "entry": 2316,
+      "name": "release-notes/v0-30-0-template-list",
+      "alt": "The template list Ctrl+Shift+J opens, with its search box and three templates, explained along with Cmd+J on a Mac."
+    },
+    {
+      "entry": 2234,
+      "name": "release-notes/v0-30-0-quick-launch-naming",
+      "alt": "The name sessions on quick launch switch in Settings, explained as offering to name a quick-launched session."
+    },
+    {
+      "entry": 2297,
+      "name": "release-notes/v0-30-0-permission-words",
+      "alt": "The session launcher's search with perms: typed, listing yolo, guarded and custom, explained along with guarded and effort:default."
+    },
+    {
+      "entry": 2266,
+      "name": "release-notes/v0-30-0-local-host-appearance",
+      "alt": "The local host's settings with its icon and color choices, explained as working like a remote host's."
+    },
+    {
+      "entry": 2269,
+      "name": "release-notes/v0-30-0-terminal-frames",
+      "alt": "The color terminal frames by host switch in Settings, explained as off by default."
+    },
+    {
+      "entry": 2298,
+      "name": "release-notes/v0-30-0-host-steps",
+      "alt": "A host's setup confirmation listing its numbered steps and the files each writes."
+    },
+    {
+      "entry": 2253,
+      "name": "release-notes/v0-30-0-session-details",
+      "alt": "An open session with its tabs and buttons in one row at the top, and its name, host, directory and command in a slim bar under the terminal."
+    }
+  ]
+}
