@@ -197,15 +197,43 @@ fn folder_suggestions<'a>(
         .collect()
 }
 
-/// Preserve the distinguishing tail without splitting UTF-8. The full escaped
-/// path remains the option's accessible name and tooltip; this is only its label.
+/// Keep at most 36 displayed characters without leaving a partial escape marker.
+/// Long paths keep up to 35 escaped characters from the end, with a leading
+/// ellipsis. A generated marker crossing that boundary is dropped with the prefix,
+/// so its orphaned suffix cannot disguise an unsafe character. Literal marker-shaped
+/// path text keeps ordinary truncation; the full escaped accessible name and tooltip
+/// remain independent of this label.
 fn folder_tail_label(path: &PeerText) -> String {
     let visible = path.escaped();
     let count = visible.chars().count();
     if count <= 36 {
         return visible;
     }
-    format!("…{}", visible.chars().skip(count - 35).collect::<String>())
+    let mut start = count - 35;
+    let mut shown = 0;
+    // Walk original characters so only generated escapes are indivisible.
+    // Parsing the displayed spelling would also change ordinary filenames that
+    // happen to contain literal marker text. The shared predicate remains the
+    // authority; each unsafe scalar has the same ASCII spelling as display_peer.
+    for ch in path.raw().chars() {
+        let width = if farhelm_proto::text::is_presentation_unsafe(ch) {
+            format!("<U+{:04X}>", ch as u32).len()
+        } else {
+            1
+        };
+        let end = shown + width;
+        if shown < start && start < end {
+            // Keep the final tail and its budget, dropping this whole marker
+            // with the omitted prefix. Ordinary one-character runs cannot cross.
+            start = end;
+            break;
+        }
+        if end >= start {
+            break;
+        }
+        shown = end;
+    }
+    format!("…{}", visible.chars().skip(start).collect::<String>())
 }
 
 /// What a successful create hands to `on_created`: the session the helm
@@ -7688,15 +7716,84 @@ mod tests {
     #[test]
     fn folder_dropdown_labels_preserve_the_escaped_tail() {
         assert_eq!(super::folder_tail_label(&"~/short".into()), "~/short");
+        let at_limit = "123456789012345678901234567890123456";
+        assert_eq!(super::folder_tail_label(&at_limit.into()), at_limit);
         let long = format!("/{}終わり", "界".repeat(40));
         let label = super::folder_tail_label(&long.into());
-        assert_eq!(label.chars().count(), 36);
-        assert!(label.starts_with('…'));
-        assert!(label.ends_with("終わり"));
+        assert_eq!(
+            label,
+            concat!(
+                "…界界界界界界界界",
+                "界界界界界界界界",
+                "界界界界界界界界",
+                "界界界界界界界界終わり"
+            )
+        );
         assert_eq!(
             super::folder_tail_label(&"/tmp/\nname".into()),
-            super::display_peer("/tmp/\nname")
+            "/tmp/<U+000A>name"
         );
+    }
+
+    /// A character-safe tail can still leave `02E>` from an escaped direction
+    /// override. Drop the whole crossing marker so it cannot look like ordinary
+    /// path text. Literal marker text earlier in the path must not shift the
+    /// generated token's displayed position or acquire escape semantics itself.
+    #[test]
+    fn folder_dropdown_labels_drop_a_split_escape_marker() {
+        for marker in ["\u{202E}", "\u{E0041}"] {
+            let path =
+                format!("~/界界界界界界界界界界/<U+200B>/{marker}abcdefghijklmnopqrstuvwxyz12345");
+            assert_eq!(
+                super::folder_tail_label(&path.into()),
+                "…abcdefghijklmnopqrstuvwxyz12345",
+                "a crossing marker must be omitted whole: {marker:?}"
+            );
+        }
+    }
+
+    /// Printable marker-shaped names need no escape and keep the existing tail.
+    /// A real unsafe character in the omitted prefix prevents a whole-input
+    /// unsafe check from accidentally giving the literal marker token semantics.
+    #[test]
+    fn folder_dropdown_labels_keep_literal_marker_text_as_ordinary_path_characters() {
+        for (marker, expected) in [
+            ("<U+202E>", "…02E>abcdefghijklmnopqrstuvwxyz12345"),
+            ("<U+E0041>", "…041>abcdefghijklmnopqrstuvwxyz12345"),
+            ("<U+10FFFF>", "…FFF>abcdefghijklmnopqrstuvwxyz12345"),
+        ] {
+            let path =
+                format!("~/界界界界界界界界界界/\u{200b}/{marker}abcdefghijklmnopqrstuvwxyz12345");
+            assert_eq!(super::folder_tail_label(&path.into()), expected);
+        }
+    }
+
+    /// A complete marker that fits in the tail still exposes the character it
+    /// represents. Exact boundaries must not discard it or consume the final
+    /// path characters to retain it; six-digit markers can occur as literal text.
+    #[test]
+    fn folder_dropdown_labels_keep_complete_markers_at_the_boundary() {
+        for (tail, expected) in [
+            (
+                "\u{202E}abcdefghijklmnopqrstuvwxyz1",
+                "…<U+202E>abcdefghijklmnopqrstuvwxyz1",
+            ),
+            (
+                "\u{E0041}abcdefghijklmnopqrstuvwxyz",
+                "…<U+E0041>abcdefghijklmnopqrstuvwxyz",
+            ),
+            (
+                "<U+10FFFF>abcdefghijklmnopqrstuvwxy",
+                "…<U+10FFFF>abcdefghijklmnopqrstuvwxy",
+            ),
+            (
+                "\u{202E}abcdefghijklmnopqrstuvwxyz123456789",
+                "…abcdefghijklmnopqrstuvwxyz123456789",
+            ),
+        ] {
+            let path = format!("~/界界界界界界界界界界/{tail}");
+            assert_eq!(super::folder_tail_label(&path.into()), expected);
+        }
     }
 
     /// A command launch with only its command, asserted not YOLO: the
