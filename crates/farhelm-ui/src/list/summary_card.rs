@@ -15,8 +15,19 @@ use crate::activity::{ActivityStamp, utc_stamp};
 use crate::peer::{DetailPart, PeerLine};
 use crate::status::StatusBadge;
 
-use super::row::{PeerTitle, menu_header_summary_parts};
+use super::row::{PeerTitle, menu_header_summary_parts, observed_yolo_mode};
 use super::shared::{HostLocality, SessionHostIcon, SessionHostName};
+
+/// Keep the saved launch visible while explaining the shield's screen evidence.
+/// The menu deliberately uses only the saved facts. Even an already-YOLO launch
+/// gets the suffix here: observing a mode and choosing it at launch are distinct.
+fn summary_parts(session: &Session) -> Vec<DetailPart> {
+    let mut parts = menu_header_summary_parts(session, None);
+    if observed_yolo_mode(session.launch.as_ref(), session.screen_yolo).is_some() {
+        parts.push(DetailPart::text(", YOLO observed"));
+    }
+    parts
+}
 
 /// Provide the one summary used by every unmarked point in a session's open button.
 ///
@@ -99,7 +110,7 @@ pub(super) fn SessionSummarySource(
                     }
                     PeerLine {
                         class: "session-summary-agent".to_string(),
-                        parts: menu_header_summary_parts(&session, None),
+                        parts: summary_parts(&session),
                     }
                 }
                 div { class: "session-summary-body",
@@ -238,6 +249,51 @@ mod tests {
                 "missing {expected}: {managed_text:?}"
             );
         }
+    }
+
+    /// A stored guarded launch must not conceal screen evidence in the real card.
+    /// The menu remains a launch record, and unsupported readings add no claim.
+    #[farhelm_testtrace::test]
+    fn card_mentions_observed_yolo_without_changing_the_menu() {
+        let mut session = row_specimen("observed");
+        session.launch = Some(crate::SessionLaunch::Agent {
+            selection: crate::LaunchSelection {
+                harness: crate::LaunchHarness::Claude,
+                permissions: Some(crate::LaunchPermission::Guarded),
+                model: None,
+                effort: None,
+                permission_flags: None,
+                wrapper_prefix: None,
+                workspace_trust: None,
+            },
+            start: vec!["claude".into(), "{farhelm_args}".into()],
+            resume: None,
+        });
+        assert!(!session.screen_yolo);
+        assert_eq!(
+            crate::peer::detail_text(&summary_parts(&session)),
+            "claude · guarded"
+        );
+        session.screen_yolo = true;
+        assert_eq!(
+            crate::peer::detail_text(&summary_parts(&session)),
+            "claude · guarded, YOLO observed"
+        );
+        let rendered = text_values(&render(session.clone(), HostLocality::Unknown, None)).join("");
+        assert!(rendered.contains(", YOLO observed"), "{rendered}");
+        assert_eq!(
+            crate::peer::detail_text(&menu_header_summary_parts(&session, None)),
+            "claude · guarded"
+        );
+        if let Some(crate::SessionLaunch::Agent { selection, .. }) = &mut session.launch {
+            selection.permissions = Some(crate::LaunchPermission::Yolo);
+        }
+        assert_eq!(
+            crate::peer::detail_text(&summary_parts(&session)),
+            "claude · yolo, YOLO observed"
+        );
+        session.launch = None;
+        assert!(!crate::peer::detail_text(&summary_parts(&session)).contains("YOLO observed"));
     }
 
     /// The card's status is a last-known verdict on a stale host, never a

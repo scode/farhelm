@@ -480,11 +480,7 @@ pub(crate) fn session_permission(
         }
         Some(crate::SessionLaunch::Legacy { .. }) | None => PermissionGlyph::Unknown,
     };
-    let observed = screen_yolo
-        && launch
-            .and_then(|launch| launch.agent_type())
-            .and_then(crate::launch_composer::screen_yolo_mode)
-            .is_some();
+    let observed = observed_yolo_mode(launch, screen_yolo).is_some();
     if observed
         && !matches!(
             permission,
@@ -495,6 +491,19 @@ pub(crate) fn session_permission(
     } else {
         permission
     }
+}
+
+/// Share the status-line capability check across the shield and its summaries.
+/// Legacy launches and harnesses without a reading cannot acquire an observation
+/// merely because an older or inconsistent peer sent the evidence flag.
+pub(super) fn observed_yolo_mode(
+    launch: Option<&crate::SessionLaunch>,
+    screen_yolo: bool,
+) -> Option<&'static str> {
+    launch
+        .and_then(|launch| launch.agent_type())
+        .and_then(crate::launch_composer::screen_yolo_mode)
+        .filter(|_| screen_yolo)
 }
 
 /// Describe a session's agent and permission from its stored launch, never
@@ -565,13 +574,7 @@ fn launch_badge(session: &Session) -> AgentBadge {
 fn agent_badge(session: &Session) -> AgentBadge {
     let mut badge = launch_badge(session);
     badge.permission = session_permission(session.launch.as_ref(), session.screen_yolo);
-    if let Some(mode) = session
-        .launch
-        .as_ref()
-        .and_then(|launch| launch.agent_type())
-        .and_then(crate::launch_composer::screen_yolo_mode)
-        .filter(|_| session.screen_yolo)
-    {
+    if let Some(mode) = observed_yolo_mode(session.launch.as_ref(), session.screen_yolo) {
         // Lead with the observation: a red shield's hover and screen-reader
         // text must not open by describing the safer launch mode.
         badge.description = format!(

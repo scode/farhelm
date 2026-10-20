@@ -16285,7 +16285,10 @@
 - Superseded 2026-10-19 (scheduling): the user replaced the time-based complexity gate above with a size gate of about
   150 lines of diff (code, tests and docs, not counting this ledger, the queue removal and the changelog fragment); over
   that, block and bring it back to the user.
-- Execution: planned in `plans/queue/summary-card-observed-yolo.md`.
+- Execution: implemented in change `zvqvnoxz`, bookmark `plan/summary-card-observed-yolo/01-card-observed-yolo`. The
+  card keeps the stored launch and adds YOLO observed; the actions-menu header stays unchanged. The scheduling
+  decision's 150-line size gate replaces the original time gate; the counted code, tests and specification diff is 99
+  lines. PR: https://github.com/scode/farhelm/pull/2378/changes.
 
 ## expanded-setup-failure-displaces-open-menu.md
 
