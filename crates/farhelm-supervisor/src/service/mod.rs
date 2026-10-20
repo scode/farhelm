@@ -81,6 +81,10 @@
 //! allocating handlers consult it at their existing validation boundaries, so
 //! sharing the allocation policy does not reorder protocol refusals.
 //!
+//! `request_modes` declares every control variant's execution contract and the
+//! conformance test's matching representative. It describes dispatch rather
+//! than choosing admission, spawning or reply order on a handler's behalf.
+//!
 //! `agent_relay` is the one slice that is not a carve-out of an older
 //! file: it arrived whole with `PROTOCOL_VERSION` 13 to carry requests
 //! UPWARD, from a session's own agent to the helm attached to it. It is
@@ -101,6 +105,7 @@ mod listing;
 pub(crate) mod notifications;
 mod report_files;
 mod report_watch;
+mod request_modes;
 mod status;
 mod sweep;
 mod tcp_relays;

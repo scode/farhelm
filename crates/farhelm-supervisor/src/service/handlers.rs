@@ -2927,7 +2927,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         // session's credential can establish, so a full-authority connection
         // cannot make one. The
         // refusal rides in `AgentResponse`, the one reply shape an agent
-        // request's sender decodes; the catch-all below would leave it waiting.
+        // request's sender decodes; merely logging it would leave it waiting.
         ControlMsg::AgentRequest { req_id, .. } => {
             send_reply(
                 ctx.tx,
@@ -2943,13 +2943,55 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             .await;
         }
         // Response/event messages arriving at the supervisor are peer
-        // bugs; log and continue. `AgentResponse` is one of them here by
+        // bugs; log and continue. Transfer requests below belong to the
+        // connection's pre-dispatch path and cannot reach this arm normally.
+        // Listing them explicitly makes a new variant require a dispatch
+        // decision as well as an execution-class declaration.
+        // `AgentResponse` is one of them here by
         // construction: the connection loop completes it against that
         // connection's own pending table before dispatch runs (see
         // `handle_connection`'s control arm), so it can only reach this
         // point if that interception is bypassed — which this arm reports
         // like any other message that should not have arrived.
-        other => warn!(?other, "unexpected control message at supervisor"),
+        other @ (ControlMsg::BeginTcpRelay { .. }
+        | ControlMsg::TcpRelayAck { .. }
+        | ControlMsg::CloseTcpRelay { .. }
+        | ControlMsg::StatFile { .. }
+        | ControlMsg::BeginDownload { .. }
+        | ControlMsg::DownloadAck { .. }
+        | ControlMsg::AbortDownload { .. }
+        | ControlMsg::TcpRelayStarted { .. }
+        | ControlMsg::TcpRelayEnded { .. }
+        | ControlMsg::BrowserForwardingSet { .. }
+        | ControlMsg::FileStat { .. }
+        | ControlMsg::DownloadStarted { .. }
+        | ControlMsg::DownloadEnded { .. }
+        | ControlMsg::SessionCreated { .. }
+        | ControlMsg::GithubCheckoutReconciled { .. }
+        | ControlMsg::SessionList { .. }
+        | ControlMsg::DirectoryListing { .. }
+        | ControlMsg::CheckoutTrashListed { .. }
+        | ControlMsg::CheckoutTrashDeleted { .. }
+        | ControlMsg::GithubCheckoutPreviewed { .. }
+        | ControlMsg::GithubRepoResults { .. }
+        | ControlMsg::SessionStopped { .. }
+        | ControlMsg::SessionDeleted { .. }
+        | ControlMsg::SessionRestarted { .. }
+        | ControlMsg::PromptTarget { .. }
+        | ControlMsg::SessionPrompted { .. }
+        | ControlMsg::SessionRenamed { .. }
+        | ControlMsg::TabOpened { .. }
+        | ControlMsg::TabClosed { .. }
+        | ControlMsg::Attached { .. }
+        | ControlMsg::Detached { .. }
+        | ControlMsg::ReplayComplete { .. }
+        | ControlMsg::SessionsChanged
+        | ControlMsg::UploadStarted { .. }
+        | ControlMsg::UploadAck { .. }
+        | ControlMsg::UploadCommitted { .. }
+        | ControlMsg::UploadAborted { .. }
+        | ControlMsg::AgentResponse { .. }
+        | ControlMsg::Error { .. }) => warn!(?other, "unexpected control message at supervisor"),
     }
 }
 
