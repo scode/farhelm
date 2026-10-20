@@ -1430,6 +1430,8 @@ test("second client takes over; first shows the detach banner", async ({
  * peer sends a stall decision, which must retain its explicit banner under
  * SPEC.md. A missing-session attach is infrastructure failure and now takes
  * the calm recovery path, so it cannot exercise this banner hold.
+ * The peer's invisible characters must stay visible after the held banner
+ * paints; being terminal-related does not make this GUI notice terminal output.
  */
 test("a final detach banner is held while a delete is in flight and paints if it fails", async ({ page }) => {
   const bogusId = "00000000-0000-0000-0000-00000000de1e";
@@ -1474,7 +1476,7 @@ test("a final detach banner is held while a delete is in flight and paints if it
       socket.send(JSON.stringify({
         type: "detached",
         code: "stalled",
-        reason: "terminal stopped consuming output (stalled)",
+        reason: "terminal\u202Estopped\u200B <U+202E>",
       }));
       socket.close();
     });
@@ -1515,7 +1517,7 @@ test("a final detach banner is held while a delete is in flight and paints if it
   // The delete "fails": the mark clears while the terminal is mounted.
   await page.locator(".terminal-panes").evaluate((node: HTMLElement) => { node.dataset.deleting = "false"; });
   await expect(banner).toBeVisible();
-  expect(await banner.textContent()).toBe("Detached: terminal stopped consuming output (stalled)");
+  expect(await banner.textContent()).toBe("Detached: terminal<U+202E>stopped<U+200B> <U+003C>U+202E>");
   expect(await page.evaluate(() => (window as any).__bannerShownWhileDeleting)).toBe(false);
 });
 

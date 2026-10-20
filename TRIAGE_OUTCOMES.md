@@ -16428,7 +16428,12 @@
   override and a zero-width space. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or the changelog fragment); over it, block and bring it back to the user. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
+- Execution: implemented in change `ovtnorvxkzuqvxmuykpqlnpmnpzukwzo`, bookmark
+  `plan/terminal-link-and-copy-fixes/01-escape-peer-errors`. Terminal notices and upload status escape presentation
+  controls at paint time; the retained-banner and upload-failure browser tests cover a direction override, zero-width
+  space and literal escape notation. A node regression also covers the fixed local notice before helper loading and
+  repeated peer-notice paints. Counted code/test/doc diff: 55 lines, within the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2388/changes.
 
 ## web-link-redraw-lowers-refusal.md
 
