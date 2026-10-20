@@ -2364,6 +2364,10 @@ pub(crate) fn SessionView(
                             // above so assistive technology can identify the
                             // panel represented by `aria-expanded`.
                             div { id: "restart-confirm-panel", class: "header-confirm",
+                                // Automatic terminal handoffs yield while an
+                                // answer owns focus; all inline questions use
+                                // the same marker, including tab Close below.
+                                "data-terminal-keyboard-owner": "true",
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js("#restart-confirm-panel", crate::dialog_focus::ContainerEnter::None)); },
                                 span { class: "confirm-consequence",
                                     "{crate::status::restart_consequence(&shown.status)}"
@@ -2465,6 +2469,7 @@ pub(crate) fn SessionView(
                         }
                         if confirming_header_replace.is_open() {
                             div { class: "header-confirm header-replace-confirm",
+                                "data-terminal-keyboard-owner": "true",
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".header-replace-confirm", crate::dialog_focus::ContainerEnter::None)); },
                                 // The same status-derived consequence the row's
                                 // and the interrupted card's replace prompts
@@ -2570,6 +2575,7 @@ pub(crate) fn SessionView(
                         }
                         if confirming_header_delete.is_open() {
                             div { class: "header-confirm header-delete-confirm",
+                                "data-terminal-keyboard-owner": "true",
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".header-delete-confirm", crate::dialog_focus::ContainerEnter::None)); },
                                 // The row prompt's own consequence text, so
                                 // the two entry points warn about exactly the
@@ -2913,6 +2919,7 @@ pub(crate) fn SessionView(
                     }
                     if confirming_replace.is_open() {
                         div { class: "replace-confirm",
+                            "data-terminal-keyboard-owner": "true",
                             span { class: "confirm-consequence", "{crate::status::replace_consequence(&shown.status, shown.tabs.len())}" }
                             button {
                                 r#type: "button",
@@ -2968,6 +2975,7 @@ pub(crate) fn SessionView(
                     // previous one is open. Keying by tab remounts its focus
                     // handoff instead of leaving Enter on the second close control.
                     div { key: "{tab_id}", class: "tab-confirm",
+                        "data-terminal-keyboard-owner": "true",
                         span { class: "confirm-consequence", "{CLOSE_TAB_CONSEQUENCE}" }
                         span { class: "confirm-title",
                             "{confirming_label.clone().unwrap_or_default()}"

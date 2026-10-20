@@ -508,7 +508,11 @@ synced terminal specs nudges waiting recovery controllers once when the host ret
 the build-mismatch capability veto remain authoritative. Interruption after a reboot still empties the desired set.
 Replay callbacks from a socket that died meanwhile cannot retire its new recovery. If replay reveals while the pane is
 still inert, the availability edge completes the focus handoff through the same guard used by reveal, preserving
-deliberate focus in fields, dialogs and other keyboard owners.
+deliberate focus in fields, dialogs and other keyboard owners. Inline session questions share a keyboard-owner marker:
+header Restart, Replace and Delete, sidebar Delete and Replace, interrupted-card Replace and tab Close keep focus on
+their answers across replay reveal, availability recovery and automatic selected-tab fallback. The guard follows focus
+inside the question, so explicitly selecting a terminal still allows typing there. Header Escape cancellation keeps its
+existing post-unmount return to the selected terminal.
 
 Restart with uses a separate dialog because it relaunches the current session rather than creating one. For an agent
 launch it renders the same `LaunchControls` component as the session launcher, with the harness fixed to the session's
