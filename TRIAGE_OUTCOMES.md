@@ -16466,7 +16466,11 @@
 - Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1).
 - Completion criteria: production repository discovery also removes bare `GIT_CONFIG`, with a test. Size gate: about 100
   lines, as above. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/repository-discovery-git-config.md`.
+- Execution: complete in change `zpxzmkwmqvknmqlmlxrolnwyutwnztqu`, bookmark
+  `plan/repository-discovery-git-config/01-strip-config-selector`. Production inspection strips bare `GIT_CONFIG` from
+  inherited and child-only environments; a real-Git regression and the existing isolation test cover it. Measured
+  code/test/doc diff: 39 lines, within the 100-line gate.
+  [PR #2412](https://github.com/scode/farhelm/pull/2412/changes).
 
 ## current-agent-chip-erases-custom-flags.md
 

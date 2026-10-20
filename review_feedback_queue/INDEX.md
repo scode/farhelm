@@ -37,9 +37,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`introduction-promises-universal-reboot-resume.md`](introduction-promises-universal-reboot-resume.md) — The
   introduction promises conversation recovery after reboot for sessions without Resume reporting.
 
-- [`repository-discovery-inherits-bare-git-config.md`](repository-discovery-inherits-bare-git-config.md) — An inherited
-  Git configuration selector can prevent repositories from appearing as launcher suggestions.
-
 - [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
   — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
 
