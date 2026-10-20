@@ -56,7 +56,8 @@ Tell each reviewer:
 - Create, modify or delete nothing in the checkout, helper scripts included; scratch goes in the agent scratch space
   `AGENTS.md`, "Agent scratch space", describes. One audit agent left a stray script in the repository root.
 - Return findings in the final reply rather than in a report file. Harnesses commonly refuse report files written by
-  subagents.
+  subagents. For trailing reviews, also keep the private findings logs and progress artifacts `persistent-review`
+  requires; those artifacts supplement the final reply and stay outside the checkout.
 - Do not spawn nested helper agents. In the audited run, helpers' caveats and dropped candidates were not carried
   forward by the reviewers that spawned them.
 - End the reply with three parts:

@@ -142,13 +142,15 @@ Triggers: "perform trailing code review", or similar wording around "trailing co
 - `review_feedback_queue/INDEX.md`
 - `review_feedback_queue/FILTER.md`
 - `review_feedback_queue/TRAILING_REVIEW.md`
+- the `persistent-review` skill
 - the `jjstack` skill
 - `AGENTS.md`, "Conventional Commits" (root, already in context for agents started at the checkout root)
 - the coverage sources, for each finding
 
-Fence: the request authorizes recording findings and updating the checkpoint only, not triage, fixes or execution; the
-checkpoint advances only after every commit in the range was reviewed and every finding handled; the review-result PR
-stays a draft and is never merged automatically.
+Fence: use `persistent-review` for the reviews; the request authorizes recording findings and updating the checkpoint
+only, not triage, fixes or execution; the checkpoint advances only after every commit in the range meets the skill's
+completion requirements and every finding is handled; the review-result PR stays a draft and is never merged
+automatically.
 
 ### Triage ("triage review feedback")
 
