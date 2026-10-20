@@ -56,9 +56,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`unselected-repository-keeps-stale-setup-eligibility.md`](unselected-repository-keeps-stale-setup-eligibility.md) —
   Checkout setup eligibility can remain stale while no repository is selected.
 
-- [`replace-yolo-questions-remain-separate.md`](replace-yolo-questions-remain-separate.md) — Equivalent Replace controls
-  can leave separate YOLO questions, with cancellation reflected in only one surface.
-
 - [`archive-recovery-clears-reused-path-trust.md`](archive-recovery-clears-reused-path-trust.md) — Startup recovery or
   Delete retry of an interrupted archive can erase the trust choice for a different directory subsequently placed at the
   old path.

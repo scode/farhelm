@@ -248,6 +248,12 @@ pub(crate) struct DeleteNotice(pub(crate) Signal<Option<String>>);
 #[derive(Clone, Copy)]
 pub(crate) struct ReplaceIntent(pub(crate) Signal<Option<(String, Option<String>)>>);
 
+/// Only one pane may own a YOLO question per source, independently of retry keys.
+/// Each local question releases its source on consumption or unmount; other rows stay usable.
+/// Retry identity may change A → B → A while the original question remains open.
+#[derive(Clone, Copy)]
+pub(crate) struct ReplaceYoloQuestions(pub(crate) Signal<HashSet<String>>);
+
 impl DeleteNotice {
     /// Show `notice` when there is one; `None` leaves any earlier notice.
     pub(crate) fn publish(mut self, notice: Option<String>) {
@@ -2301,10 +2307,24 @@ pub(crate) fn ListView(
     let mut yolo_replace = use_confirm_slot::<YoloReplaceQuestion, ()>();
     let mut yolo_openings = use_signal(|| 0u64);
     let mut yolo_replace_error = use_signal(|| None::<String>);
-    // Open the question as a new opening, replacing any other row's.
-    let mut open_yolo_replace = move |pending: PendingYoloReplace| {
+    let mut yolo_questions = use_context::<ReplaceYoloQuestions>().0;
+    use_drop(move || {
+        if let Some(question) = yolo_replace.current_key() {
+            yolo_questions.write().remove(&question.pending.source.id);
+        }
+    });
+    // Acquire before retiring the old opening: a duplicate leaves its owner intact.
+    // Its question and failure reason change together only after admission succeeds.
+    let mut open_yolo_replace = move |pending: PendingYoloReplace, error: Option<String>| {
+        if !yolo_questions.write().insert(pending.source.id.clone()) {
+            return;
+        }
+        if let Some(old) = yolo_replace.current_key() {
+            yolo_questions.write().remove(&old.pending.source.id);
+        }
         let opening = *yolo_openings.peek() + 1;
         yolo_openings.set(opening);
+        yolo_replace_error.set(error);
         yolo_replace.open(YoloReplaceQuestion { opening, pending }, ());
     };
     // `answered` is the YOLO question's answer this replace continues, taken
@@ -2350,8 +2370,7 @@ pub(crate) fn ListView(
                     // shared by every row, so not over another row's question
                     // raised meanwhile.
                     if !yolo_replace.is_open() {
-                        yolo_replace_error.set(Some(reason));
-                        open_yolo_replace(pending);
+                        open_yolo_replace(pending, Some(reason));
                     }
                     end_row_op(&id);
                     return;
@@ -2428,15 +2447,13 @@ pub(crate) fn ListView(
                                     source.agent_selection(),
                                 ),
                             };
-                            // A new question starts without an earlier one's
-                            // "don't ask again" failure.
-                            yolo_replace_error.set(None);
-                            open_yolo_replace(PendingYoloReplace {
+                            let pending = PendingYoloReplace {
                                 key: key.clone(),
                                 ask,
                                 source: source.clone(),
                                 guard,
-                            });
+                            };
+                            open_yolo_replace(pending, None);
                         } else {
                             errors
                                 .write()
@@ -4308,6 +4325,7 @@ pub(crate) fn ListView(
                                         || begin_row_op(&id),
                                         || end_row_op(&id),
                                     ) {
+                                        yolo_questions.write().remove(&answer.pending.source.id);
                                         yolo_replace_error.set(None);
                                         let pending = answer.pending.clone();
                                         do_replace(pending.source, pending.guard, Some(answer));
@@ -4326,6 +4344,7 @@ pub(crate) fn ListView(
                                         || begin_row_op(&id),
                                         || end_row_op(&id),
                                     ) {
+                                        yolo_questions.write().remove(&answer.pending.source.id);
                                         yolo_replace_error.set(None);
                                         let pending = answer.pending.clone();
                                         do_replace(pending.source, pending.guard, Some(answer));
@@ -4339,6 +4358,7 @@ pub(crate) fn ListView(
                                     // an earlier question leaves a later one
                                     // (and its error) alone.
                                     if yolo_replace.take(&question).is_some() {
+                                        yolo_questions.write().remove(&question.pending.source.id);
                                         let owns_source = replace_key.peek().as_ref().is_some_and(|(source, key)| {
                                             source == &question.pending.source.id && key.as_ref() == Some(&question.pending.key)
                                         });

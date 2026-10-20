@@ -16875,7 +16875,10 @@
   cancelling it is reflected in both; a test. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/replace-yolo-shared-question.md`.
+- Execution: complete in jj change `mtuskkxv`, bookmark `plan/replace-yolo-shared-question/01-one-question`. The shared
+  per-session admission excludes a second YOLO question without coupling it to retry-key changes. The code, tests and
+  documentation total 92 added/deleted lines, below the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2410/changes.
 
 ## repeated-terminal-links-acquire-mismatch-warning.md
 
