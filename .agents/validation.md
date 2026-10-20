@@ -139,10 +139,11 @@ that its required systemd or SSH substrate ran.
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` — keeps the agent
   instructions loadable: the root `AGENTS.md` within the 28 KiB budget (Codex injects only its first 32 KiB and drops
   the rest silently) and ending with its truncation sentinel, every path an instruction file names and every
-  `` `file`, "Heading" `` citation resolvable, every `.agents/` file reachable from the root, and no inventoried
-  `CLAUDE.md` or `CLAUDE.local.md` (either disables default native `AGENTS.md` loading). Run it whenever an instruction
-  file changes or a Markdown heading is renamed or a file moved; the self-test when the script changes. Seconds, no
-  network. CI runs it in the dprint job, which, unlike the formatting job, also runs for docs-only changes.
+  `` `file`, "Heading" `` citation resolvable (including mixed-case specification filenames), every `.agents/` file
+  reachable from the root, and no inventoried `CLAUDE.md` or `CLAUDE.local.md` (either disables default native
+  `AGENTS.md` loading). Run it whenever an instruction file changes or a Markdown heading is renamed or a file moved;
+  the self-test when the script changes. Seconds, no network. CI runs it in the dprint job, which, unlike the formatting
+  job, also runs for docs-only changes.
 - `cd website && bun install --frozen-lockfile && bun run build` — the docs website (Astro + Starlight) must build; this
   is what catches a page with missing frontmatter, a sidebar slug that names no page, or a broken internal link or
   anchor. Bun is the package manager the Vercel project is configured with, so the lockfile is `bun.lock`; commit it
