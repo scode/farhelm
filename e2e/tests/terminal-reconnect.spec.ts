@@ -28,6 +28,7 @@
 
 
 import { expect, newObservedContext, test } from "./helpers/evidence";
+import fs from "node:fs";
 import { drainedRoute } from "./helpers/drained-route";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import { localHostId, stubFeed } from "./helpers/fleet";
@@ -676,6 +677,19 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
     await page.keyboard.type(marker);
     await page.keyboard.press("Enter");
     await waitForTermText(page, `echo:${marker}`);
+    // Put both link kinds in this owned live screen before recovery retains it.
+    const snapshotUrl = "https://example.com/frozen";
+    const snapshotBytes = "snapshot download bytes";
+    fs.writeFileSync(`${own.cwd}/snapshot.txt`, snapshotBytes);
+    expect(fs.readFileSync(`${own.cwd}/snapshot.txt`, "utf8")).toBe(snapshotBytes);
+    for (const text of [snapshotUrl, "snapshot.txt"]) {
+      // Internal whitespace survives the fixture's trim and separates echo:link from the path token.
+      await page.keyboard.type(`link ${text}`);
+      await page.keyboard.press("Enter");
+      await waitForTermText(page, `echo:link ${text}`);
+      await expect(page.locator("#terminal .xterm-rows > div").filter({ hasText: `echo:link ${text}` }).last()).toBeVisible();
+    }
+    const snapshotCols = await page.evaluate(() => (window as any).__farhelmTerm.cols);
     // Withheld BEFORE the close, so there is no window at all in which the
     // ladder could reach the helm ahead of the winner below.
     await withholdTerminalSockets(page);
@@ -773,6 +787,40 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
         page.locator("#terminal"),
         "the screen the user had must still be on screen after the refusal",
       ).toContainText(`echo:${marker}`);
+      // The retained providers need new gesture evidence, without a new island.
+      await page.evaluate(() => {
+        (window as any).__snapshotOpened = [];
+        window.open = ((url: string) => { (window as any).__snapshotOpened.push(url); return null; }) as typeof window.open;
+      });
+      for (const text of [snapshotUrl, "snapshot.txt"]) {
+        const linkRow = page.locator("#terminal .xterm-rows > div").filter({ hasText: `echo:link ${text}` }).last();
+        await expect(linkRow).toBeVisible();
+        const linkBox = await linkRow.boundingBox();
+        expect(linkBox, "the complete link must occupy a painted snapshot row").not.toBeNull();
+        const col = (await linkRow.textContent())!.indexOf(text);
+        expect(col).toBeGreaterThanOrEqual(0);
+        const x = linkBox!.x + (col + text.length / 2) * linkBox!.width / snapshotCols;
+        const y = linkBox!.y + linkBox!.height / 2;
+        await page.mouse.move(linkBox!.x - 1, y);
+        await page.mouse.move(x, y);
+        if (text === "snapshot.txt") await expect(page.locator("#terminal .terminal-file-target")).toContainText("click to download");
+        await expect(page.locator("#terminal .xterm-screen")).toHaveClass(/\bxterm-cursor-pointer\b/);
+        if (text === snapshotUrl) {
+          // Restoring admission must not turn a selection drag into an open.
+          await page.mouse.down();
+          await page.mouse.move(x + 12, y, { steps: 3 });
+          await page.mouse.up();
+          expect(await page.evaluate(() => (window as any).__snapshotOpened)).toEqual([]);
+        }
+        const saved = text === "snapshot.txt" ? page.waitForEvent("download") : null;
+        await page.mouse.click(x, y);
+        if (saved) {
+          const download = await saved;
+          expect(await download.failure()).toBeNull();
+          expect(fs.readFileSync((await download.path())!, "utf8")).toBe(snapshotBytes);
+        } else await expect.poll(() => page.evaluate(() => (window as any).__snapshotOpened)).toEqual([snapshotUrl]);
+      }
+      expect(await page.evaluate(() => Object.keys((window as any).__farhelmIslands ?? {}))).toEqual([]);
       // This screen has no island: copy must come from the snapshot's own
       // listeners, and selecting it must not reopen input or transport.
       // WebKit cannot grant clipboard-read permission; record the actual

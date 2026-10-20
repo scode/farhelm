@@ -50,9 +50,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`introduction-promises-universal-reboot-resume.md`](introduction-promises-universal-reboot-resume.md) — The
   introduction promises conversation recovery after reboot for sessions without Resume reporting.
 
-- [`restored-terminal-snapshot-rejects-link-clicks.md`](restored-terminal-snapshot-rejects-link-clicks.md) — Restored
-  terminal snapshots can retain hover effects while rejecting every web or file link click.
-
 - [`repository-discovery-inherits-bare-git-config.md`](repository-discovery-inherits-bare-git-config.md) — An inherited
   Git configuration selector can prevent repositories from appearing as launcher suggestions.
 

@@ -1277,7 +1277,9 @@ button is down; the drag reporter prioritizes the primary bit when buttons overl
 open the target. The withheld press explicitly runs drag-notice dismissal bookkeeping, marks its gesture as withheld,
 clears an earlier local selection, prevents the native focus change and focuses the terminal. Forced-selection presses
 keep xterm's own path; file links, other buttons, wheel and unowned moves remain unchanged. Teardown removes the screen
-and document listeners with the mount's copy-on-select listeners, so reconnects cannot accumulate owners.
+and document listeners with the mount's copy-on-select listeners, so reconnects cannot accumulate owners. A restored
+recovery snapshot reinstalls its retained terminal's link-gesture observer beside local copy-on-select. Burial removes
+both; input and transport listeners remain detached.
 
 An OSC 8 link's hover compares the link's underlined text with its target (`linkTextMismatch` in
 `assets/terminal-links.js`) to decide whether the display is the quiet one or the loud mismatch warning. The text is
