@@ -323,6 +323,32 @@ test("a session without a terminal anchors approval below its top row", async ({
   }), { message: "no-terminal approval uses the top row fallback" }).toBeLessThan(1);
 });
 
+/** Very short windows must still expose a scrollable route to the request and its answer. */
+test("a short viewport keeps approval content and answers reachable", async ({ page }, info) => {
+  const staged = await stageApprovals(page, [launchRequest("short-viewport")]);
+  await openSelected(page);
+  // At 48px the real 30px top row and placement margins exhausted the old
+  // region. A positive height alone would miss an answer still outside it.
+  await page.setViewportSize({ width: 1280, height: 48 });
+  const region = page.locator(".approval-cards");
+  await expect.poll(() => region.evaluate((node) => node.getBoundingClientRect().height), {
+    message: "a short window must not collapse waiting requests to zero height",
+  }).toBeGreaterThan(0);
+  await expect.poll(() => region.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.top >= 0 && rect.bottom <= innerHeight;
+  })).toBe(true);
+  await region.hover();
+  await page.mouse.wheel(0, 2000);
+  await expect.poll(() => region.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  const deny = page.locator(".approval-card .approval-deny");
+  await expect(deny).toBeInViewport();
+  await page.screenshot({ path: info.outputPath("approval-short-answer.png") });
+  await deny.click();
+  await expect(page.locator(".approval-card")).toHaveCount(0);
+  expect(staged.answers).toEqual([{ id: "short-viewport", answer: "deny" }]);
+});
+
 /** A stale delay must not arm a different request after rapid switches across hosts. */
 test("one request stays selected across refreshes and rapid switches rearm the buttons", async ({ page }) => {
   await page.clock.install();

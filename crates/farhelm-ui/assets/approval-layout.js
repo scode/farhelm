@@ -21,13 +21,19 @@
     // follow that row, so only the terminal area's top clears all of them.
     const terminal = pane.querySelector(".terminal-panes");
     const chrome = pane.querySelector(".session-topbar");
-    const top = (terminal
+    let top = (terminal
       ? terminal.getBoundingClientRect().top
       : chrome ? chrome.getBoundingClientRect().bottom : bounds.top) + 12;
     const width = Math.min(660, Math.max(0, bounds.width - 24));
     // The cap preserves the prompt below the overlay; a tall header must not
     // let a nominal fraction of the pane extend past its remaining space.
-    const height = Math.max(0, Math.min(bounds.height * 0.55, bounds.bottom - top - 12));
+    let height = Math.max(0, Math.min(bounds.height * 0.55, bounds.bottom - top - 12));
+    // Reserve one answer control plus spacing (44px). If session chrome uses
+    // that room, the request temporarily takes the viewport so it can be answered.
+    if (height < 44) {
+      top = 0;
+      height = window.innerHeight;
+    }
     Object.assign(region.style, {
       left: `${bounds.left + (bounds.width - width) / 2}px`,
       top: `${top}px`,

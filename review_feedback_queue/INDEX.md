@@ -20,9 +20,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`short-main-pane-hides-approval-requests.md`](short-main-pane-hides-approval-requests.md) — In a sufficiently short
-  window, waiting approval requests disappear until the user enlarges the window or changes the selected session.
-
 - [`agent-checkout-test-compares-lexical-tmp.md`](agent-checkout-test-compares-lexical-tmp.md) — New agent checkout
   tests compare canonical destinations with lexical /tmp paths and fail on macOS.
 
