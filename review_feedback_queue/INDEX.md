@@ -22,9 +22,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
   — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
 
-- [`template-table-omits-custom-permission-flags.md`](template-table-omits-custom-permission-flags.md) — The default
-  template table omits the words that its custom permission setting applies.
-
 - [`shortcut-tests-skip-owned-cleanup.md`](shortcut-tests-skip-owned-cleanup.md) — Early cleanup failures in shortcut
   and naming tests skip remaining owned resources or shared checkout configuration restoration.
 

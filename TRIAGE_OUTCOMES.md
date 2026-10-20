@@ -16519,7 +16519,10 @@
 - Completion criteria: the table shows the custom flags beside "custom", rendered the way the wrapper value is, with a
   test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
   changelog fragment). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/template-editor-and-listing.md`.
+- Execution: complete in change `lyxzpuuuwkqwkpzkxktpoxpupkmqyuop`, bookmark
+  `plan/template-editor-and-listing/03-permission-flags`. The table shows custom permission words using the wrapper's
+  shell-joined, quoted representation, with a rendering regression test. Size: 30 code/test/doc lines, within the
+  100-line gate. PR: https://github.com/scode/farhelm/pull/2433/changes.
 
 ## file-recognition-rejects-digit-leading-extensions.md
 
