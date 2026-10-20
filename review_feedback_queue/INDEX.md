@@ -60,9 +60,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Delete retry of an interrupted archive can erase the trust choice for a different directory subsequently placed at the
   old path.
 
-- [`tab-attach-blocks-host-reader-during-stop.md`](tab-attach-blocks-host-reader-during-stop.md) — Attaching a tab
-  during Stop can temporarily block unrelated requests on the host connection.
-
 - [`stale-outcome-hides-successful-stop.md`](stale-outcome-hides-successful-stop.md) — A stale status publication can
   hide a successfully recorded user Stop until another lifecycle operation or reload repairs it.
 
