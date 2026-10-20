@@ -16392,7 +16392,10 @@
 - Superseded 2026-10-19 (scheduling): the user replaced the time-based complexity gate above with a size gate of about
   150 lines of diff (code, tests and docs, not counting this ledger, the queue removal and the changelog fragment); over
   that, block and bring it back to the user.
-- Execution: planned in `plans/queue/template-list-current-labels.md`.
+- Execution: implemented in change `uxzxwlnx`, bookmark `plan/template-list-current-labels/02-refresh-shortcut-labels`.
+  Template-mode opening refreshes only binding fields through the existing overlay; failed reads keep cached labels. The
+  scheduling decision's 150-line size gate replaces the original time gate; the counted code, tests and docs diff is 80
+  lines. PR: https://github.com/scode/farhelm/pull/2382/changes.
 
 ## queued-launch-capture-before-repaint.md
 

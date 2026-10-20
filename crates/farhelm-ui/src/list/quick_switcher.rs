@@ -8,7 +8,7 @@
 
 use dioxus::prelude::*;
 
-use crate::api::{ListSort, SessionFilter, fetch_sessions, fetch_templates};
+use crate::api::{ListSort, Preferences, SessionFilter, fetch_sessions, fetch_templates};
 use crate::hosts::HostsRead;
 use crate::hosts::settings_dialog::install_dialog_with_selector;
 use crate::icons::HostMark;
@@ -184,6 +184,14 @@ fn template_shortcut_badges(name: &str, preferences: &crate::api::Preferences) -
     badges
 }
 
+/// Mirror fresh bindings without replacing unrelated cached preferences.
+/// Callers apply the shared binding overlay first so unconfirmed local writes
+/// retain their ownership; this refresh must never become a whole seed read.
+fn apply_template_bindings(current: &mut Preferences, fresh: Preferences) {
+    current.quick_launch_template = fresh.quick_launch_template;
+    current.template_shortcuts = fresh.template_shortcuts;
+}
+
 /// Coalesce highlight runs so a long legal title does not create one DOM
 /// node per character. Positions are sorted original-character indices.
 fn highlight_runs(text: &str, positions: &[usize]) -> Vec<(bool, String)> {
@@ -232,7 +240,24 @@ pub(super) fn QuickSwitcher(
     on_pick: EventHandler<SwitcherPick>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
-    let preferences = use_context::<super::SharedPreferences>();
+    let mut preferences = use_context::<super::SharedPreferences>();
+    let bindings_base = base.clone();
+    // Refresh labels once per opening, independently of the template read.
+    // A failed read leaves the cached labels and usable list intact. Do not
+    // subscribe to preferences here: writing them must not retrigger the read.
+    let _bindings = use_resource(move || {
+        let base = bindings_base.clone();
+        async move {
+            if mode == SwitcherMode::Templates
+                && let Ok(fresh) = crate::api::fetch_preferences(&base).await
+            {
+                apply_template_bindings(
+                    &mut preferences.0.write(),
+                    crate::api::template_bindings_after_read(fresh),
+                );
+            }
+        }
+    });
     let sessions_base = base.clone();
     let listing = use_resource(move || {
         let base = sessions_base.clone();
@@ -489,6 +514,43 @@ pub(super) fn QuickSwitcher(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An agent's reassignment must move both badge kinds when the list opens,
+    /// while unrelated local preferences survive a partial binding refresh.
+    #[farhelm_testtrace::test]
+    fn fresh_bindings_refresh_badges_without_replacing_other_preferences() {
+        let mut current = Preferences {
+            compact: Some(true),
+            list_sort: Some("title".into()),
+            quick_launch_template: Some("old".into()),
+            template_shortcuts: [("1".into(), "old".into())].into(),
+            ..Default::default()
+        };
+        assert_eq!(template_shortcut_badges("old", &current).len(), 2);
+        assert!(template_shortcut_badges("new", &current).is_empty());
+        let fresh = Preferences {
+            quick_launch_template: Some("new".into()),
+            template_shortcuts: [("2".into(), "new".into())].into(),
+            ..Default::default()
+        };
+        let expected = Preferences {
+            quick_launch_template: fresh.quick_launch_template.clone(),
+            template_shortcuts: fresh.template_shortcuts.clone(),
+            ..current.clone()
+        };
+        apply_template_bindings(&mut current, fresh);
+        assert_eq!(current, expected);
+        assert!(template_shortcut_badges("old", &current).is_empty());
+        let keys = crate::launch_sequence::TEMPLATE_SHORTCUTS;
+        assert_eq!(
+            template_shortcut_badges("new", &current),
+            [keys.bolt.label(keys.mac_desktop), keys.number_chord("2")]
+        );
+        apply_template_bindings(&mut current, Preferences::default());
+        assert!(template_shortcut_badges("new", &current).is_empty());
+        assert_eq!(current.compact, Some(true));
+        assert_eq!(current.list_sort.as_deref(), Some("title"));
+    }
 
     /// Fuzzy matching keeps character positions meaningful across Unicode
     /// case expansion, and never accepts query characters in reverse order.
