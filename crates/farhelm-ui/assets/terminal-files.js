@@ -67,8 +67,12 @@
         const path = match[0].replace(/[.,;!?]+$/u, '').replace(/:\d+(?::\d+)?$/u, '');
         if (!path || /[\x00-\x1f\x7f]/u.test(path)) continue;
         if (path.startsWith('//') || /^[a-z][a-z0-9+.-]*:/iu.test(path) || path.includes('://')) continue;
-        if (/^v?\d+(?:\.\d+)+(?:[-+][\w.-]+)?$/iu.test(path)) continue;
-        if (!(path.startsWith('/') || path.startsWith('~/') || path.includes('/') || /[^/.]+\.[a-z][a-z0-9_-]*$/iu.test(path))) continue;
+        // Numeric version-like tokens, including units such as 1.5x, are
+        // not file evidence. A directory prefix still makes them paths.
+        // One required digit per dotted component avoids overlapping digit
+        // quantifiers that can backtrack exponentially on a near-match.
+        if (/^[+-]?v?\d+(?:\.\d[a-z0-9_-]*)+(?:[-+][\w.-]+)?$/iu.test(path)) continue;
+        if (!(path.startsWith('/') || path.startsWith('~/') || path.includes('/') || /[^/.]+\.[a-z0-9][a-z0-9_-]*$/iu.test(path))) continue;
         const start = chunk.index + match.index;
         found.push({ path, start, end: start + path.length });
       }

@@ -3,6 +3,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { spawnSync } = require('node:child_process');
 const { linkRangeText } = require('../assets/terminal-links.js');
 const { pathTokens, oscTarget, bufferLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, MAX_BYTES } = require('../assets/terminal-files.js');
 
@@ -173,6 +174,33 @@ test('paths exclude diagnostic locations, prose punctuation, URLs and versions',
   for (const input of ['hello', '1.2.3', 'v1.2.3', '//host/out.csv', 'https://host/out.csv',
     'ftp://host/out.csv', 'file:///tmp/out.csv', 'data:report.pdf', 'mailto:a@host.example',
     'javascript:alert/report.pdf', 'https:report.pdf', 'javascript:alert(document.domain)', 'ftp://host/(src/main.rs)', '(javascript:alert(document.domain))']) assert.deepEqual(pathTokens(input), [], input);
+});
+
+/** Digit-leading extensions must not turn numeric versions or quantities into
+ * file evidence. A slash still makes an ambiguous token an explicit path.
+ */
+test('bare digit-leading extensions retain numeric-token exclusions', () => {
+  for (const input of ['backup.7z', 'backup.001', 'archive.1part', '123.txt', './1.5x']) {
+    assert.deepEqual(pathTokens(input).map(token => token.path), [input], input);
+  }
+  for (const input of ['1.5x', '-1.5x', '+1.5x', 'v1.5x', '1.2rc1', '1.2.3', 'v1.2.3', '1.2.3-rc1', '1.2+build']) {
+    assert.deepEqual(pathTokens(input), [], input);
+  }
+});
+
+/** Numeric-looking file stems must finish recognition even when the numeric
+ * guard nearly matches. A separate process bounds a regressed synchronous
+ * regex without hanging the harness; its assertion also pins the file result.
+ */
+test('a long numeric-looking filename completes recognition', () => {
+  const result = spawnSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const { pathTokens } = require(process.argv[1]);
+    const input = '1' + '.1111111111'.repeat(8) + '.x';
+    assert.deepEqual(pathTokens(input).map(token => token.path), [input]);
+  `, require.resolve('../assets/terminal-files.js')], { timeout: 5000, encoding: 'utf8' });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
 });
 
 /** Enabling xterm all-scheme delivery must never send executable targets to an opener. */

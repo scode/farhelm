@@ -309,7 +309,8 @@ for (const kind of ['local', 'ssh']) {
   test(`file hover and complete browser download from ${kind} host`, async ({ page, request }) => {
     const host = await connectedHost(request, kind);
     const directory = stackScratchDir('file-download-');
-    const basename = 'report.pdf';
+    // The bare digit-leading extension must reach the real host lookup/save.
+    const basename = 'backup.7z';
     const content = `download from ${kind}\n`;
     fs.writeFileSync(path.join(directory, basename), content);
     // A lexical URL normalization would select the top-level report instead
@@ -351,7 +352,7 @@ for (const kind of ['local', 'ssh']) {
       expect(received.size).toBe(Buffer.byteLength(content));
       expect(received.host).toBe(kind === 'local' ? 'this machine' : 'localhost');
       gate.release();
-      await expect(tooltip.locator('.terminal-file-name')).toHaveText(`\uf1c1 ${basename}`);
+      await expect(tooltip.locator('.terminal-file-name')).toHaveText(`\uf1c6 ${basename}`);
       await expect(tooltip.locator('.terminal-file-directory')).toHaveText(`${received.host}:${path.dirname(received.path)}/`);
       await expect(tooltip.locator('.terminal-file-size')).toHaveText(`${Buffer.byteLength(content)} B · click to download`);
       await expect(tooltip).toHaveAttribute('data-tier', 'small');
