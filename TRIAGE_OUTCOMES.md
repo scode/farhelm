@@ -16471,7 +16471,10 @@
 - Completion criteria: re-selecting the current agent leaves the custom flags text byte for byte, with a test. Size
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog
   fragment). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-composer-drafts.md`.
+- Execution: complete in change `stwnwqtwtkozzxxnvmktsvqyltrmyzom`, bookmark
+  `plan/launcher-composer-drafts/01-reselect-keeps-flags`,
+  [PR #2389](https://github.com/scode/farhelm/pull/2389/changes). The fix and browser regression total 34 lines, within
+  the 100-line gate.
 
 ## incomplete-custom-flags-reset-compatible-effort.md
 

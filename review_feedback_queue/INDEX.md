@@ -126,9 +126,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`empty-initial-prompt-skipped-by-tab.md`](empty-initial-prompt-skipped-by-tab.md) — Tab traversal can wrap before
   reaching the empty initial-prompt editor.
 
-- [`current-agent-chip-erases-custom-flags.md`](current-agent-chip-erases-custom-flags.md) — Reselecting the current
-  agent can erase permission flags with an unfinished quote.
-
 - [`incomplete-custom-flags-reset-compatible-effort.md`](incomplete-custom-flags-reset-compatible-effort.md) — Accepting
   a custom model can reset compatible effort because permission flags are incomplete.
 
