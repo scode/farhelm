@@ -18,9 +18,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Repeated update or removal planning can leave adding, updating, and removing hosts stuck until the helm restarts, even
   after the pages close.
 
-- [`auth-refusal-forgets-partial-replace.md`](auth-refusal-forgets-partial-replace.md) — An authentication refusal can
-  forget a partially successful Replace attempt, allowing its retry to create another replacement.
-
 - [`unchanged-template-drops-launch-retry-key.md`](unchanged-template-drops-launch-retry-key.md) — Reapplying an
   unchanged template after a lost reply discards retry protection and can start another session.
 

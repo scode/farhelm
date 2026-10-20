@@ -17119,7 +17119,12 @@
   resumes the same Replace; the docstring is corrected; a unit test. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove
   the feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-retry-identity.md`.
+- Execution: implemented in change `kvrktzmyurotoswntwyzptsosnmzmvtt`, bookmark
+  `plan/launcher-retry-identity/02-authentication-retry`,
+  [PR #2393](https://github.com/scode/farhelm/pull/2393/changes). Authentication refusals preserve an unresolved Replace
+  key, so retrying recovers its existing replacement instead of creating another. Unit coverage includes recognized,
+  unrecognized and unreadable authentication refusals; the browser regression retains a committed replacement through a
+  consumed 401 and retries across the two controls.
 
 ## unchanged-template-drops-launch-retry-key.md
 
