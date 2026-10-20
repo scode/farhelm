@@ -1013,6 +1013,12 @@ fn not_connected_in_time(spawned: bool) -> anyhow::Error {
 /// launch would be refused again. A supervisor that reports
 /// no identity gets no remedy here: fixing it happens in a window this
 /// startup path never opens.
+///
+/// Peer builds and identities need visible presentation here, before the
+/// refusal reaches the native alert: AppleScript quoting only protects its
+/// syntax. Identity evidence also exposes spaces and literal escape markers
+/// so distinct installs cannot look alike. The app's own text and line breaks
+/// keep their original spelling.
 fn local_supervisor_refusal(
     hosts: &[crate::Host],
     state_dir: &Path,
@@ -1031,7 +1037,7 @@ fn local_supervisor_refusal(
         } => {
             // Our build and the local remedy are app-authored on this path.
             // Their original line breaks belong to the native alert's structure.
-            let peer_build = peer_build.raw();
+            let peer_build = peer_build.escaped();
             let our_build = our_build.raw();
             let remediation = remediation.raw();
             let mismatch = format!(
@@ -1049,8 +1055,8 @@ fn local_supervisor_refusal(
             }
         }
         crate::HostPhase::IdentityMismatch { recorded, reported } => {
-            let recorded = recorded.raw();
-            let reported = reported.raw();
+            let recorded = recorded.identity();
+            let reported = reported.identity();
             format!(
                 "the {label} in {dir} reports identity {reported}, but this machine's host entry \
              recorded {recorded}. The supervisor's database (supervisor.db) and this app's own \
@@ -1062,7 +1068,7 @@ fn local_supervisor_refusal(
             )
         }
         crate::HostPhase::IdentityUnverified { recorded } => {
-            let recorded = recorded.raw();
+            let recorded = recorded.identity();
             format!(
                 "the {label} in {dir} reports no identity, but this machine's host entry recorded \
              {recorded}, so this app cannot tell whether it is the same supervisor."
@@ -1671,6 +1677,136 @@ mod tests {
             None,
             "a local host still connecting keeps startup waiting"
         );
+    }
+
+    /// Native startup refusals must expose peer-controlled formatting without
+    /// rewriting the app's diagnostic. AppleScript quoting alone leaves bidi
+    /// and zero-width characters active; escaping the whole refusal would also
+    /// destroy the app's structural newlines. Identity evidence has the stronger
+    /// contract that spaces and literal escape markers cannot hide a difference.
+    /// The real helper argv is inspected without launching either native helper.
+    #[farhelm_testtrace::test]
+    fn native_supervisor_refusals_escape_only_peer_fragments() {
+        let dir = Path::new("/state/farhelm");
+        let host = |state| crate::Host {
+            id: 1,
+            kind: crate::HostKind::Local,
+            color: Default::default(),
+            icon: Default::default(),
+            destination: None,
+            alias: None,
+            name: "this machine".into(),
+            identity: None,
+            remote_farhelm: None,
+            remote_state_dir: None,
+            state,
+            incarnation: 1,
+            yolo_without_asking: false,
+            commands_without_asking: false,
+            links_without_asking: false,
+            local_links_without_asking: false,
+        };
+
+        // Builds use ordinary peer presentation: readable spaces and literal
+        // markers survive, while peer line breaks and format controls do not.
+        // Local values deliberately include those same bytes to catch accidental
+        // escaping of the whole app-authored message.
+        for (peer_build, shown_build) in [
+            ("old-build", "old-build"),
+            (
+                "old build<U+0020>\u{202E}\u{200B}\npeer line",
+                "old build<U+0020><U+202E><U+200B><U+000A>peer line",
+            ),
+        ] {
+            let refusal = local_supervisor_refusal(
+                &[host(crate::HostPhase::VersionSkew {
+                    peer_protocol: 9,
+                    peer_build: peer_build.into(),
+                    our_protocol: 10,
+                    our_build: "new build\u{200B}\nlocal build detail".into(),
+                    remediation: "update the supervisor\nthen relaunch".into(),
+                })],
+                dir,
+                true,
+            )
+            .expect("a local version skew is a refusal");
+            let expected = format!(
+                "the managed local supervisor in /state/farhelm speaks protocol 9 (build \
+                 {shown_build}), but this app speaks protocol 10 (build new build\u{200B}\n\
+                 local build detail): update the supervisor\nthen relaunch"
+            );
+            assert_eq!(refusal, expected);
+            let argv = native_refusal_commands(&refusal);
+            assert_eq!(argv[0][4], expected.replace('\n', " "));
+            assert_eq!(
+                argv[1][2],
+                format!(
+                    "display alert \"farhelm-desktop cannot start\" message \"{expected}\" as critical"
+                )
+            );
+        }
+
+        // Identity evidence exposes spaces and keeps actual controls distinct
+        // from literal marker text. Reversing the space pair also exercises a
+        // literal marker in the recorded-only, unverifiable-identity message.
+        for (recorded, reported, shown_recorded, shown_reported) in [
+            ("id-recorded", "id-reported", "id-recorded", "id-reported"),
+            (
+                "install id",
+                "install<U+0020>id",
+                "install<U+0020>id",
+                "install<U+003C>U+0020>id",
+            ),
+            (
+                "install<U+0020>id",
+                "install id",
+                "install<U+003C>U+0020>id",
+                "install<U+0020>id",
+            ),
+            (
+                "install\u{202E}\u{200B}",
+                "install<U+202E><U+200B>",
+                "install<U+202E><U+200B>",
+                "install<U+003C>U+202E><U+003C>U+200B>",
+            ),
+        ] {
+            assert_ne!(shown_recorded, shown_reported);
+            let mismatch = local_supervisor_refusal(
+                &[host(crate::HostPhase::IdentityMismatch {
+                    recorded: recorded.into(),
+                    reported: reported.into(),
+                })],
+                dir,
+                false,
+            )
+            .expect("a local identity mismatch is a refusal");
+            let evidence = format!(
+                "reports identity {shown_reported}, but this machine's host entry recorded \
+                 {shown_recorded}."
+            );
+            let unverified = local_supervisor_refusal(
+                &[host(crate::HostPhase::IdentityUnverified {
+                    recorded: recorded.into(),
+                })],
+                dir,
+                false,
+            )
+            .expect("an unverifiable local identity is a refusal");
+            let missing_evidence = format!(
+                "reports no identity, but this machine's host entry recorded {shown_recorded},"
+            );
+            for (refusal, expected_evidence) in
+                [(mismatch, evidence), (unverified, missing_evidence)]
+            {
+                let argv = native_refusal_commands(&refusal);
+                assert!(argv[0][4].contains(&expected_evidence), "{argv:?}");
+                assert!(argv[1][2].contains(&expected_evidence), "{argv:?}");
+                for raw_control in ['\u{202E}', '\u{200B}'] {
+                    assert!(!argv[0][4].contains(raw_control), "{argv:?}");
+                    assert!(!argv[1][2].contains(raw_control), "{argv:?}");
+                }
+            }
+        }
     }
 
     /// Own the server thread until its protocol result and actual exit have been observed.
