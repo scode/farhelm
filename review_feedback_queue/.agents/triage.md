@@ -34,6 +34,26 @@ When verification shows a finding is already fixed on main, do not ask the user 
 with the comment "already fixed" and the fixing commit or PR, remove its feedback file and index entry immediately, mark
 execution complete, and move on. `discard` is used because it carries no judgment about the finding.
 
+When verification shows a finding is clearly settled, do not ask the user for an outcome either: record `fix code` and
+move on. The maintainer chose this on 2026-10-19, so that a finding whose answer is already written down does not cost
+them a question. A finding is clearly settled only when all of these hold:
+
+- SPEC.md, SPEC_impl.md, or a decision the maintainer recorded in `TRIAGE_OUTCOMES.md` states the required behavior in
+  so many words;
+- the code on current main contradicts it, as triage confirmed by reading the code or running a check, not as the
+  reviewer claimed;
+- the fix follows directly from that text: it needs no design choice, changes no spec rule, and overturns no deliberate
+  choice in the code (a bound its comment explains, say).
+
+A finding that rests on a reading of the spec rather than its words, on a premise triage could not verify, or on a fix
+with more than one reasonable shape is not clearly settled; prepare and present it as usual. Record the Assessment with
+the rule or decision quoted and where it lives; a Decision saying the outcome was recorded under this rule without
+asking; and Completion criteria that include a size gate of about 100 lines of diff (code, tests and docs, not counting
+`TRIAGE_OUTCOMES.md`, the queue removal or the changelog fragment), over which execution blocks and brings the item back
+to the user. The feedback file stays and Execution starts `pending`, as for any decided item: this rule changes who
+decides, not when the fix is made. Briefly report these items with their basis alongside the covered ones; the user can
+revise any of them.
+
 Before presenting an item for a decision, check whether its behavior is explicitly accepted by the current SPEC.md or
 SPEC_impl.md, its fix is already covered by an item in TODO.md's `Planned` bucket, it is a known bug root `BUGS.md`
 already records as one we have decided to live with, or it matches a review-only filter in
