@@ -4189,6 +4189,8 @@ fn take_add_offer<G>(
 }
 
 /// One-use ADD authority paired with the inspected inputs and helm's display plan.
+/// The local offer keeps raw confirmation bytes for the existing copy contract;
+/// its confirmation component escapes them when rendering the plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AddOffer {
     probe_id: String,
@@ -4414,12 +4416,14 @@ fn AddHostForm(
                             confirmation,
                             steps,
                         }) => {
-                            offer.open(AddOffer { probe_id, confirmation, steps, binding }, ());
+                            offer.open(AddOffer { probe_id, confirmation: confirmation.raw().to_owned(), steps, binding }, ());
                             auto_submit.set(
                                 preferences.0.peek().skip_host_setup_confirmation == Some(true),
                             );
                         }
-                        Ok(ProbeResponse::Manual { reason }) => error.set(Some(reason)),
+                        // Local error state also carries transport failures;
+                        // its display still goes through the peer-text boundary.
+                        Ok(ProbeResponse::Manual { reason }) => error.set(Some(reason.raw().to_owned())),
                         Ok(ProbeResponse::Unvalidated(problem)) => {
                             // A successful probe may have registered an
                             // answering supervisor before its unreadable

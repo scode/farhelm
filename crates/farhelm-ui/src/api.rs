@@ -3676,7 +3676,8 @@ pub(crate) enum ProbeResponse {
         /// Opaque, one-use confirmation id. Never parsed or reconstructed.
         probe_id: String,
         /// The plan rendered by the helm from the executor's own actions.
-        confirmation: String,
+        /// Display escapes it; Copy plan retains its exact original bytes.
+        confirmation: PeerText,
         /// The helm's ordered descriptions of the actions this plan will run.
         /// Older test replies may omit it and use the plain-text rendering.
         #[serde(default)]
@@ -3684,10 +3685,11 @@ pub(crate) enum ProbeResponse {
     },
     /// The transport worked, but automatic provisioning does not cover the
     /// target.
-    Manual { reason: String },
+    Manual { reason: PeerText },
     /// The successful response may already have registered an answering
     /// supervisor, but this build could not decode which outcome occurred.
     /// Callers must refresh the registry and must not invent a setup offer.
+    /// This diagnostic is constructed locally, not decoded from a text field.
     #[serde(skip)]
     Unvalidated(String),
 }
@@ -3704,7 +3706,7 @@ pub(crate) struct UpdatePlan {
     /// Opaque, one-use confirmation id bound to this host and plan.
     pub(crate) probe_id: String,
     /// The concrete converge plan the second request authorizes.
-    pub(crate) confirmation: String,
+    pub(crate) confirmation: PeerText,
     #[serde(default)]
     pub(crate) steps: Option<PlanSteps>,
 }
@@ -3721,7 +3723,7 @@ pub(crate) struct UninstallPlan {
     /// Opaque, one-use confirmation id bound to this host and plan.
     pub(crate) probe_id: String,
     /// The removal the second request authorizes, rendered by the helm.
-    pub(crate) confirmation: String,
+    pub(crate) confirmation: PeerText,
     #[serde(default)]
     pub(crate) steps: Option<PlanSteps>,
     pub(crate) plan: UninstallPlanFacts,
@@ -3729,36 +3731,41 @@ pub(crate) struct UninstallPlan {
 
 /// One plan description, authored by the helm from the actions it retains.
 /// The client displays it but does not derive wording from action ids.
+/// Relayed prose remains peer text even when the current helm uses a literal:
+/// destinations and host paths can occur alongside those fixed words.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct PlanSteps {
-    pub(crate) lead: String,
+    pub(crate) lead: PeerText,
     pub(crate) steps: Vec<PlanStep>,
     /// Uninstall's kept-data note sits outside the action list because no
     /// action removes that directory.
-    pub(crate) kept: Option<String>,
+    pub(crate) kept: Option<PeerText>,
 }
 
 /// A single action's readable name and details in run order.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct PlanStep {
+    /// Executor action label used as a component key, not host-authored prose.
     pub(crate) id: String,
-    pub(crate) name: String,
+    pub(crate) name: PeerText,
     pub(crate) paths: Vec<PlanStepPath>,
-    pub(crate) explanation: Option<String>,
+    pub(crate) explanation: Option<PeerText>,
 }
 
 /// The visible home-relative path and the full host path shown on hover.
+/// Both spellings come from the retained plan; the UI escapes each separately
+/// rather than deriving a short path or pre-escaping the copied confirmation.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct PlanStepPath {
-    pub(crate) full: String,
-    pub(crate) short: String,
+    pub(crate) full: PeerText,
+    pub(crate) short: PeerText,
 }
 
 /// The part of the helm's frozen UNINSTALL plan this client reads.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct UninstallPlanFacts {
     /// The host's Farhelm data directory, which the uninstall keeps.
-    pub(crate) state_dir: String,
+    pub(crate) state_dir: PeerText,
 }
 
 /// Identity returned once the helm has accepted a long provisioning run.
@@ -3842,23 +3849,24 @@ pub(crate) enum ProvisioningStatus {
 /// One executor action as `GET /api/hosts/{id}/provisioning` reports it.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub(crate) struct ProvisioningStep {
-    /// Stable executor label; presentation uses the helm's readable name.
+    /// Finite executor action label; presentation uses the readable name, or
+    /// this label as a compatibility fallback when that name is absent.
     pub(crate) step: String,
     /// Additive plan wording, absent only in hand-built or older snapshots.
     #[serde(default)]
-    pub(crate) name: Option<String>,
+    pub(crate) name: Option<PeerText>,
     /// The same host paths shown in the confirmation, if supplied.
     #[serde(default)]
     pub(crate) paths: Vec<PlanStepPath>,
     /// Why this action is part of the plan, authored by the helm.
     #[serde(default)]
-    pub(crate) explanation: Option<String>,
-    /// Kept as a string so a newer step outcome costs only its styling, not
-    /// the entire progress panel.
+    pub(crate) explanation: Option<PeerText>,
+    /// The helm's finite StepStatus word, not a command's output. Kept as a
+    /// string so a newer outcome costs only its styling, not the entire panel.
     pub(crate) status: String,
     /// The executor's bounded explanation, including a failing command's
     /// own message. Rendered through the peer-text boundary.
-    pub(crate) message: Option<String>,
+    pub(crate) message: Option<PeerText>,
 }
 
 /// The host-scoped progress snapshot retained in this helm process.
@@ -3876,7 +3884,7 @@ pub(crate) struct ProvisioningView {
     /// Executor order, retained across completion until another run starts.
     pub(crate) steps: Vec<ProvisioningStep>,
     /// Aggregate explanation. Step messages remain separately available.
-    pub(crate) message: Option<String>,
+    pub(crate) message: Option<PeerText>,
 }
 
 /// Fetch the whole host registry with each host's live connection state.
@@ -5504,7 +5512,7 @@ mod tests {
             offered,
             ProbeResponse::Provisionable {
                 probe_id: "add-plan".to_string(),
-                confirmation: "line one\nline two\n".to_string(),
+                confirmation: "line one\nline two\n".into(),
                 steps: None,
             }
         );
@@ -5516,7 +5524,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(update.probe_id, "update-plan");
-        assert_eq!(update.confirmation, "replace then restart\n");
+        assert_eq!(update.confirmation.raw(), "replace then restart\n");
         assert!(update.steps.is_none());
 
         let structured: UninstallPlan = serde_json::from_value(serde_json::json!({
@@ -5537,16 +5545,19 @@ mod tests {
         .expect("the UI accepts the helm's structured step list beside its opaque plan");
         let steps = structured.steps.expect("the helm supplied a step list");
         assert_eq!(steps.steps[0].id, "remove-unit");
-        assert_eq!(steps.steps[0].name, "remove the systemd user unit");
+        assert_eq!(steps.steps[0].name.raw(), "remove the systemd user unit");
         assert_eq!(
-            steps.steps[0].paths[0].short,
+            steps.steps[0].paths[0].short.raw(),
             "~/.config/systemd/user/farhelm.service"
         );
         assert_eq!(
-            steps.steps[0].paths[0].full,
+            steps.steps[0].paths[0].full.raw(),
             "/home/host/.config/systemd/user/farhelm.service"
         );
-        assert_eq!(steps.kept.as_deref(), Some("Kept: host data."));
+        assert_eq!(
+            steps.kept.as_ref().map(PeerText::raw),
+            Some("Kept: host data.")
+        );
 
         let progress: ProvisioningView = serde_json::from_value(serde_json::json!({
             "host_id": 7,
@@ -5564,7 +5575,7 @@ mod tests {
         assert_eq!(progress.status, ProvisioningStatus::Failed);
         assert_eq!(progress.steps[0].status, "failed");
         assert_eq!(
-            progress.steps[0].message.as_deref(),
+            progress.steps[0].message.as_ref().map(PeerText::raw),
             Some("systemctl reported a concrete failure")
         );
     }
