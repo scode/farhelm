@@ -104,3 +104,54 @@ The browser tests observe the exact copied payload at the existing clipboard bri
 
 Each PR passed the required single fresh-context gpt-6.1-sol reviewer at high effort with no findings. Commit and PR
 wording passed separate cold reads. No review swarm was used.
+
+### Landing
+
+Landed as #2357, #2358 and #2359, merged bottom-up, unchanged from what the report describes. It was the third of eight
+plans in this landing round, after workspace-trust-destination and the blocked launch-enters-working-dir (which makes
+sessions enter their folder or fail; it failed its checks at landing and is not part of what was tested with this plan).
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained link-hover-covers (link clicks refused under the Mac app's tunnel-error notice, and
+the desktop file-opening fix), workspace-trust-destination (inherited spawns take trust from their destination, and a
+trust note on approval cards), and plan bookkeeping. A fresh-context reviewer and I read this plan against those and
+against the other plans in the round:
+
+- link-hover-covers and this plan both edit the terminal's script, in unrelated places: link-hover-covers changes which
+  surfaces count as covering a link, and this plan changes which focused controls keep the keyboard when a terminal
+  finishes replay or recovers. Neither reads the other's state.
+- The approval card note from workspace-trust-destination and this plan's header and row changes touch different parts
+  of the window.
+- Nothing else in the round touches session questions, copy feedback or the session list's action names.
+
+The only conflicts were in the review feedback queue's index, where every plan in the round removes its own entries; all
+removals are kept. The landed code is identical to what the landing's checks below tested.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+Run now, on this plan rebased onto main with workspace-trust-destination below it and the round's five later plans above
+it:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed file, and `python3 releasing/check-changelog.py format`: all passed.
+- Through the test recorder with pinned nextest and tmux, four slots and no retries, the whole protocol, helm,
+  supervisor and UI libraries and the `farhelm` binary's own tests, among others: 3489 passed, run
+  `cdabc40d-ecaa-418e-938f-01f2cbe4da64`. The UI's desktop-only Rust tests: 706 passed, run
+  `4926be34-2adf-40e5-a588-663695e00161`. `node --test` in the UI's JavaScript test directory: 311 passed, run
+  `fcb2b9cf-4424-4fc2-8148-dede8454a5ea` (one more than the executor's run, from link-hover-covers, which landed
+  earlier).
+- After `cargo build` and the release web build, `npx playwright test` on header, terminal replay rename, session
+  confirmations, approval layout, agent relay, workspace trust, Claude trust, quick launch, launcher template shortcuts,
+  managed checkouts and tooltip coverage, on Chromium and WebKit, one worker, no retries: 242 passed, run
+  `1484ba9a-0aab-4e7f-a7a4-716faede7c66`. These include the header and replay-rename files the executor ran, and the
+  session confirmation and tooltip files that also exercise the questions and names this plan changes.
+- Skipped: the rest of the browser suite, the native Mac app and screen readers; this plan changes keyboard focus
+  handoffs, one feedback message and accessible names, which the files above cover in both engines.
+
+Nothing in the executor's report became untrue at landing.
