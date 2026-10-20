@@ -2579,3 +2579,40 @@ output may expire; no new failure occurred to quote.
 Class: ambiguous-observable
 
 Cause: unknown
+
+## 2026-10-20 — takeover new-tab banner (e2e/tests/terminal-reconnect.spec.ts)
+
+The Chromium case `a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back` failed in a full recorded browser
+run (`13808999-b14a-44ef-a7df-b547a8419a62`, all of `npx playwright test`, three workers each driving its own stack,
+zero retries, source `f0604f6f`, clean tree) at the assertion that the losing view's newly opened tab is refused into
+the take-control state: the tab's `.banner` stayed empty for the full 20 s instead of saying "Detached". It was one of
+two failures in that run; the other, a WebKit Replace cancel in `terminal-restart.spec.ts`, did not reproduce in ten
+repetitions on that tip or fifteen on main, and is not recorded here. The case reproduces alone. On the same tip, ten
+repetitions of the exact case (with ten of an unrelated WebKit case, three workers) failed once
+(`ac532d81-0b4c-4999-98ab-2abf6e8ec1de`). On unmodified main `e6b50141`, dirty only with untracked links to the same
+build output (the run's commit range changed no product code), fifteen repetitions with one worker, the suite's
+configuration on main, failed four times (`8d57653f-2ced-4f0d-a6ad-c669a11d4995`): every failure ran into the same 20 s
+banner wait, about 26 s per attempt against 5–7 s for each pass, so it is not a slow pass and not caused by the parallel
+stacks. Shared Linux x86_64 with other agents' builds and tests running (load average about 10–16, not measured per
+attempt); pinned tmux 3.7c, executable SHA256 `8bf050252e2adc68d8d1044cc30ca7259ab021f04441484b1e5dabad1f570e71`; locale
+`C.UTF-8`; child `FARHELM_*` names `FARHELM_TEST_TRACE_DIR` and, in the full run only, `FARHELM_PLAYWRIGHT_POLICY_FILE`
+(the recorder's browser mode); Playwright 1.64.0. The spec and the terminal code it covers changed on main the same day
+(#2368, #2403, #2411); which change, if any, made the case fail is not established, and the failing attempts' traces
+were not examined. Open; no fix attempted.
+
+The failure on main, verbatim from the retained output (each failing attempt there read the same apart from the tab id):
+
+```text
+Error: the loser's new tab is refused into the take-control state
+
+expect(locator).toContainText(expected) failed
+
+Locator: locator('.terminal-pane[data-terminal="c4656203-e893-4654-a588-39360f00bb45"] .banner')
+Expected substring: "Detached"
+Received string:    ""
+Timeout: 20000ms
+```
+
+Class: unknown
+
+Cause: unknown
