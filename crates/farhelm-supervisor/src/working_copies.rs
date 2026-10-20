@@ -35,7 +35,7 @@
 //!   [`add_member`] / [`remove_member`], and the create-path caller
 //!   composes them into the SAME transaction as its session writes.
 //!
-//! **Transaction composition.** The SQLite-touching functions here all
+//! **Transaction composition.** The registry primitives here
 //! take `&rusqlite::Connection` rather than owning transactions. A
 //! rusqlite `Transaction` derefs to `Connection`, so the create-path
 //! slice can open one transaction and call [`record_planned`],
@@ -46,6 +46,8 @@
 //! [`reconcile_archive`]) manage their own short transactions internally
 //! because they must commit only after the filesystem step has actually
 //! succeeded.
+//! The read-only [`cwd_is_managed`] snapshot takes the database handle so it
+//! can release its lock before observing checkout identities on disk.
 //!
 //! Registry rows are private persistence. The preparation snapshot carries
 //! the original hook and shell plus the first-publication boundary; it must
@@ -1093,20 +1095,37 @@ pub fn attach_existing_ancestors(
 
 /// Read the registry's ownership snapshot for an already canonical directory.
 /// Nested checkouts can hide their outer memberships in session-list display
-/// projections, so a launch must ask the registry itself. This read takes no
-/// lifecycle lease: admission still validates the destination when it creates.
-pub(crate) fn cwd_is_managed(conn: &Connection, canonical_cwd: &str) -> Result<bool> {
-    let mut stmt = conn.prepare(
-        "SELECT canonical_path FROM working_copies \
-         WHERE allocation_state = ?1 AND canonical_path IS NOT NULL",
-    )?;
-    let paths = stmt.query_map(
-        rusqlite::params![AllocationState::Allocated.as_str()],
-        |row| row.get::<_, String>(0),
-    )?;
+/// projections, so a launch must ask the registry itself. An allocated ancestor
+/// counts only while the folder still matches its recorded identity; missing,
+/// replaced and unconfirmed-remount folders confer no trust.
+///
+/// Snapshot rows under the database lock, then release it before filesystem
+/// observation. This read takes no lifecycle lease: admission still validates
+/// the destination when it creates, and a later path replacement remains possible.
+pub(crate) fn cwd_is_managed(db: &crate::db::Db, canonical_cwd: &str) -> Result<bool> {
+    let allocated = {
+        let conn = db.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, canonical_root, canonical_path, repo_owner, repo_name, \
+             original_basename, origin_session_id, root_device, root_inode, \
+             path_device, path_inode, root_birth_ns, path_birth_ns, allocation_state, archive_destination, \
+             preparation_snapshot, created_at FROM working_copies \
+             WHERE allocation_state = ?1 AND canonical_path IS NOT NULL",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![AllocationState::Allocated.as_str()],
+            decode_row,
+        )?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
     let cwd = Path::new(canonical_cwd);
-    for path in paths {
-        if managed_ancestor(Path::new(&path?), cwd) {
+    for row in allocated {
+        if row
+            .canonical_path
+            .as_deref()
+            .is_some_and(|path| managed_ancestor(Path::new(path), cwd))
+            && verify_identity(&row)? == IdentityStatus::Matches
+        {
             return Ok(true);
         }
     }
@@ -2797,31 +2816,84 @@ mod tests {
     /// and querying a hidden outer root must not depend on any session member.
     #[test]
     fn managed_directory_snapshot_uses_allocated_component_ancestors() {
-        let conn = registry_conn();
+        let db = crate::db::Db::new(registry_conn(), "membership test");
         let dir = tempfile::tempdir().expect("tempdir");
-        let row = planned_row(&conn, dir.path(), "managed");
+        let row = planned_row(&db.lock(), dir.path(), "managed");
         let planned_path = dir.path().join("managed");
-        assert!(!cwd_is_managed(&conn, planned_path.to_str().unwrap()).unwrap());
-        let allocated = allocate(&conn, &row.id, None).expect("allocated checkout");
+        assert!(!cwd_is_managed(&db, planned_path.to_str().unwrap()).unwrap());
+        let allocated = allocate(&db.lock(), &row.id, None).expect("allocated checkout");
         let root = allocated.row.canonical_path.as_deref().unwrap();
         assert_eq!(allocated.row.allocation_state, AllocationState::Allocated);
-        assert!(cwd_is_managed(&conn, root).unwrap());
-        assert!(cwd_is_managed(&conn, &format!("{root}/nested/sibling")).unwrap());
-        assert!(!cwd_is_managed(&conn, &format!("{root}-other")).unwrap());
-        assert!(!cwd_is_managed(&conn, dir.path().to_str().unwrap()).unwrap());
+        assert!(cwd_is_managed(&db, root).unwrap());
+        assert!(cwd_is_managed(&db, &format!("{root}/nested/sibling")).unwrap());
+        assert!(!cwd_is_managed(&db, &format!("{root}-other")).unwrap());
+        assert!(!cwd_is_managed(&db, dir.path().to_str().unwrap()).unwrap());
 
         // The membership snapshot deliberately does not use member projections:
         // an outer checkout can be obscured by a nested checkout in every row.
-        conn.execute("DELETE FROM working_copy_members", [])
+        db.lock()
+            .execute("DELETE FROM working_copy_members", [])
             .unwrap();
-        assert!(cwd_is_managed(&conn, &format!("{root}/outside-inner")).unwrap());
-        conn.execute(
-            "UPDATE working_copies SET allocation_state = 'retired' WHERE id = ?1",
-            [&row.id],
-        )
-        .unwrap();
-        assert!(!cwd_is_managed(&conn, root).unwrap());
+        assert!(cwd_is_managed(&db, &format!("{root}/outside-inner")).unwrap());
+        db.lock()
+            .execute(
+                "UPDATE working_copies SET allocation_state = 'retired' WHERE id = ?1",
+                [&row.id],
+            )
+            .unwrap();
+        assert!(!cwd_is_managed(&db, root).unwrap());
         assert!(!managed_ancestor(Path::new("/"), Path::new("/ordinary")));
+    }
+
+    /// A recorded path must not grant automatic trust to replacement content.
+    /// Keep the replacement alive beside the original before swapping it in,
+    /// so inode reuse cannot make the fixture accidentally test the same object.
+    /// The allocated row stays in place: identity, not retirement, rejects it.
+    #[test]
+    fn managed_directory_snapshot_rejects_replaced_and_missing_checkout() {
+        let db = crate::db::Db::new(registry_conn(), "membership replacement test");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical_root = dir.path().canonicalize().unwrap();
+        let row = planned_row(&db.lock(), &canonical_root, "managed");
+        let allocated = allocate(&db.lock(), &row.id, None).expect("allocated checkout");
+        assert_eq!(allocated.row.allocation_state, AllocationState::Allocated);
+        let root = &allocated.canonical_path;
+        let root_text = root.to_str().unwrap();
+        assert_eq!(
+            verify_identity(&allocated.row).unwrap(),
+            IdentityStatus::Matches
+        );
+        assert!(cwd_is_managed(&db, root_text).unwrap());
+        assert!(cwd_is_managed(&db, &format!("{root_text}/nested")).unwrap());
+
+        let replacement = canonical_root.join("replacement");
+        fs::create_dir(&replacement).unwrap();
+        let observed = observe(&replacement).unwrap();
+        assert_ne!(
+            Some((observed.dev, observed.ino)),
+            allocated.row.path_identity,
+            "premise: replacement is a different, coexisting folder"
+        );
+        fs::remove_dir(root).unwrap();
+        assert!(!cwd_is_managed(&db, root_text).unwrap(), "missing checkout");
+        fs::rename(&replacement, root).unwrap();
+        assert_eq!(
+            verify_identity(&allocated.row).unwrap(),
+            IdentityStatus::DifferentObject
+        );
+        assert!(
+            !cwd_is_managed(&db, root_text).unwrap(),
+            "replaced checkout"
+        );
+        assert!(!cwd_is_managed(&db, &format!("{root_text}/nested")).unwrap());
+        assert_eq!(
+            get_working_copy(&db.lock(), &row.id)
+                .unwrap()
+                .unwrap()
+                .allocation_state,
+            AllocationState::Allocated,
+            "premise: the registry row was not retired"
+        );
     }
 
     // -- identity verification ---------------------------------------------
