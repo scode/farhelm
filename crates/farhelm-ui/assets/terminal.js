@@ -2059,7 +2059,9 @@
       for (const [className, message] of lines) {
         const line = document.createElement("div");
         line.className = className;
-        line.textContent = message;
+        // These controls are GUI text, even though their host-supplied
+        // filenames and refusals arrived through the terminal's upload path.
+        line.textContent = window.farhelmTerminalLinks.visibleFormatCharacters(message);
         node.appendChild(line);
       }
       // Cleared back to the stylesheet's own `display: none` when there is
@@ -2710,7 +2712,13 @@
     if (!banner) return;
     // Assignment clears any previous children, so the button below can
     // never accumulate copies across repaints.
-    banner.textContent = text;
+    // Peer explanations are outside the terminal's own byte display. Escape
+    // once at paint time, including banners restored after a failed delete.
+    // Before mountWhenReady loads the helper, only sync's fixed local
+    // unattended-attachment refusal can get here. Peer notices require a
+    // mounted socket, and its required helpers stay loaded for the page.
+    const links = window.farhelmTerminalLinks;
+    banner.textContent = links ? links.visibleFormatCharacters(text) : text;
     if (reclaimable) {
       const button = document.createElement("button");
       button.type = "button";

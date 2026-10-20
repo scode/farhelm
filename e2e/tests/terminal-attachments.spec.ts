@@ -832,6 +832,7 @@ for (const stamp of [
   });
 }
 
+/** Host errors must remain readable GUI text without inserting a failed upload's path. */
 test("an upload that fails surfaces the error and inserts no path", async ({ page, request }) => {
   test.setTimeout(120_000);
   const stamp = Date.now();
@@ -841,7 +842,7 @@ test("an upload that fails surfaces the error and inserts no path", async ({ pag
       await fulfillAsHelm(route, {
         status: 500,
         contentType: "text/plain",
-        body: "storing the attachment failed: no space left on device\n",
+        body: "storing the attachment failed: no\u202Espace\u200B <U+200B> left on device\n",
       });
     });
     const session = await openAttachmentSession(page, request, `attach-fail-${stamp}`);
@@ -858,7 +859,7 @@ test("an upload that fails surfaces the error and inserts no path", async ({ pag
       error,
       "the response body — here injected, in production the supervisor's own words — is what \
 makes the error actionable, so it has to reach the line the user reads",
-    ).toContainText("no space left on device");
+    ).toContainText("no<U+202E>space<U+200B> <U+003C>U+200B> left on device");
     await expect(error).toContainText("no path was inserted");
     expect(
       await islandLogicalText(page, "terminal"),

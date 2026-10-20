@@ -105,9 +105,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`stale-outcome-hides-successful-stop.md`](stale-outcome-hides-successful-stop.md) — A stale status publication can
   hide a successfully recorded user Stop until another lifecycle operation or reload repairs it.
 
-- [`terminal-peer-failures-hide-format-controls.md`](terminal-peer-failures-hide-format-controls.md) — Terminal
-  connection and upload errors display peer formatting characters outside the terminal without escaping them.
-
 - [`automatic-notification-dismissal-loses-focus.md`](automatic-notification-dismissal-loses-focus.md) — Automatic
   notification-list dismissal has no focus handoff to its session bell.
 
