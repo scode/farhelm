@@ -35,6 +35,10 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`expanded-setup-failure-displaces-open-menu.md`](expanded-setup-failure-displaces-open-menu.md) — A setup failure can
   leave a menu beside another row while it still acts on the original target; harmful reliance is unverified.
 
+- [`queued-launch-capture-before-repaint.md`](queued-launch-capture-before-repaint.md) — Enter may capture a changed
+  template binding before its indicator repaints; scheduling and harm are unverified, and redraw acceptance may cover
+  it.
+
 ## High priority: material UX degradation
 
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
@@ -190,11 +194,17 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`summary-card-clips-lower-facts.md`](summary-card-clips-lower-facts.md) — A tall hover summary can hide its directory
   and timestamps without scrolling.
 
-- [`shortcut-tests-skip-owned-cleanup.md`](shortcut-tests-skip-owned-cleanup.md) — Early cleanup failures in new
-  shortcut tests skip remaining owned sessions or templates.
+- [`shortcut-tests-skip-owned-cleanup.md`](shortcut-tests-skip-owned-cleanup.md) — Early cleanup failures in shortcut
+  and naming tests skip remaining owned resources or shared checkout configuration restoration.
 
 - [`release-review-links-allow-page-script.md`](release-review-links-allow-page-script.md) — Draft Markdown links can
   inject release-review page script; attacker exposure and consequential harm remain unverified.
 
-- [`draft-release-note-promises-update-confirmation.md`](draft-release-note-promises-update-confirmation.md) — The draft
-  release note promises a numbered Update confirmation although clicking Update starts it without asking.
+- [`draft-release-note-promises-update-confirmation.md`](draft-release-note-promises-update-confirmation.md) — Finalized
+  v0.30.0 notes promise an Update confirmation although clicking Update starts it without asking.
+
+- [`web-link-redraw-lowers-refusal.md`](web-link-redraw-lowers-refusal.md) — Terminal output can hide a refused web
+  link's explanation while the pointer stays on the link; click admission remains safe.
+
+- [`terminal-focus-tests-arm-cleanup-late.md`](terminal-focus-tests-arm-cleanup-late.md) — A focus-observer setup
+  failure can leave a new regression test's live session outside its cleanup scope.
