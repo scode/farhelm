@@ -83,6 +83,9 @@ Leave these where they already go:
   socket paths are limited to about 108 bytes, and the teststate sweep only looks directly under `/tmp`. For the same
   reason, do not point `TMPDIR` at your scratch directory when running tests or repo scripts: plain
   `tempfile::tempdir()` tests honor it, and some of them bind sockets.
+- The test recorder's durable browser timing records in `~/.local/state/farhelm-e2e-timings/`
+  (`docs/test-run-evidence.md`), the maintainer's chosen exception to "nothing in `$HOME`": a few kilobytes per run,
+  kept on purpose beyond the temporary tree's cleanup. Do not delete them as stray scratch.
 - Anything of your own that binds a unix socket, such as a hand-started supervisor or a `tmux -S` server. Put that
   directly under `/tmp` with a random name, because `/tmp/farhelm-tmp/<uuid>/` already spends over 50 of the 108 bytes.
 - Anything another rule tells you to keep somewhere specific, such as goal files and working logs.
