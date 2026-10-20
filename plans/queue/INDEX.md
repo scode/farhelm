@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `launcher-composer-drafts.md` — Keep what the user typed in the launcher and checkout-folder fields: custom flags, compatible effort, the inline checkout-folder draft, and an unedited folder name (4 triage outcomes).
 - [complete] `terminal-link-and-copy-fixes.md` — Fix six terminal link, hover and copy problems, from unescaped host errors to hovers on frozen snapshots (6 triage outcomes).
 - [complete] `transfer-leftover-cleanup.md` — Release a cancelled download's route and a cancelled upload's admission entry, if each fix is super cheap (2 triage outcomes).
-- [in-flight d6f55f] `download-staging-sweep.md` — Remove hidden partial downloads a desktop Quit left behind, without touching another instance's save (1 triage outcome). (after `helm-lock-outlives-work.md`)
+- [blocked] `download-staging-sweep.md` — Remove hidden partial downloads a desktop Quit left behind, without touching another instance's save (1 triage outcome). (after `helm-lock-outlives-work.md`)
 - [in-flight 2657c4] `sidebar-bell-follows-row.md` — Make the notification list hand focus back on every close and close when its row moves (2 triage outcomes). (after `hosts-panel-menu-close.md`)
 - [complete] `trash-unknown-totals.md` — Stop trash summaries calling unchecked archives empty or an over-limit total complete (2 triage outcomes).
 - [complete] `reachable-at-small-sizes.md` — Keep approval cards, the outage card and host dialogs reachable in very small windows (3 triage outcomes).
