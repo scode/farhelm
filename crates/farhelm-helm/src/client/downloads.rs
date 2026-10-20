@@ -176,8 +176,10 @@ impl DownloadGuard {
                 }
                 match result {
                     Ok(()) => {
-                        self.finished = true;
                         self.client.downloads.lock().await.remove(&self.channel);
+                        // Until removal completes, cancellation still owes the
+                        // route cleanup that Drop hands to its independent task.
+                        self.finished = true;
                         return Ok(None);
                     }
                     Err(reason) => anyhow::bail!(reason),
@@ -240,6 +242,75 @@ mod tests {
             .unwrap()
             .expect("the client closed the transport");
         parse_control(&frame).unwrap()
+    }
+
+    /// EOF does not disarm cancellation while route removal is waiting on
+    /// demux's mutex. Holding that mutex and polling once fixes the exact
+    /// boundary; the live peer's Abort proves Drop completed the cleanup.
+    #[farhelm_testtrace::test]
+    async fn cancelled_download_eof_cleanup_retires_its_route() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut reader, mut writer) = peer.await.unwrap();
+        let admission = tokio::spawn({
+            let client = Arc::clone(&client);
+            async move { client.begin_download("session", "empty.txt").await }
+        });
+        let ControlMsg::BeginDownload {
+            req_id, channel, ..
+        } = read_control(&mut reader).await
+        else {
+            panic!("expected download admission");
+        };
+        writer
+            .write_control(&ControlMsg::DownloadStarted {
+                req_id,
+                channel,
+                info: DownloadFileInfo {
+                    path: "/fixture/empty.txt".into(),
+                    size: Some(0),
+                    status: DownloadFileStatus::Ready,
+                },
+            })
+            .await
+            .unwrap();
+        let mut download = admission.await.unwrap().unwrap();
+        let routes = client.downloads.lock().await;
+        let route = routes.get(&channel).expect("admitted route exists");
+        // This is the same publication demux makes while holding this lock.
+        route.end.send_replace(Some(Ok(())));
+        assert_eq!(*download.end.borrow(), Some(Ok(())));
+        assert!(download.bytes.is_empty(), "EOF must have no queued data");
+        assert!(!client.pending.lock().await.closed, "peer must stay live");
+        let mut receive = Box::pin(download.recv());
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(receive.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        drop(receive);
+        drop(download);
+        assert!(routes.contains_key(&channel), "cleanup is still contended");
+        drop(routes);
+
+        // Abort follows route retirement in the owned cleanup task. No reply
+        // or transport loss is allowed to supply the removal being asserted.
+        assert_eq!(
+            read_control(&mut reader).await,
+            ControlMsg::AbortDownload { channel }
+        );
+        assert!(!client.downloads.lock().await.contains_key(&channel));
+        assert!(!client.pending.lock().await.closed);
     }
 
     /// Cancelling admission must retire exactly its unanswered request while
