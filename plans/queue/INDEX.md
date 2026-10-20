@@ -7,7 +7,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `template-editor-and-listing.md` — Escape template names in the editor, stop an open Templates dialog undoing agent shortcut moves, and list custom flags in the CLI table (3 triage outcomes). (after `template-list-current-labels.md`)
 - [complete] `test-hygiene-oct19.md` — Fix a macOS path comparison in checkout tests and three browser-test cleanups that stop early or arm late (4 triage outcomes). (after `host-entry-session-ids.md`)
 - [in-flight 38a1a2] `structured-settings-dialog.md` — Restructure the Settings dialog into a sidebar of seven sections, like the Templates dialog (1 TODO entry).
-- [complete] `host-settings-focus.md` — Keep keyboard focus inside host settings and SSH help when a save ends or SSH help's commands arrive (1 TODO entry).
+- [landing 9368c9] `host-settings-focus.md` — Keep keyboard focus inside host settings and SSH help when a save ends or SSH help's commands arrive (1 TODO entry).
 - [complete] `launch-sequences.md` — Accurate quick-launch banners, one launchability rule for templates, and a centered amber launch-sequence pill (2 TODO entries).
 - [complete] `menu-arrow-focus-race.md` — Drop a desktop menu focus move that would land after the user moved focus elsewhere (1 TODO entry).
 - [in-flight cf3a9b] `launcher-enter-feedback.md` — Make Enter in the session launcher always launch, pick a visible row, or say why not (1 TODO entry).
