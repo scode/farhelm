@@ -197,6 +197,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   opened session selected and active; today it does not, and what actually gets selected instead is not yet confirmed.
   Find what selection happens when a session closes, then make the newest session take over. Plan:
   `plans/queue/select-newest-on-close.md`.
+- **Say which step of a supervisor connection stalled.** When a session card reads "Session unavailable — waiting for
+  supervisor", the detail is only "the connection attempt did not complete within 20s (dial, supervisor hello or
+  browser-forwarding setup did not finish)": `deadlined_attempt` in `crates/farhelm-helm/src/manager.rs` runs dial,
+  supervisor hello, and browser-forwarding placement under one shared deadline, so expiry cannot say which stalled.
+  Record which phase the attempt is in as it runs and report it on timeout, and where the transport already knows more —
+  an ssh dial/hello failure with its own text (`annotate_ssh_handshake_eof` and friends) — surface that instead of the
+  generic sentence, so an operator can tell an ssh tunnel problem (host down, no route, bad key, no supervisor over
+  there) from a supervisor that accepts connections but never finishes its hello from a browser-forwarding placement
+  hang. Per-phase deadlines would make it exact, but a phase marker on the shared deadline may be enough; decide which
+  while planning.
 
 ## Doc todo
 
