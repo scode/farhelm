@@ -2078,16 +2078,20 @@ pub(crate) fn ListView(
                     // for an action that had already succeeded.
                     if let Some(Ok(current)) = listing.write().as_mut() {
                         let open_menu = menu_open.peek().clone();
+                        let open_bell = bell_open.peek().as_ref().map(|open| open.id.clone());
                         // Judged on the displayed order, which an order hold
-                        // can make differ from the served one.
+                        // can make differ from the served one. The menu and
+                        // bell exclude each other; check their sole anchor
+                        // before removal discards the old layout baseline.
                         let held = order_hold.peek().clone().unwrap_or_default();
                         if remove_row_reporting_menu_move(
                             &mut current.sessions,
                             &id,
-                            open_menu.as_deref(),
+                            open_menu.as_deref().or(open_bell.as_deref()),
                             &held,
                         ) {
                             menu_open.set(None);
+                            bell_open.set(None);
                         }
                     }
                     // A listing read already in flight started before the
