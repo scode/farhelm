@@ -5,7 +5,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `download-staging-sweep.md` — Remove hidden partial downloads a desktop Quit left behind, without touching another instance's save (1 triage outcome). (after `helm-lock-outlives-work.md`)
 - [complete] `sidebar-bell-follows-row.md` — Make the notification list hand focus back on every close and close when its row moves (2 triage outcomes). (after `hosts-panel-menu-close.md`)
 - [complete] `template-editor-and-listing.md` — Escape template names in the editor, stop an open Templates dialog undoing agent shortcut moves, and list custom flags in the CLI table (3 triage outcomes). (after `template-list-current-labels.md`)
-- [landing c6b0d3] `tooling-checks-oct19.md` — Fix the release-review page's link escaping and two instruction-checker gaps (3 triage outcomes).
 - [complete] `test-hygiene-oct19.md` — Fix a macOS path comparison in checkout tests and three browser-test cleanups that stop early or arm late (4 triage outcomes). (after `host-entry-session-ids.md`)
 - [complete] `triage-discards-oct19.md` — Close the four findings discarded in the 2026-10-19 triage, in one PR (4 triage outcomes).
 - [in-flight 38a1a2] `structured-settings-dialog.md` — Restructure the Settings dialog into a sidebar of seven sections, like the Templates dialog (1 TODO entry).

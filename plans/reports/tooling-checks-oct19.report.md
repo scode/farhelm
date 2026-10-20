@@ -75,3 +75,57 @@ Each PR passed its single fresh-context gpt-6.1-sol reviewer at high effort, inc
 and size gate. The first reviewer also checked the portability correction. No findings remain. All three commit messages
 passed separate cold reads, and a separate documentation pass checked each changed function, fixture and inventory
 description. The PRs remain open drafts for the landing monitor.
+
+### Landing
+
+Landed as #2417, #2421 and #2422, merged bottom-up, with the same content the report describes, rebased onto this
+round's main (see the end of these notes). It was the thirteenth of sixteen plans in this landing round, after the
+twelve listed in the earlier plans' notes, most recently spec-scope-clarifications.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained round 107's four plans, the twelve plans earlier in this round, and documentation
+and plan bookkeeping. A fresh-context reviewer and I read them and the other plans of this round against this plan. The
+interaction that matters is whether the stricter instruction checker accepts what the other plans changed. It does: the
+checker and its self-test passed on all sixteen plans stacked together, including every SPEC.md and SPEC_impl.md edit in
+the round, and no local Claude instruction file exists in the repository. No other plan touches the release-notes review
+page or the checker. This plan also changes two agent instruction files: the validation inventory and the run-all-tests
+procedure; the landing monitor re-reads them before its next round. The only conflicts were in the review feedback
+queue's index, where each plan removes its own entries; all removals are kept.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+Every plan in this round was executed on a main from before round 107's session-identity change, so none had been tested
+against it. That is why this round ran the whole Rust workspace and the full browser suite rather than a selection. All
+of the following ran now, on all sixteen plans of this round stacked together on main, including the fixes made while
+landing plans in this round:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` and its `--self-test`,
+  `python3 releasing/notes-review-page.py --self-test`, `scripts/check-desktop-assets.sh`, and the website build
+  (`bun run build` in `website/`): all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `40f2b98b-b160-4239-a653-44cd0bcdcf96`: 3948 passed.
+  `cargo nextest run -p farhelm-ui --features desktop`, run `d288b68b-249f-4f21-9fe0-d4d6d1c4a738`: 717 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `f82f83f8-67c9-4e07-99ed-467c9830dc9f`: 317 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, one worker, no retries, run
+  `81d76a96-912f-47ed-8e1f-57423edbeb32` (kept): 2183 passed and 14 skipped. Of the skips, 9 are the WebKit clipboard
+  cases, because Playwright cannot grant WebKit clipboard permissions; 4 run only against a real, signed-in agent; and 1
+  is a pixel capture that runs only on Chromium. One test failed: on WebKit, "model-only number key opens New with a
+  temporary composition explanation" in `templates.spec.ts` timed out at its first step, waiting 60 seconds for the
+  header's Templates button to settle before clicking it. No plan in this round changes that button or that test, and
+  the file's other WebKit tests that open the same dialog passed.
+  `npx playwright test --project=webkit-templates -g 'model-only number key opens New with a temporary composition explanation' --repeat-each=20`
+  then passed all 20 (run `6c382916-77a1-4ecb-b4ee-a1dae8cac848`). The cause is probably machine load during the full
+  run, not something this round broke, but that is not confirmed; on one observation it is not recorded as a flake.
+- Skipped: the native Mac app (not runnable here) and the installer (unchanged).
+
+The report was written on a main from before round 107's session-identity change, so its statement that no rebase was
+needed no longer describes what landed; the checker and page self-tests above ran on the combined stack. Nothing else in
+the executor's report became untrue at landing.
