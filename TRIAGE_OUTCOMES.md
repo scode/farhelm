@@ -16748,7 +16748,13 @@
   off the top, and keyboard-reachable), with a browser test. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/reachable-at-small-sizes.md`.
+- Execution: implemented in change `rkuyukmxlvklquxutsmvoxkrwwrwquqv`, bookmark
+  `plan/reachable-at-small-sizes/02-scroll-outage-explanations`. Existing overlay scrolling and safe centering keep the
+  full explanation reachable; the host card is a named keyboard stop. Measured terminal height selects a viewport
+  fallback above the sidebar bar when session chrome leaves too little space. Both engines pass ordinary centering, a
+  long explanation above a zero-height terminal with a real refusal band, keyboard/wheel endpoints and reconnect
+  keyboard scrolling in a 48px window. The code, tests and specification diff is 100 added/removed lines, within the
+  gate. PR: https://github.com/scode/farhelm/pull/2411/changes.
 
 ## pinned-host-dialog-chrome-can-hide-content.md
 

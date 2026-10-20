@@ -3101,6 +3101,17 @@ test.describe("multi-host", () => {
     }) => {
       requireFleet();
       const info = stackInfo();
+      // The supervisor is really down; only its diagnostic is enlarged so
+      // the same card fits an ordinary window and overflows a short one.
+      await page.route("**/api/hosts", async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        const host = body.hosts.find((host: any) => host.destination === info.remote_ssh);
+        expect(host).toBeDefined();
+        host.state.last_error = `${"wrapped diagnostic ".repeat(100)}diagnostic end`;
+        await route.fulfill({ response, json: body });
+      });
+      await page.setViewportSize({ width: 1000, height: 800 });
 
       await page.goto("/");
       await rowByTitle(page, staleTitle).locator(".session-row-open").click();
@@ -3147,6 +3158,45 @@ test.describe("multi-host", () => {
         "a stale session must mount no terminal at all, not an empty one",
       ).toBe(0);
       expect(await page.locator(".tab-strip").count()).toBe(0);
+      await expect(notice.locator(".session-unavailable-detail")).toContainText("diagnostic end");
+      const card = notice.locator(".session-unavailable-card");
+      const ordinary = (await notice.boundingBox())!;
+      const fitting = (await card.boundingBox())!;
+      expect(fitting.height).toBeLessThan(ordinary.height - 40);
+      expect(Math.abs(fitting.y + fitting.height / 2 - ordinary.y - ordinary.height / 2)).toBeLessThanOrEqual(1);
+
+      // A real refusal band can exhaust the terminal even above a viewport cutoff.
+      await page.route(`**/api/sessions/${encodeURIComponent(staleSessionId!)}/replace`, (route) =>
+        fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: "wrapped refusal ".repeat(100) }));
+      await page.locator(".header-replace").click();
+      await page.locator(".header-replace-confirm .btn-danger").click();
+      await expect(page.locator(".replace-error")).toContainText("wrapped refusal");
+      await page.setViewportSize({ width: 800, height: 240 });
+      await expect.poll(() => page.locator(".terminal-panes").evaluate((node) => node.clientHeight)).toBe(0);
+      await expect(notice).toHaveCSS("position", "fixed");
+      // Read scrollport-relative edges: DOM presence or scrollIntoView would
+      // also accept the old card whose first lines lay before the scroll origin.
+      const edges = () => notice.evaluate((node) => {
+        const port = node.getBoundingClientRect();
+        const heading = node.querySelector(".session-unavailable-heading")!.getBoundingClientRect();
+        const detail = node.querySelector(".session-unavailable-detail")!.getBoundingClientRect();
+        return { overflow: node.scrollHeight - node.clientHeight,
+          first: heading.top - port.top, last: detail.bottom - port.bottom,
+          offset: node.scrollTop, remaining: node.scrollHeight - node.clientHeight - node.scrollTop };
+      });
+      await assertFullyPaintedAndHitTestable(page, notice.locator(".session-unavailable-heading"));
+      await expectKeyboardScroll(page, page.locator(".session-details .header-copy").first(), notice, "Shift+Tab");
+      await page.keyboard.press("End");
+      await expect.poll(async () => (await edges()).remaining).toBeLessThanOrEqual(1);
+      expect((await edges()).last).toBeLessThanOrEqual(1);
+      await page.keyboard.press("Home");
+      await expect.poll(async () => (await edges()).offset).toBe(0);
+      expect((await edges()).first).toBeGreaterThanOrEqual(0);
+      // Wheel input must reach the same last line without assigning scrollTop.
+      await notice.hover();
+      await page.mouse.wheel(0, 10_000);
+      await expect.poll(async () => (await edges()).remaining).toBeLessThanOrEqual(1);
+      expect((await edges()).last).toBeLessThanOrEqual(1);
     });
 
     // SPEC.md: operations against a session on an unreachable host "are

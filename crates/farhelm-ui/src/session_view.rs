@@ -2001,6 +2001,7 @@ pub(crate) fn SessionView(
         // to be a no-op if nothing is mounted.
         document::eval(
             "window.__farhelmSyncGeneration = (window.__farhelmSyncGeneration || 0) + 1; \
+             window.__farhelmOutageLayout?.disconnect(); \
              if (window.farhelmTerm) { farhelmTerm.unmountAll(); }",
         );
     });
@@ -3069,6 +3070,7 @@ pub(crate) fn SessionView(
                 // WKWebView (MT-5).
                 div {
                     class: "terminal-panes",
+                    onmounted: move |_| { document::eval(include_str!("../assets/outage-layout.js")); },
                     "data-colored-frame": if color_frame { "true" } else { "false" },
                     style: "--host-frame-color: {frame_color};",
                     "data-unavailable": "{shown.stale}",
@@ -3218,6 +3220,7 @@ pub(crate) fn SessionView(
                 }
             } else if let Some(notice) = &stale_notice {
                 div { class: "terminal-panes",
+                    onmounted: move |_| { document::eval(include_str!("../assets/outage-layout.js")); },
                     SessionUnavailableCard { notice: notice.clone() }
                 }
             }
@@ -3322,11 +3325,14 @@ pub(crate) fn SessionView(
 /// The host outage owns one accessible card above any retained terminal.
 /// PeerLine escapes and direction-isolates host names and diagnostics; only
 /// fixed client wording enters the headline.
+/// The text-only overlay is a keyboard stop so a short terminal area never
+/// makes reading a long remedy depend on a pointer.
 #[component]
 fn SessionUnavailableCard(notice: SessionUnavailableNotice) -> Element {
     rsx! {
-        div { class: "session-unavailable-overlay host-stale-notice", role: "status",
-            div { class: "session-unavailable-card",
+        div { class: "session-unavailable-overlay host-stale-notice", role: "region",
+            tabindex: "0", aria_label: "session unavailable",
+            div { class: "session-unavailable-card", role: "status",
                 div { class: "session-unavailable-heading",
                     span { class: "delete-spinner", "aria-hidden": "true" }
                     "Session unavailable — {notice.cause}"

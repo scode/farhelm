@@ -609,6 +609,16 @@ test("manual-reconnect-is-offered-during-the-first-rung", async ({ page, request
     ).toContainText("attempt 1 of 6");
     const manual = page.locator(".terminal-reconnect-now");
     await expect(manual).toBeVisible();
+    // Focus reveals the answer; native PageUp must also reveal the explanation.
+    await page.setViewportSize({ width: 800, height: 48 });
+    await expect(surface).toHaveCSS("position", "fixed");
+    await expect.poll(() => surface.evaluate((node) => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0);
+    await manual.focus();
+    await expect(manual).toBeFocused();
+    const bottom = await surface.evaluate((node) => node.scrollTop);
+    await page.keyboard.press("PageUp");
+    await expect.poll(() => surface.evaluate((node) => node.scrollTop)).toBeLessThan(bottom);
+    await page.setViewportSize({ width: 1280, height: 800 });
 
     // Pressed well inside a thirty-second rung: if this did nothing, the
     // remount below could not happen for half a minute.
