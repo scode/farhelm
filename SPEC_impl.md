@@ -81,6 +81,27 @@ fixed amount, grow only with a rare and explicit user action (such as switching 
 removed by the next attempt at the same operation or by the next start of the process that owns them. As with retained
 supervisor metadata, the line is accumulation without bound over time during ordinary operation.
 
+## Cleanup on quit
+
+Confirmed 2026-10-20: when quitting leaves temporary files or other resources behind, the default fix is to clean them
+up on quit. That holds when the quit skips the code that would normally do the cleanup, as the desktop app's Quit does
+by ending in a hard exit that runs no destructors: the fix is to run that cleanup on the quit path. Do not instead add a
+sweep that reclaims leftovers at a future start-up, and do not add inter-process locking (lock files, advisory locks,
+ownership markers or anything else that coordinates between processes) or similar machinery to tell a live owner's
+resources from abandoned ones. Either needs the maintainer's approval for the specific case first. That includes
+covering crashes and force-quits, which cleanup on quit cannot reach: leaving those uncovered is the default, and a
+sweep for them is an addition that needs approval.
+
+The process that is quitting knows exactly which resources are its own. A sweep at the next start does not, so it has to
+work out whether another running process still owns what it finds, which is where the locks, ownership markers and
+compatibility cases come from. On 2026-10-20 a plan to reclaim the partial files that a desktop download interrupted by
+Quit leaves in Downloads grew a per-download lock that way, then blocked over directories written by older builds that
+the lock could not classify, when the app could have removed its own downloads' staging directories as it quit.
+
+"Leftover files" says when files left behind are not a leak, and the next start of their owning process removing them is
+one such case. It describes cleanup that already exists; it is not a reason to choose a start-up sweep over cleanup on
+quit.
+
 ## Session IDs in logs
 
 Session IDs must not inject log lines or use invisible or direction-changing characters to disguise the ID shown in
