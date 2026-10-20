@@ -12,7 +12,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 6cec47] `transfer-leftover-cleanup.md` — Release a cancelled download's route and a cancelled upload's admission entry, if each fix is super cheap (2 triage outcomes).
 - [pending] `download-staging-sweep.md` — Remove hidden partial downloads a desktop Quit left behind, without touching another instance's save (1 triage outcome). (after `helm-lock-outlives-work.md`)
 - [pending] `sidebar-bell-follows-row.md` — Make the notification list hand focus back on every close and close when its row moves (2 triage outcomes). (after `hosts-panel-menu-close.md`)
-- [pending] `trash-unknown-totals.md` — Stop trash summaries calling unchecked archives empty or an over-limit total complete (2 triage outcomes).
+- [in-flight 7ff67f] `trash-unknown-totals.md` — Stop trash summaries calling unchecked archives empty or an over-limit total complete (2 triage outcomes).
 - [pending] `reachable-at-small-sizes.md` — Keep approval cards, the outage card and host dialogs reachable in very small windows (3 triage outcomes).
 - [pending] `app-dialog-focus.md` — Fix focus handoffs for the update and SSH help controls, and keep a delayed host confirmation from freezing another dialog (3 triage outcomes).
 - [pending] `template-editor-and-listing.md` — Escape template names in the editor, stop an open Templates dialog undoing agent shortcut moves, and list custom flags in the CLI table (3 triage outcomes). (after `template-list-current-labels.md`)
