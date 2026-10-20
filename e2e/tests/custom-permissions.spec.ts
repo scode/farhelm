@@ -104,6 +104,34 @@ test("same-agent search and chips preserve custom permission drafts byte for byt
   await expect(flags).toHaveValue("");
 });
 
+/** An unfinished permission editor cannot make a supported effort incompatible
+ * with a custom model. Both empty text and malformed quotes remain repairable
+ * without silently changing the independent reasoning choice.
+ */
+test("custom model acceptance keeps compatible effort with incomplete permission flags", async ({ page, request }) => {
+  const response = await request.get("/api/launch-catalog");
+  expect(response.ok()).toBe(true);
+  const catalog = await response.json() as { harness: string; efforts: string[] }[];
+  expect(catalog.some(entry => entry.harness === "claude" && entry.efforts.includes("high"))).toBe(true);
+  const form = await openNew(page);
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true }).click();
+  const flags = form.locator(".custom-permission-flags");
+  const high = form.locator(".launch-composer-effort-choice").getByRole("button", { name: "high", exact: true });
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  for (const draft of ["", "--mode '"]) {
+    await flags.fill(draft);
+    await high.click();
+    await expect(high).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
+    await model.fill("private-permission-test-model");
+    await model.press("Enter");
+    await expect(model).toHaveValue("private-permission-test-model");
+    await expect(high).toHaveAttribute("aria-pressed", "true");
+    await expect(flags).toHaveValue(draft);
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
+  }
+});
+
 /** Enter on Custom opens its required editor instead of attempting a launch.
  * The focus assertion distinguishes the handoff from a disabled-primary refusal.
  */

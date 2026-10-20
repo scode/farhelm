@@ -126,9 +126,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`empty-initial-prompt-skipped-by-tab.md`](empty-initial-prompt-skipped-by-tab.md) — Tab traversal can wrap before
   reaching the empty initial-prompt editor.
 
-- [`incomplete-custom-flags-reset-compatible-effort.md`](incomplete-custom-flags-reset-compatible-effort.md) — Accepting
-  a custom model can reset compatible effort because permission flags are incomplete.
-
 - [`template-name-editor-conceals-formatting.md`](template-name-editor-conceals-formatting.md) — The template name
   editor displays formatting characters raw although the list and approval card escape them.
 
