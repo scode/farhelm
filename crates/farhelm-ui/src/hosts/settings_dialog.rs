@@ -589,13 +589,13 @@ pub(super) fn HostSettingsDialog(
             Some((owner, FieldOutcome::Error(text))) if *owner == field => rsx! {
                 PeerLine {
                     class: "action-error host-error host-settings-outcome",
-                    parts: vec![DetailPart::Peer(text.clone())],
+                    parts: vec![DetailPart::peer(text.clone())],
                 }
             },
             Some((owner, FieldOutcome::Warning(text))) if *owner == field => rsx! {
                 PeerLine {
                     class: "host-warning host-settings-outcome",
-                    parts: vec![DetailPart::Peer(text.clone())],
+                    parts: vec![DetailPart::peer(text.clone())],
                 }
             },
             _ => rsx! {},
@@ -888,7 +888,7 @@ pub(super) fn HostRemoveDialog(
                     if let Some(reason) = error {
                         PeerLine {
                             class: "host-refusal-reason",
-                            parts: vec![DetailPart::Peer(reason)],
+                            parts: vec![DetailPart::peer(reason)],
                         }
                     }
                 }

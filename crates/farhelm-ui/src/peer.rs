@@ -90,6 +90,20 @@ impl From<&str> for PeerText {
     }
 }
 
+/// Capture a borrowed reply string when a detail must own its render snapshot.
+impl From<&String> for PeerText {
+    fn from(value: &String) -> Self {
+        Self(value.clone())
+    }
+}
+
+/// Retain typed provenance when an owned detail is built from a borrowed reply.
+impl From<&PeerText> for PeerText {
+    fn from(value: &PeerText) -> Self {
+        value.clone()
+    }
+}
+
 /// Keep diagnostic and component-key spelling identical to the former String.
 /// Some ownership keys Debug-format nested identity options; adding a tuple
 /// wrapper to that output would remount components despite unchanged evidence.
@@ -203,8 +217,8 @@ pub(crate) enum DetailPart {
     /// This UI's own wording — trusted, and never escaped.
     Text(String),
     /// A value from the helm, a supervisor, or the registry. Escaped and
-    /// isolated when rendered; carried raw here.
-    Peer(String),
+    /// isolated when rendered; typed raw storage keeps that choice at the boundary.
+    Peer(PeerText),
 }
 
 impl DetailPart {
@@ -218,8 +232,8 @@ impl DetailPart {
         DetailPart::Text(words.into())
     }
 
-    /// Someone else's.
-    pub(crate) fn peer(value: impl Into<String>) -> DetailPart {
+    /// Capture someone else's value without pre-escaping its render snapshot.
+    pub(crate) fn peer(value: impl Into<PeerText>) -> DetailPart {
         DetailPart::Peer(value.into())
     }
 }
@@ -240,7 +254,7 @@ pub(crate) fn detail_text(parts: &[DetailPart]) -> String {
         .iter()
         .map(|part| match part {
             DetailPart::Text(text) => text.clone(),
-            DetailPart::Peer(value) => display_peer(value),
+            DetailPart::Peer(value) => value.escaped(),
         })
         .collect()
 }
@@ -272,8 +286,8 @@ pub(crate) fn PeerLine(
                             key: "{index}",
                             class: "peer-value",
                             dir: "ltr",
-                            "data-tooltip": if peer_tooltips { display_peer(value) },
-                            "{display_peer(value)}"
+                            "data-tooltip": if peer_tooltips { value.escaped() },
+                            "{value.escaped()}"
                         }
                     },
                 }
@@ -300,9 +314,12 @@ pub(crate) fn PeerLine(
 /// hiding characters the user needs to notice.
 /// A caller that caps this text in a scrollport supplies `scroll_label` so
 /// keyboard users can enter it without adding stops to ordinary text blocks.
+/// The typed input retains raw bytes only to recover those structural line
+/// boundaries; each line still passes through the existing editable escape.
 #[component]
-pub(crate) fn PeerBlock(class: String, text: String, scroll_label: Option<String>) -> Element {
+pub(crate) fn PeerBlock(class: String, text: PeerText, scroll_label: Option<String>) -> Element {
     let lines = text
+        .raw()
         .split_inclusive('\n')
         .map(|line| {
             // Keep the existing CRLF normalization for peer command blocks;
@@ -330,7 +347,7 @@ pub(crate) fn PeerBlock(class: String, text: String, scroll_label: Option<String
                     }
                 }
             }
-            if text.ends_with('\n') {
+            if text.raw().ends_with('\n') {
                 span { class: "peer-block-end", "aria-hidden": "true" }
             }
         }

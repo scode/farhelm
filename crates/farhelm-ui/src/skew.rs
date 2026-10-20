@@ -361,7 +361,7 @@ mod tests {
             .iter()
             .map(|part| match part {
                 DetailPart::Text(text) => text.as_str(),
-                DetailPart::Peer(value) => value.as_str(),
+                DetailPart::Peer(value) => value.raw(),
             })
             .collect();
         assert!(
@@ -416,7 +416,7 @@ mod tests {
                 .iter()
                 .map(|part| match part {
                     DetailPart::Text(text) => text.clone(),
-                    DetailPart::Peer(value) => value.clone(),
+                    DetailPart::Peer(value) => value.raw().to_owned(),
                 })
                 .collect()
         };
@@ -425,7 +425,7 @@ mod tests {
         let peers: Vec<&str> = reported
             .iter()
             .filter_map(|part| match part {
-                DetailPart::Peer(value) => Some(value.as_str()),
+                DetailPart::Peer(value) => Some(value.raw()),
                 DetailPart::Text(_) => None,
             })
             .collect();

@@ -259,7 +259,7 @@ fn menu_header_summary_tooltip(parts: &[DetailPart]) -> String {
         .iter()
         .map(|part| match part {
             DetailPart::Text(text) => text.clone(),
-            DetailPart::Peer(value) => display_peer(value),
+            DetailPart::Peer(value) => value.escaped(),
         })
         .collect()
 }
@@ -2545,7 +2545,7 @@ pub(super) fn SessionRow(
                         if let Some(err) = error.clone() {
                             PeerLine {
                                 class: "action-error".to_string(),
-                                parts: vec![DetailPart::Peer(err)],
+                                parts: vec![DetailPart::peer(err)],
                             }
                         }
                         // End of `.session-row-menu-panel`.
@@ -2564,7 +2564,7 @@ pub(super) fn SessionRow(
                 if !menu_open {
                     PeerLine {
                         class: "action-error".to_string(),
-                        parts: vec![DetailPart::Peer(err)],
+                        parts: vec![DetailPart::peer(err)],
                     }
                 }
             }
