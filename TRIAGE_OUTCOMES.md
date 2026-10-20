@@ -16911,7 +16911,10 @@
   while eligibility is being re-checked, or lift the draft); a test. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/launcher-composer-drafts.md`.
+- Execution: complete in change `qqmrqzswzlyknptnrxpynnyxmusuunol`, bookmark
+  `plan/launcher-composer-drafts/03-retain-checkout-draft`,
+  [PR #2394](https://github.com/scode/farhelm/pull/2394/changes). The fix and browser regression total 78 lines, within
+  the 100-line gate.
 
 ## unselected-repository-keeps-stale-setup-eligibility.md
 

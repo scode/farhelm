@@ -86,9 +86,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`unselected-repository-keeps-stale-setup-eligibility.md`](unselected-repository-keeps-stale-setup-eligibility.md) —
   Checkout setup eligibility can remain stale while no repository is selected.
 
-- [`checkout-config-refresh-erases-setup-draft.md`](checkout-config-refresh-erases-setup-draft.md) — An unrelated
-  configuration refresh can unmount the launcher's checkout-folder editor and erase its unfinished entry.
-
 - [`outage-card-content-can-overflow-above-view.md`](outage-card-content-can-overflow-above-view.md) — A short terminal
   area or long host error can put the outage explanation and recovery instructions above the reachable view.
 

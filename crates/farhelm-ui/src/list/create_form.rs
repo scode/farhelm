@@ -4193,20 +4193,25 @@ pub(super) fn CreateSessionForm(
     // discovery, while true keeps setup visible. A newer epoch must check
     // again, since the effective folder may have been cleared elsewhere.
     let mut checkout_root_observation = use_signal(|| None::<(RepositoryAuthority, i64, bool)>);
-    let observed_root_required = checkout_root_observation
+    let host_root_observation = checkout_root_observation
         .read()
         .as_ref()
-        .filter(|(claim, revision, _)| {
-            *revision == observed_checkout_revision()
-                && hosts.iter().any(|host| {
-                    Some(host.id) == selected
-                        && host.id == claim.host
-                        && host.connection == claim.incarnation
-                        && host.identity.as_deref() == Some(claim.installation_identity.as_str())
-                })
+        .filter(|(claim, _, _)| {
+            hosts.iter().any(|host| {
+                Some(host.id) == selected
+                    && host.id == claim.host
+                    && host.connection == claim.incarnation
+                    && host.identity.as_deref() == Some(claim.installation_identity.as_str())
+            })
         })
-        .map(|(_, _, required)| *required);
-    let needs_checkout_root = observed_root_required == Some(true);
+        .map(|(_, revision, required)| (*revision, *required));
+    // Freshness controls discovery, but a same-host editor must stay mounted
+    // during that check: unmounting would discard its local draft and focus.
+    // A current false answer retires it; changing host identity still hides it.
+    let observed_root_required = host_root_observation
+        .filter(|(revision, _)| *revision == observed_checkout_revision())
+        .map(|(_, required)| required);
+    let needs_checkout_root = host_root_observation.is_some_and(|(_, required)| required);
     // Unknown eligibility keeps the same discovery worker alive until the helm
     // answers. Query and destination authority still reject obsolete replies;
     // editing a selected repository's title cannot restart a configured scan.
