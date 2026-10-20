@@ -68,3 +68,49 @@ The required single fresh-context gpt-6.1-sol reviewer at high effort found no i
 lifetime, both callers, the accepted token-rotation caveat, regression cleanup, bookkeeping and the 268-line size. The
 commit title and body passed a separate fresh cold read. The final documentation pass found the changed lifecycle and
 fixture contracts documented.
+
+### Landing
+
+Landed as #2383, unchanged from what the report describes. It was the second of four plans in this landing round, after
+host-entry-session-ids and before hosts-panel-menu-close and template-list-current-labels.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the PR's base, main gained host-entry-session-ids in this round (sessions identified by their host entry, with a
+one-way helm database migration) and documentation and plan bookkeeping. A fresh-context reviewer and I read the two
+against each other: host-entry-session-ids changes how the helm names sessions, not how it starts, serves or shuts down,
+and its database migration still runs while the state-folder lock is held, before anything else opens the database; this
+plan only keeps that lock until the runtime has finished. Every caller of the startup and serving functions this plan
+changed was updated, including the desktop app's embedded helm. The two other plans in the round touch only the UI. The
+only conflicts were in the review feedback queue's index, where each plan removes its own entries; all removals are
+kept. The landed code is identical to what the landing's checks below tested.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-ups
+
+- The new test that runs a real helm waits up to 10 seconds for it to become ready; on a heavily loaded machine that
+  wait could run out. It passed in every run here.
+
+#### Checks
+
+Run now, on the four plans of this round stacked together on main:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop` (the desktop app's
+  embedded helm), the isolated test-sleep check, `dprint check` on every changed file, and
+  `python3 releasing/check-changelog.py format`: all passed.
+- The whole Rust workspace through the test recorder with pinned nextest and tmux, four slots and no retries
+  (`cargo nextest run --workspace --exclude farhelm-desktop`), run `7067248e-06f2-4bd7-90ff-63250d8fff42`: every test of
+  this plan passed; the four failures in that run were host-entry-session-ids' tests that still expected the old session
+  IDs, fixed in that plan. The whole helm library passed again after those fixes (1232 tests, run
+  `cbf11585-1556-4055-ba01-7041b35a4f28`), and the UI library built with desktop support passed (714 tests, run
+  `1560df43-83f8-4586-87cf-c71d56f481fc`). The executor had run selected tests only.
+- The full browser suite on Chromium and WebKit, which starts real helms, ran on the same tree (run
+  `8214f916-6dda-4c7a-9d91-35ed24e150e8`); its failures were all host-entry-session-ids' tests that still expected the
+  old session IDs, fixed and rerun there.
+- Skipped: the native Mac app (not runnable here) and the installer (unchanged).
+
+Nothing in the executor's report became untrue at landing.
