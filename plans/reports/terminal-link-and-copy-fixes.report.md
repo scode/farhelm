@@ -100,3 +100,64 @@ Each PR passed its single fresh-context gpt-6.1-sol/high review, with correction
 message cold reads passed. A separate fresh-context scope reassessment after the snapshot fixture corrections found no
 unnecessary complexity and confirmed the 69-line fix. The documentation pass is complete. Feedback files and index
 entries are removed, each ledger Execution field names its change, bookmark and PR, and every PR remains an open draft.
+
+### Landing
+
+Landed as #2388, #2392, #2396, #2399, #2401 and #2403, merged bottom-up, unchanged from what the report describes. It
+was the third of sixteen plans in this landing round, after launcher-retry-identity and launcher-composer-drafts.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained round 107's four plans, the two launcher plans earlier in this round, and
+documentation and plan bookkeeping. A fresh-context reviewer and I read them and the other plans of this round against
+this plan. The one that touches the same ground is host-entry-session-ids, which changed how sessions are identified.
+This plan's new code and browser checks do not build session addresses of their own, so the change in how sessions are
+identified does not affect them. A file link clicked in a frozen terminal view uses the session identity the view was
+opened with, so after its host is removed and added again the download is refused rather than going to the new host
+entry, as the specification intends.
+
+Two plans later in this round meet this one's link behavior. reachable-at-small-sizes lets approval requests take the
+whole window when it is very short; those requests count as covering the terminal, so a link click is refused with the
+explanation that the link's destination is covered, which is correct. launch-sequences moves the quick-launch sequence's
+status pill to the middle of the terminal. That pill is not counted as covering a link, so a link whose hover details
+are partly hidden under the pill still opens when clicked. The gap predates both plans and is listed as a follow-up in
+launch-sequences' landing notes. reachable-at-small-sizes also edits the reconnect browser checks, in a different test
+from the one this plan changed, with no overlap. The only conflicts were in the review feedback queue's index, where
+each plan removes its own entries; all removals are kept.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+Every plan in this round was executed on a main from before round 107's session-identity change, so none had been tested
+against it. That is why this round ran the whole Rust workspace and the full browser suite rather than a selection. All
+of the following ran now, on all sixteen plans of this round stacked together on main, including the fixes made while
+landing plans in this round:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` and its `--self-test`,
+  `python3 releasing/notes-review-page.py --self-test`, `scripts/check-desktop-assets.sh`, and the website build
+  (`bun run build` in `website/`): all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `40f2b98b-b160-4239-a653-44cd0bcdcf96`: 3948 passed.
+  `cargo nextest run -p farhelm-ui --features desktop`, run `d288b68b-249f-4f21-9fe0-d4d6d1c4a738`: 717 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `f82f83f8-67c9-4e07-99ed-467c9830dc9f`: 317 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, one worker, no retries, run
+  `81d76a96-912f-47ed-8e1f-57423edbeb32` (kept): 2183 passed and 14 skipped. Of the skips, 9 are the WebKit clipboard
+  cases, because Playwright cannot grant WebKit clipboard permissions; 4 run only against a real, signed-in agent; and 1
+  is a pixel capture that runs only on Chromium. One test failed: on WebKit, "model-only number key opens New with a
+  temporary composition explanation" in `templates.spec.ts` timed out at its first step, waiting 60 seconds for the
+  header's Templates button to settle before clicking it. No plan in this round changes that button or that test, and
+  the file's other WebKit tests that open the same dialog passed.
+  `npx playwright test --project=webkit-templates -g 'model-only number key opens New with a temporary composition explanation' --repeat-each=20`
+  then passed all 20 (run `6c382916-77a1-4ecb-b4ee-a1dae8cac848`). The cause is probably machine load during the full
+  run, not something this round broke, but that is not confirmed; on one observation it is not recorded as a flake.
+- Skipped: the native Mac app (not runnable here) and the installer (unchanged).
+
+The report was written on a main from before round 107's session-identity change, so its statement that no rebase was
+needed and its focused checks no longer describe what landed; the combined runs above supersede them. Nothing else in
+the executor's report became untrue at landing.
