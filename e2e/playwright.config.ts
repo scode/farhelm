@@ -14,18 +14,23 @@
 import { defineConfig, devices } from "@playwright/test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { harnessStackPort, STACK_PORT_ENV } from "./stack-port";
-import {
-  AUTH_STORAGE_STATE_PATH,
-  harnessAuthorizationHeaders,
-} from "./tests/helpers/device-auth";
+import { STACK_INFO_ENV } from "./global-setup";
+import { STACK_PORT_ENV } from "./stack-port";
+import { currentStackSlot, harnessStackSlots, isWorkerProcess, STACK_COUNT } from "./stack-slots";
+import { AUTH_STATE_ENV, harnessAuthorizationHeaders } from "./tests/helpers/device-auth";
 
-const authorizationHeaders = harnessAuthorizationHeaders();
-// Chosen once per run and pinned through the environment; see stack-port.ts
-// for why a fixed port was a collision between concurrent runs and why the
-// choice cannot live in start-stack.sh.
-const stackPort = harnessStackPort();
-const stackBaseURL = `http://127.0.0.1:${stackPort}`;
+// One stack per worker slot (stack-slots.ts). Ports are chosen once per run
+// and pinned through the environment; see stack-port.ts for why a fixed port
+// was a collision between concurrent runs and why the choice cannot live in
+// start-stack.sh.
+const stackSlots = harnessStackSlots();
+// Playwright re-imports this config in every worker, with the worker's slot
+// already in its environment, so `use` below points each worker at its own
+// stack. The runner (and any other process that only loads the config to
+// discover tests) has no slot and never drives a page; slot 0 only gives its
+// copy of `use` valid values.
+const slot = isWorkerProcess() ? currentStackSlot() : stackSlots[0];
+const authorizationHeaders = harnessAuthorizationHeaders(slot.authStatePath);
 const testsDir = join(__dirname, "tests");
 
 /** Preserve Playwright's recursive spec discovery while assigning one file per project. */
@@ -82,35 +87,46 @@ const engines = [
 
 export default defineConfig({
   testDir: "./tests",
-  // The stack is one shared helm with ONE session; tests interfere with
-  // each other by design (takeover semantics), so run serially. `workers`
-  // caps the whole run, including across projects, and every project points
-  // at the one webServer below. A second worker would race the first on the
-  // shared session server-side.
+  // Each stack is one shared helm with ONE startup session; tests interfere
+  // with each other by design (takeover semantics), so a stack serves one
+  // worker at a time. `workers` equals the number of stacks, and every worker
+  // drives only its own slot's stack (stack-slots.ts), so workers run in
+  // parallel without ever sharing a stack. Within a project, tests stay
+  // serial.
   //
-  // One project per (engine, spec file) is also a browser-process lifetime
+  // One project per (engine, spec file) is also the unit Playwright hands to
+  // whichever worker is free, and a browser-process lifetime
   // boundary. The old one-project-per-engine shape reused one WebKit process
   // for all 294 cases. Its network subprocess eventually crashed in CI and
   // took healthy terminal and feed WebSockets down with it. A fresh project
-  // keeps the suite serial and the stack shared while replacing the browser
-  // between files. Do not collapse these projects merely to save launches;
+  // keeps each file's tests serial on its worker's long-lived stack while
+  // replacing the browser between files. Do not collapse these projects merely to save launches;
   // that restores the multi-thousand-second process lifetime behind the
   // crash. The largest file still sets the residual lifetime bound.
   fullyParallel: false,
-  workers: 1,
+  workers: STACK_COUNT,
   timeout: 60_000,
   use: {
-    baseURL: stackBaseURL,
+    baseURL: slot.baseURL,
     // These two options are one credential in two browser transports.
     // Playwright injects `use` options into the request fixture and into
     // manual browser.newContext() calls as well as its default page context,
     // so secondary clients cannot silently fall back to unauthenticated I/O.
-    storageState: AUTH_STORAGE_STATE_PATH,
+    storageState: slot.authStatePath,
     extraHTTPHeaders: authorizationHeaders,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
   globalSetup: "./global-setup.ts",
+  // Global setup runs in the runner, which has no slot of its own, so it is
+  // told about every stack it has to authenticate here.
+  metadata: {
+    stackSlots: stackSlots.map(({ baseURL, stackInfoPath, authStatePath }) => ({
+      baseURL,
+      stackInfoPath,
+      authStatePath,
+    })),
+  },
   // The per-engine stack reset is registered by
   // `tests/helpers/terminal-suite.ts`'s `installTerminalSuiteHooks`, not by a
   // setup project or a name-ordered spec file:
@@ -139,7 +155,16 @@ export default defineConfig({
       })),
     ),
   ],
-  webServer: {
+  // One entry per stack slot. Each is an independent stack with its own port,
+  // state directory and credential; Playwright starts them all before global
+  // setup and shuts each down with its own graceful SIGTERM.
+  //
+  // They boot even when the selection is one test that only one worker will
+  // run. Booting lazily from a worker instead would make that worker the
+  // stack script's parent, and the orphan watcher below would tear the stack
+  // down as soon as the worker's (engine, spec file) project ended, since
+  // every project gets a fresh worker process. The idle stacks cost seconds.
+  webServer: stackSlots.map((stack) => ({
     // The `exec` is load-bearing, not cosmetic. Playwright launches this
     // as `/bin/sh -c "<command>"`, and on Linux that shell is dash, which
     // stays resident instead of replacing itself — so without `exec` the
@@ -152,11 +177,17 @@ export default defineConfig({
     // pins this layering; do not drop the prefix without updating it.
     command: "exec bash ./start-stack.sh",
     // The stack script is a shell child with no view of this module, so the
-    // port it must bind reaches it the same way it reaches the workers.
-    env: { [STACK_PORT_ENV]: String(stackPort) },
+    // port it must bind, and the slot's paths it publishes to, reach it
+    // through its environment.
+    env: {
+      [STACK_PORT_ENV]: String(stack.port),
+      [STACK_INFO_ENV]: stack.stackInfoPath,
+      [AUTH_STATE_ENV]: stack.authStatePath,
+    },
     // The API correctly answers 401 before global setup has exchanged the
     // token. The public static bundle is therefore the readiness probe.
-    url: `${stackBaseURL}/`,
+    url: `${stack.baseURL}/`,
+    name: `stack ${stack.index}`,
     // A port that already answers is someone else's stack (another agent's
     // run on this machine), never this run's; refuse it rather than test
     // against a helm whose token this run does not hold.
@@ -169,5 +200,5 @@ export default defineConfig({
     // the group) would survive every run. SIGTERM lets start-stack.sh
     // reap its own supervisor and tmux server.
     gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
-  },
+  })),
 });

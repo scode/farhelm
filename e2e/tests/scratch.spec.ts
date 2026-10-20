@@ -11,9 +11,10 @@ import { expect, test } from "./helpers/evidence";
 import fs from "node:fs";
 import path from "node:path";
 import { stackScratchDir } from "./helpers/scratch";
+import { currentStackSlot } from "../stack-slots";
 
 test("scratch dirs land in the stack state dir and keep their prefix", () => {
-  const raw = fs.readFileSync(path.resolve(__dirname, "../.stack-info.json"), "utf8");
+  const raw = fs.readFileSync(currentStackSlot().stackInfoPath, "utf8");
   const state = (JSON.parse(raw) as { state: string }).state;
   const first = stackScratchDir("fh-contract-");
   const second = stackScratchDir("fh-contract-");

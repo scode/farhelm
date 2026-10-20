@@ -3,6 +3,7 @@
 import hashlib
 import json
 import pathlib
+import re
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -28,7 +29,7 @@ def report(output, *, status="expected", expected="passed", results=None, versio
         })
     return {
         "config": {
-            "version": version, "workers": 1, "forbidOnly": True,
+            "version": version, "workers": adapter.WORKERS, "forbidOnly": True,
             "failOnFlakyTests": True, "shard": None, "projects": projects,
         },
         "suites": [{"specs": specs}],
@@ -42,7 +43,7 @@ def policy_report(output):
     """Supply resolved engines separately, as Playwright's supplementary reporter does."""
     return {
         "schema_version": 1, "completed": True, "status": "passed",
-        "workers": 1, "forbidOnly": True, "failOnFlakyTests": True,
+        "workers": adapter.WORKERS, "forbidOnly": True, "failOnFlakyTests": True,
         "projects": [{
             "name": f"{engine}-x", "engine": engine,
             "retries": 0, "repeatEach": 1, "outputDir": str(output),
@@ -70,6 +71,7 @@ class PlaywrightReportTest(unittest.TestCase):
         """A second report cannot silently change the engine, budget, or output owner."""
         mutations = (
             lambda p: p.update(workers=True),
+            lambda p: p.update(workers=adapter.WORKERS + 1),
             lambda p: p.update(schema_version=True),
             lambda p: p.update(completed=False),
             lambda p: p.update(status=[]),
@@ -292,7 +294,7 @@ class PlaywrightPreparationTest(unittest.TestCase):
                 ["npx", "playwright", "test", "a.spec.ts"], child, probe)
             self.assertEqual(command[:3], [str(node), str(e2e / "node_modules/playwright/cli.js"), "test"])
             self.assertEqual(len(calls), 2)
-            for flag in ("--workers=1", "--retries=0", "--repeat-each=1", "--forbid-only",
+            for flag in (f"--workers={adapter.WORKERS}", "--retries=0", "--repeat-each=1", "--forbid-only",
                          "--fail-on-flaky-tests", "--max-failures=0", "--update-snapshots=none"):
                 self.assertIn(flag, command)
             self.assertEqual(child["PLAYWRIGHT_JSON_OUTPUT_FILE"], str(run_dir / adapter.REPORT))
@@ -330,6 +332,24 @@ class PlaywrightPreparationTest(unittest.TestCase):
             (e2e / "package-lock.json").write_text(json.dumps({"packages": {}}))
             with self.assertRaisesRegex(ValueError, "lock"):
                 adapter.prepare(run_dir, root, ["npx", "playwright", "test"], original.copy(), probe)
+
+
+class WorkerCountAgreementTest(unittest.TestCase):
+    """The recorder's pinned worker count is the browser suite's stack count."""
+
+    def test_pinned_workers_match_the_suites_stack_count(self):
+        """Each worker drives its own stack, so the two numbers are one policy.
+
+        A recorder pinning more workers than there are stacks would point two
+        workers at one stack, where the suite's tests interfere by design; one
+        pinning fewer would boot stacks no worker uses. The suite's constant
+        lives in TypeScript, so this reads it from source rather than importing
+        it, and fails loudly if the declaration's shape stops matching.
+        """
+        source = (pathlib.Path(__file__).resolve().parent.parent / "e2e" / "stack-slots.ts").read_text()
+        match = re.search(r"^export const STACK_COUNT = ([0-9]+);$", source, re.MULTILINE)
+        self.assertIsNotNone(match, "e2e/stack-slots.ts no longer declares STACK_COUNT as a literal")
+        self.assertEqual(int(match.group(1)), adapter.WORKERS)
 
 
 if __name__ == "__main__":

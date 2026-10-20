@@ -57,6 +57,7 @@ import {
 import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, termText } from "./helpers/term";
 import { submitPrompt, waitUntilAgentReady } from "./helpers/real-agent";
+import { currentStackSlot } from "../stack-slots";
 
 /**
  * The one thing this file needs out of what `start-stack.sh` publishes:
@@ -76,7 +77,7 @@ type StackInfo = { farhelm: string; fixtures: string };
  * with no hint of the cause.
  */
 function stackInfo(): StackInfo {
-  const at = path.resolve(__dirname, "../.stack-info.json");
+  const at = currentStackSlot().stackInfoPath;
   if (!fs.existsSync(at)) {
     throw new Error(
       `${at} is missing: start-stack.sh publishes it before the helm starts, so the stack under test is not the one this suite expects`,

@@ -190,9 +190,15 @@ provisioning_backend="$state/provisioning-backend"
 # misleading leftover describing a stack that no longer exists — an
 # untrappable death (SIGKILL, OOM) can still strand a stale file, so
 # readers must not treat its presence as proof of a live stack.
-stack_info="$repo/e2e/.stack-info.json"
-auth_state="$repo/e2e/.auth/storage-state.json"
-mkdir -p "$work" "$remote_state" "$provisioning_backend" "$structured_bin" "$structured_home" || exit 1
+#
+# The browser suite runs one stack per worker slot, so the config names each
+# slot's own file (and its own credential file, which this script removes
+# with the stack) through the environment; both live under e2e/.stacks/.
+# The defaults are for running this script by hand.
+stack_info="${FARHELM_E2E_STACK_INFO:-$repo/e2e/.stack-info.json}"
+auth_state="${FARHELM_E2E_AUTH_STATE:-$repo/e2e/.auth/storage-state.json}"
+mkdir -p "$work" "$remote_state" "$provisioning_backend" "$structured_bin" "$structured_home" \
+  "$(dirname "$stack_info")" || exit 1
 : >"$checkout_git_config" || exit 1
 printf '%s\n' 'farhelm-e2e-provisioning-v1' >"$provisioning_backend/ENABLED" || exit 1
 printf '%s\n' '{}' >"$provisioning_backend/config.json" || exit 1

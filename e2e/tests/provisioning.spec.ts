@@ -27,6 +27,7 @@ import { requireHelmBuild } from "./helpers/helm-build";
 import { routeGate } from "./helpers/route-gate";
 import { expectKeyboardTooltip, expectQuietInitialFocus, expectCancelTooltipReturns } from "./helpers/host-dialog-tooltip";
 import { expectKeyboardScroll } from "./helpers/keyboard-scroll";
+import { currentStackSlot } from "../stack-slots";
 
 /** Live helm identity copied onto every route response this suite fabricates. */
 let HELM_BUILD = "";
@@ -86,7 +87,7 @@ type StackInfo = { provisioning_backend: string };
 
 /** Read the backend path only after Playwright has started the stack. */
 async function backendRoot(): Promise<string> {
-  const raw = await readFile(path.join(__dirname, "..", ".stack-info.json"), "utf8");
+  const raw = await readFile(currentStackSlot().stackInfoPath, "utf8");
   return (JSON.parse(raw) as StackInfo).provisioning_backend;
 }
 

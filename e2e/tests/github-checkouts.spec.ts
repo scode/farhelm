@@ -22,6 +22,7 @@ test.afterEach(async ({ request }) => {
 });
 import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, waitForTermText, answerYolo, termText } from "./helpers/term";
+import { currentStackSlot } from "../stack-slots";
 
 const run = promisify(execFile);
 
@@ -443,7 +444,7 @@ async function deleteSession(request: APIRequestContext, id: string) {
  * The stack runs one browser test at a time, so its private Git config can
  * be restored exactly without coordinating with another test's clone. */
 async function checkoutFixture(repoName: string) {
-  const stack = JSON.parse(await fs.readFile(path.resolve(__dirname, "../.stack-info.json"), "utf8"));
+  const stack = JSON.parse(await fs.readFile(currentStackSlot().stackInfoPath, "utf8"));
   const scratch = stackScratchDir("github-browser-");
   const root = path.join(scratch, "checkouts");
   const seed = path.join(scratch, "seed");
@@ -538,7 +539,7 @@ test("agent managed checkout approval and keyed recovery", async ({ page, contex
     driverPage = driver;
     await setLocalYoloWithoutAsking(request, true);
     await setLocalCommandsWithoutAsking(request, false);
-    const stack = JSON.parse(await fs.readFile(path.resolve(__dirname, "../.stack-info.json"), "utf8"));
+    const stack = JSON.parse(await fs.readFile(currentStackSlot().stackInfoPath, "utf8"));
     // Complete the observer's attachment before the requester exists. Both
     // pages otherwise auto-select the new requester, and a delayed observer
     // attachment can detach the driver under the one-client terminal rule.

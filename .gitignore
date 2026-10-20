@@ -23,6 +23,8 @@ playwright-report/
 e2e/.stack-info.json
 # Minted by Playwright's global auth setup and removed with the stack.
 e2e/.auth/storage-state.json
+# The browser suite's per-slot equivalents of both (e2e/stack-slots.ts).
+e2e/.stacks/
 
 # Local cache and build environment for the pinned tmux regression gate.
 .ci-tmux/
