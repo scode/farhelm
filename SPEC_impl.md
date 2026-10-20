@@ -28,6 +28,13 @@ framework drops when the client goes away, supervisor request handlers, which ar
 helm's connection closes, and the helm's answers to agent requests relayed by a supervisor, whose read-only answers are
 aborted when that supervisor's connection ends.
 
+For authenticated helm HTTP routes, ownership is the router's default for methods other than GET and HEAD. It begins
+after authentication and before typed request parsing, so a valid request can finish parsing and take effect after its
+caller disconnects. Invalid requests still receive their existing rejection responses. Routes whose cancellation is
+intentional live outside that layer: read-only POSTs, Stop and tab operations, transfers, and handlers with narrower
+admission or owned-work boundaries documented at their registrations. GET, its implicit HEAD companion and WebSocket
+upgrades keep their existing lifetimes. Desktop preflight and the standalone token exchange remain outside ownership.
+
 The reason is that dropping an async task stops it at whatever step it had reached, while blocking work already handed
 to other threads, such as a database transaction, still finishes. A handler written as a sequence of steps (commit a
 change, then reconcile running state with it; mark a host busy, then start the job that clears the flag; start killing a
