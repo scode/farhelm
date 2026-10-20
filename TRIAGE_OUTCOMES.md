@@ -16660,7 +16660,9 @@
 - Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3); about 8 lines.
 - Completion criteria: the global total is partial whenever any settled listing's totals are, with a test. Gate: over
   about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/trash-unknown-totals.md`.
+- Execution: complete in jj change `mmvxpost`, bookmark `plan/trash-unknown-totals/02-partial-over-limit`. The non-test
+  diff is 14 added/deleted lines, below the approximately 15-line gate; 46 test lines are excluded. PR:
+  https://github.com/scode/farhelm/pull/2404/changes.
 
 ## empty-initial-prompt-skipped-by-tab.md
 
