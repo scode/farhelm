@@ -19,12 +19,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`agent-checkout-test-compares-lexical-tmp.md`](agent-checkout-test-compares-lexical-tmp.md) — New agent checkout
   tests compare canonical destinations with lexical /tmp paths and fail on macOS.
 
-- [`introduction-promises-waiting-alerts-for-every-agent.md`](introduction-promises-waiting-alerts-for-every-agent.md) —
-  Introductory artwork promises blocked-agent alerts for agents without waiting detection.
-
-- [`introduction-omits-automatic-install-prerequisites.md`](introduction-omits-automatic-install-prerequisites.md) — The
-  automatic-installation claim omits architecture and systemd user-manager prerequisites.
-
 - [`template-discovery-fails-permanently-once-reply-exceeds.md`](template-discovery-fails-permanently-once-reply-exceeds.md)
   — A large valid template catalog permanently disables agent discovery.
 
@@ -33,9 +27,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`template-screenshot-implies-deletion-needs-save.md`](template-screenshot-implies-deletion-needs-save.md) — A reader
   could delete a saved template and close the dialog believing the deletion was never committed.
-
-- [`introduction-promises-universal-reboot-resume.md`](introduction-promises-universal-reboot-resume.md) — The
-  introduction promises conversation recovery after reboot for sessions without Resume reporting.
 
 - [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
   — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
