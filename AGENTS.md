@@ -196,9 +196,9 @@ under `crates/farhelm-ui/src/icons/`); vendored geometry gets an entry in `THIRD
 ## TODO.md and FLAKES.md
 
 `TODO.md` is the maintainer's running list of wanted fixes and features. When a PR addresses an entry, remove that entry
-in the same PR. Do not add entries on your own initiative. The exception is a deflake run (`deflake/AGENTS.md`), which
-records the flakes it finds as Deflake entries. When a Deflake entry is removed, remove the matching line in
-`deflake/known-flakes.txt` in the same PR.
+in the same PR. Do not add entries on your own initiative. Two narrow exceptions: a deflake run (`deflake/AGENTS.md`)
+records the flakes it finds as Deflake entries, and recording a newly established open flake in `FLAKES.md` adds its
+Deflake entry. When a Deflake entry is removed, remove the matching line in `deflake/known-flakes.txt` in the same PR.
 
 Before adding or revising an entry, and before answering any question about what TODO.md currently holds (a "tldr todo"
 included), fetch and rebase the working copy onto the latest main per jjstack: `jj git fetch`, then rebase the
@@ -208,8 +208,10 @@ working-copy change onto `main@origin`. In a stack (a deflake run, plan or triag
 `FLAKES.md` is the append-only log of LATENT flakes: tests that pass where they were written and fail elsewhere,
 sometimes, or under load, whose cause was not obvious when they failed. When you establish that a failure is a true
 flake of that kind — pre-existing, or one that survived past the session that wrote it — add a dated entry. Do NOT log a
-test that was written, flaked, and was fixed within the same session. Open flakes also get a deflake entry in TODO.md.
-Before writing an entry, read `.agents/test-evidence.md`, "FLAKES.md", for its fields.
+test that was written, flaked, and was fixed within the same session. Open flakes also get a Deflake entry in TODO.md
+and its `deflake/known-flakes.txt` line, as `deflake/AGENTS.md` describes for a deflake run's flakes; this covers flakes
+recorded from now on, not older entries. Before writing an entry, read `.agents/test-evidence.md`, "FLAKES.md", for its
+fields.
 
 ## Tests and validation
 
