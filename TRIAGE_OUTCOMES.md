@@ -16156,7 +16156,10 @@
   on the Mac when free, so a Mac program expecting that port may reach the remote host instead; SPEC.md's list of what
   the warning explains and the docs page that repeats the warning say the same; edit the tunnel feature's existing
   changelog fragment if it is unreleased. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/tunnel-port-consent-warning.md`.
+- Execution: change `xqqwknvzpwknwmsppovkkmzrnqsyqvkw`, bookmark
+  `plan/tunnel-port-consent-warning/01-tunnel-port-warning`; the shared warning, specification and docs explain the
+  same-port preference and possible redirection of Mac programs to the remote host. Draft PR
+  [#2364](https://github.com/scode/farhelm/pull/2364/changes).
 
 ## pending-approval-can-cross-host-entries.md
 

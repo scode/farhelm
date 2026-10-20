@@ -3067,10 +3067,12 @@ Localhost tunnels deliberately extend that browser boundary. Before enabling the
 a tunneled page is served from `127.0.0.1` on the Mac: cookies are not isolated by port, so it can read cookies from
 other services on that address; the browser treats it as a local page and skips private-network checks. The tunnel's
 loopback listener has no authentication and accepts connections from any program on the Mac, like SSH port forwarding.
-The helm's same-site navigation hardening also means an ordinary link from another `127.0.0.1` page cannot open a
-standalone helm on that Mac. The user accepted these consequences for this feature; consent is off until they accept the
-warning, and Settings can revoke it and close the tunnels. A tunnel does not give a supervisor an arbitrary network
-dialer: only the helm may open a relay, and the supervisor independently confines its destination to loopback.
+The warning also explains that a tunnel uses the remote service's port number on the Mac when free, so a Mac program
+expecting that port may reach the remote host instead. The helm's same-site navigation hardening also means an ordinary
+link from another `127.0.0.1` page cannot open a standalone helm on that Mac. The user accepted these consequences for
+this feature; consent is off until they accept the warning, and Settings can revoke it and close the tunnels. A tunnel
+does not give a supervisor an arbitrary network dialer: only the helm may open a relay, and the supervisor independently
+confines its destination to loopback.
 
 A program in an attached remote terminal may write the viewer machine's system clipboard through OSC 52, without a
 separate local selection or copy gesture. This is an explicitly allowed, bounded effect across the remote-host boundary,
