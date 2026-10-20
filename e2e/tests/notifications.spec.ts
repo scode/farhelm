@@ -10,7 +10,7 @@
 // The supervisor's recording and the helm's marks have their own Rust tests.
 import { expect, test } from "./helpers/evidence";
 import { Locator, Page, Route } from "@playwright/test";
-import { cleanupSession, createSession, forceBuildSkew, pinAutoSelect, resetPreferences, stubFeed } from "./helpers/fleet";
+import { cleanupSession, createSession, forceBuildSkew, openRowMenu, patchPreferences, pinAutoSelect, resetPreferences, stubFeed } from "./helpers/fleet";
 import { replayRecord, waitForReplayReveal, waitForSessionMounted, waitForSessionReady } from "./helpers/terminal-readiness";
 
 interface StubNotification { seq: number; at: number; text: string; resolved?: boolean }
@@ -124,6 +124,73 @@ test.describe("session notifications", () => {
     await page.setViewportSize(viewport);
     await expect(panel).toHaveCount(0);
     await expect(elsewhere).toBeFocused();
+  });
+
+  /** Local deletion must retire a bell's measured position before losing the
+   * old row order. Holding all later listings isolates that local path; a
+   * quiet feed, stable selection and sidebar size exclude other dismissals. */
+  test("a local delete closes the notification list on a row it moves", async ({ page, request }) => {
+    const stamp = Date.now();
+    const a = await createSession(request, { title: `bell-delete-${stamp}-a`, invocation: "sleep 300" });
+    created.push(a.id);
+    const b = await createSession(request, { title: `bell-delete-${stamp}-b`, invocation: "sleep 300" });
+    created.push(b.id);
+    const c = await createSession(request, { title: `bell-delete-${stamp}-c`, invocation: "sleep 300" });
+    created.push(c.id);
+    await patchPreferences(request, { list_sort: "title" });
+    await serveNotifications(page, b.id, new NotificationStub([{ seq: 1, at: NOW, text: "anchored to B" }]));
+    const feed = await stubFeed(page);
+    await pinAutoSelect(page, c.id);
+    await page.goto("/");
+    await waitForSessionReady(page, c.id);
+    await expect(row(page, a.id)).toBeVisible();
+    await expect(row(page, b.id)).toBeVisible();
+    await expect.poll(() => feed.connections()).toBeGreaterThan(0);
+    let releaseDelete = () => {};
+    let releaseListings = () => {};
+    const deleteGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
+    const listingGate = new Promise<void>((resolve) => { releaseListings = resolve; });
+    let deleteReached = false;
+    try {
+      await page.route((url) => url.pathname === "/api/sessions", async (route) => {
+        if (route.request().method() === "GET") await listingGate;
+        await route.fallback();
+      });
+      await page.route(`**/api/sessions/${encodeURIComponent(a.id)}`, async (route) => {
+        if (route.request().method() === "DELETE") {
+          deleteReached = true;
+          await deleteGate;
+        }
+        await route.fallback();
+      });
+      await openRowMenu(row(page, a.id));
+      await row(page, a.id).locator(".session-row-delete").click();
+      await row(page, a.id).locator(".confirm-delete").click();
+      await expect.poll(() => deleteReached).toBe(true);
+      // Finish A's menu handback before opening B; switching both surfaces
+      // in one click would exercise their separate focus-transfer race.
+      await row(page, a.id).locator(".session-row-menu").click();
+      await expect(row(page, a.id).locator(".session-row-menu-flyout")).toHaveCount(0);
+      await expect(row(page, a.id).locator(".session-row-menu")).toBeFocused();
+      const bell = row(page, b.id).locator(".session-row-bell");
+      await bell.click();
+      const panel = page.locator(".session-bell-panel");
+      await expect(panel).toBeFocused();
+      await expect(page.locator(".session-bell-flyout")).toHaveCSS("opacity", "1");
+      const before = (await row(page, b.id).boundingBox())!;
+      expect((await row(page, a.id).boundingBox())!.y).toBeLessThan(before.y);
+      const sidebarHeight = (await page.locator(".app-sidebar").boundingBox())!.height;
+      releaseDelete();
+      await expect(row(page, a.id)).toHaveCount(0, { timeout: 20_000 });
+      expect((await row(page, b.id).boundingBox())!.y).toBeLessThan(before.y);
+      expect((await page.locator(".app-sidebar").boundingBox())!.height).toBe(sidebarHeight);
+      await expect(panel).toHaveCount(0);
+      await expect(bell).toBeFocused();
+    } finally {
+      releaseDelete();
+      releaseListings();
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+    }
   });
 
   /** Closing the list must reconcile its bell even when automatic reads stop.

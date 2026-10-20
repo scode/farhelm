@@ -16872,7 +16872,8 @@
 - Completion criteria: a row removal that moves an open notification list closes it, as #1154 does for the row menu; a
   test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
   changelog fragment); over it, discard. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/sidebar-bell-follows-row.md`.
+- Execution: complete in change `yyvxsxtytlvusuntyktykqwmyxlxxtsy`, bookmark
+  `plan/sidebar-bell-follows-row/02-close-moved-bell`, [PR #2430](https://github.com/scode/farhelm/pull/2430/changes).
 
 ## delayed-host-confirmation-conflicts-with-other-dialogs.md
 

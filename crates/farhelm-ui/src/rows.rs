@@ -311,7 +311,7 @@ pub(crate) fn pin_separator_after(sessions: &[Session]) -> Option<&str> {
 }
 
 /// Remove `removed` from `sessions` (this client's own optimistic delete)
-/// and report whether the row holding the open actions menu, `open_id`,
+/// and report whether the row holding the open menu or bell, `open_id`,
 /// moved or went away as a result.
 ///
 /// The optimistic removal edits the listing in place instead of going
@@ -320,8 +320,8 @@ pub(crate) fn pin_separator_after(sessions: &[Session]) -> Option<&str> {
 /// panel was measured, now beside a different row. Its buttons still act on
 /// the original row, but it reads as the neighbour's, and for an ended
 /// session with no tabs Delete runs with no prompt naming the row. The
-/// caller closes the menu when this returns true, exactly as a reordering
-/// listing would.
+/// caller closes the menu or notification list when this returns true, as a
+/// reordering listing would.
 ///
 /// "Moved" is judged on the DISPLAYED order, `held` being the list's order
 /// hold (empty when there is none; see [`held_display_order`]). Under a hold
