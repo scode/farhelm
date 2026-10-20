@@ -10,13 +10,14 @@
 # and state lock, unreachable to the recorder's group cleanup. The script
 # now watches its spawner and runs its normal TERM trap when the spawner
 # goes away. This script proves that for spawner SIGKILL and SIGTERM, plus
-# the normal trap path, with an unrelated tmux server, process, and state
-# lookalike standing by as the "other stacks" that must survive. A
+# the normal trap path and the reaping of a replacement "remote"
+# supervisor, with an unrelated tmux server, process, and state lookalike
+# standing by as the "other stacks" that must survive. A
 # layering guard first pins the `exec` prefix the watcher depends on: the
 # Playwright leader must direct-parent the script, not a resident shell.
 #
 # Needs a built tree (cargo build, dx web build); picks its own free port
-# per run and boots three real stacks on it plus a seconds-long layering
+# per run and boots five real stacks on it plus a seconds-long layering
 # guard, so a few minutes.
 # NOT wired into CI: like the rest of the browser suite it is far too slow
 # for per-PR runs. Run it by hand when start-stack.sh's lifetime handling
@@ -355,6 +356,52 @@ fi
 check_decoys "trap-phase"
 spawner_pid=""
 script_pid=""
+
+# Phases 4 and 5: the replacement "remote" supervisor. When
+# terminal-multihost.spec.ts takes the stack's second host down, it starts a
+# replacement detached from its Playwright worker (later projects on the
+# same stack still need that host) and records its pid in a file the stack
+# publishes. The stack's cleanup is then the only thing that reaps it, and
+# it must reap exactly that process: phase 4 records a stand-in whose
+# command line is a supervisor on this stack's remote state dir and expects
+# it gone with the rest of the stack; phase 5 records the unrelated decoy
+# process, the shape a stale file with a reused pid has, and expects it to
+# survive (check_decoys).
+replacement_phase() {
+  local phase="$1" record="$2"
+  boot_stack "$phase" || exit 1
+  state="$(stack_state)" || exit 1
+  local remote pidfile
+  remote="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["remote_state"])' "$stack_info")" || exit 1
+  pidfile="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["remote_replacement_pidfile"])' "$stack_info")" || exit 1
+  if test "$record" = stand-in; then
+    # `exec -a` gives a plain sleep the argv a real replacement has; it
+    # cannot take the real supervisor's place, which holds the state dir.
+    bash -c 'exec -a "$0" sleep 300' "farhelm supervisor run --state-dir $remote --boot-id-file $remote/boot-id" &
+    replacement_pid=$!
+    echo "$replacement_pid" >"$pidfile" || exit 1
+  else
+    echo "$decoy_pid" >"$pidfile" || exit 1
+  fi
+  kill -TERM "$script_pid" || exit 1
+  for _ in $(seq 1 10); do
+    kill -0 "$spawner_pid" 2>/dev/null || break
+    sleep 1
+  done
+  # await_gone also proves the stand-in is gone: its command line names the
+  # state dir.
+  if await_gone "$phase" "$state"; then
+    pass "$phase: stack freed"
+  else
+    report_leftovers "$phase" "$state"
+    emergency_cleanup "$state"
+  fi
+  check_decoys "$phase"
+  spawner_pid=""
+  script_pid=""
+}
+replacement_phase "replacement-phase" stand-in
+replacement_phase "stale-replacement-phase" decoy
 
 if test "$failures" -gt 0; then
   echo "$failures check(s) failed" >&2

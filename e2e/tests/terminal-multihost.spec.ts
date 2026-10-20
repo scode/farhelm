@@ -53,7 +53,7 @@ import {
 import { stackScratchDir } from "./helpers/scratch";
 import path from "node:path";
 import fs from "node:fs";
-import { ChildProcess, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import { cleanupSession, fillCreateForm, waitForTermText, answerYolo } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
@@ -117,6 +117,23 @@ type StackInfo = {
    * `rebootRemoteHost`).
    */
   remote_boot_id_file: string;
+  /**
+   * Where a replacement "remote" supervisor started by this file records its
+   * pid (see `restoreRemoteSupervisor`). The stack script reads the same
+   * file at cleanup, which is what lets a replacement outlive the worker
+   * that started it without outliving the stack.
+   */
+  remote_replacement_pidfile: string;
+  /**
+   * The "remote" supervisor's log and the `RUST_LOG` filter it was started
+   * with. A replacement appends to the same log under the same filter: other
+   * specs read the original's debug receipts from that file (the sidebar's
+   * remote-browse test does), and a replacement that logged elsewhere, or at
+   * a different level, would break them whenever they run after this file on
+   * the same stack.
+   */
+  remote_supervisor_log: string;
+  remote_supervisor_rust_log: string;
 };
 
 /**
@@ -490,8 +507,6 @@ function requireFleet() {
 }
 
 
-/** The replacement supervisor a down-host test started, if any. */
-let restartedRemote: ChildProcess | undefined;
 
 /**
  * Whether anything is actually SERVING the "remote" supervisor's socket.
@@ -541,9 +556,8 @@ async function remoteSupervisorAlive(): Promise<boolean> {
  * is unavailable is deliberate: this suite runs on Linux (see the CI job),
  * and the alternative to verifying is signalling blind.
  */
-function verifiedRemoteSupervisorPid(): number {
+function verifiedRemoteSupervisorPid(pid: number = stackInfo().remote_supervisor_pid): number {
   const info = stackInfo();
-  const pid = info.remote_supervisor_pid;
   const at = `/proc/${pid}/cmdline`;
   if (!fs.existsSync(at)) {
     throw new Error(
@@ -564,49 +578,80 @@ function verifiedRemoteSupervisorPid(): number {
 }
 
 /**
+ * The live replacement "remote" supervisor recorded in the stack's pidfile,
+ * if there is one.
+ *
+ * A replacement started by an earlier project (the other engine's pass
+ * through this file on the same stack) belongs to a worker process that is
+ * long gone, so the pidfile, not any
+ * in-process handle, is the only record of it. A recorded pid whose process
+ * has exited, or which no longer runs a supervisor on this stack's remote
+ * state dir, is stale: the file is dropped and the answer is "none".
+ */
+function liveReplacementSupervisorPid(): number | undefined {
+  const at = stackInfo().remote_replacement_pidfile;
+  if (!fs.existsSync(at)) return undefined;
+  const pid = Number(fs.readFileSync(at, "utf8").trim());
+  if (Number.isInteger(pid) && pid > 0 && !processGone(pid)) {
+    try {
+      return verifiedRemoteSupervisorPid(pid);
+    } catch {
+      // A reused pid: fall through and forget it rather than signal it.
+    }
+  }
+  fs.rmSync(at, { force: true });
+  return undefined;
+}
+
+/**
+ * Whether `pid` has exited, counting an unreaped zombie as exited.
+ *
+ * A replacement supervisor is spawned detached, so after its worker exits it
+ * is reaped by whatever adopted it, possibly not before this check runs. A
+ * zombie no longer holds the state dir's ownership lock, which is the thing
+ * the callers are waiting for.
+ */
+function processGone(pid: number): boolean {
+  let stat: string;
+  try {
+    stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+  } catch {
+    return true;
+  }
+  // The state field follows the parenthesized command name, which may itself
+  // contain spaces or parentheses, so split after the LAST ")".
+  return stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z");
+}
+
+/**
  * Kill whichever supervisor is currently serving the "remote" state dir, and
  * wait for it to actually be gone.
  *
- * Awaiting matters: the caller's next move is asserting that the helm has
- * noticed, and a supervisor that is merely signalled is still answering.
+ * Awaiting matters twice over: the caller's next move is asserting that the
+ * helm has noticed, and a supervisor that is merely signalled is still
+ * answering; and a restore that follows needs the dying process to have
+ * released the state dir's ownership lock.
  */
 async function killRemoteSupervisor() {
-  // A replacement THIS file started takes precedence: after one down-host
-  // pass the pid the harness published is a corpse, and signalling it would
-  // either throw or — worse, after pid reuse — hit something else.
-  if (restartedRemote) {
-    await stopRestartedRemote();
-    return;
-  }
-  process.kill(verifiedRemoteSupervisorPid(), "SIGTERM");
+  // A replacement takes precedence: once one exists, the pid the harness
+  // published is a corpse, and signalling it would either throw or, after
+  // pid reuse, hit something else.
+  const replacement = liveReplacementSupervisorPid();
+  const pid = replacement ?? verifiedRemoteSupervisorPid();
+  process.kill(pid, "SIGTERM");
   await expect
     .poll(remoteSupervisorAlive, {
       timeout: 30_000,
       message: "waiting for the killed remote supervisor to stop answering",
     })
     .toBe(false);
-}
-
-/**
- * Stop the replacement supervisor this file started, waiting for its exit.
- *
- * Awaited rather than fire-and-forget because the next thing that happens is
- * either another test or the whole run ending: a signalled-but-not-yet-dead
- * supervisor still holds its state directory's ownership lock, so a
- * replacement started immediately afterwards would refuse to serve, and a
- * run that ended here would leak a live process past the suite.
- */
-async function stopRestartedRemote() {
-  const child = restartedRemote;
-  restartedRemote = undefined;
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-  const exited = new Promise<void>((resolve) => {
-    child.once("exit", () => resolve());
-  });
-  child.kill("SIGTERM");
-  await exited;
+  await expect
+    .poll(() => processGone(pid), {
+      timeout: 30_000,
+      message: "waiting for the killed remote supervisor to exit and release its state dir",
+    })
+    .toBe(true);
+  if (replacement !== undefined) fs.rmSync(stackInfo().remote_replacement_pidfile, { force: true });
 }
 
 /**
@@ -627,8 +672,14 @@ async function stopRestartedRemote() {
  * every later test a fleet that looks restored and is not. A row that does
  * not match is replaced rather than adjusted, because the retarget verb
  * deliberately cannot change install fields.
+ *
+ * `replace` drops even a matching row and registers it afresh. A row keeps
+ * per-row state that its fields do not show, such as a failed uninstall run
+ * that stays on display under the row; the file's last hook uses this so the
+ * specs that run on this stack afterwards see the row as start-stack.sh
+ * registered it, not grown by this file's leftovers.
  */
-async function restoreFleetRow(request: APIRequestContext) {
+async function restoreFleetRow(request: APIRequestContext, { replace = false } = {}) {
   const info = stackInfo();
   const wanted = (host: any) =>
     host.destination === info.remote_ssh &&
@@ -636,7 +687,7 @@ async function restoreFleetRow(request: APIRequestContext) {
     host.remote_state_dir === info.remote_state;
 
   const existing = await apiRemoteHost(request);
-  if (existing && !wanted(existing)) {
+  if (existing && (replace || !wanted(existing))) {
     const removed = await request.delete(`/api/hosts/${existing.id}`);
     expect(
       removed.ok(),
@@ -681,11 +732,31 @@ async function restoreRemoteSupervisor(request: APIRequestContext) {
   // respawn that dropped the option would read the machine's real boot id,
   // and every session of the harness's "boot-1" would come back interrupted
   // on a host that never rebooted.
-  restartedRemote = spawn(
-    info.farhelm,
-    ["supervisor", "run", "--state-dir", info.remote_state, "--boot-id-file", info.remote_boot_id_file],
-    { stdio: "ignore" },
-  );
+  //
+  // Detached and recorded in the stack's pidfile rather than held as a child
+  // handle: the replacement is the stack's remote from now on, for every
+  // later project that runs on this stack, long after this worker has
+  // exited. start-stack.sh reaps it from the pidfile with the rest of the
+  // stack.
+  const log = fs.openSync(info.remote_supervisor_log, "a");
+  let replacement: ReturnType<typeof spawn>;
+  try {
+    replacement = spawn(
+      info.farhelm,
+      ["supervisor", "run", "--state-dir", info.remote_state, "--boot-id-file", info.remote_boot_id_file],
+      {
+        stdio: ["ignore", log, log],
+        detached: true,
+        env: { ...process.env, RUST_LOG: info.remote_supervisor_rust_log },
+      },
+    );
+  } finally {
+    // The child holds its own copy of the descriptor; this worker's must not
+    // stay open for the rest of its life.
+    fs.closeSync(log);
+  }
+  replacement.unref();
+  fs.writeFileSync(info.remote_replacement_pidfile, `${replacement.pid}\n`);
   await expect
     .poll(
       async () => {
@@ -731,18 +802,17 @@ test.describe("multi-host", () => {
 
     // Self-ssh works, so the fleet is expected to be up — and anything that
     // goes wrong from here is a real failure rather than a reason to skip.
-    // In a full run, 45 seconds detects the previous engine's deliberate
-    // teardown without spending the longer resurrection budget. When this
-    // project is selected directly, it still gives the stack's initial remote
-    // supervisor enough time to make its first connection.
+    // 45 seconds gives the stack's initial remote supervisor enough time to
+    // make its first connection when this project is the first on its stack,
+    // without spending the longer resurrection budget.
     fleetReady = await remoteReachesPhase(request, "connected", 45_000);
     if (!fleetReady) {
-      // Nothing serving that state dir is what an EARLIER project's pass
-      // through this file leaves behind: its down-host group killed the
-      // harness's supervisor, and the replacement was reaped at the end of
-      // the file. Put one back — and let a failure to do so FAIL the hook,
-      // because with self-ssh working there is no honest reading of it as a
-      // missing prerequisite.
+      // Nothing serving that state dir means an EARLIER project on this
+      // stack took the host down and could not put it back (this file's
+      // after-hooks restore it, so that takes a crash or an abandoned hook).
+      // Put one back — and let a failure to do so FAIL the hook, because
+      // with self-ssh working there is no honest reading of it as a missing
+      // prerequisite.
       expect(
         await remoteSupervisorAlive(),
         "the ssh host is not connected and its supervisor IS serving: the fleet is broken in a way self-ssh cannot explain",
@@ -4945,16 +5015,23 @@ test.describe("multi-host", () => {
     }
   });
 
-  test.afterAll(async () => {
-    // Only ever the replacement THIS file started; the harness's own
-    // supervisor is start-stack.sh's to reap. Left running it would leak a
-    // process past the suite, and killing indiscriminately would take the
-    // harness's original down with the fleet.
-    //
-    // Awaited rather than fired and forgotten: the next project's pass
-    // through this file starts by looking for a supervisor on that state
-    // directory, and a signalled-but-not-yet-dead one still holds the
-    // ownership lock its replacement would need.
-    await stopRestartedRemote();
+  // Leave the stack's fleet as start-stack.sh made it. Whatever project runs
+  // next on this stack may need the second host (agent-relay and filters do,
+  // and they can only wait for it, never restore it), and every spec that
+  // renders the hosts panel lays out around that host's row, so leftovers
+  // here move other specs' rows (a failed uninstall run left on display made
+  // the sidebar's layout tests miss their measurements). Playwright may hand
+  // any project to this stack next, so no ordering can keep them away.
+  //
+  // The groups that take the host down restore it themselves; this catches a
+  // failure between a kill and its restore. A replacement started here keeps
+  // running for the rest of the run and is reaped by start-stack.sh. The row
+  // is then registered afresh, which drops whatever per-row state the tests
+  // above left on it.
+  test.afterAll(async ({ request }) => {
+    if (!fleetReady) return;
+    test.setTimeout(180_000);
+    if (!(await remoteSupervisorAlive())) await restoreRemoteSupervisor(request);
+    await restoreFleetRow(request, { replace: true });
   });
 });

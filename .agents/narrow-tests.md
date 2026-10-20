@@ -134,9 +134,8 @@ it, every test fails with a 409 "host 1 is connecting" from a supervisor that ne
 
 Engine choice: chromium is the faster iteration engine; webkit is the desktop stand-in, so a report that smells
 desktop-family (see `docs/desktop-web-triage.md`) should reproduce on `webkit-<spec>` before anyone blames shared code.
-Selecting any spec in isolation is safe, including `terminal-multihost` — the config's ordering constraint (multihost
-last) only matters for runs that include specs needing the second host after it, and a selected run inherits the
-config's project order anyway.
+Selecting any spec in isolation is safe, including `terminal-multihost`: projects carry no ordering constraint, because
+the multihost spec puts the second host back before it ends.
 
 ## JS unit tests
 
