@@ -30,10 +30,12 @@ if it only partially addresses it. A fix that leaves its feedback item behind is
 
 `review_feedback_queue/.agents/triage.md` and `review_feedback_queue/.agents/execute-outcomes.md` define the separate
 "triage review feedback" and "execute triage outcomes" steps. Triage records the user's decision in root
-`TRIAGE_OUTCOMES.md` without changing the feedback file or index. Execution applies that decision and removes or narrows
-the item in its own draft PR. A `discard` outcome means only "not worth the human's time at this time", not that the
-feedback is wrong; its execution removes the file and index entry without a spec or code change. The outcome ledger
-lives outside this directory and is not a feedback file to add to `INDEX.md`.
+`TRIAGE_OUTCOMES.md` without changing the feedback file or index; a finding the spec or a recorded decision already
+clearly settles gets `fix code` without a question (`review_feedback_queue/.agents/triage.md`, "Preparing each item").
+Execution applies that decision and removes or narrows the item in its own draft PR. A `discard` outcome means only "not
+worth the human's time at this time", not that the feedback is wrong; its execution removes the file and index entry
+without a spec or code change. The outcome ledger lives outside this directory and is not a feedback file to add to
+`INDEX.md`.
 
 Exception: when triage verifies that a finding is fully covered by an accepted specification rule, an existing `Planned`
 item in TODO.md, a known bug recorded in root `BUGS.md`, or a filter in `FILTER.md`, record the basis in the ledger and
