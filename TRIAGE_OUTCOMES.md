@@ -11534,6 +11534,15 @@
   require writing beside the binary. That needs an explicit participation contract for supported executable paths and
   installation transitions. Recommend that separately scoped exclusion change. No partial fix shipped; the original
   setup/uninstall race remains unfixed. Feedback file and index entry retained.
+- Superseded 2026-10-19: re-checked on main a7165396 by code reading. Linux flat uninstall needs the
+  `.farhelm-installation` record, which only older installers wrote: current `scripts/install.sh` refuses Linux and
+  removes that record as the previous layout's, and nothing current creates one. The race then also needs the two
+  commands to overlap. That matches `review_feedback_queue/FILTER.md`, "Upgrades from older releases combined with
+  another rare condition" (added 2026-10-14, after the decision above); none of its exceptions applies.
+- Outcome (2026-10-19, supersedes the above): `other`.
+- Decision (2026-10-19): on the cross-cutting triage page, the user accepted "remove as filtered" for this item.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: complete (queue cleanup during triage, per `review_feedback_queue/AGENTS.md`, "Lifecycle").
 
 ## failed-sink-record-hides-older-reaper.md
 
@@ -12284,6 +12293,15 @@
   guarantee; bounding host display names would broaden the host-input contract. Recommend a separate byte-bounded
   listing/pagination plan, which can also handle existing oversized catalogs. No cap shipped; the original cross-host
   discovery risk remains unfixed. Feedback file and index entry retained.
+- Outcome (2026-10-19, supersedes the above): `fix spec`.
+- Decision (2026-10-19): on the cross-cutting triage page, the user accepted declaring a template catalog of that size
+  out of scope, as the trash's scale was on 2026-10-16 (`trash-listing-exceeds-control-frame.md`). Every agent template
+  write needs an approval card by default, so the catalog cannot grow that far silently.
+- Completion criteria: SPEC_impl.md, next to the template catalog's description, says a catalog whose agent listing
+  exceeds one reply frame (about 8 MiB, roughly 130 templates near the per-field cap) is outside the supported scale and
+  agent template listing may then fail until templates are removed; the GUI is unaffected. No code change. Remove the
+  feedback file and its index entry.
+- Execution: pending.
 
 ## dropping-upload-guard-outside-tokio-runtime-skips.md
 
@@ -12896,6 +12914,12 @@
   separately authorize a correlated final result that survives forgetting the host (helm/API lifecycle work beyond this
   gate). No product change for this outcome; its original feedback remains queued. Scope review confirmed the gate
   return; the recorded Outcome is unchanged.
+- Outcome (2026-10-19, supersedes the above): `other`.
+- Decision (2026-10-19): on the cross-cutting triage page, the user accepted the recommended option: the residual is
+  accepted under SPEC.md "One GUI at a time" ("do not add significant machinery to keep concurrent GUIs consistent"),
+  since it needs a second GUI to remove the host while this one's uninstall is failing.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: complete (queue cleanup during triage, per `review_feedback_queue/AGENTS.md`, "Lifecycle").
 
 ## newer-completed-run-leaves-older-update-permanently.md
 
@@ -16351,3 +16375,723 @@
   delivered".
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
 - Execution: complete (queue cleanup during triage, per `review_feedback_queue/AGENTS.md`, "Lifecycle").
+
+## terminal-peer-failures-hide-format-controls.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (fresh reviewer; not run). The terminal's detach banner
+  (`Detached: ${msg.reason}`, `terminal.js` around 4910) and upload error lines (`paint`, around 2062) assign host text
+  to `textContent` without escaping, so bidi and zero-width characters can hide or reorder the explanation. SPEC.md's
+  2026-10-10 rule escapes host-supplied text shown outside a terminal wherever it appears; `visibleFormatCharacters`
+  (`terminal-links.js` around 401) already exists.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" for findings the spec or an earlier decision
+  already settles (cross-cutting triage page, question 1).
+- Completion criteria: both sites escape host text the way the rest of the GUI does, with a test using a direction
+  override and a zero-width space. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
+  the queue removal or the changelog fragment); over it, block and bring it back to the user. Remove the feedback file
+  and its index entry.
+- Execution: pending.
+
+## web-link-redraw-lowers-refusal.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). After a covered web link is refused, a redraw of
+  that row with the pointer still on it calls `hideWebLinkTarget` (`terminal.js` around 3627), which lowers the refusal
+  explanation at once (the OSC `leave()` path defers this only for file links), so it drops back under the disclosure or
+  tunnel-error notice. Clicks stay refused. The 2026-10-18 decision under
+  `tunnel-error-notice-obscures-link-disclosure.md` requires that the notice not hide the refusal explanation, and
+  SPEC_impl.md says the explanation stays raised until the pointer leaves.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1).
+- Completion criteria: a redraw under a resting pointer keeps a refused web link's explanation raised until the pointer
+  leaves the link, as for file links; the existing browser test is extended to redraw the row. Size gate: about 100
+  lines, as above; over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## repository-discovery-inherits-bare-git-config.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). Production `run_git`
+  (`crates/farhelm-supervisor/src/repository_discovery.rs` around 239–254) strips `GIT_CONFIG_*` but not bare
+  `GIT_CONFIG`, so an inherited selector can hide existing repositories from the launcher's suggestions. SPEC_impl.md
+  (around 3017) says inspection children discard ambient Git configuration and location overrides, and the earlier
+  decision under `git-discovery-fixtures-inherit-bare-git-config.md` asked for the same change in production; #2099
+  fixed only the fixture.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1).
+- Completion criteria: production repository discovery also removes bare `GIT_CONFIG`, with a test. Size gate: about 100
+  lines, as above. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## current-agent-chip-erases-custom-flags.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). Clicking or pressing Enter on the already-selected
+  agent chip in New, Clone or Replace with rebuilds the custom permission flags (`create_form.rs` around 4735–4741),
+  blanking flags that hold an unfinished quote. The earlier decision under
+  `custom-permission-model-choice-erases-draft.md` set the behavior ("current-harness re-selection byte for byte"); its
+  gate confined #2163 to composer search, leaving this path.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1).
+- Completion criteria: re-selecting the current agent leaves the custom flags text byte for byte, with a test. Size
+  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog
+  fragment). Remove the feedback file and its index entry.
+- Execution: pending.
+
+## incomplete-custom-flags-reset-compatible-effort.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run), with a broader trigger than filed. Accepting a
+  custom model while custom permission flags are incomplete, or still empty after choosing Custom, fails the whole
+  selection check (`selection_fits_catalog` around `create_form.rs` 7041, and `split_permission_flags` refusing empty
+  text in `farhelm-proto/src/launch.rs` around 629), so a reasoning effort the model supports is cleared and the message
+  blames the model. SPEC_impl's launch-composer rule drops only incompatible effort; Restart with already uses an
+  effort-only check.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1).
+- Completion criteria: the effort check ignores the permission flags' state, so a compatible effort survives incomplete
+  or empty custom flags; a test covers both. Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or the changelog fragment). Remove the feedback file and its index entry.
+- Execution: pending.
+
+## template-table-omits-custom-permission-flags.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). `farhelm agent templates` table output shows
+  "permissions custom" without the flags (`template_sets_cell`, `crates/farhelm/src/render.rs` around 200–205); `--json`
+  includes them. SPEC.md (around 2570–2572) says the listing shows the fields a template sets "with their values".
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1).
+- Completion criteria: the table shows the custom flags beside "custom", rendered the way the wrapper value is, with a
+  test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
+  changelog fragment). Remove the feedback file and its index entry.
+- Execution: pending.
+
+## file-recognition-rejects-digit-leading-extensions.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The bare-name test in `pathTokens`
+  (`terminal-files.js`) requires an extension starting with a letter, so `backup.7z` or `backup.001` gets no file hover
+  or download unless a directory prefix is printed. SPEC.md (around 1841) promises relative paths "containing a slash or
+  a file extension". Whether digit-leading extensions count was a reading, which the user settled by including this
+  item.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1), after the session pointed out
+  that this item rests on a reading of "file extension".
+- Completion criteria: bare names with digit-leading extensions are recognized, while tokens that are not plausibly
+  files (version numbers, `1.5x` and the like) stay unrecognized; unit tests for both. Size gate: about 100 lines, as
+  above. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## terminal-right-click-recopies-stale-selection.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). Without mouse reporting, `handleTerminalMouseDown`
+  (`terminal.js` around 5472) records any button and `copySelectionOnMouseUp` (`copy-on-select.js` around 77–80) has no
+  button check, so a right-click can re-copy a still-visible old selection over newer clipboard contents; the
+  restored-snapshot copy path has the same gap. SPEC.md copies on completed selections. Unverified: whether browsers and
+  the desktop webview deliver that mouseup after a context menu, and whether macOS right-click word selection makes some
+  copies deliberate. Bucket other: clipboard contents are recreatable (2026-10-14).
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1), after the session pointed out
+  the unverified browser behavior.
+- Completion criteria: copy-on-select acts only on primary-button selections, in the live and restored-snapshot paths,
+  with a node test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or the changelog fragment). Remove the feedback file and its index entry.
+- Execution: pending.
+
+## native-download-quit-leaves-partial-files.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). In the desktop app, a download in progress stages
+  bytes in a hidden `.farhelm-download-*` directory in Downloads that only `TempDir` drop removes
+  (`crates/farhelm-helm/src/downloads.rs` around 295), and an ordinary Quit ends in `process::exit` without destructors
+  (`desktop.rs` around 696), so up to 100 MB of partial bytes stay hidden with no owner. SPEC.md (around 1862) says an
+  interruption leaves no partial file, and "Desktop Quit" (around 2960) keeps ordinary cleanup of interrupted work.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1), after the session pointed out
+  that the fix is a small new sweep at the next launch.
+- Completion criteria: leftover staging directories from an earlier run are removed (at the next launch, or by an
+  equivalent owner), without touching a save another running instance still owns; a test. Size gate: about 100 lines, as
+  above. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## tab-attach-blocks-host-reader-during-stop.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). Opening or reconnecting a terminal tab while its
+  session is being stopped, restarted or deleted holds the supervisor connection's reader in `handle_control`
+  (`service/connection.rs` around 689) for up to `TAB_ATTACH_LIFECYCLE_TIMEOUT` (2 s, `handlers.rs` around 1286,
+  `core.rs` around 336), freezing typing and requests for every session on that host. SPEC.md "Waiting between
+  operations on one host" (around 2896) says terminal input and attaching never wait on a grace period. The 2 s bound is
+  deliberate per its comment. Unverified: how the helm and UI retry an immediate refusal.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1), after the session pointed out
+  the deliberate bound and the unverified retry behavior.
+- Completion criteria: a tab attach that meets a lifecycle operation in progress no longer holds the connection reader
+  (for example an immediate conflict refusal via the existing non-waiting claim, following the stop-admission
+  precedent), and the UI's retry does not spin; the existing test is updated. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or the changelog fragment). Remove the feedback file and
+  its index entry.
+- Execution: pending.
+
+## abandoned-planners-exhaust-global-planning-slots.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). If a local ssh helper escapes the probe's process
+  group and keeps stderr open, `stop_probe` (`backend.rs` around 1845–1851) awaits stderr with no deadline, and the plan
+  keeps one of the helm's four planning slots (`service.rs` around 998–1003); after four, adding, updating and removing
+  stop for every host until restart. No demonstrated trigger: `BUGS.md` found current OpenSSH does not hold output open.
+  The bounded join pattern exists at `backend.rs` around 2071–2077. Bucket high.
+- Decision: on 2026-10-19 the user applied the 2026-10-11 rule (no demonstrated trigger, no shown damage: discard unless
+  super cheap) with "super cheap" set at about 15 lines of non-test code (cross-cutting triage page, question 3). This
+  one is about 8 lines.
+- Completion criteria: `stop_probe` bounds its stderr wait like the existing bounded join, with a test. Gate: if it
+  needs more than about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## download-eof-cancellation-retains-route.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). `DownloadGuard::recv` (`client/downloads.rs` around
+  176) sets `finished` before awaiting the routing lock, and `Drop` skips cleanup when `finished` is set, so a
+  cancellation in that window leaves the route entry until the host client is discarded. Tiny leak, very narrow window.
+- Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3); this is a reorder of
+  about 3 lines.
+- Completion criteria: the route is removed before the guard counts as finished (or equivalently), optionally with a
+  test. Gate: over about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## checkout-folder-save-trims-literal-path.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The Settings checkout-folder field trims
+  unconditionally on Save (`checkout_root.rs` around 85), so a folder set from the CLI with surrounding whitespace is
+  changed when someone saves without editing; the helm does not trim. Very rare.
+- Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3); about 5 lines.
+- Completion criteria: Save trims only a value the user edited and leaves an unedited stored value byte for byte, with a
+  test. Gate: over about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## cancelled-upload-retains-admission-entry.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). `UploadGuard::drop`
+  (`crates/farhelm-helm/src/client.rs` around 4089) removes only the upload route, and the supervisor can drop the final
+  reply when its reply queue is full (`service/uploads.rs` around 307), leaving one pending admission entry until the
+  host connection ends. The download twin was fixed under `download-cancel-retains-pending-admission.md`.
+- Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3); about 10 lines.
+- Completion criteria: a cancelled upload also releases its admission entry, mirroring `cancel_download`, with a
+  regression test. Gate: over about 15 lines of non-test code, discard instead. Remove the feedback file and its index
+  entry.
+- Execution: pending.
+
+## over-limit-trash-total-loses-partial-size.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). With more than 10,000 archived entries on one host,
+  the trash dialog's global total derives "partial" only from deletion targets (`trash.rs` around 590–602), which
+  exclude over-limit hosts, so a measured total can lose its partial qualifier. SPEC.md (around 1030) says unknown sizes
+  make totals explicitly partial. Extremely rare.
+- Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3); about 8 lines.
+- Completion criteria: the global total is partial whenever any settled listing's totals are, with a test. Gate: over
+  about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## empty-initial-prompt-skipped-by-tab.md
+
+- Outcome: `discard`.
+- Assessment: probably already fixed, not confirmed in a browser. The launcher's focus trap still omits text areas
+  (`create_form.rs` around 1742), but #2272 added an always-rendered wrapper-prefix input after the prompt
+  (`launch_controls.rs` around 572–583), so the prompt is no longer the last control and the reported early wrap should
+  not occur.
+- Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3), whose recommendation
+  discarded this as probably fixed.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: pending.
+
+## stale-outcome-hides-successful-stop.md
+
+- Outcome: `discard`.
+- Assessment: mechanism confirmed by code reading on main a7165396; the interleaving was not executed. If the agent
+  exits on its own just as Stop lands and the ticker stalls between its database commit and publishing that result
+  across the whole Stop, `mirror_committed_outcome` (`hints.rs` around 91) can overwrite the stop annotation until
+  another lifecycle action. No demonstrated trigger; the fix is about 50 lines plus a barrier test.
+- Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3): not super cheap,
+  discard.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: pending.
+
+## archive-recovery-clears-reused-path-trust.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by code reading on main a7165396 (not run). After a Delete interrupted once the checkout was
+  moved to the trash, startup recovery (`service/core.rs` around 5870 and 5903–5908) or a Delete retry (`teardown.rs`
+  around 740 and 905–925) removes Claude's recorded workspace trust without checking that the old path is still absent,
+  so a different folder the user later trusted at that path is asked about again. Fail-safe direction, very rare.
+  SPEC_impl.md (around 2146–2148) claims startup never retries an old removal against a reused path, which the
+  pending-archive branch contradicts. The code fix is about 25 lines plus about 100 test lines.
+- Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3), whose recommendation
+  discarded the code fix and corrected SPEC_impl.md's claim alongside.
+- Completion criteria: SPEC_impl.md states the actual behavior (recovery of an interrupted archive may clear the trust
+  record for a different folder later placed at the old path, which then asks again) instead of claiming a reused path
+  is never touched. No code change. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## noop-shortcut-approval-reports-missing-binding.md
+
+- Outcome: `discard`.
+- Assessment: mechanism confirmed by code reading on main a7165396; the claimed harm is doubtful. When an agent asks for
+  a shortcut its template already holds and another client moves it during approval, only the template is checked when
+  the write lands (`agent_requests.rs` around 2526–2534), and the success reply reports the shortcuts as they are after
+  the write (around 2542–2555). The result matches the write landing first and the move after, and the reply shows the
+  real state, so nothing failed.
+- Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3), whose recommendation
+  discarded this one as not a real failure.
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: pending.
+
+## short-main-pane-hides-approval-requests.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). In a very short window or at heavy zoom, the
+  approval cards area's height (`approval-layout.js` around 30, `max(0, min(h*0.55, bottom - top - 12))`) reaches zero,
+  so waiting requests cannot be seen or answered and time out refused. The exact threshold is unverified (#2253 moved
+  session details below the terminal). The 2026-10-15 scrolling filter does not apply: the content is unreachable.
+- Decision: on 2026-10-19 the user chose "Controls and explanations always reachable; hover summaries may clip"
+  (question 5).
+- Completion criteria: waiting approval cards stay visible and answerable at any window size the app allows (a minimum
+  height or a fallback placement), with a browser test in a short viewport. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it
+  back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## outage-card-content-can-overflow-above-view.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The host-outage and reconnect card is centered in
+  the terminal area with no height limit or scrolling (`app.css` around 7032–7052), so a short window or long host error
+  pushes the explanation and remedy above the top, unreachable.
+- Decision: on 2026-10-19 the user chose "Controls and explanations always reachable; hover summaries may clip"
+  (question 5).
+- Completion criteria: the card's whole content stays reachable (scrollable overlay whose centering cannot push content
+  off the top, and keyboard-reachable), with a browser test. Size gate: about 100 lines of diff (code, tests and docs,
+  not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## pinned-host-dialog-chrome-can-hide-content.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). Host setup, remove, uninstall and refusal dialogs
+  pin header and footer and clip overflow (`app.css` around 3361–3366), and only `.host-settings-refreshed` caps the
+  title (around 3389–3395), so a very short window or a long host destination wrapping in the heading hides the body or
+  footer beyond scrolling. Close and Escape still work.
+- Decision: on 2026-10-19 the user chose "Controls and explanations always reachable; hover summaries may clip"
+  (question 5).
+- Completion criteria: every control and explanation in these dialogs stays reachable at any window size the app allows
+  (title capped, with the full destination still shown elsewhere in the dialog, and a short-viewport fallback that
+  scrolls the whole card), with a geometry test. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the feedback file
+  and its index entry.
+- Execution: pending.
+
+## summary-card-clips-lower-facts.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The sidebar hover summary is capped at the viewport
+  height with overflow hidden and no pointer events (`app.css` around 1439–1462), so a very long title or directory, or
+  a very short window, hides the lower rows (directory, timestamps). SPEC.md (around 1430–1434) promises "the full
+  directory in the row's hover summary card".
+- Decision: on 2026-10-19 the user chose "Controls and explanations always reachable; hover summaries may clip"
+  (question 5).
+- Completion criteria: SPEC.md says a hover summary may clip very long values or rows in a short window, which the
+  session view shows in full, replacing the promise of the full directory there. No code change. Remove the feedback
+  file and its index entry.
+- Execution: pending.
+
+## update-check-replacement-loses-focus.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). In the desktop app, the check-for-updates control is
+  rendered conditionally (`app_bar.rs` around 684–689) and the restart menu toggle that replaces it (around 663–683)
+  gets no focus handoff, so a keyboard user's focus drops to the page.
+- Decision: on 2026-10-19 the user extended the 2026-10-18 rule ("aids, not safeguards, fix if cheap") to focus, menus,
+  hovers and labels, choosing "Fix all ten, 100-line gate each, discard over the gate" (question 6).
+- Completion criteria: when the check button is replaced while focused, focus moves to the restart toggle; a test. Size
+  gate: about 100 lines; over it, discard instead. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## ssh-help-close-loses-replaced-opener-focus.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). Closing SSH help returns focus only to
+  `.add-host-ssh-help` (`ssh_help.rs` around 26–33), which a setup offer may have replaced, so the first key goes to
+  recovering focus. SPEC_impl.md (around 1564) says closing restores focus.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each, discard over the gate" (question 6).
+- Completion criteria: closing help falls back to a surviving control in the Add dialog when its opener is gone; a test.
+  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog
+  fragment); over it, discard. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## automatic-notification-dismissal-loses-focus.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The bell's notification list hands focus back only
+  on Escape and Clear (`bell.rs` around 152–164 and 217–225); automatic closes on sidebar resize or scroll, layout
+  change or a refusal line (`view.rs` around 1117, 1213, 1462, 3138) drop focus to the page. The scheduled
+  `hosts-panel-menu-close.md` plan adds another automatic close.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each, discard over the gate" (question 6).
+- Completion criteria: any close of the list while focus is inside it returns focus to its bell (handled in the bell
+  itself, so every automatic close is covered, including the hosts-panel one); a browser test. Size gate: about 100
+  lines; over it, discard. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## notification-popup-drifts-after-local-delete.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). When a session above is deleted while a lower
+  session's notification list is open, the delete-success path (`view.rs` around 2070–2083) checks only the row menu
+  (`rows.rs` around 330), so the list stays at its old position beside another row; Clear still acts on the right
+  session.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each, discard over the gate" (question 6).
+- Completion criteria: a row removal that moves an open notification list closes it, as #1154 does for the row menu; a
+  test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
+  changelog fragment); over it, discard. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## delayed-host-confirmation-conflicts-with-other-dialogs.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). A host plan or refusal arriving while app Settings,
+  help, feedback, welcome, Add or Remove is open makes both dialogs ignore clicks and normal keys until Escape; only
+  Host Settings checks `confirmation_may_open` (`hosts.rs` around 1794), while `app_bar.rs` (around 717–742) opens
+  dialogs without it.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each, discard over the gate" (question 6).
+- Completion criteria: a delayed host confirmation never leaves two dialogs mutually inert (one modal owns the page at a
+  time, by guards or stack-aware isolation, the executor's choice); a browser test. Size gate: about 100 lines of diff
+  (code, tests and docs, not counting this ledger, the queue removal or the changelog fragment); over it, discard.
+  Remove the feedback file and its index entry.
+- Execution: pending.
+
+## replace-yolo-questions-remain-separate.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). Replace from the session header (`session_view.rs`
+  around 717) and from the sidebar (`list/view.rs` around 2302) each keep their own YOLO question, so both can be open
+  and cancelling one leaves the other answerable. SPEC.md (around 829–830) lists a pending confirmation among the state
+  equivalent controls share; #2205 shared only the retry identity.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each, discard over the gate" (question 6).
+- Completion criteria: the two Replace controls share one YOLO question per session (or exclude each other), so
+  cancelling it is reflected in both; a test. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback file and its index
+  entry.
+- Execution: pending.
+
+## repeated-terminal-links-acquire-mismatch-warning.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The same OSC 8 link with the same explicit `id=` on
+  adjacent rows is joined into one text by `linkHoverText` (`terminal-links.js` around 448), which then shows a false
+  "text names a different destination" warning. SPEC_impl.md (around 1257–1268) prescribes the join; it does not accept
+  this false alarm. Which programs emit repeated ids is unknown.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each, discard over the gate" (question 6).
+- Completion criteria: no warning when each joined row's own text already equals the target, without weakening the
+  split-host case the join exists for; tests for both. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback file and its
+  index entry.
+- Execution: pending.
+
+## restored-terminal-snapshot-rejects-link-clicks.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). After a takeover or refused reconnect, the kept
+  frozen screen installs only snapshot copy-on-select (`cancelReconnect`, `terminal.js` around 1793); the link gesture
+  observer is gone, so link hovers still show but every web and file link click is refused (around 3607 and 3716).
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each, discard over the gate" (question 6), with the
+  executor picking the cheaper variant.
+- Completion criteria: on a restored snapshot, a link hover is shown only if the click works: either links work there or
+  hovers are suppressed, whichever is cheaper; a test. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback file and its
+  index entry.
+- Execution: pending.
+
+## trash-sidebar-calls-unchecked-archives-empty.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). When a host's trash holds only archives Farhelm
+  could not inspect, the sidebar trash button counts only checked checkouts (`trash.rs` around 392–422) and shows an
+  empty can, "trash: empty" and the accessible name "checkout trash, empty". SPEC_impl.md (around 2290) says unknown
+  counts stay unknown; #2118 fixed only the per-host header.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each, discard over the gate" (question 6).
+- Completion criteria: unchecked entries keep the sidebar button, tooltip and accessible name from saying empty; a unit
+  test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
+  changelog fragment); over it, discard. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## template-name-editor-conceals-formatting.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The Templates editor shows a template name raw
+  (`templates.rs` around 1745), while the list and approval cards escape invisible and direction-changing characters;
+  agents may submit such names (`check_template_shape` refuses only control characters, `launcher.rs` around 445).
+  SPEC.md's 2026-10-10 rule escapes host-supplied text wherever it appears.
+- Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each, discard over the gate" (question 6), with the
+  executor picking the cheaper variant.
+- Completion criteria: the editor no longer shows such characters unescaped, either by escaping the name field while
+  keeping its original bytes, or by refusing such names when saved; if refusing, existing stored names (emoji joiners,
+  say) must stay usable, which may rule that variant out. A test. Size gate: about 100 lines of diff (code, tests and
+  docs, not counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback
+  file and its index entry.
+- Execution: pending.
+
+## stale-template-dialog-undoes-agent-shortcut.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). An already-open Templates dialog edits shortcuts
+  from the window's cached preferences (`templates.rs` around 1316–1341), so changing a shortcut there writes back the
+  old map and silently reverts an agent's approved shortcut move. The scheduled `template-list-current-labels.md` plan
+  refreshes the cache only when Cmd-J opens. SPEC.md "One GUI at a time" requires agent operations alongside a GUI to
+  behave correctly.
+- Decision: on 2026-10-19 the user chose "Writes must not undo agent/CLI changes; displays may lag; keep drafts if
+  cheap" (question 7). Principle for the spec: a GUI write never undoes a change an agent or the CLI made while the view
+  was open; an open view's display may lag until the next interaction.
+- Completion criteria: shortcut edits in the Templates dialog start from a fresh read of the bindings (or an equivalent
+  per-key update), so an agent's move made while the dialog is open survives; a test. SPEC.md, "One GUI at a time",
+  gains the principle above. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
+  queue removal or the changelog fragment); over it, block and bring it back. Remove the feedback file and its index
+  entry.
+- Execution: pending.
+
+## checkout-config-refresh-erases-setup-draft.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396; the browser remount was not observed. While the user types in
+  the launcher's inline checkout-folder field, an unrelated configuration change advances the revision, the eligibility
+  observation is dropped (`create_form.rs` around 4190–4203 and 4287), and the field unmounts, losing its
+  component-local draft (`checkout_root.rs` around 27) and focus. Probably a side effect of #2162.
+- Decision: on 2026-10-19 the user chose "Writes must not undo agent/CLI changes; displays may lag; keep drafts if
+  cheap" (question 7).
+- Completion criteria: an unrelated configuration refresh no longer erases the draft or focus (keep the field mounted
+  while eligibility is being re-checked, or lift the draft); a test. Size gate: about 100 lines of diff (code, tests and
+  docs, not counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback
+  file and its index entry.
+- Execution: pending.
+
+## unselected-repository-keeps-stale-setup-eligibility.md
+
+- Outcome: `discard`.
+- Assessment: confirmed by code reading on main a7165396 (not run). With managed checkout chosen and no repository
+  picked, a checkout-folder change from the CLI leaves the inline setup field shown or hidden by the old setting
+  (`create_form.rs` around 4207–4285) until the repository input changes or the launcher closes.
+- Decision: on 2026-10-19 the user chose "Writes must not undo agent/CLI changes; displays may lag; keep drafts if
+  cheap" (question 7): a display that lags until the next interaction is accepted.
+- Completion criteria: remove the feedback file and its index entry; no code change. The principle is written into
+  SPEC.md under `stale-template-dialog-undoes-agent-shortcut.md`.
+- Execution: pending.
+
+## introduction-promises-waiting-alerts-for-every-agent.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed on main a7165396. The "Blocked agents stand out" introduction artwork
+  (`website/scripts/render-svgs.mjs` around 217–221) says a waiting agent turns red and rings a bell "on whichever host
+  it runs", while only Claude and Codex report Waiting (SPEC.md around 1512).
+- Decision: on 2026-10-19 the user chose "The introduction may describe the main path" (question 8) and wrote: "SPEC
+  this. The overview is meant to be short and a hook. We cannot be lawyers and make it 100 pages of caveats. don't
+  change anything, just fix spec." Principle for the spec: the README introduction, the docs Overview and their artwork
+  are a short hook that may describe the main, first-class path; qualifications for other agents and hosts belong in the
+  guides, and a claim there that holds on the main path is not a defect.
+- Completion criteria: SPEC.md states that principle, where it governs the README introduction and Overview. No change
+  to the introduction, Overview or artwork. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## introduction-omits-automatic-install-prerequisites.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed on main a7165396. The "Just ssh" artwork (`render-svgs.mjs` around 206–210) says Farhelm
+  installs itself on the host, which does not hold for hosts without a usable systemd user manager or on unsupported
+  architectures (SPEC.md "Topology", around 122–129).
+- Decision: on 2026-10-19, the same answer as `introduction-promises-waiting-alerts-for-every-agent.md` (question 8:
+  "SPEC this ... don't change anything, just fix spec").
+- Completion criteria: covered by the SPEC.md principle recorded under
+  `introduction-promises-waiting-alerts-for-every-agent.md` (one spec change for all three); no change to the artwork.
+  Remove the feedback file and its index entry.
+- Execution: pending.
+
+## introduction-promises-universal-reboot-resume.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed on main a7165396. README.md (around 64–65) and the docs Overview (`index.mdx` around 53) say
+  that after a host reboot, restarting picks the agent's conversation back up, which is false for Cursor, Muse,
+  OpenCode, Grok until verified, and custom commands. The reviewer suggested highest; kept in other, since the launcher
+  already says Resume is unsupported for those agents.
+- Decision: on 2026-10-19, the same answer as `introduction-promises-waiting-alerts-for-every-agent.md` (question 8).
+- Completion criteria: covered by that SPEC.md principle; no change to the README or Overview. Remove the feedback file
+  and its index entry.
+- Execution: pending.
+
+## template-screenshot-implies-deletion-needs-save.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed on main a7165396. The published v0.25.0 Templates screenshot's caption
+  (`e2e/docs-shots/release-notes.spec.ts` around 90) says "Nothing is saved until you press save", while deleting a
+  template takes effect immediately with undo (SPEC.md around 724–727). The reviewer suggested highest; kept in other:
+  the deletion is deliberate, the same caption mentions undo, and a template can be rebuilt.
+- Decision: on 2026-10-19 the user chose "Leave them as published" (question 9) and wrote: "SPEC this. We don't change
+  unless it's an absolutely catastrophically major mistake with huge user impact." Principle for the spec: published
+  release notes and their screenshots are the historical record and are not corrected, unless a mistake is
+  catastrophically major with huge user impact.
+- Completion criteria: SPEC.md states that principle, in a place the existing frozen-material rules for published
+  release notes can point to. No change to the published notes or shots. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## draft-release-note-promises-update-confirmation.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed on main a7165396. The published v0.30.0 notes (CHANGELOG.md around 30, and the
+  `v0-30-0-host-steps` shot's callout) say Update lists its steps for confirmation, while clicking Update starts it
+  without asking (SPEC.md around 106).
+- Decision: on 2026-10-19, the same answer as `template-screenshot-implies-deletion-needs-save.md` (question 9).
+- Completion criteria: covered by the SPEC.md principle recorded under
+  `template-screenshot-implies-deletion-needs-save.md` (one spec change for both); no change to the published notes.
+  Remove the feedback file and its index entry.
+- Execution: pending.
+
+## release-review-links-allow-page-script.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The release-notes review page builder escapes text
+  with `quote=False` and then places link targets inside `href="..."` (`releasing/notes-review-page.py` around 82–85),
+  so a crafted link in the draft can add attributes or a `javascript:` link to the page. Needs hostile text in the
+  changelog draft; maintainer tooling.
+- Decision: on 2026-10-19 the user chose "Fix all seven, named tests only, 100-line gate each" for maintainer tooling
+  and test hygiene, under the 2026-10-11 tooling rule and the 2026-10-15 test fixes (question 10).
+- Completion criteria: link targets are attribute-escaped and limited to http, https and relative links, with self-test
+  cases. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
+  changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## instruction-check-allows-claude-local-shadowing.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). `scripts/check-agents-md.py` (around 199–203)
+  rejects `AGENTS.override.md` and `CLAUDE.md` but not `CLAUDE.local.md`, which per Claude's documentation would stop
+  Claude Code loading AGENTS.md (that loader behavior is unverified here). The checker's inventory includes untracked,
+  non-ignored files.
+- Decision: on 2026-10-19 the user chose "Fix all seven, named tests only, 100-line gate each" (question 10).
+- Completion criteria: the checker also refuses `CLAUDE.local.md`, with a self-test fixture. Size gate: about 100 lines
+  of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog fragment); over it, block
+  and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## instruction-check-misses-mixed-case-spec-typo.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The checker's docstring promises to reject
+  `SPEC_impll.md`, but its all-caps pattern (`check-agents-md.py` around 135) does not match mixed case, so the typo
+  passes.
+- Decision: on 2026-10-19 the user chose "Fix all seven, named tests only, 100-line gate each" (question 10).
+- Completion criteria: mixed-case spec-name typos are rejected as documented, with a self-test fixture. Size gate: about
+  100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog fragment); over
+  it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## agent-checkout-test-compares-lexical-tmp.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run on macOS). Three CLI checkout assertions in
+  `crates/farhelm/tests/e2e/github_checkouts.rs` (around 90–93, 180–181 and 232–240) compare the session's folder with
+  an unresolved `/tmp` path, which fails on macOS where `/tmp` resolves to `/private/tmp`; the same file canonicalizes
+  elsewhere.
+- Decision: on 2026-10-19 the user chose "Fix all seven, named tests only, 100-line gate each" (question 10).
+- Completion criteria: those assertions compare canonical paths. Size gate: about 100 lines of diff (code, tests and
+  docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove
+  the feedback file and its index entry.
+- Execution: pending.
+
+## notification-test-cleanup-skips-preference-restoration.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The per-test cleanup in
+  `e2e/tests/notifications.spec.ts` (around 90–92) runs its steps in sequence and stops at the first error, so one
+  failed session cleanup skips the rest and the shared preference reset; the identical `sounds.spec.ts` case was fixed
+  under `sound-tests-skip-remaining-cleanup-and-preferences.md`.
+- Decision: on 2026-10-19 the user chose "Fix all seven, named tests only, 100-line gate each" (question 10).
+- Completion criteria: the cleanup steps run independently (reusing `cleanupOwnedSteps`), so a failure in one does not
+  skip the others. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
+  or the changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## shortcut-tests-skip-owned-cleanup.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). The named cleanup blocks in
+  `e2e/tests/launcher-template-shortcuts.spec.ts`, `template-list-shortcut.spec.ts` and `github-checkouts.spec.ts` stop
+  at the first failure; in the last file that can skip `fixture.close`, which restores shared checkout settings. About
+  11 more blocks with the same shape in `github-checkouts.spec.ts` are not named by the finding.
+- Decision: on 2026-10-19 the user chose "Fix all seven, named tests only, 100-line gate each" (question 10): only the
+  blocks the finding names.
+- Completion criteria: the named cleanup blocks run their steps independently; the unnamed blocks in
+  `github-checkouts.spec.ts` stay out of scope. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the feedback file
+  and its index entry.
+- Execution: pending.
+
+## terminal-focus-tests-arm-cleanup-late.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). In `e2e/tests/terminal-replay-rename.spec.ts`
+  (around 1923–1924 and 1958–1959), `installTerminalFocusSpy` is awaited after the session is created but before the
+  `try` whose `finally` deletes it, so a failure there leaks the session.
+- Decision: on 2026-10-19 the user chose "Fix all seven, named tests only, 100-line gate each" (question 10).
+- Completion criteria: cleanup is armed as soon as the session exists. Size gate: about 100 lines of diff (code, tests
+  and docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back.
+  Remove the feedback file and its index entry.
+- Execution: pending.
+
+## launcher-retries-ignore-settled-refusal-proof.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). When New, Clone or Replace with fails because the
+  folder is missing, the helm settles the refusal (definitely not created), but the launcher's `CreateRefusal`
+  (`crates/farhelm-ui/src/api.rs` around 2309–2338) reads only the stale and YOLO markers, not the
+  definitely-not-created marker `ActionRefusal::read` (around 2393–2399) reads since #2206. So an unchanged retry after
+  the folder is restored replays the old failure; editing the form or reopening recovers. SPEC.md (around 832–833)
+  states the retry-identity rules for plain Replace only; the sibling fix for plain Replace was
+  `replace-retries-replay-settled-create-failure.md`. Bucket high.
+- Decision: on 2026-10-19, after the session restated the question in plain terms, the user answered "yes" to: pressing
+  Launch again always means retrying the same attempt until it succeeds or Farhelm knows for certain it failed, and only
+  then a fresh attempt starts, in every launcher. Principle for the spec: in New, Clone, Replace, Replace with and quick
+  launch, a create's retry identity ends only on success or on the helm's definite proof that nothing was created;
+  nothing else (an authentication refusal, re-applying an unchanged template) clears it.
+- Completion criteria: the launchers' create refusals honor the helm's definitely-not-created marker, so an unchanged
+  retry after a settled refusal is a fresh attempt; a test. SPEC.md generalizes the plain-Replace retry-identity
+  sentence to every launcher with the principle above. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## auth-refusal-forgets-partial-replace.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). In the browser, when Replace has created the
+  replacement but not removed the original, and the retry is the first request to meet an authentication refusal, the
+  retry key is retired (`api.rs` around 2362–2371, `answered: !matches!(error, SendError::Request(_))`, documented as
+  intended around 2377), so after signing in a retry creates a second replacement. The desktop app is unaffected.
+  SPEC.md (around 825–826) says "never two silently". The helm treats an unknown key as new, so keeping it is harmless.
+  Bucket high.
+- Decision: on 2026-10-19 the user answered "yes" to the retry-identity rule recorded under
+  `launcher-retries-ignore-settled-refusal-proof.md`.
+- Completion criteria: an authentication refusal does not retire a create's retry identity, so a retry after signing in
+  resumes the same Replace; the docstring is corrected; a unit test. Size gate: about 100 lines of diff (code, tests and
+  docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove
+  the feedback file and its index entry.
+- Execution: pending.
+
+## unchanged-template-drops-launch-retry-key.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main a7165396 (not run). After a quick launch's reply is lost, re-applying
+  the same template in the revealed launcher clears the retry key on every template application (`create_form.rs` around
+  879–882), so pressing Launch starts a second session. Sibling
+  `retrying-through-unchanged-permission-choice-launch-duplicate.md` was fixed in #1908. Unverified: whether the
+  existing snapshot-change re-minting already covers template changes, which would make removing the clear enough.
+  Bucket high.
+- Decision: on 2026-10-19 the user answered "yes" to the retry-identity rule recorded under
+  `launcher-retries-ignore-settled-refusal-proof.md`.
+- Completion criteria: applying a template that leaves the request unchanged keeps the retry identity, while a change
+  that alters the request still mints a new one; a test. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: pending.

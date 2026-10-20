@@ -38,13 +38,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Repeated update or removal planning can leave adding, updating, and removing hosts stuck until the helm restarts, even
   after the pages close.
 
-- [`uninstall-forgotten-success.md`](uninstall-forgotten-success.md) — A failed uninstall can be reported as successful
-  after another client forgets the host.
-
-- [`uninstall-race-first-time-service-setup.md`](uninstall-race-first-time-service-setup.md) — Concurrent setup and
-  uninstall can leave services pointing at a deleted executable; a conditional legacy path can miss existing services
-  too.
-
 - [`launcher-retries-ignore-settled-refusal-proof.md`](launcher-retries-ignore-settled-refusal-proof.md) — An unchanged
   New, Clone or Replace-with retry can keep replaying a missing-folder failure after the folder is restored.
 
