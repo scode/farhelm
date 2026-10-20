@@ -20,7 +20,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `tab-attach-no-wait.md` — Stop a tab attach during Stop from stalling every session on that host (1 triage outcome).
 - [in-flight 8a22b8] `planning-probe-bound.md` — Bound a host planning probe's output wait so a lingering ssh helper cannot hold a planning slot forever, if super cheap (1 triage outcome).
 - [in-flight eb6e00] `repository-discovery-git-config.md` — Make repository suggestions ignore an inherited GIT_CONFIG, as the test fixture already does (1 triage outcome).
-- [pending] `spec-scope-clarifications.md` — Write the introduction-is-a-hook and published-notes principles and three scope statements into the spec, with no code change (8 triage outcomes).
+- [in-flight 06f289] `spec-scope-clarifications.md` — Write the introduction-is-a-hook and published-notes principles and three scope statements into the spec, with no code change (8 triage outcomes).
 - [pending] `tooling-checks-oct19.md` — Fix the release-review page's link escaping and two instruction-checker gaps (3 triage outcomes).
 - [pending] `test-hygiene-oct19.md` — Fix a macOS path comparison in checkout tests and three browser-test cleanups that stop early or arm late (4 triage outcomes). (after `host-entry-session-ids.md`)
 - [pending] `triage-discards-oct19.md` — Close the four findings discarded in the 2026-10-19 triage, in one PR (4 triage outcomes).
