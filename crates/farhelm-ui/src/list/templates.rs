@@ -1324,6 +1324,17 @@ pub(super) fn TemplatesDialog(
         }
     });
     let current = draft();
+    // Escapes are presentation only: an unrelated save must retain the raw
+    // name, including stored emoji joiners. Replacement is an explicit edit.
+    let name_read_only = current
+        .name
+        .chars()
+        .any(farhelm_proto::text::is_presentation_unsafe);
+    let shown_name = if name_read_only {
+        display_peer(&current.name)
+    } else {
+        current.name.clone()
+    };
     // Field editors own raw text that can be invalid while being repaired.
     // Changing the approved source template must remount them rather than
     // letting that text describe a different saved vector. Renaming a draft
@@ -1719,9 +1730,14 @@ pub(super) fn TemplatesDialog(
                                 span { "name" }
                                 // The name is a literal tl: search key; browser
                                 // correction would change what the user chose.
-                                input { class: "templates-name", value: "{current.name}", disabled, placeholder: "my-claude",
+                                input { class: "templates-name", value: shown_name, readonly: name_read_only, disabled, placeholder: "my-claude",
                                     autocomplete: "off", autocorrect: "off", autocapitalize: "none", spellcheck: "false",
-                                    "data-tooltip": "template name: use tl:name to apply it in New session", oninput: move |e| draft.with_mut(|d| d.name=e.value()) }
+                                    "data-tooltip": "template name: use tl:name to apply it in New session", oninput: move |e| { if !name_read_only { draft.with_mut(|d| d.name=e.value()); } } }
+                            }
+                            if name_read_only {
+                                p { class: "templates-hint", "This name contains invisible formatting, shown as escapes. It stays unchanged until replaced." }
+                                button { r#type: "button", class: "btn btn-neutral templates-replace-name", disabled,
+                                    onclick: move |_| { draft.with_mut(|d| d.name.clear()); focus_template_control(".templates-name"); }, "replace name" }
                             }
                             p { class: "templates-quick-state",
                                 if previous().is_some() && preferences.0.read().quick_launch_template == previous() {
