@@ -16976,7 +16976,10 @@
   say) must stay usable, which may rule that variant out. A test. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback
   file and its index entry.
-- Execution: planned in `plans/queue/template-editor-and-listing.md`.
+- Execution: complete in change `mmyqqxpuwpzmlmyyspktstrwwzwnqmpx`, bookmark
+  `plan/template-editor-and-listing/01-escaped-name`. Escaped read-only presentation retains raw names through unrelated
+  saves; explicit replacement restores literal editing. Size: 66 code/test lines, within the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2428/changes.
 
 ## stale-template-dialog-undoes-agent-shortcut.md
 

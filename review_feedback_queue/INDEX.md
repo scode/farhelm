@@ -22,9 +22,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
   — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
 
-- [`template-name-editor-conceals-formatting.md`](template-name-editor-conceals-formatting.md) — The template name
-  editor displays formatting characters raw although the list and approval card escape them.
-
 - [`template-table-omits-custom-permission-flags.md`](template-table-omits-custom-permission-flags.md) — The default
   template table omits the words that its custom permission setting applies.
 

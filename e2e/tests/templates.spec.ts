@@ -67,6 +67,52 @@ for (const field of ["command", "resume_command", "name"] as const) {
   });
 }
 
+/** A catalog name must expose formatting without turning the display spelling
+ * into a rename. An unrelated save preserves the API seed, including an emoji
+ * joiner; explicit replacement restores literal editing without decoding escapes.
+ */
+test("template name escapes formatting until explicitly replaced", async ({ page, request }) => {
+  const prefix = `unsafe-name-${Date.now()}`;
+  const name = `${prefix}\u200b\u202e👩‍💻`;
+  const shown = `${prefix}<U+200B><U+202E>👩<U+200D>💻`;
+  const replacement = `${prefix}-literal<U+200B>`;
+  const fields = { kind: "agent", agent: "claude", name: "before" };
+  let bodyFailed = false;
+  try {
+    await putTemplate(request, name, fields);
+    expect((await storedTemplate(request, name)).fields).toEqual(fields);
+    const dialog = await openTemplates(page);
+    await dialog.locator(".templates-row-name").getByText(shown, { exact: true }).click();
+    const input = dialog.locator(".templates-name");
+    await expect(input).toHaveValue(shown);
+    await expect(input).toHaveJSProperty("readOnly", true);
+    await input.focus();
+    await expect(input).toBeFocused();
+    await page.keyboard.type("changed");
+    await expect(input).toHaveValue(shown);
+    await dialog.locator(".templates-session-name").fill("after");
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, name)).fields).toEqual({ ...fields, name: "after" });
+    await dialog.locator(".templates-replace-name").click();
+    await expect(input).toBeEditable();
+    await expect(input).toBeFocused();
+    await input.fill(replacement);
+    await dialog.locator(".templates-save").click();
+    await expect(dialog.locator(".templates-unsaved")).toHaveCount(0);
+    expect((await storedTemplate(request, replacement)).fields).toEqual({ ...fields, name: "after" });
+    expect(await storedTemplate(request, name)).toBeUndefined();
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["original template", () => deleteTemplate(request, name)],
+      ["replacement template", () => deleteTemplate(request, replacement)],
+    ]);
+  }
+});
+
 /** Host-derived model and folder values must be visibly escaped without
  * storing the display spelling. A real API seed and later reads distinguish
  * raw-byte preservation from an input that silently rewrites its own display.
