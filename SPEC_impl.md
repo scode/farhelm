@@ -4852,9 +4852,11 @@ reader's skip-and-log policy.
 
 ### Launch templates
 
-Quick launch resolves its ordered, typed digit/bolt references as one all-or-none request from one fresh preference and
-template read. Dispatch takes a shared keyboard-context and modal-opening-epoch snapshot before and after that read
-check, so a dialog that appears during the read cannot receive its result after closing. It hands the captured
+Direct quick-launch shortcuts resolve their digit/bolt references from fresh preferences. A completed sequence first
+captures the names in its indicator's preference snapshot at Enter; an unbound reference stays unbound even if a later
+read finds a binding. Both resolve current template definitions as one all-or-none request, so a renamed or deleted name
+refuses the sequence. Dispatch takes a shared keyboard-context and modal-opening-epoch snapshot before and after that
+read check, so a dialog that appears during the read cannot receive its result after closing. It hands the captured
 definitions to ordinary New, replaying one through the existing template/search acceptance path per effect pass. A
 refusal stops the remaining replay. Automatic submission waits for a render after the final replay, so its captured
 readiness and refusal describe the resulting draft. A coarse fold over launch kind, agent and command decides whether to
@@ -4878,8 +4880,8 @@ guard and before other command listeners, consuming with stopImmediatePropagatio
 otherwise still run. Pointer/click, blur, visibility, modal focus and the existing modal-opening hook cancel both state
 owners. A launcher-owned text field admits the prefix only without selected text; other editors keep their usual key
 action. Hidden quick-launch preparation consumes recognized keys without enqueuing a relay. The relays stay mounted and
-enabled across render-delayed armed state; Enter takes the queue before starting the existing generation-fenced
-quick-launch read.
+enabled across render-delayed armed state; Enter takes the queue and captures its displayed bindings synchronously
+before starting the existing generation-fenced quick-launch read.
 
 Number bindings accept partial templates; the bolt keeps its runnable-template affordance. A single partial-template key
 passes its name to New for a prominent alert. The form starts one component-owned six-second expiry only after initial

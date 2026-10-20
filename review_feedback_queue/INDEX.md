@@ -45,9 +45,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`approval-session-id-display-collision.md`](approval-session-id-display-collision.md) — Approval cards can display
   distinct session IDs identically; mistaken authorization remains unverified.
 
-- [`queued-launch-can-change-template.md`](queued-launch-can-change-template.md) — A queued sequence can show one
-  template and directly launch another after its shortcut changes elsewhere.
-
 - [`tunnel-port-can-divert-local-traffic.md`](tunnel-port-can-divert-local-traffic.md) — A consented tunnel can take a
   Mac port a later local service expects, without that consequence in the warning.
 

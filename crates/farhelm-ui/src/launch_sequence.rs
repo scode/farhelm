@@ -2,8 +2,9 @@
 //!
 //! The physical keys and modifier masks live here so the capture listener
 //! and every Rust hint receive the same definition. The queue is shared by the
-//! sidebar relays and main pane's indicator. Only Enter resolves bindings;
-//! displayed names never grant launch authority.
+//! sidebar relays and main pane's indicator. Enter captures the bindings shown
+//! by that indicator before the dispatcher reads current template definitions.
+//! A shortcut moved elsewhere cannot substitute a different template unseen.
 
 use crate::list::SharedPreferences;
 use crate::peer::display_peer;
@@ -225,9 +226,9 @@ pub(crate) const TEMPLATE_SHORTCUTS: TemplateShortcutDefinition = TemplateShortc
     },
 };
 
-/// A shortcut names a binding, not a template captured when its key was pressed.
-/// The dispatcher resolves this against one fresh read so renamed or deleted
-/// templates never inherit stale authority from a rendered hint.
+/// Direct shortcuts resolve fresh bindings; a completed sequence supplies names
+/// from its displayed snapshot. Both use current template definitions, so a
+/// renamed or deleted template cannot launch from a stale captured definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TemplateReference {
     /// The helm-wide ⚡ mark, read at dispatch time.
@@ -236,6 +237,47 @@ pub(crate) enum TemplateReference {
     Number(String),
     /// A switcher row names a template from its snapshot; resolve it afresh.
     Name(String),
+    /// A sequence showed an absent binding. Keep it absent after a fresh read;
+    /// `Some` identifies a number key and `None` identifies the bolt mark.
+    Unbound(Option<String>),
+}
+
+impl TemplateReference {
+    /// Read the binding used by the indicator and by sequence capture alike.
+    /// An explicitly unbound reference cannot gain authority from newer settings.
+    fn name<'a>(&'a self, preferences: &'a crate::api::Preferences) -> Option<&'a String> {
+        match self {
+            Self::Bolt => preferences.quick_launch_template.as_ref(),
+            Self::Number(key) => preferences.template_shortcuts.get(key),
+            Self::Name(name) => Some(name),
+            Self::Unbound(_) => None,
+        }
+    }
+}
+
+/// Capture the names shown at Enter, before any awaited preference read.
+/// Keep order and duplicates, including absent bindings: a key newly assigned
+/// elsewhere must still refuse if the indicator showed it as unbound. Names
+/// remain subject to the dispatcher's current-catalog lookup.
+pub(crate) fn capture_sequence_bindings(
+    references: &[TemplateReference],
+    preferences: &crate::api::Preferences,
+) -> Vec<TemplateReference> {
+    references
+        .iter()
+        .map(|reference| {
+            if let Some(name) = reference.name(preferences) {
+                TemplateReference::Name(name.clone())
+            } else {
+                match reference {
+                    TemplateReference::Number(key) | TemplateReference::Unbound(Some(key)) => {
+                        TemplateReference::Unbound(Some(key.clone()))
+                    }
+                    _ => TemplateReference::Unbound(None),
+                }
+            }
+        })
+        .collect()
 }
 
 /// One synchronous JS observation of dialog ownership and its opening epoch.
@@ -282,11 +324,7 @@ pub(crate) fn resolve_template_references(
     references
         .iter()
         .map(|reference| {
-            let name = match reference {
-                TemplateReference::Bolt => preferences.quick_launch_template.as_ref(),
-                TemplateReference::Number(key) => preferences.template_shortcuts.get(key),
-                TemplateReference::Name(name) => Some(name),
-            }?;
+            let name = reference.name(preferences)?;
             templates
                 .iter()
                 .find(|template| &template.name == name)
@@ -321,19 +359,15 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
         .iter()
         .map(|reference| {
             let preferences = preferences.0.read();
-            match reference {
-                TemplateReference::Number(key) => preferences
-                    .template_shortcuts
-                    .get(key)
-                    .map(|name| display_peer(name))
-                    .unwrap_or_else(|| format!("unbound key {key}")),
-                TemplateReference::Bolt => preferences
-                    .quick_launch_template
-                    .as_ref()
-                    .map(|name| display_peer(name))
-                    .unwrap_or_else(|| "unbound ⚡".into()),
-                TemplateReference::Name(name) => display_peer(name),
-            }
+            reference
+                .name(&preferences)
+                .map(|name| display_peer(name))
+                .unwrap_or_else(|| match reference {
+                    TemplateReference::Number(key) | TemplateReference::Unbound(Some(key)) => {
+                        format!("unbound key {key}")
+                    }
+                    _ => "unbound ⚡".into(),
+                })
         })
         .collect::<Vec<_>>();
     rsx! {
@@ -435,6 +469,101 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    /// Enter must keep the names shown by the pill when another client moves
+    /// number and bolt bindings. Current definitions still apply by name, and
+    /// the sequence retains its order and duplicate applications.
+    #[test]
+    fn sequence_uses_displayed_names_after_bindings_move() {
+        use farhelm_proto::launcher::TemplateFields;
+
+        let mut shown = crate::api::Preferences {
+            quick_launch_template: Some("second".into()),
+            ..Default::default()
+        };
+        shown.template_shortcuts.insert("1".into(), "first".into());
+        let references = [
+            TemplateReference::Number("1".into()),
+            TemplateReference::Bolt,
+            TemplateReference::Number("1".into()),
+        ];
+        let captured = capture_sequence_bindings(&references, &shown);
+        let mut fresh = shown.clone();
+        fresh.quick_launch_template = Some("first".into());
+        fresh.template_shortcuts.insert("1".into(), "second".into());
+        let templates = ["first", "second"].map(|name| LaunchTemplate {
+            name: name.into(),
+            fields: TemplateFields {
+                name: Some(format!("current {name}")),
+                ..Default::default()
+            },
+        });
+        let names = |templates: Vec<LaunchTemplate>| {
+            templates
+                .into_iter()
+                .map(|template| template.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(resolve_template_references(&references, &fresh, &templates).unwrap()),
+            ["second", "first", "second"],
+            "premise: fresh shortcut lookup would launch different templates"
+        );
+        assert_eq!(
+            resolve_template_references(&captured, &fresh, &templates),
+            Some(vec![
+                templates[0].clone(),
+                templates[1].clone(),
+                templates[0].clone()
+            ]),
+        );
+        assert!(
+            resolve_template_references(&captured, &fresh, &templates[1..]).is_none(),
+            "deleting or renaming a captured name must refuse the entire batch"
+        );
+    }
+
+    /// A key shown as unbound must not launch a later assignment. Preserve its
+    /// kind for the existing refusal hint, and refuse the whole mixed batch.
+    #[test]
+    fn sequence_unbound_references_cannot_gain_new_bindings() {
+        use farhelm_proto::launcher::TemplateFields;
+
+        let shown = crate::api::Preferences::default();
+        let references = [
+            TemplateReference::Number("1".into()),
+            TemplateReference::Bolt,
+        ];
+        let captured = capture_sequence_bindings(&references, &shown);
+        assert_eq!(
+            captured,
+            [
+                TemplateReference::Unbound(Some("1".into())),
+                TemplateReference::Unbound(None),
+            ]
+        );
+        let mut fresh = shown;
+        fresh.quick_launch_template = Some("new".into());
+        fresh.template_shortcuts.insert("1".into(), "new".into());
+        let templates = [LaunchTemplate {
+            name: "new".into(),
+            fields: TemplateFields::default(),
+        }];
+        assert!(
+            resolve_template_references(&references, &fresh, &templates).is_some(),
+            "premise: both previously absent bindings now resolve"
+        );
+        for unbound in captured {
+            assert!(
+                resolve_template_references(
+                    &[TemplateReference::Name("new".into()), unbound,],
+                    &fresh,
+                    &templates
+                )
+                .is_none()
+            );
+        }
     }
 
     /// A Cmd-J row supplies only its name. A rename or deletion between the

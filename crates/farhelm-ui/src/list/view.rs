@@ -3540,11 +3540,19 @@ pub(crate) fn ListView(
                                 }
                                 let refusal = if resolved.is_none() {
                                     Some(match references.as_slice() {
-                                        [crate::launch_sequence::TemplateReference::Bolt] => {
+                                        [
+                                            crate::launch_sequence::TemplateReference::Bolt
+                                            | crate::launch_sequence::TemplateReference::Unbound(
+                                                None,
+                                            ),
+                                        ] => {
                                             "no template is marked ⚡ for quick launch".to_string()
                                         }
                                         [
-                                            crate::launch_sequence::TemplateReference::Number(key),
+                                            crate::launch_sequence::TemplateReference::Number(key)
+                                            | crate::launch_sequence::TemplateReference::Unbound(
+                                                Some(key),
+                                            ),
                                         ] => format!("no template is bound to key {key}"),
                                         _ => "a template in this sequence is unbound or missing"
                                             .to_string(),
@@ -3591,13 +3599,13 @@ pub(crate) fn ListView(
                                     quick_launch_hint.set(references.iter().any(|reference| {
                                         matches!(
                                             reference,
-                                            crate::launch_sequence::TemplateReference::Bolt
+                                            crate::launch_sequence::TemplateReference::Bolt | crate::launch_sequence::TemplateReference::Unbound(None)
                                         )
                                     }));
                                     number_shortcut_hint.set(references.iter().any(|reference| {
                                         matches!(
                                             reference,
-                                            crate::launch_sequence::TemplateReference::Number(_)
+                                            crate::launch_sequence::TemplateReference::Number(_) | crate::launch_sequence::TemplateReference::Unbound(Some(_))
                                         )
                                     }));
                                     templates_open.set(true);
@@ -3735,7 +3743,12 @@ pub(crate) fn ListView(
             onclick: move |_| {
                 let queued = launch_sequence.write().take();
                 if let Some(queue) = queued.filter(|queue| !queue.is_empty()) {
-                    quick_launch.call((queue, true));
+                    // Capture from the indicator's settings before the worker's
+                    // fresh read can observe a shortcut moved by another client.
+                    let captured = crate::launch_sequence::capture_sequence_bindings(
+                        &queue, &preferences.0.peek(),
+                    );
+                    quick_launch.call((captured, true));
                 }
             },
         }
