@@ -48,11 +48,11 @@ test("custom permission search focuses literal words and switching agents clears
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "custom", exact: true })).toHaveCount(0);
 });
 
-/** Model search and same-agent selection must not reconstruct the editor from
+/** Model search and same-agent choices must not reconstruct the editor from
  * parsed words: unfinished quotes and intentional spacing are still drafts.
  * A real agent change retires them because flags belong to that agent's CLI.
  */
-test("same-agent model and harness search preserve custom permission drafts byte for byte", async ({ page, request }) => {
+test("same-agent search and chips preserve custom permission drafts byte for byte", async ({ page, request }) => {
   const response = await request.get("/api/launch-catalog");
   expect(response.ok()).toBe(true);
   const catalog = await response.json() as { harness: string; id: string }[];
@@ -81,6 +81,19 @@ test("same-agent model and harness search preserve custom permission drafts byte
       await option.click();
       await expect(search).toHaveValue("");
       await expect(custom).toHaveAttribute("aria-pressed", "true");
+      await expect(flags).toHaveValue(draft);
+    }
+    const currentAgent = form.locator(".launch-composer-harness-choice")
+      .getByRole("button", { name: "Claude", exact: true });
+    await currentAgent.click();
+    await expect(flags).toHaveValue(draft);
+    if (draft.startsWith("--permission-mode")) {
+      // An unfinished quote forbids submission, so Enter exercises chip
+      // selection without starting an installed vendor agent.
+      await expect(form.locator(".create-session-submit")).toBeDisabled();
+      await currentAgent.focus();
+      await expect(currentAgent).toBeFocused();
+      await currentAgent.press("Enter");
       await expect(flags).toHaveValue(draft);
     }
   }

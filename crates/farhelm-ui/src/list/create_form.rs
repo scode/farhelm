@@ -4738,14 +4738,17 @@ pub(super) fn CreateSessionForm(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
-            structured_permission_flags.set(
-                selection
-                    .permission_flags
-                    .as_ref()
-                    .map(shell_words::join)
-                    .unwrap_or_default(),
-            );
+            // Re-selecting the current agent is not an edit to its flags.
+            // Parsing loses unfinished quotes and normalizes intentional
+            // spacing, so only a real agent switch may reconstruct the text.
             if old_harness != Some(harness) {
+                structured_permission_flags.set(
+                    selection
+                        .permission_flags
+                        .as_ref()
+                        .map(shell_words::join)
+                        .unwrap_or_default(),
+                );
                 structured_wrapper.set(remembered_wrapper(&preferences.0.peek(), Some(harness)));
                 wrapper_is_explicit.set(false);
             }
