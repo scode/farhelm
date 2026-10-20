@@ -251,6 +251,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Interrupted-card Replace clicks lost under load.** The WebKit test
+  `don't ask again on a refused YOLO replace marks the host, then replaces with the override` in
+  `e2e/tests/terminal-restart.spec.ts` failed in full browser run `49c74525-36ad-44e1-825b-878edadfd71c`: the Replace
+  confirmation click landed but no YOLO question or replace request followed. On unmodified main `9f0fd7e9` it failed
+  once in six runs under added load (`61cbd3cf-a2ab-4ebc-9b91-cc801ba932dd`) and passed four of four on a quiet machine.
+  A Cancel click in the same card was lost the same way once in run `13808999-b14a-44ef-a7df-b547a8419a62`. Hypothesis:
+  the spec's injected sessions use ids without the host-entry prefix #2368 made mandatory, so the UI's background
+  session reads get 400s, and one completing at the click re-renders the card (FLAKES.md, 2026-10-20).
+
 - **Takeover new tab never shows Detached.** The Chromium test
   `a-tab-opened-unaware-of-a-takeover-does-not-take-the-session-back` in `e2e/tests/terminal-reconnect.spec.ts` failed
   in full browser run `13808999-b14a-44ef-a7df-b547a8419a62`: after a takeover, the losing view's newly opened tab kept

@@ -2616,3 +2616,39 @@ Timeout: 20000ms
 Class: unknown
 
 Cause: unknown
+
+## 2026-10-20 — refused YOLO Replace confirmation (e2e/tests/terminal-restart.spec.ts)
+
+The WebKit case `don't ask again on a refused YOLO replace marks the host, then replaces with the override` failed in a
+full recorded browser run (`49c74525-36ad-44e1-825b-878edadfd71c`, all of `npx playwright test`, three workers each
+driving its own stack, zero retries, source `dc977dd7`, clean tree, under heavy load from other agents' work: load
+average 18–28): after the click on the interrupted card's Replace confirmation, the YOLO question never appeared within
+5 s and no replace request was sent. It was one of two failures in that run; the other was the takeover new-tab flake
+recorded above. On unmodified main `9f0fd7e9` (dirty only with untracked links to the same build output; no product code
+differs from the tested tip), the whole WebKit `terminal-restart` file passed four times serially on a quiet machine, so
+this case passed four of four (60 of 60 tests, `e3aec355-0c1a-4faa-ac81-4d01189bfb98`), and in six repetitions of the
+file while a three-worker browser run from another checkout loaded the machine this case failed once in six (one failure
+among 90 tests) (`61cbd3cf-a2ab-4ebc-9b91-cc801ba932dd`), with the same assertion. So it is load-sensitive and predates
+the parallel suite. A WebKit Replace cancel in the same file failed the same way once in an earlier full run
+(`13808999`, the confirm did not close after the Cancel click landed) and did not reproduce in 25 attempts. Hypothesis,
+not confirmed: the spec injects interrupted sessions with ids that lack the host-entry prefix main has required since
+#2368, so the UI's background `GET /api/sessions/<id>` reads of those sessions get 400 replies from the real helm; in
+the failing trace the click landed as one of those failing reads completed, which fits a re-render racing the click.
+Pinned tmux 3.7c, executable SHA256 `8bf050252e2adc68d8d1044cc30ca7259ab021f04441484b1e5dabad1f570e71`; locale
+`C.UTF-8`; child `FARHELM_*` names `FARHELM_TEST_TRACE_DIR` and, in the full run only, `FARHELM_PLAYWRIGHT_POLICY_FILE`;
+Playwright 1.64.0. Open; no fix attempted.
+
+The failure on main, verbatim from the retained output:
+
+```text
+Error: expect(locator).toBeVisible() failed
+
+Locator: locator('.yolo-confirmation')
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+```
+
+Class: unknown
+
+Cause: hypothesis
