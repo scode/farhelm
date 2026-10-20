@@ -209,8 +209,10 @@ needs that breadth. Do not start the full suite merely because a PR is about to 
 no browser tests, and a minor rebase does not discard existing browser evidence.
 
 When browser validation is warranted, run the selected specs through the recorder on Chromium and WebKit (WebKit stands
-in for the desktop app's engine family). The full-suite child command is `cd e2e && npx playwright test`. It needs
-`cargo build` and `cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release` first, because it
-drives the built web UI against a real helm and supervisor, plus a one-time
+in for the desktop app's engine family). Every run, full or selected, boots three stacks and spreads its (engine, spec
+file) projects over three workers, one stack each (`e2e/stack-slots.ts`), so a selection of a few spec files already
+runs in parallel. The full-suite child command is `cd e2e && npx playwright test`. It needs `cargo build` and
+`cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release` first, because it drives the built web
+UI against a real helm and supervisor, plus a one-time
 `cd e2e && npm install && npx playwright install chromium webkit`. Reuse matching builds and successful test results
 when the intervening diff leaves their coverage intact; see `docs/test-run-evidence.md` for recorded selections.

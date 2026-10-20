@@ -578,7 +578,7 @@ def phases(profile: str = "full") -> list[Phase]:
             Phase("rust-nextest", "nextest", "farhelm-proto unit tests (eval profile)", "4 nextest slots; retries 0",
                   "required", ["cargo", "nextest", "run", "-p", "farhelm-proto", "--lib"],
                   rerun=nextest_rerun, runner="nextest"),
-            Phase("browser", "playwright", "feed spec, both engines (eval profile)", "one browser worker; retries 0",
+            Phase("browser", "playwright", "feed spec, both engines (eval profile)", "3 browser workers, one stack each; retries 0",
                   "required", ["npx", "playwright", "test", "feed.spec.ts"], cwd="e2e", rerun=playwright_rerun,
                   runner="playwright"),
             Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery", "none",
@@ -591,7 +591,7 @@ def phases(profile: str = "full") -> list[Phase]:
     return [
         Phase("rust-nextest", "nextest", "workspace Rust targets", "4 nextest slots; retries 0",
               "required", workspace_nextest, rerun=nextest_rerun, runner="nextest"),
-        Phase("browser", "playwright", "browser suite, both engines", "one browser worker; retries 0",
+        Phase("browser", "playwright", "browser suite, both engines", "3 browser workers, one stack each; retries 0",
               "required", ["npx", "playwright", "test"], cwd="e2e", rerun=playwright_rerun,
               runner="playwright"),
         Phase("desktop-nextest", "nextest", "desktop Rust targets", "4 nextest slots; retries 0",

@@ -198,16 +198,17 @@ tmux_dir=$(scripts/build-pinned-tmux-ci.sh) && \
 cd e2e && \
 PATH="$tmux_dir:$PATH" python3 ../scripts/record-test-run.py \
   --runner playwright --kind development --tmux required --timeout 300 \
-  --selection 'feed spec, both engines' --concurrency 'one browser worker; retries 0' \
+  --selection 'feed spec, both engines' --concurrency '3 browser workers, one stack each; retries 0' \
   -- npx playwright test 'feed\.spec\.ts'
 ```
 
 The requested `npx playwright test` prefix is a selection syntax; execution uses resolved Node and the locally installed
 Playwright CLI directly. Both Playwright packages and their lock entries must match 1.64.0. The maintained config runs
-with one worker, zero retries, one execution per selected case, no focused-only tests and no snapshot updates. Only
-file-pattern and grep selectors are accepted; project, reporter, config and execution-policy overrides are refused. Both
-configured engines must execute cases before a zero child exit can support recorder success. A single-engine debugging
-command can still use generic recording, which does not claim validated browser counts.
+with three workers, each driving its own stack (`e2e/stack-slots.ts`), zero retries, one execution per selected case, no
+focused-only tests and no snapshot updates. Only file-pattern and grep selectors are accepted; project, reporter, config
+and execution-policy overrides are refused. Both configured engines must execute cases before a zero child exit can
+support recorder success. A single-engine debugging command can still use generic recording, which does not claim
+validated browser counts.
 
 Each run owns `playwright.json`, `playwright-policy.json` and `playwright-artifacts/`. The supplementary reporter
 records resolved engine and project policy before execution and atomically replaces its own initial record at
@@ -235,8 +236,8 @@ python3 ../scripts/hunt-browser-tests.py --repeat 20 --timeout 60 \
 
 Add `--execute` only when the displayed selection and cost are intended. Planning does not probe tools, create evidence,
 install dependencies or build the application. Execution needs the browser recorder's prerequisites above, including the
-pinned tmux already on PATH. Each attempt uses both Chromium and WebKit, one worker, no retries and no internal
-repeat-each loop. Use generic recording for an intentionally single-engine debugging run.
+pinned tmux already on PATH. Each attempt uses both Chromium and WebKit, the suite's three workers, no retries and no
+internal repeat-each loop. Use generic recording for an intentionally single-engine debugging run.
 
 The private batch index retains each attempt and its validated actual and expected outcome counts per engine. A later
 pass does not erase an earlier failure. Ordinary failed assertions and individual case timeouts may proceed to the next

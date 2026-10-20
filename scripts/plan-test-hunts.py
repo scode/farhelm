@@ -257,7 +257,8 @@ def build_plan(paths, packages, exists, repeat, timeout):
                 why.append(f"selection partition {index + 1} of {len(groups)} fits runner argv limits")
             commands.append({"cwd": "e2e", "runner": "playwright", "reasons": why,
                              "child": ["npx", "playwright", "test", *group],
-                             "concurrency": "1 worker; chromium and webkit; retries 0"})
+                             "concurrency": f"{test_run_playwright.WORKERS} workers, one stack each; "
+                                            "chromium and webkit; retries 0"})
     for command in commands:
         script = "scripts/hunt-rust-tests.py" if command["runner"] == "nextest" else "../scripts/hunt-browser-tests.py"
         command["argv"] = ["python3", script, "--repeat", str(repeat), "--timeout", str(timeout),

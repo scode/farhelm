@@ -22,7 +22,7 @@ VERSION = "1.64.0"
 # STACK_COUNT), so the worker count is part of the runner policy this module
 # pins and verifies, not a tunable. test-playwright-report.py checks that the
 # two values agree; change them together.
-WORKERS = 1
+WORKERS = 3
 TERMINATION_GRACE = 60.0
 GRACEFUL_SIGNAL = signal.SIGINT
 ARGV_LIMIT = 128
