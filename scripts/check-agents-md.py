@@ -19,8 +19,9 @@ and this script checks for each of them:
 - A detail file becomes unreachable: nothing that an agent starting from the root would read points at it. The
   old-section map is a lookup table, so its mentions do not count as a route.
 
-It also refuses a root `AGENTS.override.md` (Codex would load it instead of `AGENTS.md`) and any `CLAUDE.md` (Claude
-Code stops reading `AGENTS.md` when one exists in the working directory or a parent).
+It also refuses a root `AGENTS.override.md` (Codex would load it instead of `AGENTS.md`) and any inventoried `CLAUDE.md`
+or `CLAUDE.local.md` (Claude Code's default loader skips `AGENTS.md` when either exists in the working directory or a
+parent). Ignored files and files outside the repository inventory are not checked.
 
 What it does not check, though the plan for the split proposed some of it: whether a reading list is complete
 (closure over what its files cite), how many hops a file is from the root, whether every index entry carries a fence,
@@ -154,10 +155,10 @@ def resolve(root: pathlib.Path, source: str, ref: str, top_level: set[str],
         return root / ref
     if (base_dir / ref).exists():
         return base_dir / ref
-    if "/" not in ref and (ref in basenames or ref == "CLAUDE.md"):
+    if "/" not in ref and (ref in basenames or ref in {"CLAUDE.md", "CLAUDE.local.md"}):
         # A bare name such as `INDEX.md` is written in the context of its own directory tree (`plans/queue/INDEX.md`
         # from `plans/.agents/`); any tracked file of that name satisfies it, and only a name matching no file at all
-        # is a typo. `CLAUDE.md` is named only as the file that must not exist.
+        # is a typo. The Claude instruction names are mentioned as files that must not exist.
         return None
     if ref.split("/")[0] in top_level or is_definite_path(ref):
         return root / ref
@@ -199,8 +200,9 @@ def check(root: pathlib.Path, files: list[str]) -> tuple[list[str], list[str]]:
     if (root / "AGENTS.override.md").exists():
         errors.append("AGENTS.override.md: Codex would load it instead of AGENTS.md; remove it")
     for f in files:
-        if f.split("/")[-1] == "CLAUDE.md":
-            errors.append(f"{f}: a CLAUDE.md stops Claude Code from reading AGENTS.md; remove it")
+        name = f.split("/")[-1]
+        if name in {"CLAUDE.md", "CLAUDE.local.md"}:
+            errors.append(f"{f}: a {name} stops Claude Code from reading AGENTS.md by default; remove it")
 
     # Paths named in instruction files must exist, and reachability follows those same edges. Every path the root
     # names is checked, because its path table is what routes agents; elsewhere only `.md` targets are, since detail
@@ -314,6 +316,10 @@ GOOD_ROOT = "# Root\n\nRead `.agents/a.md` and `sub/AGENTS.md`.\n\n# End of AGEN
 
 
 def self_test() -> int:
+    """Prove each instruction rule rejects its bad tree and accepts its valid counterpart.
+
+    All forbidden filenames live only in temporary fixtures, never the checkout.
+    """
     cases = []
 
     def case(name: str, files: dict[str, str], expect_error: str | None, expect_warning: str | None = None):
@@ -332,6 +338,10 @@ def self_test() -> int:
          "must end with")
     case("override file", {**good, "AGENTS.override.md": "x"}, "AGENTS.override.md")
     case("nested CLAUDE.md", {**good, "sub/CLAUDE.md": "x"}, "CLAUDE.md stops")
+    case("root CLAUDE.local.md", {**good, "CLAUDE.local.md": "x"}, "CLAUDE.local.md stops")
+    case("nested CLAUDE.local.md", {**good, "sub/CLAUDE.local.md": "x"}, "CLAUDE.local.md stops")
+    case("prohibiting an absent Claude local file is not a missing pointer",
+         {**good, ".agents/a.md": good[".agents/a.md"] + "Never add `CLAUDE.local.md`.\n"}, None)
     case("pointer to missing file", {**good, ".agents/a.md": "# A\n\nRead `sub/.agents/gone.md`.\n"},
          "does not exist")
     case("unreachable detail file", {**good, "sub/.agents/orphan.md": "# Orphan\n"}, "orphan.md: no instruction")

@@ -17120,7 +17120,10 @@
 - Completion criteria: the checker also refuses `CLAUDE.local.md`, with a self-test fixture. Size gate: about 100 lines
   of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog fragment); over it, block
   and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/tooling-checks-oct19.md`.
+- Execution: complete in change `yttozvrrpktqwlrrkmslqwrqwrkqtlpz`, bookmark
+  `plan/tooling-checks-oct19/02-refuse-local-instructions`. The checker rejects inventoried local Claude instruction
+  files at the root or below it; prohibitions mentioning the absent filename remain valid. Code/test/doc diff: 33 lines,
+  within the 100-line gate. [PR #2421](https://github.com/scode/farhelm/pull/2421/changes).
 
 ## instruction-check-misses-mixed-case-spec-typo.md
 

@@ -25,9 +25,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
   — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
 
-- [`instruction-check-allows-claude-local-shadowing.md`](instruction-check-allows-claude-local-shadowing.md) — The
-  instruction checker permits local Claude files that suppress default repository-rule loading.
-
 - [`instruction-check-misses-mixed-case-spec-typo.md`](instruction-check-misses-mixed-case-spec-typo.md) — The
   instruction checker misses the mixed-case specification typo its own contract promises to reject.
 
