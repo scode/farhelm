@@ -16901,7 +16901,9 @@
 - Completion criteria: unchecked entries keep the sidebar button, tooltip and accessible name from saying empty; a unit
   test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
   changelog fragment); over it, discard. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/trash-unknown-totals.md`.
+- Execution: complete in jj change `nmmswyzu`, bookmark `plan/trash-unknown-totals/01-unchecked-not-empty`. The code,
+  tests and documentation total 77 added/deleted lines, below the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2402/changes.
 
 ## template-name-editor-conceals-formatting.md
 

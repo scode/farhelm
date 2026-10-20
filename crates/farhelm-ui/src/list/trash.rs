@@ -27,6 +27,23 @@ fn checkouts(count: usize) -> &'static str {
     if count == 1 { "checkout" } else { "checkouts" }
 }
 
+/// Keep the can and its descriptions honest about archives not yet inspected.
+/// Checked rows remain an exact count; diagnostics never become checkout counts.
+fn sidebar_summary(count: usize, has_unchecked: bool, all_ready: bool) -> (bool, String) {
+    let full = count > 0 || has_unchecked;
+    let label = if !all_ready || has_unchecked {
+        format!(
+            "{count} known archived {}, some entries or hosts unchecked",
+            checkouts(count)
+        )
+    } else if count == 0 {
+        "empty".into()
+    } else {
+        format!("{count} archived {}", checkouts(count))
+    };
+    (full, label)
+}
+
 /// A reply is meaningful only on the connection that supplied it. The retained
 /// same-connection reply keeps the count steady during a fresh measurement.
 #[derive(Clone, Default)]
@@ -389,7 +406,7 @@ pub(super) fn TrashControl(
     let host_error = hosts.read().refresh_error().map(str::to_owned);
     let hosts_known = hosts.read().hosts().is_some() && host_error.is_none();
     let current_hosts = hosts.read().hosts().unwrap_or_default().to_vec();
-    let count: usize = current_hosts
+    let (count, has_unchecked) = current_hosts
         .iter()
         .filter(|host| hosts_known && connected(host))
         .filter_map(|host| {
@@ -399,9 +416,11 @@ pub(super) fn TrashControl(
                 .filter(|entry| entry.incarnation == host.incarnation)
                 .and_then(|entry| entry.reply.as_ref())
                 .and_then(|reply| reply.as_ref().ok())
-                .map(|reply| reply.checkouts.len())
+                .map(|reply| (reply.checkouts.len(), !reply.issues.is_empty()))
         })
-        .sum();
+        .fold((0, false), |(count, unchecked), (known, issues)| {
+            (count + known, unchecked || issues)
+        });
     let targets: Vec<_> = current_hosts
         .iter()
         .filter(|_| hosts_known)
@@ -543,29 +562,17 @@ pub(super) fn TrashControl(
         return_focus();
         open.set(false);
     };
-    let tooltip = if !all_ready {
-        format!(
-            "trash: {count} known archived {} on reachable hosts; some hosts have not been checked. Click to see what is known.",
-            checkouts(count)
-        )
+    let (full, summary) = sidebar_summary(count, has_unchecked, all_ready);
+    let tooltip = if !all_ready || has_unchecked {
+        format!("trash: {summary}. Click to see what is known.")
     } else if count == 0 {
         "trash: empty. When you delete the last session using a managed checkout, its folder moves here instead of being deleted.".into()
     } else {
         format!(
-            "trash: {count} archived {}. A managed checkout moves here when the last session using it is deleted. Click to see them, or to delete them for good.",
-            checkouts(count)
+            "trash: {summary}. A managed checkout moves here when the last session using it is deleted. Click to see them, or to delete them for good."
         )
     };
-    let accessible_name = if !all_ready {
-        format!(
-            "checkout trash, {count} known archived {}, some hosts unchecked",
-            checkouts(count)
-        )
-    } else if count == 0 {
-        "checkout trash, empty".into()
-    } else {
-        format!("checkout trash, {count} archived {}", checkouts(count))
-    };
+    let accessible_name = format!("checkout trash, {summary}");
     // Measuring disables confirmation, but retained known sizes still belong
     // in the total. Selection eligibility must not silently turn it into zero.
     let total_bytes = current_hosts
@@ -602,11 +609,11 @@ pub(super) fn TrashControl(
             .any(|target| target.partial || target.unchecked > 0);
     rsx! {
         button {
-            class: if count == 0 { "btn btn-neutral checkout-trash-button" } else { "btn btn-neutral checkout-trash-button full" },
+            class: if full { "btn btn-neutral checkout-trash-button full" } else { "btn btn-neutral checkout-trash-button" },
             r#type: "button", aria_label: accessible_name, aria_haspopup: "dialog", "data-count": "{count}",
             "data-tooltip": tooltip, disabled: gate.busy(),
             onclick: move |_| { if !gate.busy_now() { notices.write().clear(); confirmation.set(None); open.set(true); } },
-            TrashIcon { full: count > 0 }
+            TrashIcon { full }
             if count > 0 { span { class: "checkout-trash-count", "{count}" } }
         }
         if open() {
@@ -615,7 +622,7 @@ pub(super) fn TrashControl(
                     onmounted: move |_| crate::hosts::settings_dialog::install_dialog_with_selector(DIALOG, ".trash-close", Some(".trash-confirm-cancel, .trash-close"), Some(".trash-confirm-submit")),
                     onkeydown: move |event| { if event.key() == Key::Escape && !event.is_composing() { event.prevent_default(); event.stop_propagation(); close(()); } },
                     div { class: "checkout-trash-header",
-                        h2 { id: "checkout-trash-title", TrashIcon { full: count > 0 } "trash" }
+                        h2 { id: "checkout-trash-title", TrashIcon { full } "trash" }
                         span { class: "checkout-trash-total", "{count} {checkouts(count)} · {space(total_bytes, total_partial)} on reachable hosts" }
                         div { class: "checkout-trash-header-actions",
                             button { class: "btn btn-danger trash-delete-all", disabled: busy || !all_ready || targets.is_empty(), onclick: move |_| { if deletion.peek().is_none() { confirmation.set(Some(Confirmation { host: None, targets: targets.clone() })); } }, "delete all" }
@@ -840,6 +847,7 @@ mod tests {
     /// Duplicate diagnostics describe one unchecked entry, and a mixed listing
     /// keeps its measured bytes while disclosing the missing part. The same
     /// evidence must reach the frozen confirmation without widening its IDs.
+    /// The sidebar must also distinguish unchecked-only trash from empty trash.
     #[farhelm_testtrace::test]
     fn host_totals_qualify_unchecked_entries_and_partial_sizes() {
         let host = host();
@@ -857,7 +865,7 @@ mod tests {
             archived_at: None,
             bytes,
         };
-        for (listing, expected_count, expected_size, expected_unchecked) in [
+        for (listing, expected_count, expected_size, expected_unchecked, expected_sidebar) in [
             (
                 CheckoutTrashListing {
                     checkouts: vec![],
@@ -866,6 +874,7 @@ mod tests {
                 "0 checkouts · 1 unchecked entry",
                 "0 B measured · partial",
                 1,
+                "0 known archived checkouts, some entries or hosts unchecked",
             ),
             (
                 CheckoutTrashListing {
@@ -881,6 +890,7 @@ mod tests {
                 "1 checkout · 2 unchecked entries",
                 "4.0 KiB measured · partial",
                 2,
+                "1 known archived checkout, some entries or hosts unchecked",
             ),
             (
                 CheckoutTrashListing {
@@ -890,6 +900,7 @@ mod tests {
                 "1 checkout",
                 "0 B measured · partial",
                 0,
+                "1 archived checkout",
             ),
             (
                 CheckoutTrashListing {
@@ -899,11 +910,17 @@ mod tests {
                 "1 checkout",
                 "4.0 KiB",
                 0,
+                "1 archived checkout",
             ),
         ] {
             let totals = listing_totals(&listing);
             assert_eq!(totals.count_label(), expected_count);
             assert_eq!(space(totals.bytes, totals.partial), expected_size);
+            assert_eq!(totals.unchecked, expected_unchecked);
+            assert_eq!(
+                sidebar_summary(totals.count, totals.unchecked > 0, true),
+                (true, expected_sidebar.into())
+            );
             let state = HostTrash {
                 incarnation: host.incarnation,
                 loading: false,
@@ -914,6 +931,14 @@ mod tests {
             assert_eq!(selected.ids.len(), selected.count + expected_unchecked);
             assert_eq!(space(selected.bytes, selected.partial), expected_size);
         }
+        assert_eq!(sidebar_summary(0, false, true), (false, "empty".into()));
+        assert_eq!(
+            sidebar_summary(0, false, false),
+            (
+                false,
+                "0 known archived checkouts, some entries or hosts unchecked".into()
+            )
+        );
     }
 
     /// A row click must select only its checkout, never a neighbouring archive
