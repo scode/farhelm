@@ -7,6 +7,8 @@
 use farhelm_proto::RepoError;
 use serde::{Deserialize, Serialize};
 
+use crate::peer::PeerText;
+
 /// The launch destination is independent of the agent controls and search
 /// text. Existing retains the exact submitted path; the separate text editor
 /// may show an escaped spelling of that path. A GitHub destination never uses
@@ -80,10 +82,12 @@ impl DestinationDraft {
 }
 
 /// Repository intent, independent of any previous checkout's actual cwd.
+/// The UI owns this decoded mirror; even parser-admitted identifiers retain
+/// peer provenance until a consumer chooses presentation or raw identity.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct GithubRepo {
-    pub(crate) owner: String,
-    pub(crate) name: String,
+    pub(crate) owner: PeerText,
+    pub(crate) name: PeerText,
 }
 
 /// Read-only association reported by the supervisor registry. The origin id
@@ -91,12 +95,14 @@ pub(crate) struct GithubRepo {
 /// Clone seeds a fresh checkout of this repository, including for borrowers;
 /// Replace and Replace with keep the source's actual cwd. The UI never changes
 /// the registry association itself when choosing a new destination.
+/// Paths and ids retain their decoded bytes; choosing a folder label must not
+/// rewrite the association or the allocating session's opaque reference.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct WorkingCopyInfo {
-    pub(crate) id: String,
+    pub(crate) id: PeerText,
     pub(crate) repo: GithubRepo,
-    pub(crate) canonical_path: String,
-    pub(crate) origin_session_id: String,
+    pub(crate) canonical_path: PeerText,
+    pub(crate) origin_session_id: PeerText,
 }
 
 impl GithubRepo {
@@ -116,8 +122,8 @@ impl GithubRepo {
     pub(crate) fn parse(value: &str) -> Result<Self, String> {
         match farhelm_proto::parse_github_repo(value) {
             Ok(repo) => Ok(Self {
-                owner: repo.owner,
-                name: repo.name,
+                owner: repo.owner.into(),
+                name: repo.name.into(),
             }),
             Err(RepoError::Empty | RepoError::MissingSeparator) => {
                 Err("enter a GitHub repository as owner/repo".into())
@@ -131,23 +137,27 @@ impl GithubRepo {
         }
     }
 
-    /// Canonical identifier used for search, grouping and the create body.
+    /// Raw canonical identifier used for search, grouping and the create body.
+    /// Escaping either component here would change request identity and matching.
     pub(crate) fn identifier(&self) -> String {
-        format!("{}/{}", self.owner, self.name)
+        format!("{}/{}", self.owner.raw(), self.name.raw())
     }
 }
 
 /// Exact displayed destination, including the installation that proposed it.
 /// The flattened shape mirrors the helm's AcceptedGithubPreview response.
+/// Text serializes with its original bytes because create submits this exact
+/// snapshot again, including paths and installation comparison evidence.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct GithubPreview {
-    pub(crate) canonical_root: String,
-    pub(crate) basename: String,
-    pub(crate) cwd: String,
+    pub(crate) canonical_root: PeerText,
+    pub(crate) basename: PeerText,
+    pub(crate) cwd: PeerText,
     pub(crate) config_revision: i64,
+    /// Helm-owned decimal registry id, not a peer-supplied host label.
     pub(crate) host: String,
     pub(crate) incarnation: u64,
-    pub(crate) installation_identity: String,
+    pub(crate) installation_identity: PeerText,
 }
 
 /// A create carries the same repo, title and preview the user accepted.
@@ -161,12 +171,13 @@ pub(crate) struct GithubCheckoutRequest {
 /// Completion can remain useful even when the target cannot finish its scan.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct GithubRepositories {
+    /// Helm-owned decimal registry id, not a peer-supplied host label.
     pub(crate) host: String,
     pub(crate) incarnation: u64,
-    pub(crate) installation_identity: String,
+    pub(crate) installation_identity: PeerText,
     pub(crate) repos: Vec<GithubRepo>,
     pub(crate) truncated: bool,
-    pub(crate) scan_error: Option<String>,
+    pub(crate) scan_error: Option<PeerText>,
     /// Only the helm knows whether a command-line host override supplies a root.
     /// Older or partial replies keep the existing note rather than guessing
     /// setup eligibility from a message or the global-only configuration route.
@@ -193,7 +204,7 @@ impl RepositoryAuthority {
             && reply.host == self.host.to_string()
             && reply.incarnation == self.incarnation
             && !self.installation_identity.is_empty()
-            && reply.installation_identity == self.installation_identity
+            && reply.installation_identity.raw() == self.installation_identity
     }
 }
 
@@ -241,7 +252,7 @@ impl PreviewAuthority {
             && preview.host == self.host
             && preview.incarnation == self.incarnation
             && !self.installation_identity.is_empty()
-            && preview.installation_identity == self.installation_identity
+            && preview.installation_identity.raw() == self.installation_identity
     }
 }
 
@@ -356,6 +367,33 @@ mod tests {
         let mut changed_install = reply.clone();
         changed_install.installation_identity = "install-b".into();
         assert!(!authority.accepts(&authority, &changed_install));
+    }
+
+    /// Visible peer-text escapes must not become installation authority.
+    /// Escaping a decoded identity before matching could authorize a reply from
+    /// another installation whose literal text happens to spell the same marker.
+    #[test]
+    fn repository_authority_compares_original_identity_bytes() {
+        let authority = RepositoryAuthority {
+            generation: 1,
+            host: 1,
+            incarnation: 2,
+            installation_identity: "install\u{200b}".into(),
+            destination_generation: 3,
+            query: "acme".into(),
+        };
+        let mut reply: GithubRepositories = serde_json::from_value(serde_json::json!({
+            "host": "1", "incarnation": 2, "installation_identity": "install\u{200b}",
+            "repos": [], "truncated": false, "scan_error": "scan\u{202e} failed",
+        }))
+        .unwrap();
+        assert!(authority.accepts(&authority, &reply));
+        assert_eq!(
+            reply.scan_error.as_ref().unwrap().raw(),
+            "scan\u{202e} failed"
+        );
+        reply.installation_identity = "install<U+200B>".into();
+        assert!(!authority.accepts(&authority, &reply));
     }
 
     /// Inputs accepted locally must remain plain repository identities. URL

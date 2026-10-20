@@ -619,10 +619,9 @@ fn launcher_snapshot(
                 )))
             }
             DestinationDraft::GithubInput { .. } => None,
-            DestinationDraft::Github { repo, .. } => Some(TemplateDestination::Github(format!(
-                "{}/{}",
-                repo.owner, repo.name
-            ))),
+            DestinationDraft::Github { repo, .. } => {
+                Some(TemplateDestination::Github(repo.identifier()))
+            }
         },
         name: Some(
             t.clone_checkout_naming
@@ -1459,6 +1458,8 @@ impl IntentBinding {
 /// Reconciliation follows user intent and installation, not the latest config
 /// or connection counter. The retained body still carries its original preview
 /// and incarnation for the helm's authenticated reconciliation path.
+/// Installation matching uses the original reply bytes, independently of how
+/// an identity might be presented to the user.
 fn same_fresh_intent(
     accepted: &IntentBinding,
     current: &IntentBinding,
@@ -1472,7 +1473,7 @@ fn same_fresh_intent(
         && accepted.replace_source == current.replace_source
         && accepted.github_checkout.as_ref().is_some_and(|checkout| {
             checkout.repo == repo.identifier()
-                && checkout.preview.installation_identity == installation
+                && checkout.preview.installation_identity.raw() == installation
         })
 }
 
@@ -3842,7 +3843,7 @@ pub(super) fn CreateSessionForm(
         ),
         DestinationDraft::Github { repo, .. } => displayed_preview.as_ref().map_or_else(
             || format!("gh:{} (preview pending)", repo.identifier()),
-            |preview| display_peer(&preview.cwd),
+            |preview| preview.cwd.escaped(),
         ),
     };
     // The editable `cwd` seed belongs to existing-folder mode. A fresh
@@ -3854,7 +3855,7 @@ pub(super) fn CreateSessionForm(
         DestinationDraft::Github { preview_state, .. } => (
             displayed_preview
                 .as_ref()
-                .map(|preview| display_peer(&preview.cwd))
+                .map(|preview| preview.cwd.escaped())
                 .unwrap_or_default(),
             if displayed_preview.is_some() {
                 ""
@@ -3890,7 +3891,7 @@ pub(super) fn CreateSessionForm(
     let title_placeholder = if checkout_mode && (title_ignored || title().is_empty()) {
         displayed_preview
             .as_ref()
-            .map(|preview| display_peer(&preview.basename))
+            .map(|preview| preview.basename.escaped())
             .unwrap_or_default()
     } else {
         String::new()
@@ -4359,12 +4360,19 @@ pub(super) fn CreateSessionForm(
         }
     }
     let show_checkout_root_setup = checkout_mode && needs_checkout_root;
+    // This local note also holds UI literals and request errors. Keep the scan
+    // reply raw here; both placements below escape the final note as before.
     let repository_note = match &repository_result {
-        Some(Ok(reply)) => reply.scan_error.clone().or_else(|| {
-            reply.truncated.then(|| {
-                "repository search is incomplete; a valid owner/repo can still be selected".into()
-            })
-        }),
+        Some(Ok(reply)) => reply
+            .scan_error
+            .as_ref()
+            .map(|text| text.raw().to_owned())
+            .or_else(|| {
+                reply.truncated.then(|| {
+                    "repository search is incomplete; a valid owner/repo can still be selected"
+                        .into()
+                })
+            }),
         Some(Err(message)) => Some(message.clone()),
         None => None,
     };
@@ -5452,14 +5460,14 @@ pub(super) fn CreateSessionForm(
                             replaying_fresh = true;
                         } else if let PreviewState::Ready { authority, preview } = *preview_state
                             && live_preview_authority.peek().as_ref().is_some_and(|live| authority.accepts(live, &preview))
-                            && preview.installation_identity == installation
+                            && preview.installation_identity.raw() == installation
                             && preview.host == binding.host.to_string()
                             && Some(preview.incarnation) == connection_claim(&hosts, binding.host)
                             && authority.title.as_deref() == Some(binding.title.as_str())
                             && authority.agent == preview_agent_now()
                             && *preview_revision.peek() == *applied_preview_revision.peek()
                         {
-                            binding.cwd = preview.cwd.clone();
+                            binding.cwd = preview.cwd.raw().to_owned();
                             binding.github_checkout = Some(GithubCheckoutRequest { repo: repo.identifier(), title: Some(binding.title.clone()), preview });
                         } else {
                             error.set(Some("wait for a current checkout preview before launching".into()));
@@ -5703,7 +5711,7 @@ pub(super) fn CreateSessionForm(
                             .map(|(_, attempt)| attempt.clone())
                             .unwrap_or_else(|| GithubAttempt::new(
                                 key.clone(), api::fresh_create_body(agent, &key, bound.host, checkout),
-                                checkout.preview.installation_identity.clone(),
+                                checkout.preview.installation_identity.raw().to_owned(),
                             ));
                         let mut attempt = attempt;
                         if allow_yolo {
@@ -6842,7 +6850,7 @@ pub(super) fn CreateSessionForm(
                                         },
                                         "managed checkout of {repo.identifier()} on {selected_host_label}"
                                         if let Some(preview) = &displayed_preview {
-                                            div { dir: "ltr", "{display_peer(&preview.cwd)}" }
+                                            div { dir: "ltr", "{preview.cwd.escaped()}" }
                                         }
                                         if retry_binding.is_some() {
                                             div { "retry reconciles the original request at this path" }
@@ -8781,10 +8789,10 @@ mod tests {
         let mut session = Session {
             cwd: "/work/bar-1/subdir".to_string(),
             working_copy: Some(crate::github_checkout::WorkingCopyInfo {
-                id: "checkout-1".to_string(),
+                id: "checkout-1".into(),
                 repo: GithubRepo::parse("acme/bar").unwrap(),
-                canonical_path: "/work/bar-1".to_string(),
-                origin_session_id: "origin".to_string(),
+                canonical_path: "/work/bar-1".into(),
+                origin_session_id: "origin".into(),
             }),
             ..row_specimen("borrower")
         };
