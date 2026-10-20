@@ -1051,10 +1051,10 @@ test("an OSC 8 link whose text matches its target, or is not a URL, hovers quiet
 /** Pin the private cell tag against the shipped xterm, not a synthetic buffer.
  * Claude closes/reopens an id at the edge; Codex keeps an id-less link open
  * over a cursor move. Neither marks the continuation as terminal-wrapped.
- * A native wrap, split-host forgery and ambiguous continuation also pin the
+ * Repeated complete links, a native wrap, split-host forgery and ambiguity pin the
  * complete comparison and the fragment-to-warning mapping.
  */
-for (const layout of ["claude", "codex", "terminal", "wide-wrap", "split-host", "ambiguous"] as const) {
+for (const layout of ["claude", "codex", "terminal", "wide-wrap", "split-host", "ambiguous", "repeated"] as const) {
   test(`OSC 8 tagged rows compare the complete ${layout} link`, async ({ page, request }) => {
     let owned: string | undefined;
     try {
@@ -1069,14 +1069,14 @@ for (const layout of ["claude", "codex", "terminal", "wide-wrap", "split-host", 
       const fixture = await page.evaluate(async (shape) => {
         const term = (window as any).__farhelmTerm;
         const prefix = "https://wrap.example/";
-        const first = shape === "split-host" ? "https://git" : shape === "codex" || shape === "ambiguous" ? `${prefix}short-` :
+        const first = shape === "repeated" ? prefix : shape === "split-host" ? "https://git" : shape === "codex" || shape === "ambiguous" ? `${prefix}short-` :
           prefix + "a".repeat(term.cols - 4 - prefix.length - (shape === "wide-wrap" ? 1 : 0));
-        const last = shape === "split-host" ? "hub.com/login" : shape === "ambiguous" ? "https://piece.example/" :
+        const last = shape === "repeated" ? first : shape === "split-host" ? "hub.com/login" : shape === "ambiguous" ? "https://piece.example/" :
           shape === "wide-wrap" ? "日continuation-tail" : "continuation-tail";
-        const target = shape === "split-host" ? "https://hub.com/login" : shape === "ambiguous" ? first : first + last;
-        const open = `\x1b]8;${shape === "claude" || shape === "split-host" || shape === "ambiguous" ? "id=joined" : ""};${target}\x07`;
+        const target = shape === "split-host" ? "https://hub.com/login" : shape === "ambiguous" || shape === "repeated" ? first : first + last;
+        const open = `\x1b]8;${shape === "claude" || shape === "split-host" || shape === "ambiguous" || shape === "repeated" ? "id=joined" : ""};${target}\x07`;
         const close = "\x1b]8;;\x07";
-        const middle = shape === "claude" || shape === "split-host" || shape === "ambiguous" ? `${close}\r\n     ${open}` :
+        const middle = shape === "claude" || shape === "split-host" || shape === "ambiguous" || shape === "repeated" ? `${close}\r\n     ${open}` :
           shape === "codex" ? "\x1b[3;6H" : "";
         // The first ambiguous piece equals its target. Only the incomplete
         // extent, rather than ordinary mismatch parsing, can make it warn.
@@ -1109,8 +1109,8 @@ for (const layout of ["claude", "codex", "terminal", "wide-wrap", "split-host", 
       }
       expect(fixture.bottomText).toBe(" ".repeat(fixture.indent) + fixture.last + (layout === "ambiguous" ? " again" : ""));
       const display = page.locator("#terminal .terminal-link-target:not(.terminal-file-target)");
-      for (const piece of [fixture.first, fixture.last]) {
-        await hoverLink(page, piece, piece.slice(0, 12));
+      for (const [index, piece] of [fixture.first, fixture.last].entries()) {
+        await hoverLink(page, layout === "repeated" ? `${index === 0 ? "see " : "     "}${piece}` : piece, piece.slice(0, 12));
         await expect(display.locator(".terminal-link-target-url")).toHaveText(fixture.target);
         if (layout === "split-host" || layout === "ambiguous") await expect(display).toHaveClass(/\bterminal-link-target-mismatch\b/);
         else await expect(display).not.toHaveClass(/\bterminal-link-target-mismatch\b/);

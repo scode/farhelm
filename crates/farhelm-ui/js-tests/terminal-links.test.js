@@ -461,7 +461,7 @@ test('whole split lookalikes are compared from either row', () => {
   const rows = [[['https://git', 8]], [['hub.com/login', 8]]];
   for (const y of [1, 2]) {
     const range = { start: { x: 1, y }, end: { x: rows[y - 1][0][0].length, y } };
-    const result = linkHoverText(taggedTerminal(rows), range);
+    const result = linkHoverText(taggedTerminal(rows), range, 'https://hub.com/login');
     assert.equal(result.kind, 'whole');
     assert.equal(linkTextMismatch(result.text, 'https://hub.com/login'), true);
     const old = linkHoverText(taggedTerminal(rows, true), range);
@@ -472,6 +472,23 @@ test('whole split lookalikes are compared from either row', () => {
   const decoy = taggedTerminal([[['https://good.example', 8]], [['.evil.test/', 8]]]);
   const result = linkHoverText(decoy, { start: { x: 1, y: 1 }, end: { x: 20, y: 1 } });
   assert.equal(linkTextMismatch(result.text, 'https://good.example.evil.test/'), false);
+});
+
+/** Complete repeated addresses must stay quiet without accepting one matching
+ * row as proof for a different continuation. Both hover positions matter.
+ */
+test('repeated honest rows compare independently only when all match', () => {
+  const target = 'https://example.com/';
+  for (const labels of [[target, target], [target, 'example.com/'], [target, 'click here']]) {
+    const term = taggedTerminal(labels.map(text => [[text, 8]]));
+    for (const y of [1, 2]) {
+      const range = { start: { x: 1, y }, end: { x: labels[y - 1].length, y } };
+      const result = linkHoverText(term, range, target);
+      const prose = labels[1] === 'click here';
+      assert.deepEqual(result, { kind: 'whole', text: prose ? labels.join('') : labels[y - 1] });
+      assert.equal(linkTextMismatch(result.text, target), prose);
+    }
+  }
 });
 
 /** Plain output cannot become evidence for a link, even with a long history.
@@ -502,7 +519,7 @@ test('ambiguous and bounded continuations stay fragments', () => {
     [duplicate, [['continued', 7]]],
     Array.from({ length: 129 }, () => [['x', 7]]),
     [[['x'.repeat(8192), 7]], [['x', 7]]],
-  ]) assert.equal(linkHoverText(taggedTerminal(rows), range).kind, 'fragment');
+  ]) assert.equal(linkHoverText(taggedTerminal(rows), range, 'https://example.com/').kind, 'fragment');
   const atBound = Array.from({ length: 128 }, () => [['x', 7]]);
   assert.equal(linkHoverText(taggedTerminal(atBound), range).kind, 'whole');
 });
