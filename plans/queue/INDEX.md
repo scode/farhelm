@@ -16,7 +16,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight bb1971] `reachable-at-small-sizes.md` — Keep approval cards, the outage card and host dialogs reachable in very small windows (3 triage outcomes).
 - [in-flight 07a183] `app-dialog-focus.md` — Fix focus handoffs for the update and SSH help controls, and keep a delayed host confirmation from freezing another dialog (3 triage outcomes).
 - [pending] `template-editor-and-listing.md` — Escape template names in the editor, stop an open Templates dialog undoing agent shortcut moves, and list custom flags in the CLI table (3 triage outcomes). (after `template-list-current-labels.md`)
-- [pending] `replace-yolo-shared-question.md` — Make the header and sidebar Replace controls share one YOLO question per session (1 triage outcome).
+- [in-flight 995a33] `replace-yolo-shared-question.md` — Make the header and sidebar Replace controls share one YOLO question per session (1 triage outcome).
 - [pending] `tab-attach-no-wait.md` — Stop a tab attach during Stop from stalling every session on that host (1 triage outcome).
 - [pending] `planning-probe-bound.md` — Bound a host planning probe's output wait so a lingering ssh helper cannot hold a planning slot forever, if super cheap (1 triage outcome).
 - [pending] `repository-discovery-git-config.md` — Make repository suggestions ignore an inherited GIT_CONFIG, as the test fixture already does (1 triage outcome).
