@@ -40,7 +40,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   admission, credential revalidation after waits, keyed-create durability, and disconnect cleanup. Verify with a
   deterministic regression that another request or terminal input progresses while creation is paused. Medium effort:
   localized dispatch changes, with care around task ownership and existing lifecycle guards. This plans the fix
-  described in `create-runs-inline-on-read-loop.md`; it does not request immediate implementation.
+  described in `create-runs-inline-on-read-loop.md`; it does not request immediate implementation. Plan:
+  `plans/queue/supervisor-request-modes.md`.
 
 ## Near term
 
@@ -547,6 +548,31 @@ are large mostly because of their tests.
   for every message family in one file that every protocol change touches (about 3.5k production lines plus tests). Held
   out of the 2026-09 cleanup stack as a large mechanical move to time when no other stacks are touching proto; the
   changelog docstring and the cross-protocol test pruning that shared this entry are done.
+
+### Turning rules into structure
+
+A 2026-10-19 assessment of about 530 recent product fixes found that most were an agent missing a rule, written as prose
+or per-call-site discipline, at one place when a sibling path already followed it. After an adversarial review, the
+maintainer chose these five behavior-preserving refactors, each of which makes one such rule something a type, an
+exhaustive match or a default enforces. A clear fix of the targeted bug class is allowed in its own PR.
+
+- **Declare how every supervisor request runs.** One exhaustive table maps each request type to how it executes, one
+  table owns the connection's channel ids, and a test proves that every request keeps the connection moving while slots
+  and locks are held; the requests that still stall it (creation and the checkout reconciliation before it) are fixed in
+  the same plan. The "typing freezes on a busy host" chain was fixed one request type at a time (#1164 to #1493). Plan:
+  `plans/queue/supervisor-request-modes.md`.
+- **Make helm ownership of accepted actions the default.** Every state-changing request runs on a helm-owned task unless
+  its route is on an explicit exempt list with a reason. Seven fixes were a handler that forgot to opt in (#1196, #1319,
+  #1409 and others). Plan: `plans/queue/helm-owned-by-default.md`.
+- **Type the helm's trust boundary.** Session data from supervisors, parsed agent verbs and the origin of the helm's
+  errors become types only the checking code constructs, replacing checks repeated per call site (#1491, #1128, #1083,
+  #1036). Plan: `plans/queue/helm-ingress-types.md`.
+- **Make text from other machines its own UI type.** Showing host- or agent-controlled text without escaping stops
+  compiling, instead of relying on about 236 call sites to remember the helper; the unescaped sites it exposes are fixed
+  in the same plan. Plan: `plans/queue/ui-peer-text-type.md`.
+- **One Replace/YOLO controller in the UI.** The sidebar's and header's copied Replace flows, YOLO questions and
+  retry-key decisions become one controller with an outcome enum, and the operation lock becomes guard-only. The same
+  cancel race was fixed three times (#1658 to #1660). Plan: `plans/queue/ui-session-actions.md`.
 
 ## Maybe later
 
