@@ -5596,7 +5596,7 @@ pub(super) fn CreateSessionForm(
                                 // attempt and its key stay, so the confirmed
                                 // retry is the same request with the override.
                                 github_attempt.set(Some((bound.clone(), attempt)));
-                                Err(api::CreateRefusal { stale: false, yolo_confirmation: true, text })
+                                Err(api::CreateRefusal { stale: false, definitely_unaccepted: false, yolo_confirmation: true, text })
                             }
                             Err(failure) => {
                                 let retired = attempt.may_retire_after(&failure);
@@ -5689,7 +5689,7 @@ pub(super) fn CreateSessionForm(
                             // would describe a machine the user is not looking
                             // at and may not even be true.
                             if create_target.peek().as_ref() == target_now.as_ref() {
-                                let api::CreateRefusal { stale, yolo_confirmation, text: prose } = e;
+                                let api::CreateRefusal { stale, definitely_unaccepted, yolo_confirmation, text: prose } = e;
                                 if yolo_confirmation {
                                     // The key deliberately survives: this
                                     // attempt was refused before dispatch, but
@@ -5714,6 +5714,11 @@ pub(super) fn CreateSessionForm(
                                     );
                                     ops.release();
                                     return;
+                                }
+                                if definitely_unaccepted {
+                                    // The supervisor remembers this settled refusal under its
+                                    // key; repairing the folder needs a fresh attempt, not replay.
+                                    intent_key.set(None);
                                 }
                                 if stale {
                                     // The world moved between preparing this

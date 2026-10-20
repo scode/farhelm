@@ -18,9 +18,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Repeated update or removal planning can leave adding, updating, and removing hosts stuck until the helm restarts, even
   after the pages close.
 
-- [`launcher-retries-ignore-settled-refusal-proof.md`](launcher-retries-ignore-settled-refusal-proof.md) — An unchanged
-  New, Clone or Replace-with retry can keep replaying a missing-folder failure after the folder is restored.
-
 - [`auth-refusal-forgets-partial-replace.md`](auth-refusal-forgets-partial-replace.md) — An authentication refusal can
   forget a partially successful Replace attempt, allowing its retry to create another replacement.
 

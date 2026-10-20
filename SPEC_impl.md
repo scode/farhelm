@@ -1745,9 +1745,9 @@ cleanup is unconfirmed is deferred in TODO.md's entry on requiring a systemd use
 agent-request recovery encodings are excluded. This is reply metadata: the stored refusal and its same-key replay do not
 change. Missing proof, including a failed proof lookup, stays inconclusive. The helm accepts this host-local statement
 only on a `CreateSession` reply and translates it to its existing definitely-unaccepted HTTP marker. A flag on a failed
-Delete cannot retire a successful replacement's identity. The UI already drops a Replace identity on that marker, so
-repairing a missing folder and pressing Replace again starts a fresh attempt without weakening recovery after an
-uncertain or partially successful attempt.
+Delete cannot retire a successful replacement's identity. Launchers drop a create identity on that marker, so repairing
+a missing folder and pressing Launch again starts a fresh attempt without weakening recovery after an uncertain or
+partially successful attempt.
 
 `SessionInfo::last_work_started_at` is the millisecond ordering key for the session list's stable work bursts. It was
 added within protocol version 20 under the same additive rule: absent decodes to zero, and zero falls back to

@@ -829,8 +829,10 @@ parameters — same directory, same launch — is a sanctioned workflow, not a d
 Controls that perform exactly the same operation on the same target behave identically and share that operation's state,
 including an unresolved retry identity or a pending confirmation, differing only where the GUI strictly requires it.
 Plain Replace shares one unresolved identity across the sidebar, session header and interrupted-session card, including
-navigation away and back. An acknowledged result, cancelling Replace, choosing Replace with, or starting Replace on
-another source ends that identity; a partial success or unclear outcome retains it for retry.
+navigation away and back. In New, Clone, Replace, Replace with and quick launch, an unchanged create's retry identity
+ends only on success or the helm's definite proof that nothing was created; partial success, unclear outcomes,
+authentication refusals and reapplying an unchanged template retain it. Cancelling Replace, choosing Replace with, or
+starting Replace on another source ends the plain Replace identity.
 
 A YOLO launch on a host that asks before YOLO launches (see the host settings under Topology) needs an explicit
 confirmation. An agent launch counts as YOLO when its stored permission is custom or YOLO, including omitted permissions
