@@ -1196,7 +1196,7 @@ mod tests {
         consent(&harness, json!(true)).await;
         harness
             .store
-            .set_pinned("remote-session", true)
+            .set_pinned(&crate::store::SessionKey::new(host, "remote-session"), true)
             .await
             .unwrap();
         let (opened, mut socket, channel) = live_socket(&harness, &mut reader, &mut writer).await;
@@ -1272,10 +1272,10 @@ mod tests {
         assert!(
             harness
                 .store
-                .pinned_sessions(&["replacement-session".into()])
+                .pinned_sessions(&[crate::store::SessionKey::new(host, "replacement-session")])
                 .await
                 .unwrap()
-                .contains("replacement-session")
+                .contains(&crate::store::SessionKey::new(host, "replacement-session"))
         );
     }
 

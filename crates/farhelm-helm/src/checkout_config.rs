@@ -2594,6 +2594,13 @@ mod tests {
                  -- Schema 62 added host entry UUIDs, which v26 did not have.
                  DROP INDEX hosts_entry_uuid;
                  ALTER TABLE hosts DROP COLUMN entry_uuid;
+                 -- Viewer-state pairing keyed seen state by host entry; v26 keyed
+                 -- it by the bare session id alone.
+                 DROP TABLE session_seen;
+                 CREATE TABLE session_seen (
+                     session_id       TEXT NOT NULL PRIMARY KEY,
+                     seen_activity_at INTEGER NOT NULL
+                 ) STRICT;
                  PRAGMA user_version = 26;",
             )
             .unwrap();

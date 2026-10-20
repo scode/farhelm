@@ -1362,35 +1362,49 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
     });
 
     let harness = rest_harness::spliced_helm(client_side).await;
+    let viewer_host = rest_harness::local_id(&harness.store).await;
     harness
         .store
-        .mark_seen("sess-1", 1_700_000_000)
+        .mark_seen(
+            &store::SessionKey::new(viewer_host, "sess-1"),
+            1_700_000_000,
+        )
         .await
         .unwrap();
     harness
         .store
-        .raise_notification_marks("sess-1", 2, crate::store::NotificationMark::Cleared)
+        .raise_notification_marks(
+            &store::SessionKey::new(viewer_host, "sess-1"),
+            2,
+            crate::store::NotificationMark::Cleared,
+        )
         .await
         .unwrap();
     assert_eq!(
         harness
             .store
-            .notification_marks(&["sess-1".to_string()])
+            .notification_marks(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
-            .get("sess-1"),
+            .get(&store::SessionKey::new(viewer_host, "sess-1")),
         Some(&(2, 2)),
         "fixture premise: the marks exist before the delete"
     );
 
-    assert!(harness.store.set_pinned("sess-1", true).await.unwrap());
     assert!(
         harness
             .store
-            .pinned_sessions(&["sess-1".into()])
+            .set_pinned(&store::SessionKey::new(viewer_host, "sess-1"), true)
             .await
             .unwrap()
-            .contains("sess-1"),
+    );
+    assert!(
+        harness
+            .store
+            .pinned_sessions(&[store::SessionKey::new(viewer_host, "sess-1")])
+            .await
+            .unwrap()
+            .contains(&store::SessionKey::new(viewer_host, "sess-1")),
         "fixture premise: source pin exists"
     );
     let app = harness.router();
@@ -1406,7 +1420,7 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
     assert!(
         harness
             .store
-            .seen_activity(&["sess-1".to_string()])
+            .seen_activity(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
             .is_empty(),
@@ -1415,7 +1429,7 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
     assert!(
         harness
             .store
-            .notification_marks(&["sess-1".to_string()])
+            .notification_marks(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
             .is_empty(),
@@ -1425,10 +1439,10 @@ async fn delete_session_drops_the_seen_and_notification_mark_rows() {
     assert!(
         !harness
             .store
-            .pinned_sessions(&["sess-1".into()])
+            .pinned_sessions(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
-            .contains("sess-1"),
+            .contains(&store::SessionKey::new(viewer_host, "sess-1")),
         "deleted source pin must be cleared"
     );
     peer.await.unwrap();
@@ -1507,10 +1521,14 @@ async fn pin_route_round_trip_changes_only_on_real_writes() {
     .await;
     assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
     assert_eq!(harness.manager.events().revision(), before);
+    let viewer_host = rest_harness::local_id(&harness.store).await;
     assert!(
         harness
             .store
-            .pinned_sessions(&["sess-1".into(), "absent".into()])
+            .pinned_sessions(&[
+                store::SessionKey::new(viewer_host, "sess-1"),
+                store::SessionKey::new(viewer_host, "absent")
+            ])
             .await
             .unwrap()
             .is_empty()
@@ -1652,9 +1670,13 @@ async fn mark_seen_route_bumps_on_change_and_not_on_a_repeat() {
 async fn mark_seen_route_rejects_a_body_with_the_key_omitted() {
     let harness =
         rest_harness::helm_listing(vec![rest_harness::session("sess-1", 1_700_000_000)]).await;
+    let viewer_host = rest_harness::local_id(&harness.store).await;
     harness
         .store
-        .mark_seen("sess-1", 1_700_000_000)
+        .mark_seen(
+            &store::SessionKey::new(viewer_host, "sess-1"),
+            1_700_000_000,
+        )
         .await
         .unwrap();
     let before = harness.manager.events().revision();
@@ -1672,10 +1694,10 @@ async fn mark_seen_route_rejects_a_body_with_the_key_omitted() {
     assert_eq!(
         harness
             .store
-            .seen_activity(&["sess-1".to_string()])
+            .seen_activity(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
-            .get("sess-1"),
+            .get(&store::SessionKey::new(viewer_host, "sess-1")),
         Some(&1_700_000_000),
         "the stored stamp must be untouched by the refused request"
     );
@@ -1732,10 +1754,10 @@ async fn mark_seen_route_succeeds_on_an_unreachable_host() {
     assert_eq!(
         harness
             .store
-            .seen_activity(&["owned".to_string()])
+            .seen_activity(&[store::SessionKey::new(host, "owned")])
             .await
             .unwrap()
-            .get("owned"),
+            .get(&store::SessionKey::new(host, "owned")),
         Some(&1_700_000_000),
         "the stamp must be durably stored despite the host being down"
     );
@@ -1752,7 +1774,7 @@ async fn mark_seen_route_succeeds_on_an_unreachable_host() {
     assert!(
         harness
             .store
-            .seen_activity(&["owned".to_string()])
+            .seen_activity(&[store::SessionKey::new(host, "owned")])
             .await
             .unwrap()
             .is_empty(),
@@ -1859,6 +1881,7 @@ async fn notification_marks_are_clamped_to_the_newest_known_entry() {
     ])
     .await;
 
+    let viewer_host = rest_harness::local_id(&harness.store).await;
     let (status, _) = put_json(
         &harness,
         "/api/sessions/sess-1/notifications/cleared",
@@ -1869,10 +1892,10 @@ async fn notification_marks_are_clamped_to_the_newest_known_entry() {
     assert_eq!(
         harness
             .store
-            .notification_marks(&["sess-1".to_string()])
+            .notification_marks(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
-            .get("sess-1"),
+            .get(&store::SessionKey::new(viewer_host, "sess-1")),
         Some(&(3, 3))
     );
 
@@ -1888,10 +1911,10 @@ async fn notification_marks_are_clamped_to_the_newest_known_entry() {
     assert!(
         harness
             .store
-            .notification_marks(&["quiet".to_string()])
+            .notification_marks(&[store::SessionKey::new(viewer_host, "quiet")])
             .await
             .unwrap()
-            .get("quiet")
+            .get(&store::SessionKey::new(viewer_host, "quiet"))
             .is_none_or(|marks| *marks == (0, 0)),
         "nothing to mark leaves the session where it stood"
     );
@@ -1962,10 +1985,10 @@ async fn notification_marks_land_while_the_host_is_down() {
     assert_eq!(
         harness
             .store
-            .notification_marks(&["owned".to_string()])
+            .notification_marks(&[store::SessionKey::new(host, "owned")])
             .await
             .unwrap()
-            .get("owned"),
+            .get(&store::SessionKey::new(host, "owned")),
         Some(&(2, 2)),
         "the mark lands, clamped to the newest entry the cached row holds"
     );
@@ -1989,9 +2012,13 @@ async fn get_session_route_carries_seen_activity_at_when_live() {
         "an id nothing has marked reads back null, not merely absent"
     );
 
+    let viewer_host = rest_harness::local_id(&harness.store).await;
     harness
         .store
-        .mark_seen("sess-1", 1_700_000_000)
+        .mark_seen(
+            &store::SessionKey::new(viewer_host, "sess-1"),
+            1_700_000_000,
+        )
         .await
         .unwrap();
     let (status, detail) = get_json(&harness, "/api/sessions/sess-1").await;
@@ -2020,7 +2047,7 @@ async fn get_session_route_carries_seen_activity_at_when_stale() {
     harness.await_refreshed(host).await;
     harness
         .store
-        .mark_seen("owned", 1_700_000_000)
+        .mark_seen(&store::SessionKey::new(host, "owned"), 1_700_000_000)
         .await
         .unwrap();
     harness.fleet.take_down(host);
@@ -2074,9 +2101,13 @@ async fn delete_session_succeeds_even_when_clearing_the_seen_row_fails() {
     });
 
     let harness = rest_harness::spliced_helm(client_side).await;
+    let viewer_host = rest_harness::local_id(&harness.store).await;
     harness
         .store
-        .mark_seen("sess-1", 1_700_000_000)
+        .mark_seen(
+            &store::SessionKey::new(viewer_host, "sess-1"),
+            1_700_000_000,
+        )
         .await
         .unwrap();
     harness
@@ -2640,44 +2671,58 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     });
 
     harness.await_refreshed(local).await;
+    let viewer_host = rest_harness::local_id(&harness.store).await;
     harness
         .store
-        .mark_seen("sess-1", 1_700_000_000)
+        .mark_seen(
+            &store::SessionKey::new(viewer_host, "sess-1"),
+            1_700_000_000,
+        )
         .await
         .unwrap();
     assert_eq!(
         harness
             .store
-            .seen_activity(&["sess-1".to_string()])
+            .seen_activity(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
-            .get("sess-1"),
+            .get(&store::SessionKey::new(viewer_host, "sess-1")),
         Some(&1_700_000_000),
         "fixture premise: the source's seen-state row exists before the replace"
     );
     harness
         .store
-        .raise_notification_marks("sess-1", 2, crate::store::NotificationMark::Cleared)
+        .raise_notification_marks(
+            &store::SessionKey::new(viewer_host, "sess-1"),
+            2,
+            crate::store::NotificationMark::Cleared,
+        )
         .await
         .unwrap();
     assert_eq!(
         harness
             .store
-            .notification_marks(&["sess-1".to_string()])
+            .notification_marks(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
-            .get("sess-1"),
+            .get(&store::SessionKey::new(viewer_host, "sess-1")),
         Some(&(2, 2)),
         "fixture premise: the source's notification marks exist before the replace"
     );
-    assert!(harness.store.set_pinned("sess-1", true).await.unwrap());
     assert!(
         harness
             .store
-            .pinned_sessions(&["sess-1".into()])
+            .set_pinned(&store::SessionKey::new(viewer_host, "sess-1"), true)
             .await
             .unwrap()
-            .contains("sess-1"),
+    );
+    assert!(
+        harness
+            .store
+            .pinned_sessions(&[store::SessionKey::new(viewer_host, "sess-1")])
+            .await
+            .unwrap()
+            .contains(&store::SessionKey::new(viewer_host, "sess-1")),
         "fixture premise: source pin exists"
     );
     let (status, body) = post_text(
@@ -2690,7 +2735,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     assert!(
         harness
             .store
-            .seen_activity(&["sess-1".to_string()])
+            .seen_activity(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
             .is_empty(),
@@ -2699,7 +2744,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     assert!(
         harness
             .store
-            .notification_marks(&["sess-1".to_string()])
+            .notification_marks(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
             .is_empty(),
@@ -2708,19 +2753,19 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
     assert!(
         !harness
             .store
-            .pinned_sessions(&["sess-1".into()])
+            .pinned_sessions(&[store::SessionKey::new(viewer_host, "sess-1")])
             .await
             .unwrap()
-            .contains("sess-1"),
+            .contains(&store::SessionKey::new(viewer_host, "sess-1")),
         "deleted source pin must be cleared"
     );
     assert!(
         harness
             .store
-            .pinned_sessions(&["sess-2".into()])
+            .pinned_sessions(&[store::SessionKey::new(viewer_host, "sess-2")])
             .await
             .unwrap()
-            .contains("sess-2"),
+            .contains(&store::SessionKey::new(viewer_host, "sess-2")),
         "replacement inherits the pin"
     );
     let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();

@@ -1556,6 +1556,10 @@ client keeps its own copy, and opening the same session from a second client see
 session reads UNSEEN whenever its most recent activity is newer than that recorded stamp, or nothing is recorded at all;
 otherwise it reads SEEN.
 
+Pins, seen stamps and notification read/cleared marks belong to the session on its particular host entry. They survive
+editing, retargeting or adopting that entry, but removing it and adding the host again starts those values fresh. On
+upgrading to this storage, state the helm cannot attribute to one host starts fresh too.
+
 The stamp is set automatically in two moments — opening a session records its current activity as seen, and that
 session's activity advancing while it stays open re-records the new value — with which client did the opening, and
 whether its window has focus or its tab is visible, both ignored: a session sitting in a background tab is still
