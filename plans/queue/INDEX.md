@@ -19,7 +19,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `host-settings-focus.md` — Keep keyboard focus inside host settings and SSH help when a save ends or SSH help's commands arrive (1 TODO entry).
 - [complete] `launch-sequences.md` — Accurate quick-launch banners, one launchability rule for templates, and a centered amber launch-sequence pill (2 TODO entries).
 - [complete] `menu-arrow-focus-race.md` — Drop a desktop menu focus move that would land after the user moved focus elsewhere (1 TODO entry).
-- [pending] `launcher-enter-feedback.md` — Make Enter in the session launcher always launch, pick a visible row, or say why not (1 TODO entry).
+- [in-flight cf3a9b] `launcher-enter-feedback.md` — Make Enter in the session launcher always launch, pick a visible row, or say why not (1 TODO entry).
 - [complete] `select-newest-on-close.md` — When the open session goes away, open the most recently visited one, from a history kept on the helm (1 TODO entry). (after `host-entry-session-ids.md`)
 - [pending] `supervisor-request-modes.md` — Declare how every supervisor request type runs in one exhaustive table with one owner for channel ids, test that each keeps the connection moving, and fix the requests that still stall it (creation and the checkout reconciliation before it). (after `tab-attach-no-wait.md`)
 - [pending] `helm-owned-by-default.md` — Run every state-changing helm request on a helm-owned task by default, with an explicit exempt list for routes that must stay cancellable (structural refactor; accidental omissions fixed first). (after `host-entry-session-ids.md`, `transfer-leftover-cleanup.md`)
