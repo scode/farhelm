@@ -137,3 +137,96 @@ Each PR passed its single fresh-context gpt-6.1-sol/high general reviewer, with 
 outcome entries and test-authoring checklist. The same reviewers verified corrections; no second general reviewer or
 swarm was used. Commit/PR wording passed independent cold reads. The combined boundary cut passed the required scope
 reassessment, and the approval display complexity gate was accepted for the reuse described above.
+
+### Landing
+
+Landed as #2366, #2367, #2368, #2369 and #2370, merged bottom-up, with test-only fixes made during the landing (below);
+no product code changed at landing. It was the first of four plans in this landing round, with helm-lock-outlives-work,
+hosts-panel-menu-close and template-list-current-labels after it.
+
+#### Release relevance
+
+This is the release's largest change and is marked breaking. The report covers it; in short:
+
+- The helm's database migration is one-way, and some viewer conveniences that cannot be attributed to one host entry
+  (pins, seen state, notification marks, the last selection) are dropped.
+- Agent commands need the full session IDs `farhelm agent sessions` prints; remembered bare IDs are refused.
+- Discovery JSON moves to schema version 7.
+- Approval requests waiting when the helm restarts for the upgrade are lost; the agent has to ask again.
+- An open browser tab must be reloaded after the upgrade.
+- Session IDs are limited to 40 bytes from the supervisor (77 for the full ID); longer ones, which only foreign or
+  hand-edited state could produce, are left out of listings.
+- Supervisors are unchanged and older ones keep working.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained archive-recovery-reproduction (a guard on a deleted checkout's recorded trash
+location, in the supervisor), summary-card-observed-yolo (the session hover card mentions observed YOLO), and
+documentation and plan bookkeeping. A fresh-context reviewer and I read this plan against those and against the three
+plans landing after it:
+
+- The hover card change reads only a session's launch and its observed-YOLO flag, never its ID, and approval cards are
+  drawn outside the session rows it changed, so it does not interact.
+- The trash-location guard is entirely inside the supervisor, which still uses bare local IDs.
+- helm-lock-outlives-work changes when the helm releases its state-folder lock; this plan's database migration still
+  runs while the lock is held, before anything else opens the database.
+- hosts-panel-menu-close and template-list-current-labels touch neither session identity nor host entries.
+
+The only conflicts were in the review feedback queue's index, where each plan removes its own entries; all removals are
+kept. While the landing ran, main also gained three planning changes that edit TODO.md and the triage record, not code.
+The landed code is identical to what the landing's checks below tested.
+
+#### Fixes made during the landing
+
+The executor ran 9 of the roughly 40 browser files it edited (counted from the diff), and only a selection of Rust
+tests. The landing's whole-suite runs found tests that still expected the old bare IDs, or a session to keep its
+reference after its host was removed and re-added (the plan's own design gives it a new one). Each fix sits in the PR
+that introduced the change it follows; none changes product code:
+
+- In #2366, #2367 and #2369, the helm's checkout-configuration migration tests rebuild an older database to check the
+  upgrade path, and that rebuild now also undoes this plan's schema changes: it drops the host entry ID column, restores
+  the seen-state table to its old shape, and recreates the one-owner index on cached sessions that the plan removed.
+- In #2368:
+  - Two helm host tests now compare session rows with full references.
+  - A new browser-test helper gives the supervisor's own part of a full ID. The managed-checkout and clone browser tests
+    use it to wait for a launch marker the supervisor prints, and the file-attachment tests use it to check the folder
+    uploads land in.
+  - The test that removes and re-adds a host now checks that the session survives with the same supervisor ID but a new
+    reference, and its cleanup finds the session again under the new entry. Before that change, it left a session
+    running on the test's remote host, which failed later tests.
+  - One session-list test built a page selector from a session ID, and the colon in a full ID broke the selector.
+
+#### Possible follow-ups
+
+- hosts-panel-menu-close, landing after this plan, closes an open session menu whenever the hosts panel changes height.
+  Browser tests that open a session row's menu without waiting for host rows to settle could become flaky. Nothing
+  failed for this reason in these runs.
+
+#### Checks
+
+Run now, on the four plans stacked together on main:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed file, and `python3 releasing/check-changelog.py format`: all passed,
+  and clippy again after the fixes.
+- The whole Rust workspace through the test recorder with pinned nextest and tmux, four slots and no retries
+  (`cargo nextest run --workspace --exclude farhelm-desktop`): 3934 passed and 4 failed in run
+  `7067248e-06f2-4bd7-90ff-63250d8fff42`, the four helm tests fixed above. After the fixes, those two test modules
+  passed in run `19fa2fc6-b6f3-442a-8682-5e3614f48040`, and the whole helm library (1232 tests) in run
+  `cbf11585-1556-4055-ba01-7041b35a4f28`. The UI library built with desktop support: 714 passed, run
+  `1560df43-83f8-4586-87cf-c71d56f481fc`. `node --test` in the UI's JavaScript test directory: 311 passed, run
+  `5f9b15b4-5549-46ed-8f7a-3528415256fa`.
+- The full browser suite (`npx playwright test`) on Chromium and WebKit, one worker, no retries: 2025 passed, 27 failed
+  and 76 did not run, in run `8214f916-6dda-4c7a-9d91-35ed24e150e8`; all failures were the browser tests fixed above,
+  and every test that did not run was in the multi-host file. After the fixes, the clone, managed-checkout,
+  file-attachment, session-list and multi-host files ran again: 417 passed and 3 multi-host tests failed, in run
+  `796a5815-5f13-4ded-8d5c-a796487bd993`; those three came from the remove-and-re-add test's leftover session, and after
+  its cleanup fix the multi-host file alone passed all 116 tests, run `c5409925-1c07-4c7f-9e5c-065728a7e123`. The
+  remaining skips are by design: the real-agent tests, WebKit's clipboard limits, and one visual capture.
+- Skipped: the installer and provisioning against a CentOS host (no change to installing Farhelm or setting up hosts),
+  the native Mac app (not runnable here), and doctests (no documentation examples changed).
+
+One thing in the executor's report became untrue at landing: it skipped the full Rust and browser suites on the ground
+that its selected checks covered the affected behavior, and the full suites then found the stale tests above. The
+product behavior the report describes held.
