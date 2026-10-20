@@ -17135,7 +17135,11 @@
 - Completion criteria: mixed-case spec-name typos are rejected as documented, with a self-test fixture. Size gate: about
   100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog fragment); over
   it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/tooling-checks-oct19.md`.
+- Execution: complete in change `tvvuxzntuprwyrmymqypwptzrsrqqoru`, bookmark
+  `plan/tooling-checks-oct19/03-check-mixed-case-spec-pointers`. Uppercase stems with mixed-case underscore suffixes are
+  definite paths, so a missing specification target fails. Self-tests preserve existing specification references and
+  lowercase fragment examples. Code/test/doc diff: 26 lines, within the 100-line gate.
+  [PR #2422](https://github.com/scode/farhelm/pull/2422/changes).
 
 ## agent-checkout-test-compares-lexical-tmp.md
 

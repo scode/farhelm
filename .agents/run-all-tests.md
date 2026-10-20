@@ -96,7 +96,7 @@ Generic recorder wrapping is fine but not required for these; record each result
   request counts and diagnostics for unexpected requests in refused `/latest` cases.
 - `dprint check`
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` (includes both Claude
-  instruction-file names in the repository inventory)
+  instruction-file names in the repository inventory and mixed-case specification pointers)
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`
 - `dist generate --check`
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test`

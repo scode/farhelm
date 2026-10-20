@@ -11,8 +11,8 @@ and this script checks for each of them:
   `# End of AGENTS.md` sentinel, which is how an agent recognizes a truncated copy.
 - A pointer names a file that does not exist, or a citation names a heading that was renamed, so an agent following
   the instructions reaches nothing. Checked: backticked paths that exist, start with a tracked top-level entry, or are
-  unmistakably files (a `.md` path with a directory, or an all-caps name like `SPEC.md`); Markdown links, resolved
-  relative to the citing file as a renderer does; `` `file`, "Heading" `` citations in any tracked text file; and the
+  unmistakably files (a `.md` path with a directory, or an uppercase stem like `SPEC.md` or `SPEC_impl.md`); Markdown
+  links, resolved relative to the citing file as a renderer does; `` `file`, "Heading" `` citations in any tracked text file; and the
   older comma-less root citations (root `AGENTS.md` "Heading"), which must name a current root heading or one listed
   in `.agents/old-sections.md`. Other backtick spans (commands, runtime files like `~/.farhelm-ntfy-topic`, templates
   with `<placeholders>`) are not paths.
@@ -126,14 +126,14 @@ def warn_only(path: str) -> bool:
 
 
 def is_definite_path(ref: str) -> bool:
-    """A span that can only be meant as a repository file: a `.md` path with a directory, or an all-caps `.md` name.
+    """Recognize directory paths and uppercase file stems, including mixed-case underscore suffixes.
 
     These are checked even when nothing by that name exists, so a typo (`plnas/AGENTS.md`, `SPEC_impll.md`) fails
     rather than being mistaken for a command. Lowercase bare names (`cursor-launch.md`) are often examples, not paths.
     """
     if not ref.endswith(".md"):
         return False
-    return "/" in ref or re.fullmatch(r"[A-Z0-9_]+(\.[A-Za-z0-9_]+)?\.md", ref) is not None
+    return "/" in ref or re.fullmatch(r"[A-Z0-9_]+(?:_[A-Za-z0-9_]+)?(\.[A-Za-z0-9_]+)?\.md", ref) is not None
 
 
 def resolve(root: pathlib.Path, source: str, ref: str, top_level: set[str],
@@ -375,6 +375,13 @@ def self_test() -> int:
          {**good, ".agents/a.md": "# A\n\nRead `sbu/AGENTS.md`.\n"}, "names `sbu/AGENTS.md`")
     case("typo in an all-caps file name is an error",
          {**good, ".agents/a.md": "# A\n\nRead `SPECC.md`.\n"}, "names `SPECC.md`")
+    case("typo in a mixed-case spec name is an error",
+         {**good, ".agents/a.md": "# A\n\nRead `SPEC_impll.md`.\n"}, "names `SPEC_impll.md`")
+    case("existing mixed-case specification resolves",
+         {**good, "SPEC_impl.md": "# Implementation\n",
+          ".agents/a.md": good[".agents/a.md"] + "Read `SPEC_impl.md`.\n"}, None)
+    case("lowercase bare fragment names remain examples",
+         {**good, ".agents/a.md": good[".agents/a.md"] + "Write `cursor-launch.md`.\n"}, None)
     case("markdown links resolve relative to the citing file",
          {**good, ".agents/a.md": "# A\n\nRead [b](.agents/b.md).\n", ".agents/b.md": "# B\n"}, "names `.agents/b.md`")
     case("the old-section map is not a reading route",
