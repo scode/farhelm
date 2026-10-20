@@ -336,3 +336,30 @@ A single fresh-context gpt-6.1-sol reviewer at high effort reviewed the ledger d
 patch, retained recorder evidence and relevant ownership/cache code. No findings. The reviewer confirmed that the
 ledger's claims follow from the assertions and retained output, that its limitations stay explicit, and that only the
 Execution field changes. The commit/PR wording passed its fresh cold read after one rewrite.
+
+### Landing
+
+Landed as #2356, unchanged from what the report describes. It was the fifth of eight plans in this landing round. Its
+one PR changes only the triage record (TRIAGE_OUTCOMES.md); the reproduction itself stays in the report, as the report
+says, and the finding's feedback file stays in the review queue for the next triage.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the PR's base, main gained link-hover-covers, workspace-trust-destination, session-header-and-row-fixes,
+queued-launch-snapshot and plan bookkeeping. None of them changes how the helm unpacks and caches the program files it
+installs on hosts, or how it holds its state folder, so the report's evidence still describes main. The other plans in
+the round edit different TRIAGE_OUTCOMES.md entries, with no conflict there. The landed text is identical to what was
+checked.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+`dprint check` on TRIAGE_OUTCOMES.md, on the combined result of the round's landing plans: passed. No runtime tests were
+run for this PR, since it changes only a Markdown record. It was part of the combined tree on which the landing ran the
+round's Rust, JavaScript and browser checks (runs `cdabc40d-ecaa-418e-938f-01f2cbe4da64`,
+`fcb2b9cf-4424-4fc2-8148-dede8454a5ea` and `1484ba9a-0aab-4e7f-a7a4-716faede7c66`), all of which passed.
+
+Nothing in the executor's report became untrue at landing.
