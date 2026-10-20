@@ -242,6 +242,7 @@ for (const [field, value] of [
 /** Keys move between saved names independently of the bolt. Keyboard Escape
  * closes only the nested menu; rename must retain the key, while delete/Undo
  * retires it permanently. Partial templates retain the same complete key menu.
+ * An external move made while this dialog stays open must survive its next edit.
  */
 test("number keys move, follow rename, and stay freed after undo", async ({ page, request }) => {
   const prefix = `number-bindings-${Date.now()}`;
@@ -293,6 +294,21 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await dialog.getByRole("button", { name: "undo", exact: true }).click();
     await expect(keyButton(renamed)).toBeVisible();
     await expect(keyButton(renamed)).toHaveText("Ctrl+Shift+ –");
+    await patchPreferences(request, { template_shortcuts: { "1": a }, quick_launch_template: a });
+    expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": a });
+    await expect(keyButton(a)).toHaveText("Ctrl+Shift+ –");
+    await keyButton(renamed).click();
+    await dialog.getByRole("menu", { name: `number key for ${renamed}`, exact: true })
+      .getByRole("menuitem", { name: "Ctrl+Shift+2", exact: true }).click();
+    await expect.poll(async () => (await readPreferences(request)).template_shortcuts).toEqual({ "1": a, "2": renamed });
+    await patchPreferences(request, { quick_launch_template: renamed });
+    expect((await readPreferences(request)).quick_launch_template).toBe(renamed);
+    const bolt = dialog.getByRole("button", { name: `quick launch ${renamed}`, exact: true });
+    await expect(bolt).toHaveAttribute("aria-pressed", "false");
+    // The stale unlit bolt asks to mark a template an agent has already marked: the mark must survive.
+    await bolt.click();
+    await expect(bolt).toHaveAttribute("aria-pressed", "true");
+    expect((await readPreferences(request)).quick_launch_template).toBe(renamed);
     await dialog.locator(".templates-close").click();
     await patchPreferences(request, { template_shortcuts: { "3": partial } });
     await page.reload();

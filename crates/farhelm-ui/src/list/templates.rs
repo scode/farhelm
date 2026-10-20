@@ -8,6 +8,7 @@
 
 use super::shared::HostOption;
 use crate::ApiBase;
+use crate::api::{PreferenceValue, Preferences};
 use crate::hosts::settings_dialog::install_dialog_with_selector;
 use crate::launch_sequence::TEMPLATE_SHORTCUTS;
 use crate::menu_panel::{
@@ -36,6 +37,24 @@ fn bind_number(bindings: &mut BTreeMap<String, String>, name: &str, key: Option<
     if let Some(key) = key {
         bindings.insert(key.into(), name.into());
     }
+}
+
+/// Mirror fresh bindings without replacing unrelated cached preferences.
+/// Callers apply the shared binding overlay first so unconfirmed local writes
+/// retain their ownership; this refresh must never become a whole seed read.
+pub(super) fn apply_template_bindings(current: &mut Preferences, fresh: Preferences) {
+    current.quick_launch_template = fresh.quick_launch_template;
+    current.template_shortcuts = fresh.template_shortcuts;
+}
+
+/// Capture intent before reading; a stale displayed owner cannot decide a toggle.
+///
+/// `Bolt` carries what the user asked for at click time: `true` to mark the template (its bolt was unlit),
+/// `false` to clear it (lit). The handler applies that to freshly read bindings and writes nothing when they
+/// already agree, so a mark or move an agent made while the dialog was open is never undone.
+enum BindingEdit {
+    Bolt(String, bool),
+    Number(String, Option<String>),
 }
 
 /// Move the old name's key even if the new name has a stale binding already.
@@ -1289,33 +1308,49 @@ pub(super) fn TemplatesDialog(
     let mut add_open = use_signal(|| false);
     let mut undo = use_signal(|| None::<Undo>);
     let mut undo_generation = use_signal(|| 0_u64);
-    let mark_base = base.clone();
-    let mark: EventHandler<String> = EventHandler::new(move |name| {
+    let binding_base = base.clone();
+    let edit_binding: EventHandler<BindingEdit> = EventHandler::new(move |edit| {
         if busy() {
             return;
         }
-        let next =
-            (preferences.0.peek().quick_launch_template.as_ref() != Some(&name)).then_some(name);
-        preferences.0.write().quick_launch_template = next.clone();
-        crate::api::store_preference(
-            &mark_base,
-            crate::api::PreferenceValue::QuickLaunchTemplate(next),
-        );
-    });
-    let number_base = base.clone();
-    let bind_key: EventHandler<(String, Option<String>)> =
-        EventHandler::new(move |(name, key): (String, Option<String>)| {
-            if busy() {
-                return;
+        busy.set(true);
+        error.set(None);
+        let base = binding_base.clone();
+        spawn(async move {
+            match crate::api::fetch_preferences(&base).await {
+                Ok(fresh) => {
+                    apply_template_bindings(
+                        &mut preferences.0.write(),
+                        crate::api::template_bindings_after_read(fresh),
+                    );
+                    let mut current = preferences.0.write();
+                    let value = match edit {
+                        BindingEdit::Bolt(name, mark) => {
+                            // Already as asked (an agent marked it, or moved the mark away): leave it.
+                            let owned = current.quick_launch_template.as_ref() == Some(&name);
+                            (mark != owned).then(|| {
+                                let next = mark.then_some(name);
+                                current.quick_launch_template = next.clone();
+                                PreferenceValue::QuickLaunchTemplate(next)
+                            })
+                        }
+                        BindingEdit::Number(name, key) => {
+                            bind_number(&mut current.template_shortcuts, &name, key.as_deref());
+                            Some(PreferenceValue::TemplateShortcuts(
+                                current.template_shortcuts.clone(),
+                            ))
+                        }
+                    };
+                    drop(current);
+                    if let Some(value) = value {
+                        crate::api::store_preference(&base, value);
+                    }
+                }
+                Err(message) => error.set(Some(message)),
             }
-            let mut bindings = preferences.0.peek().template_shortcuts.clone();
-            bind_number(&mut bindings, &name, key.as_deref());
-            preferences.0.write().template_shortcuts = bindings.clone();
-            crate::api::store_preference(
-                &number_base,
-                crate::api::PreferenceValue::TemplateShortcuts(bindings),
-            );
+            busy.set(false);
         });
+    });
     use_effect(move || {
         let writing = busy();
         let loading = templates.pending();
@@ -1694,7 +1729,7 @@ pub(super) fn TemplatesDialog(
                                                 aria_label: "quick launch {display_peer(&template.name)}",
                                                 aria_pressed: preferences.0.read().quick_launch_template.as_ref() == Some(&template.name),
                                                 "data-tooltip": if preferences.0.read().quick_launch_template.as_ref() == Some(&template.name) { format!("{quick_launch_chord} starts a session from this template right away, without opening New. Only one template can hold ⚡. Click to turn off.") } else if !quick_launch_eligible(&template.fields) { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Can't mark this one: an agent launch needs an agent; a command launch needs a nonblank command.") } else { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Click to mark this one.") },
-                                                onclick: { let name = template.name.clone(); move |_| mark.call(name.clone()) },
+                                                onclick: { let name = template.name.clone(); move |_| { let lit = preferences.0.read().quick_launch_template.as_ref() == Some(&name); edit_binding.call(BindingEdit::Bolt(name.clone(), !lit)) } },
                                                 "⚡"
                                             }
                                             NumberShortcutMenu {
@@ -1702,7 +1737,7 @@ pub(super) fn TemplatesDialog(
                                                 launchable: quick_launch_eligible(&template.fields), disabled: disabled || templates.pending(),
                                                 bindings: preferences.0.read().template_shortcuts.clone(),
                                                 layout_epoch, dialog_epoch,
-                                                on_choose: { let name = template.name.clone(); move |key| bind_key.call((name.clone(), key)) },
+                                                on_choose: { let name = template.name.clone(); move |key| edit_binding.call(BindingEdit::Number(name.clone(), key)) },
                                             }
                                             button { r#type: "button", class: "templates-row", disabled: disabled || templates.pending(), aria_pressed: previous().as_ref()==Some(&template.name), "data-tooltip": "edit template {display_peer(&template.name)}", onclick: move |_| depart.call(Departure::Open(Box::new(template.clone()))),
                                                 span { class: "templates-row-name peer-value", dir: "ltr", "{display_peer(&template.name)}" }

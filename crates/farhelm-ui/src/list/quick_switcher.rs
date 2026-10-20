@@ -6,6 +6,7 @@
 //! each tier. Selection is a navigation intent; ListView keeps the ordinary
 //! busy guard, preference write and terminal focus handoff.
 
+use super::templates::apply_template_bindings;
 use dioxus::prelude::*;
 
 use crate::api::{ListSort, Preferences, SessionFilter, fetch_sessions, fetch_templates};
@@ -170,7 +171,7 @@ fn agent_label(session: &Session) -> &'static str {
 ///
 /// Preferences give the current assignments, while the one shortcut
 /// definition supplies the same labels used by the capture listener.
-fn template_shortcut_badges(name: &str, preferences: &crate::api::Preferences) -> Vec<String> {
+fn template_shortcut_badges(name: &str, preferences: &Preferences) -> Vec<String> {
     let keys = crate::launch_sequence::TEMPLATE_SHORTCUTS;
     let mut badges = Vec::new();
     if preferences.quick_launch_template.as_deref() == Some(name) {
@@ -182,14 +183,6 @@ fn template_shortcut_badges(name: &str, preferences: &crate::api::Preferences) -
         }
     }
     badges
-}
-
-/// Mirror fresh bindings without replacing unrelated cached preferences.
-/// Callers apply the shared binding overlay first so unconfirmed local writes
-/// retain their ownership; this refresh must never become a whole seed read.
-fn apply_template_bindings(current: &mut Preferences, fresh: Preferences) {
-    current.quick_launch_template = fresh.quick_launch_template;
-    current.template_shortcuts = fresh.template_shortcuts;
 }
 
 /// Coalesce highlight runs so a long legal title does not create one DOM

@@ -3229,6 +3229,9 @@ surface alongside the GUI, including while a GUI is open (acting from inside a s
 it, unless the host's setting says not to ask; see Agent-spawned sessions): operations they perform concurrently with a
 GUI must behave correctly, and the best-effort qualifier above applies only to several GUIs at once.
 
+A GUI write must not undo a change an agent or the command line made while that view was open; the view's display may
+lag until the next interaction.
+
 Confirmed 2026-10-10: an action a user takes inside a sub-second window before the screen updates, or in a dialog hidden
 behind another, may be carried out as delivered. A Cancel and a submit of the same dialog that arrive together before a
 redraw may still submit, and confirming a dialog that another one covers confirms that dialog. Guards this spec names
