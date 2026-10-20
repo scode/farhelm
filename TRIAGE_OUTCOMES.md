@@ -17141,4 +17141,9 @@
   that alters the request still mints a new one; a test. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-retry-identity.md`.
+- Execution: implemented in change `zwusrwwquqtwkvvzowymonszspxtlxsv`, bookmark
+  `plan/launcher-retry-identity/03-template-retry`, [PR #2398](https://github.com/scode/farhelm/pull/2398/changes). A
+  template preserves the retained request binding across its edits; submit's existing comparison reuses it for an
+  unchanged request and mints a new key for a changed one. Browser coverage commits a quick launch while losing its
+  reply, reapplies unchanged or changed templates through both shortcut kinds, and checks request keys, session counts
+  and the resulting live attachment.

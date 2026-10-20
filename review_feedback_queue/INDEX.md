@@ -18,9 +18,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Repeated update or removal planning can leave adding, updating, and removing hosts stuck until the helm restarts, even
   after the pages close.
 
-- [`unchanged-template-drops-launch-retry-key.md`](unchanged-template-drops-launch-retry-key.md) — Reapplying an
-  unchanged template after a lost reply discards retry protection and can start another session.
-
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`file-recognition-rejects-digit-leading-extensions.md`](file-recognition-rejects-digit-leading-extensions.md) —
