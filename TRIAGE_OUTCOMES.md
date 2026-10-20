@@ -16586,7 +16586,11 @@
   precedent), and the UI's retry does not spin; the existing test is updated. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or the changelog fragment). Remove the feedback file and
   its index entry.
-- Execution: planned in `plans/queue/tab-attach-no-wait.md`.
+- Execution: implemented in change `uyupqqzuqomzvvmuoolkrozsxkonowko`, bookmark
+  `plan/tab-attach-no-wait/01-refuse-busy-tab-attach`. A contested tab attach now refuses immediately while retaining
+  the lifecycle guard for accepted attachments. The existing terminal reconnect delay spaces retries. The updated
+  regression and 50 other selected tests passed. Code, tests and docs total 99 changed lines, within the 100-line gate.
+  PR: https://github.com/scode/farhelm/pull/2409/changes.
 
 ## abandoned-planners-exhaust-global-planning-slots.md
 

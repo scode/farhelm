@@ -1280,32 +1280,27 @@ async fn handle_attach(
     // Holding it is what makes `close_tab`'s own claim mean
     // something from this side. The agent terminal has no such
     // race (nothing removes it while its session lives), and
-    // taking the claim for it would queue every ordinary attach
-    // behind a multi-second stop or delete for no gain.
+    // taking the claim for it would refuse ordinary attaches during
+    // a stop or delete for no gain. A contested tab claim is refused
+    // immediately: this handler runs on the shared connection reader,
+    // which must never wait out a process teardown's grace period.
     let _lifecycle = match &terminal_id {
-        TerminalId::Tab(_) => {
-            match tokio::time::timeout(
-                sup.timeouts.tab_attach_lifecycle,
-                sup.lifecycle_locks.claim(&session_id),
-            )
-            .await
-            {
-                Ok(claim) => Some(claim),
-                Err(_) => {
-                    reply_error(
-                        tx,
-                        req_id,
-                        ErrorKind::Conflict,
-                        format!(
-                            "session {} is being stopped or deleted; retry attaching",
-                            truncate_for_error(&session_id)
-                        ),
-                    )
-                    .await;
-                    return;
-                }
+        TerminalId::Tab(_) => match sup.lifecycle_locks.try_claim(&session_id) {
+            Some(claim) => Some(claim),
+            None => {
+                reply_error(
+                    tx,
+                    req_id,
+                    ErrorKind::Conflict,
+                    format!(
+                        "session {} is being stopped or deleted; retry attaching",
+                        truncate_for_error(&session_id)
+                    ),
+                )
+                .await;
+                return;
             }
-        }
+        },
         TerminalId::Agent => None,
     };
     let entry = sup.sessions.lock().await.get(&session_id).cloned();
@@ -6125,25 +6120,19 @@ mod tests {
         );
     }
 
-    /// A tab attach must give the shared connection read loop back when a
-    /// lifecycle operation holds the session claim. The claim protects tab
-    /// resolution and takeover, but waiting for a stop or delete to finish
-    /// must not park unrelated requests on the same connection indefinitely.
+    /// A contested tab attach must return without advancing the clock while
+    /// the lifecycle claim stays held. Even a bounded wait would park every
+    /// later request on the shared reader behind a process teardown.
     #[farhelm_testtrace::test]
-    async fn tab_attach_lifecycle_claim_times_out_and_hands_off() {
+    async fn tab_attach_lifecycle_claim_refuses_without_waiting_and_hands_off() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe_and_timeouts(
-            state.path(),
-            dummy_exe(),
-            SupervisorTimeouts {
-                tab_attach_lifecycle: Duration::from_secs(2),
-                ..SupervisorTimeouts::default()
-            },
-        )
-        .await
-        .expect("supervisor");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
         tokio::time::pause();
         let held = sup.lifecycle_locks.claim("session-1").await;
+        assert!(sup.lifecycle_locks.try_claim("session-1").is_none());
+        let started = tokio::time::Instant::now();
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let mut input_routes = HashMap::new();
         let mut tasks = tokio::task::JoinSet::new();
@@ -6173,24 +6162,14 @@ mod tests {
                     },
                 )
                 .await;
+                assert!(input_routes.is_empty());
             }
         });
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            sup.lifecycle_locks.claims_reached_for_test("session-1", 2),
-        )
-        .await
-        .expect("the tab attach must reach the held lifecycle claim");
-
-        tokio::time::advance(Duration::from_secs(2)).await;
         attach.await.expect("tab attach task must not panic");
-        let reply: ControlMsg = serde_json::from_slice(
-            &rx.recv()
-                .await
-                .expect("the timed-out attach must reply")
-                .body,
-        )
-        .expect("the attach reply must decode");
+        assert_eq!(tokio::time::Instant::now(), started, "attach must not wait");
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("the refused attach must reply").body)
+                .expect("the attach reply must decode");
         let ControlMsg::Error { kind, message, .. } = reply else {
             panic!("a held lifecycle claim must produce an error reply");
         };
