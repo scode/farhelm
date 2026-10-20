@@ -16688,7 +16688,9 @@
 - Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3), whose recommendation
   discarded this as probably fixed.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: planned in `plans/queue/triage-discards-oct19.md`.
+- Execution: `complete`; discarded as agreed, with no spec or code change. jj change `vxrzyqozprtstktmxzmzkvxqrruxulkv`,
+  bookmark `plan/triage-discards-oct19/01-close-discards`;
+  [draft PR #2423](https://github.com/scode/farhelm/pull/2423/changes).
 
 ## stale-outcome-hides-successful-stop.md
 
@@ -16700,7 +16702,9 @@
 - Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3): not super cheap,
   discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: planned in `plans/queue/triage-discards-oct19.md`.
+- Execution: `complete`; discarded as agreed, with no spec or code change. jj change `vxrzyqozprtstktmxzmzkvxqrruxulkv`,
+  bookmark `plan/triage-discards-oct19/01-close-discards`;
+  [draft PR #2423](https://github.com/scode/farhelm/pull/2423/changes).
 
 ## archive-recovery-clears-reused-path-trust.md
 
@@ -16731,7 +16735,9 @@
 - Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3), whose recommendation
   discarded this one as not a real failure.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: planned in `plans/queue/triage-discards-oct19.md`.
+- Execution: `complete`; discarded as agreed, with no spec or code change. jj change `vxrzyqozprtstktmxzmzkvxqrruxulkv`,
+  bookmark `plan/triage-discards-oct19/01-close-discards`;
+  [draft PR #2423](https://github.com/scode/farhelm/pull/2423/changes).
 
 ## short-main-pane-hides-approval-requests.md
 
@@ -17013,7 +17019,9 @@
   cheap" (question 7): a display that lags until the next interaction is accepted.
 - Completion criteria: remove the feedback file and its index entry; no code change. The principle is written into
   SPEC.md under `stale-template-dialog-undoes-agent-shortcut.md`.
-- Execution: planned in `plans/queue/triage-discards-oct19.md`.
+- Execution: `complete`; discarded as agreed, with no spec or code change. jj change `vxrzyqozprtstktmxzmzkvxqrruxulkv`,
+  bookmark `plan/triage-discards-oct19/01-close-discards`;
+  [draft PR #2423](https://github.com/scode/farhelm/pull/2423/changes).
 
 ## introduction-promises-waiting-alerts-for-every-agent.md
 

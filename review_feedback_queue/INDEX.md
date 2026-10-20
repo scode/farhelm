@@ -25,20 +25,11 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
   — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
 
-- [`unselected-repository-keeps-stale-setup-eligibility.md`](unselected-repository-keeps-stale-setup-eligibility.md) —
-  Checkout setup eligibility can remain stale while no repository is selected.
-
-- [`stale-outcome-hides-successful-stop.md`](stale-outcome-hides-successful-stop.md) — A stale status publication can
-  hide a successfully recorded user Stop until another lifecycle operation or reload repairs it.
-
 - [`automatic-notification-dismissal-loses-focus.md`](automatic-notification-dismissal-loses-focus.md) — Automatic
   notification-list dismissal has no focus handoff to its session bell.
 
 - [`notification-popup-drifts-after-local-delete.md`](notification-popup-drifts-after-local-delete.md) — A notification
   popup can remain at its former position after a session above it is deleted.
-
-- [`empty-initial-prompt-skipped-by-tab.md`](empty-initial-prompt-skipped-by-tab.md) — Tab traversal can wrap before
-  reaching the empty initial-prompt editor.
 
 - [`template-name-editor-conceals-formatting.md`](template-name-editor-conceals-formatting.md) — The template name
   editor displays formatting characters raw although the list and approval card escape them.
@@ -48,9 +39,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`stale-template-dialog-undoes-agent-shortcut.md`](stale-template-dialog-undoes-agent-shortcut.md) — An open Templates
   dialog can overwrite an approved agent shortcut move with its old bindings.
-
-- [`noop-shortcut-approval-reports-missing-binding.md`](noop-shortcut-approval-reports-missing-binding.md) — A shortcut
-  request can report success after another client moves its initially satisfied binding during approval.
 
 - [`shortcut-tests-skip-owned-cleanup.md`](shortcut-tests-skip-owned-cleanup.md) — Early cleanup failures in shortcut
   and naming tests skip remaining owned resources or shared checkout configuration restoration.
