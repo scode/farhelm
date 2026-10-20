@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [complete] `test-hygiene-oct19.md` — Fix a macOS path comparison in checkout tests and three browser-test cleanups that stop early or arm late (4 triage outcomes). (after `host-entry-session-ids.md`)
+- [landing 6b0fb9] `test-hygiene-oct19.md` — Fix a macOS path comparison in checkout tests and three browser-test cleanups that stop early or arm late (4 triage outcomes). (after `host-entry-session-ids.md`)
 - [complete] `structured-settings-dialog.md` — Restructure the Settings dialog into a sidebar of seven sections, like the Templates dialog (1 TODO entry).
 - [complete] `menu-arrow-focus-race.md` — Drop a desktop menu focus move that would land after the user moved focus elsewhere (1 TODO entry).
 - [complete] `launcher-enter-feedback.md` — Make Enter in the session launcher always launch, pick a visible row, or say why not (1 TODO entry).
