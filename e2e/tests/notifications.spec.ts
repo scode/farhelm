@@ -11,7 +11,7 @@
 import { expect, test } from "./helpers/evidence";
 import { Locator, Page, Route } from "@playwright/test";
 import { cleanupSession, createSession, forceBuildSkew, pinAutoSelect, resetPreferences, stubFeed } from "./helpers/fleet";
-import { replayRecord, waitForReplayReveal, waitForSessionMounted } from "./helpers/terminal-readiness";
+import { replayRecord, waitForReplayReveal, waitForSessionMounted, waitForSessionReady } from "./helpers/terminal-readiness";
 
 interface StubNotification { seq: number; at: number; text: string; resolved?: boolean }
 
@@ -90,6 +90,40 @@ test.describe("session notifications", () => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     while (created.length) await cleanupSession(request, created.pop()!);
     await resetPreferences(request);
+  });
+
+  /** A layout dismissal must keep keyboard work at the bell, without
+   * reclaiming focus after the user has chosen a different control. The
+   * first Tab after closure proves no recovery key was swallowed. */
+  test("automatic notification dismissal returns only the list's focus", async ({ page, request }) => {
+    const session = await createSession(request, { title: `dismiss-focus-${Date.now()}` });
+    created.push(session.id);
+    await serveNotifications(page, session.id, new NotificationStub([{ seq: 1, at: NOW, text: "keep focus nearby" }]));
+    await pinAutoSelect(page, session.id);
+    await page.goto("/");
+    await waitForSessionReady(page, session.id);
+    const bell = row(page, session.id).locator(".session-row-bell");
+    await bell.click();
+    const panel = page.locator(".session-bell-panel");
+    await expect(panel).toBeFocused();
+    const viewport = page.viewportSize()!;
+    const sidebarHeight = (await page.locator(".app-sidebar").boundingBox())!.height;
+    await page.setViewportSize({ ...viewport, height: viewport.height - 40 });
+    await expect.poll(async () => (await page.locator(".app-sidebar").boundingBox())!.height).toBeLessThan(sidebarHeight);
+    await expect(panel).toHaveCount(0);
+    await expect(bell).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(bell).not.toBeFocused();
+    expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
+
+    await bell.click();
+    await expect(panel).toBeFocused();
+    const elsewhere = page.getByRole("button", { name: "new session", exact: true });
+    await elsewhere.focus();
+    await expect(elsewhere).toBeFocused();
+    await page.setViewportSize(viewport);
+    await expect(panel).toHaveCount(0);
+    await expect(elsewhere).toBeFocused();
   });
 
   /** Closing the list must reconcile its bell even when automatic reads stop.

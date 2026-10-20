@@ -103,6 +103,23 @@ pub(super) fn NotificationBell(
 ) -> Element {
     let mut bell_handle = use_signal(|| None::<Rc<MountedData>>);
     let mut placement = use_signal(|| PanelPlacement::Unmeasured);
+    // Removing a focused flyout destroys its event handlers before its
+    // focusout can reach Rust. Remember ownership while it is mounted,
+    // just as the row menu does, then let the shared handback guard preserve
+    // any control the user independently focused before this close.
+    let mut focus_inside = use_signal(|| false);
+    let return_id = session_id.clone();
+    use_effect(use_reactive((&open,), move |(open,)| {
+        let was_inside = *focus_inside.peek();
+        if open.is_none() && was_inside {
+            focus_inside.set(false);
+            crate::menu_panel::focus_menu_toggle(
+                "data-session-id",
+                &return_id,
+                ".session-row-bell",
+            );
+        }
+    }));
     // Bumped on every open so a measurement that resolves after a newer open
     // is discarded, as in the row menus (`menu_panel::measurement_outcome`).
     let mut open_generation = use_signal(|| 0_u64);
@@ -206,7 +223,11 @@ pub(super) fn NotificationBell(
                 // focus, through the same relay the outside-click dismissal
                 // clicks; focus that went nowhere (the page body) is the
                 // pointer-down path's to handle.
-                onfocusout: move |_| close_when_focus_leaves(&flyout_key_for_focus),
+                onfocusin: move |_| focus_inside.set(true),
+                onfocusout: move |_| {
+                    focus_inside.set(false);
+                    close_when_focus_leaves(&flyout_key_for_focus);
+                },
                 if let Some(pointer_style) = session_menu_pointer_style(placement()) {
                     span { class: "host-row-menu-pointer", style: pointer_style, "aria-hidden": "true" }
                 }
