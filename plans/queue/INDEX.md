@@ -3,7 +3,6 @@
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [complete] `structured-settings-dialog.md` — Restructure the Settings dialog into a sidebar of seven sections, like the Templates dialog (1 TODO entry).
-- [landing 488078] `menu-arrow-focus-race.md` — Drop a desktop menu focus move that would land after the user moved focus elsewhere (1 TODO entry).
 - [complete] `launcher-enter-feedback.md` — Make Enter in the session launcher always launch, pick a visible row, or say why not (1 TODO entry).
 - [complete] `select-newest-on-close.md` — When the open session goes away, open the most recently visited one, from a history kept on the helm (1 TODO entry). (after `host-entry-session-ids.md`)
 - [complete] `supervisor-request-modes.md` — Declare how every supervisor request type runs in one exhaustive table with one owner for channel ids, test that each keeps the connection moving, and fix the requests that still stall it (creation and the checkout reconciliation before it). (after `tab-attach-no-wait.md`)
