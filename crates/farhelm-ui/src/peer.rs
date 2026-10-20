@@ -94,6 +94,13 @@ impl PeerText {
         display_peer(self.raw())
     }
 
+    /// Escape a field's spelling without adding empty or blank placeholders.
+    /// The editor must keep the raw seed separately when untouched submission
+    /// preserves it; this displayed spelling is not a replacement wire value.
+    pub(crate) fn editable(&self) -> String {
+        editable_peer(self.raw())
+    }
+
     /// Show an identity without hiding spaces or confusing literal escape text.
     /// Comparisons and adoption must still use the original bytes from `raw`.
     pub(crate) fn identity(&self) -> String {
@@ -393,6 +400,7 @@ mod tests {
             let text: PeerText = serde_json::from_str(&wire).unwrap();
             assert_eq!(text.raw(), raw);
             assert_eq!(text.escaped(), display_peer(raw));
+            assert_eq!(text.editable(), editable_peer(raw));
             assert_eq!(text.identity(), display_identity(raw));
             assert_eq!(serde_json::to_string(&text).unwrap(), wire);
             assert_eq!(format!("{text:?}"), format!("{raw:?}"));
