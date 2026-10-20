@@ -16802,7 +16802,9 @@
   hovers and labels, choosing "Fix all ten, 100-line gate each, discard over the gate" (question 6).
 - Completion criteria: when the check button is replaced while focused, focus moves to the restart toggle; a test. Size
   gate: about 100 lines; over it, discard instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/app-dialog-focus.md`.
+- Execution: complete in change `wxzzpwxmykrsmqltznmzsoutnpkvyvwl`, bookmark `plan/app-dialog-focus/01-update-focus`;
+  [PR #2405](https://github.com/scode/farhelm/pull/2405/changes). The focused check hands off to Restart; 58 counted
+  lines, below the 100-line gate.
 
 ## ssh-help-close-loses-replaced-opener-focus.md
 
