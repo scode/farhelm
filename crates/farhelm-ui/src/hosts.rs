@@ -1192,6 +1192,10 @@ pub(crate) fn HostsPanel(
     /// The session list's own open-menu signal — written (never read) here,
     /// purely to close a session row's menu when a host row's opens.
     mut session_menu_open: Signal<Option<String>>,
+    /// Invalidate fixed sidebar menus when optional host-row text changes
+    /// the panel's size. The observer belongs on this section: resize
+    /// events do not bubble from it to the list that owns those menus.
+    on_resize: EventHandler<()>,
     on_changed: EventHandler<()>,
     /// Publish confirmed identity before releasing the write token. The
     /// parent owns the read-ordering barrier against older host reads.
@@ -1862,6 +1866,7 @@ pub(crate) fn HostsPanel(
     };
     rsx! {
         section { class: "hosts-panel",
+            onresize: move |_| on_resize.call(()),
             div { class: "hosts-heading",
                 // Number and label in separate spans so the stylesheet can
                 // draw this as a section heading, label first ("HOSTS 3"),
