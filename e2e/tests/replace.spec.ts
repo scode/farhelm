@@ -53,7 +53,7 @@ import { fulfillAsHelm, helmBuild, installTerminalSuiteHooks, LIVE_BADGE, LIVE_S
  * create that already landed, so the UI keeps the key for a same-key retry. */
 const UNACCEPTED = { "x-farhelm-create-outcome": "definitely-unaccepted" };
 import { routeGate } from "./helpers/route-gate";
-import { attachSession, waitForTermText } from "./helpers/term";
+import { answerYolo, attachSession, waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 // Fabricated refusals need the live helm's stamp. The existing suite reset
@@ -152,20 +152,37 @@ async function confirmSidebarReplace(sourceRow: Locator) {
 
 // This must use a real refusal: a fabricated marker would prove only the UI
 // branch, missing the supervisor's durable failure and the helm's translation.
-for (const surface of ["sidebar", "header"] as const) {
-  test(`plain Replace starts fresh after repairing a missing folder (${surface})`, async ({ page, request }) => {
+for (const surface of ["sidebar", "header", "new", "clone", "replace-with"] as const) {
+  test(`launchers start fresh after repairing a missing folder (${surface})`, async ({ page, request }) => {
     const root = stackScratchDir("replace-refused-");
     const cwd = path.join(root, "work");
     const hidden = path.join(root, "hidden");
     fs.mkdirSync(cwd);
     const title = `replace-refused-${surface}-${Date.now()}`;
     const source = await createSession(request, { title, cwd });
-    const endpoint = `**/api/sessions/${encodeURIComponent(source.id)}/replace`;
+    const keepsSource = surface === "new" || surface === "clone";
+    const routePath = keepsSource ? "/api/sessions" : `/api/sessions/${encodeURIComponent(source.id)}/replace`;
+    const endpoint = `**${routePath}`;
     const keys: string[] = [];
     try {
       await waitForListedState(request, source.id, "live");
       await page.goto("/");
       await attachSession(page, source.id);
+      const form = page.locator(".create-session-form");
+      if (surface === "new") {
+        await page.locator(".new-session-button").click();
+        await form.getByRole("tab", { name: "command", exact: true }).click();
+        await form.getByLabel("agent command").fill(FAKE_AGENT);
+        await form.getByLabel("folder", { exact: true }).fill(cwd);
+        await answerYolo(form);
+      } else if (surface === "clone" || surface === "replace-with") {
+        await openRowMenu(row(page, source.id));
+        await row(page, source.id).locator(`.session-row-${surface}`).click();
+      }
+      if (surface !== "sidebar" && surface !== "header") {
+        await form.getByLabel("name (optional)").fill(title);
+        await expect(form.locator(".create-session-submit")).toBeEnabled();
+      }
       fs.renameSync(cwd, hidden);
       expect(fs.existsSync(cwd), "the real create must see a missing folder").toBe(false);
       await page.route(endpoint, async (route) => {
@@ -175,20 +192,21 @@ for (const surface of ["sidebar", "header"] as const) {
       const sourceRow = row(page, source.id);
       const submit = async () => {
         if (surface === "sidebar") await confirmSidebarReplace(sourceRow);
-        else {
+        else if (surface === "header") {
           await page.locator(".header-replace").click();
           await page.locator(".header-replace-confirm .btn-danger").click();
-        }
+        } else await form.locator(".create-session-submit").click();
       };
       const [refusal] = await Promise.all([
         page.waitForResponse((response) => response.request().method() === "POST"
-          && response.url().endsWith(`/api/sessions/${encodeURIComponent(source.id)}/replace`)),
+          && response.url().endsWith(routePath)),
         submit(),
       ]);
       expect(refusal.ok()).toBe(false);
       expect(refusal.headers()["x-farhelm-create-outcome"]).toBe("definitely-unaccepted");
-      const error = surface === "sidebar" ? sourceRow.locator(".action-error").first() : page.locator(".replace-error");
-      await expect(error).toContainText("replace:");
+      const error = surface === "sidebar" ? sourceRow.locator(".action-error").first()
+        : surface === "header" ? page.locator(".replace-error") : form.locator(".create-session-error");
+      await expect(error).toBeVisible();
       expect(keys).toHaveLength(1);
       expect(keys[0].length).toBeGreaterThan(0);
       expect((await listSessions(request)).sessions.filter((one) => one.title === title).map((one) => one.id))
@@ -198,17 +216,17 @@ for (const surface of ["sidebar", "header"] as const) {
       expect(fs.statSync(cwd).isDirectory(), "the refusal's cause is repaired before retry").toBe(true);
       const [success] = await Promise.all([
         page.waitForResponse((response) => response.request().method() === "POST"
-          && response.url().endsWith(`/api/sessions/${encodeURIComponent(source.id)}/replace`)),
+          && response.url().endsWith(routePath)),
         submit(),
       ]);
       expect(success.ok(), await success.text()).toBe(true);
       const replacement = await success.json();
       expect(keys).toHaveLength(2);
       expect(keys[1]).not.toBe(keys[0]);
-      await expect(sourceRow).toHaveCount(0, { timeout: 20_000 });
+      await expect(sourceRow).toHaveCount(keepsSource ? 1 : 0, { timeout: 20_000 });
       await expect(row(page, replacement.id)).toHaveAttribute("data-session-selected", "true");
-      expect((await listSessions(request)).sessions.filter((one) => one.title === title).map((one) => one.id))
-        .toEqual([replacement.id]);
+      expect((await listSessions(request)).sessions.filter((one) => one.title === title))
+        .toHaveLength(keepsSource ? 2 : 1);
     } finally {
       await page.unroute(endpoint);
       if (fs.existsSync(hidden)) fs.renameSync(hidden, cwd);

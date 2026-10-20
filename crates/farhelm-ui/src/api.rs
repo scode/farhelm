@@ -2373,7 +2373,7 @@ pub(crate) async fn create_session(
         .map_err(|e| CreateRefusal::from(http_error_text(e)))
 }
 
-/// A refused create, and whether the helm said the world moved under it.
+/// A refused create, with the helm's proofs that permit changing retry state.
 ///
 /// `stale` comes from the helm's precondition header, never from the text:
 /// the text is the helm's body, which can quote a remote supervisor
@@ -2383,6 +2383,8 @@ pub(crate) async fn create_session(
 #[derive(Debug)]
 pub(crate) struct CreateRefusal {
     pub(crate) stale: bool,
+    /// The helm proved nothing was created; an unchanged retry needs a fresh key.
+    pub(crate) definitely_unaccepted: bool,
     /// The helm refused a YOLO launch on a host that asks before YOLO launches and will
     /// accept it again only with an explicit confirmation ([`asks_yolo_confirmation`]).
     /// Nothing was created.
@@ -2394,6 +2396,7 @@ impl From<String> for CreateRefusal {
     fn from(text: String) -> Self {
         CreateRefusal {
             stale: false,
+            definitely_unaccepted: false,
             yolo_confirmation: false,
             text,
         }
@@ -2406,6 +2409,7 @@ impl CreateRefusal {
         let yolo_confirmation = asks_yolo_confirmation(resp.headers());
         CreateRefusal {
             stale,
+            definitely_unaccepted: is_definitely_unaccepted(resp.headers()),
             yolo_confirmation,
             text: refusal_text(method, url, resp).await,
         }
@@ -5708,8 +5712,8 @@ mod tests {
     /// A create refusal is stale only when the helm's precondition header
     /// says so, whatever the text contains.
     ///
-    /// Stale is the one refusal the form answers by discarding its intent
-    /// key and re-reading. The text can quote a remote supervisor verbatim,
+    /// Staleness asks the form to re-read, independently of definitive create
+    /// refusal. The text can quote a remote supervisor verbatim,
     /// and staleness used to be a marker at the end of that text, so a
     /// supervisor that ended its message with the marker could trigger it.
     #[farhelm_testtrace::test]
@@ -5730,6 +5734,7 @@ mod tests {
             "ends like the old marker [farhelm:precondition/incarnation]".to_string(),
         );
         assert!(!refusal.stale);
+        assert!(!refusal.definitely_unaccepted);
     }
 
     /// The YOLO confirmation is offered only when the helm's header says so,

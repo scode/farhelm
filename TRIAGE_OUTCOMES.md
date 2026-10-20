@@ -17098,7 +17098,11 @@
   sentence to every launcher with the principle above. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-retry-identity.md`.
+- Execution: implemented in change `lntxolzrtymnmkynlnnuyunyklltowom`, bookmark
+  `plan/launcher-retry-identity/01-settled-refusal`, [PR #2390](https://github.com/scode/farhelm/pull/2390/changes).
+  New, Clone and Replace with consume the helm's definitive no-create proof so repairing a refused folder and retrying
+  unchanged starts a fresh attempt; uncertain and YOLO retries retain their identity. SPEC.md states the shared launcher
+  rule.
 
 ## auth-refusal-forgets-partial-replace.md
 
