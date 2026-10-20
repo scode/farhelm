@@ -10,6 +10,13 @@ control — my Mac and one or more Linux hosts — and supervise all of them fro
 through its real TUI. Existing tools in this space (herdr, superset.sh, various "agent manager" GUIs) each miss some
 combination of: durable remote execution, real-terminal fidelity, VCS neutrality, or multi-host aggregation.
 
+## Documentation scope
+
+The README introduction, the docs Overview and their artwork are a short hook that may describe the main, first-class
+path. Qualifications for other agents and hosts belong in the guides; a claim that holds on that main path is not a
+defect in the introduction. The maintainer's principle is: "The overview is meant to be short and a hook. We cannot be
+lawyers and make it 100 pages of caveats. don't change anything, just fix spec."
+
 ## Concepts
 
 - **Host**: a machine that runs sessions. The local Mac is a host; each remote Linux machine is a host. Every host runs

@@ -17022,7 +17022,9 @@
   guides, and a claim there that holds on the main path is not a defect.
 - Completion criteria: SPEC.md states that principle, where it governs the README introduction and Overview. No change
   to the introduction, Overview or artwork. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
+- Execution: complete in change `vlnsyqowzvxxuzktypokypmkmyrwqmwv`, bookmark
+  `plan/spec-scope-clarifications/01-introduction-is-a-hook`,
+  [PR #2413](https://github.com/scode/farhelm/pull/2413/changes).
 
 ## introduction-omits-automatic-install-prerequisites.md
 
@@ -17035,7 +17037,9 @@
 - Completion criteria: covered by the SPEC.md principle recorded under
   `introduction-promises-waiting-alerts-for-every-agent.md` (one spec change for all three); no change to the artwork.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
+- Execution: complete in change `vlnsyqowzvxxuzktypokypmkmyrwqmwv`, bookmark
+  `plan/spec-scope-clarifications/01-introduction-is-a-hook`,
+  [PR #2413](https://github.com/scode/farhelm/pull/2413/changes).
 
 ## introduction-promises-universal-reboot-resume.md
 
@@ -17047,7 +17051,9 @@
 - Decision: on 2026-10-19, the same answer as `introduction-promises-waiting-alerts-for-every-agent.md` (question 8).
 - Completion criteria: covered by that SPEC.md principle; no change to the README or Overview. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
+- Execution: complete in change `vlnsyqowzvxxuzktypokypmkmyrwqmwv`, bookmark
+  `plan/spec-scope-clarifications/01-introduction-is-a-hook`,
+  [PR #2413](https://github.com/scode/farhelm/pull/2413/changes).
 
 ## template-screenshot-implies-deletion-needs-save.md
 
