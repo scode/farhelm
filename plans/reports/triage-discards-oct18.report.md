@@ -52,3 +52,34 @@ goal, decisions, all five ledger entries and queue execution rules. No findings.
 five temporary PR placeholders with this PR's URL; that diff was inspected separately. The independent resume check
 found no discrepancy, and the commit/PR message cold reader found no unclear or contradicted claims or convention
 violations.
+
+### Landing
+
+Landed as #2360, unchanged from what the report describes. It was the sixth of eight plans in this landing round. Its
+one PR removes the five discarded findings from the review queue and records their completion in the triage record.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the PR's base, main gained link-hover-covers, workspace-trust-destination, session-header-and-row-fixes,
+queued-launch-snapshot, payload-lock-reproduction and plan bookkeeping. Each of those also removes its own entries from
+the review queue's index or edits its own triage entries; the only conflicts were in that index, where every removal is
+kept, and the triage entries are separate. One of the five discarded findings concerns an initial launch starting in
+another folder if a symlink changes during creation; launch-enters-working-dir, blocked in this round, works on a
+related problem (sessions starting in the home folder) but does not reopen that decision. Resolving those index
+conflicts was mechanical, keeping every plan's removals, so it is not counted as a fix; the landed text is identical to
+what the landing checked.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+`dprint check` on TRIAGE_OUTCOMES.md and the review queue's index, on the combined result of the round's landing plans:
+passed. No runtime tests were run for this PR, since it changes only Markdown records. It was part of the combined tree
+on which the landing ran the round's Rust, JavaScript and browser checks (runs `cdabc40d-ecaa-418e-938f-01f2cbe4da64`,
+`fcb2b9cf-4424-4fc2-8148-dede8454a5ea` and `1484ba9a-0aab-4e7f-a7a4-716faede7c66`), all of which passed.
+
+The report's statements that main had not moved since the PR's base and that the PR was still an open draft were true
+when it was delivered; main then moved as described above, and the PR has now merged. Nothing else in the report became
+untrue at landing.
