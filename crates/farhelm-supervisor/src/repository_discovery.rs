@@ -238,6 +238,9 @@ impl RepositoryScanner {
         command.args(args);
         command.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
         command.env_remove("GIT_COMMON_DIR");
+        // The bare selector conflicts with `config --local`, even without
+        // any GIT_CONFIG_* overrides, hiding otherwise valid suggestions.
+        command.env_remove("GIT_CONFIG");
         for (name, _) in std::env::vars_os()
             .filter(|(name, _)| name.to_string_lossy().starts_with("GIT_CONFIG_"))
         {
@@ -245,6 +248,7 @@ impl RepositoryScanner {
         }
         for (name, value) in self.child_env.iter() {
             if !name.to_string_lossy().starts_with("GIT_CONFIG_")
+                && name != OsStr::new("GIT_CONFIG")
                 && name != OsStr::new("GIT_DIR")
                 && name != OsStr::new("GIT_WORK_TREE")
                 && name != OsStr::new("GIT_COMMON_DIR")
@@ -581,6 +585,38 @@ mod tests {
         assert!(!result.truncated);
     }
 
+    /// A bare config selector must not hide a real local origin. Inject it
+    /// only into children, and prove the unsanitized Git invocation refuses
+    /// this fixture before asking discovery to recover the suggestion.
+    #[farhelm_testtrace::test]
+    async fn bare_git_config_does_not_hide_a_local_repository() {
+        let fixture = tempfile::tempdir().unwrap();
+        init_repo(fixture.path(), "repo", "https://github.com/acme/local.git");
+        let config = fixture.path().join("override.conf");
+        fs::write(&config, "").unwrap();
+        let refused = Command::new("git")
+            .args([
+                "config",
+                "--local",
+                "--no-includes",
+                "--get",
+                "remote.origin.url",
+            ])
+            .current_dir(fixture.path().join("repo"))
+            .env("GIT_CONFIG", &config)
+            .output()
+            .unwrap();
+        assert!(!refused.status.success());
+        let scanner = RepositoryScanner::with_options(
+            "git",
+            vec![("GIT_CONFIG".into(), config.into_os_string())],
+            DiscoveryLimits::production(),
+        );
+        let result = scanner.scan(fixture.path(), "").await.unwrap();
+        assert_eq!(repo_names(&result), ["acme/local"]);
+        assert!(!result.truncated);
+    }
+
     /// Oversized and hanging children are not merely ignored: both cases mark
     /// the list incomplete, and the hanging child's owned PID is gone before
     /// the scanner returns.
@@ -807,6 +843,7 @@ mod tests {
                 ("GIT_DIR", "/foreign"),
                 ("GIT_WORK_TREE", "/foreign"),
                 ("GIT_COMMON_DIR", "/foreign"),
+                ("GIT_CONFIG", "/foreign"),
                 ("GIT_CONFIG_COUNT", "1"),
                 ("GIT_CONFIG_KEY_0", "remote.origin.url"),
                 ("GIT_CONFIG_VALUE_0", "https://github.com/foreign/repo.git"),
@@ -1013,7 +1050,7 @@ if [ "$1" = "--version" ]; then echo fake-git; exit 0; fi
 case "$FAKE_MODE" in
   sized) head -c "$FAKE_SIZE" /dev/zero ;;
   environment)
-    if env | grep -E '^GIT_(DIR|WORK_TREE|COMMON_DIR|CONFIG_[^=]*)=' >/dev/null; then
+    if env | grep -E '^GIT_(DIR|WORK_TREE|COMMON_DIR|CONFIG|CONFIG_[^=]*)=' >/dev/null; then
       echo https://github.com/foreign/repo.git
     else
       echo https://github.com/acme/clean.git
