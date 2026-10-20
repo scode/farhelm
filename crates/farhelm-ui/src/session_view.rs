@@ -2139,30 +2139,39 @@ pub(crate) fn SessionView(
     let restart_with_description = with_reason.clone().unwrap_or_else(|| {
         "resume this session's conversation with changed launch settings".to_string()
     });
-    // Each button's feedback is `Some(click)` while it shows, naming the
-    // click that raised it, so a click's timer clears only its OWN feedback.
+    // Feedback keeps the warning for the bytes copied, even when a session
+    // refresh changes the displayed field. Its click id also ensures a
+    // click's timer clears only its OWN feedback.
     // A plain flag let the first of two quick clicks clear the flag the
     // second had just set, cutting its "copied" short.
-    let copied_directory = use_signal(|| None::<u64>);
-    let copied_command = use_signal(|| None::<u64>);
+    let copied_directory = use_signal(|| None::<CopyFeedback>);
+    let copied_command = use_signal(|| None::<CopyFeedback>);
     let mut copy_clicks = use_signal(|| 0_u64);
-    let mut copy_value = move |value: String, mut copied: Signal<Option<u64>>| {
-        copy_to_clipboard(&value);
-        let click = {
-            let mut clicks = copy_clicks.write();
-            *clicks += 1;
-            *clicks
+    let mut copy_value =
+        move |what: &str, value: String, mut copied: Signal<Option<CopyFeedback>>| {
+            copy_to_clipboard(&value);
+            let click = {
+                let mut clicks = copy_clicks.write();
+                *clicks += 1;
+                *clicks
+            };
+            copied.set(Some(CopyFeedback {
+                click,
+                warning: copy_warning(what, &value),
+            }));
+            spawn(async move {
+                // `sleep_ms` rather than tokio directly: the web build targets
+                // wasm, where tokio's timer is not linked (see `reader::sleep_ms`).
+                sleep_ms(1500).await;
+                if copied
+                    .peek()
+                    .as_ref()
+                    .is_some_and(|feedback| feedback.click == click)
+                {
+                    copied.set(None);
+                }
+            });
         };
-        spawn(async move {
-            copied.set(Some(click));
-            // `sleep_ms` rather than tokio directly: the web build targets
-            // wasm, where tokio's timer is not linked (see `reader::sleep_ms`).
-            sleep_ms(1500).await;
-            if *copied.peek() == Some(click) {
-                copied.set(None);
-            }
-        });
-    };
     let hosts_snapshot = sidebar_hosts.read();
     let registry = hosts_snapshot.hosts().unwrap_or_default();
     let local_host = registry
@@ -3257,7 +3266,7 @@ pub(crate) fn SessionView(
                     // The clipboard gets the raw bytes (a copy that differed
                     // from the value would be useless); the feedback says
                     // when those bytes hold characters the display escaped.
-                    onclick: { let cwd = shown.cwd.clone(); move |_| copy_value(cwd.clone(), copied_directory) },
+                    onclick: { let cwd = shown.cwd.clone(); move |_| copy_value("folder", cwd.clone(), copied_directory) },
                     // The short feedback replaces the value while it shows;
                     // a hidden-characters warning does NOT live in here,
                     // because this button shrinks and clips in a crowded
@@ -3278,7 +3287,7 @@ pub(crate) fn SessionView(
                     class: if copied_command().is_some() { "header-copy copied" } else { "header-copy" },
                     "data-tooltip": "{display_peer(&shown.invocation)} — click to copy",
                     "aria-describedby": COPY_COMMAND_DESCRIPTION_ID,
-                    onclick: { let invocation = shown.invocation.clone(); move |_| copy_value(invocation.clone(), copied_command) },
+                    onclick: { let invocation = shown.invocation.clone(); move |_| copy_value("command", invocation.clone(), copied_command) },
                     if copied_command().is_some() {
                         span { class: "copy-feedback", "✓ copied" }
                     } else {
@@ -3300,8 +3309,8 @@ pub(crate) fn SessionView(
                 // label did not show, and that is the one thing this copy
                 // must not leave unsaid.
                 if let Some(warning) = copied_directory()
-                    .and(copy_warning("folder", &shown.cwd))
-                    .or(copied_command().and(copy_warning("command", &shown.invocation)))
+                    .and_then(|feedback| feedback.warning)
+                    .or_else(|| copied_command().and_then(|feedback| feedback.warning))
                 {
                     div { class: "copy-warning", role: "status", "{warning}" }
                 }
@@ -3733,8 +3742,8 @@ fn restart_button_label(offer: RestartOffer) -> &'static str {
 ///
 /// SPEC.md has the bar abbreviate the home directory the way the session list
 /// does. The fold is skipped when the account segment it would remove holds a
-/// presentation-unsafe character: the copy warning says hidden characters are
-/// "shown above", so the label must still show every one the copied path has.
+/// presentation-unsafe character, so abbreviating a path cannot hide the
+/// escaped spelling of a character that will be copied literally.
 fn directory_label(cwd: &str) -> String {
     let unsafe_count = |text: &str| {
         text.chars()
@@ -3750,7 +3759,18 @@ fn directory_label(cwd: &str) -> String {
     display_peer(&shown)
 }
 
-/// The warning a header copy shows after copying `value`, when there is one.
+/// Feedback belongs to a copy click, including the warning for its raw bytes.
+///
+/// Session metadata can change before the feedback expires. Keeping the
+/// warning here prevents a refresh from describing different clipboard bytes;
+/// the click id prevents an older timer from clearing newer feedback.
+#[derive(Clone)]
+struct CopyFeedback {
+    click: u64,
+    warning: Option<String>,
+}
+
+/// The warning a header copy snapshots for `value`, when there is one.
 ///
 /// The copy is always the raw value, so when it contains characters the
 /// header shows escaped (`<U+202E>`, a newline), the clipboard does not hold
@@ -3761,7 +3781,7 @@ fn copy_warning(what: &str, value: &str) -> Option<String> {
     value
         .chars()
         .any(farhelm_proto::text::is_presentation_unsafe)
-        .then(|| format!("⚠ the copied {what} contains hidden characters, shown above as <U+…>"))
+        .then(|| format!("⚠ the copied {what} contains hidden characters, displayed as <U+…>"))
 }
 
 /// Copy exact bytes through the native bridge first, then the browser fallback.
@@ -3845,14 +3865,14 @@ mod tests {
         );
         assert_eq!(
             copy_warning("command", spoofed).as_deref(),
-            Some("⚠ the copied command contains hidden characters, shown above as <U+…>")
+            Some("⚠ the copied command contains hidden characters, displayed as <U+…>")
         );
         assert_eq!(copy_warning("command", "claude --resume"), None);
     }
 
     /// Why this matters: the details bar is where the open session's folder
     /// is read, and SPEC.md promises the same `~` the session list shows; a
-    /// fold must never hide a character the copy warning claims is shown.
+    /// fold must never hide an escaped character from the displayed path.
     /// Spec: a path under a home folds to `~`, other paths are unchanged, and
     /// a hidden character in the folded-away account keeps the full path.
     #[farhelm_testtrace::test]

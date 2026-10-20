@@ -42,9 +42,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`capture-marker-collision-misframes-replay.md`](capture-marker-collision-misframes-replay.md) — Terminal text can
   imitate capture delimiters, truncating replay or entering diagnostics; confidentiality impact is unverified.
 
-- [`header-copy-warning-follows-refreshed-value.md`](header-copy-warning-follows-refreshed-value.md) — Refreshed session
-  metadata can remove the warning for hidden characters still on the clipboard; harmful subsequent use is unverified.
-
 - [`session-accessible-names-use-raw-titles.md`](session-accessible-names-use-raw-titles.md) — Session accessible names
   retain raw title formatting; destructive-target confusion remains unverified and prior scope coverage is ambiguous.
 

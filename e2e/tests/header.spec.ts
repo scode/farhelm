@@ -15,6 +15,7 @@ import {
   listSessions,
   openRowMenu,
   stopSession,
+  stubFeed,
 } from "./helpers/fleet";
 import { waitForTermText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
@@ -427,7 +428,7 @@ test("details copy shows escaped peer text, copies raw bytes, and warns upward",
       .toEqual([invocation]);
     const warning = page.locator(".session-details .copy-warning");
     await expect(warning).toHaveText(
-      "⚠ the copied command contains hidden characters, shown above as <U+…>",
+      "⚠ the copied command contains hidden characters, displayed as <U+…>",
     );
     // The warning opens upward from the bottom bar. Checking both vertical
     // edges catches an otherwise visible warning clipped by the window.
@@ -449,6 +450,96 @@ test("details copy shows escaped peer text, copies raw bytes, and warns upward",
     await cleanupSession(request, session.id);
   }
 });
+
+for (const field of ["folder", "command"] as const) {
+  /** Feedback describes the clipboard snapshot even after metadata refreshes.
+   * Pause the feedback timer only after the view is ready, then deliver a
+   * real feed invalidation. The safe replacement must reach the tooltip while
+   * the warning still describes the unsafe bytes copied before that refresh.
+   */
+  test(`copied ${field} warning survives a safe metadata refresh`, async ({ page, request }) => {
+    const session = await createSession(request, { title: `copy-refresh-${field}-${Date.now()}` });
+    try {
+      const response = await request.get(`/api/sessions/${session.id}`);
+      expect(response.ok(), await response.text()).toBe(true);
+      const snapshot = await response.json();
+      const build = response.headers()["x-farhelm-build"];
+      expect(build, "fabricated metadata must carry the real helm's build stamp").toBeTruthy();
+      const unsafeValue = field === "folder" ? "/tmp/\u202Ecopied-folder" : `${FAKE_AGENT_INVOCATION} # \u202Ecopied-command`;
+      const safeValue = field === "folder" ? "/tmp/refreshed-folder" : `${FAKE_AGENT_INVOCATION} # refreshed-command`;
+      let refreshed = false;
+      const metadata = (url: URL) => url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${session.id}`;
+      await page.route(metadata, async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        // Only the displayed metadata changes. The owned process keeps its real
+        // folder and command, so this fixture needs no hostile filesystem path.
+        const value = refreshed ? safeValue : unsafeValue;
+        const shown = {
+          ...snapshot,
+          ...(field === "folder" ? { cwd: value } : {
+            invocation: value,
+            launch: { ...snapshot.launch, command: value },
+          }),
+        };
+        const body = new URL(route.request().url()).pathname === "/api/sessions"
+          ? { sessions: [shown], total: 1, truncated: false }
+          : shown;
+        await route.fulfill({
+          status: 200,
+          headers: { "content-type": "application/json", "x-farhelm-build": build },
+          body: JSON.stringify(body),
+        });
+      });
+      const feed = await stubFeed(page);
+      feed.notifyOnConnect(1);
+      await page.goto("/");
+      await feed.waitForConnection(1);
+      await row(page, session.id).locator(".session-row-open").click();
+      await waitForSessionRevealed(page, session.id);
+      const copy = page.locator(".session-details .header-copy").nth(field === "folder" ? 0 : 1);
+      await expect(copy.locator(".peer-value")).toHaveText(unsafeValue.replace("\u202E", "<U+202E>"));
+      await page.evaluate(() => {
+        (window as any).__headerCopies = [];
+        (window as any).__farhelmNativeClipboardWrite = (value: string) => {
+          (window as any).__headerCopies.push(value);
+        };
+      });
+      // Installing the clock alone leaves it ticking. Pausing before the copy
+      // keeps its 1.5-second feedback alive through arbitrary runner latency.
+      await page.clock.install();
+      await page.clock.pauseAt(new Date(Date.now() + 5_000));
+      await copy.click();
+      await expect.poll(() => page.evaluate(() => (window as any).__headerCopies)).toEqual([unsafeValue]);
+      const warning = page.locator(".session-details .copy-warning");
+      const warningText = `⚠ the copied ${field} contains hidden characters, displayed as <U+…>`;
+      await expect(copy.locator(".copy-feedback")).toHaveText("✓ copied");
+      await expect(warning).toHaveText(warningText);
+
+      refreshed = true;
+      expect(feed.openSockets(), "the invalidation must reach a live feed subscription").toBe(1);
+      feed.notify(2);
+      // The copied label temporarily replaces the value, but its tooltip and
+      // accessible description still expose the refreshed metadata.
+      await expect(copy, "the safe metadata must actually reach the rendered field").toHaveAttribute("data-tooltip", `${safeValue} — click to copy`);
+      await expect(copy).toHaveAccessibleDescription(`${safeValue} — click to copy`);
+      await expect(copy.locator(".copy-feedback")).toHaveText("✓ copied");
+      await expect(warning).toHaveText(warningText);
+      expect(await page.evaluate(() => (window as any).__headerCopies), "refreshing must not replace the copied bytes").toEqual([unsafeValue]);
+
+      await page.clock.runFor(1_500);
+      await expect(copy.locator(".copy-feedback")).toHaveCount(0);
+      await expect(warning).toHaveCount(0);
+      await expect(copy.locator(".peer-value")).toHaveText(safeValue);
+    } finally {
+      try {
+        await page.goto("about:blank");
+        await page.unrouteAll({ behavior: "wait" });
+      } finally {
+        await cleanupSession(request, session.id);
+      }
+    }
+  });
+}
 
 /**
  * Deletes the open session from its header, and only after an answered

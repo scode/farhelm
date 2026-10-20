@@ -16070,7 +16070,9 @@
 - Completion criteria: the warning is computed at click time from the copied value and kept with the feedback state,
   with a test showing it survives a change of the shown value. Complexity gate: if not cheap, discard instead. Remove
   the feedback file and its index entry.
-- Execution: planned in `plans/queue/session-header-and-row-fixes.md`.
+- Execution: complete in change `qomuwtnmzvvolxsyqtuowlrquznptmmv`, bookmark
+  `plan/session-header-and-row-fixes/02-copied-value-warning`; the cheap local feedback snapshot met the complexity
+  gate. Draft PR https://github.com/scode/farhelm/pull/2358/changes.
 
 ## session-accessible-names-use-raw-titles.md
 

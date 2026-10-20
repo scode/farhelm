@@ -477,6 +477,10 @@ Restart, like an unavailable Restart with, is `aria-disabled` rather than native
 hoverable in webviews and its click handler is what refuses. The directory and invocation buttons carry their full
 values in their tooltips, shrink before the session title and host, and reveal a clipboard affordance on hover or
 keyboard focus. Their hidden-characters copy warning opens upward from the bottom bar so the window edge cannot clip it.
+
+Copy feedback snapshots that warning from the copied value alongside its click id. A metadata refresh leaves the warning
+and its existing expiry unchanged; an older click's timer cannot clear newer feedback.
+
 The six action buttons remain fully visible and in DOM order from a 650px main pane; the tab strip shrinks into the
 remaining width and scrolls horizontally. The app's 320px main-pane floor is unchanged; between those widths the row may
 clip its trailing actions rather than wrapping or hiding them. The restart confirmation became a popover anchored under
