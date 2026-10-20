@@ -975,7 +975,8 @@ test.describe("covered terminal disclosures", () => {
 
   /** OSC labels do not reveal their destinations. A notice beside the live
    * link must block opening while its hover is hidden, then permit the same
-   * target after dismissal; its refusal must remain readable meanwhile.
+   * target after dismissal; redraw under a resting pointer must not lower
+   * its refusal beneath the notice. Count the actual re-hover as the premise.
    */
   test("a tunnel notice covering an OSC web hover refuses opening", async ({ page, request }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -1003,6 +1004,28 @@ test.describe("covered terminal disclosures", () => {
       await assertRefusalAboveTunnelNotice(page);
       expect(await opens()).toEqual([]);
 
+      await page.evaluate(async ({ x, y }) => {
+        const state = window as any;
+        const term = state.__farhelmTerm;
+        const hover = term.options.linkHandler.hover;
+        state.__coveredWebRehovers = 0;
+        term.options.linkHandler.hover = (...args: any[]) => {
+          state.__coveredWebRehovers++;
+          return hover(...args);
+        };
+        const box = term.element.querySelector('.xterm-screen').getBoundingClientRect();
+        const row = Math.floor((y - box.y) * term.rows / box.height) + 1;
+        const column = Math.floor((x - box.x) * term.cols / box.width) + 20;
+        await new Promise<void>(resolve => term.write(`\x1b7\x1b[${row};${column}HX\x1b8`, resolve));
+      }, point);
+      await expect.poll(() => page.evaluate(() => (window as any).__coveredWebRehovers)).toBeGreaterThan(0);
+      await expectLinkUnderPointer(page, point, label);
+      await expect(page.locator(disclosure)).toBeVisible();
+      await assertRefusalAboveTunnelNotice(page);
+      expect(await opens()).toEqual([]);
+
+      await page.mouse.move(2, 2);
+      await expect(page.locator('#terminal .terminal-file-message')).toHaveAttribute("data-outcome", "failure");
       await page.locator(".tunnel-error-notice").evaluate(el => el.remove());
       const uncovered = await cell(page, label);
       await expect(page.locator(disclosure)).toContainText(target);
