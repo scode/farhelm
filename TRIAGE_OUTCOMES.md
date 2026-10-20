@@ -16770,7 +16770,13 @@
   scrolls the whole card), with a geometry test. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/reachable-at-small-sizes.md`.
+- Execution: implemented in change `yppvvwnpnlwqxpwmyprsuwnmxrsvxqtv`, bookmark
+  `plan/reachable-at-small-sizes/03-reachable-host-dialogs`. Framed headings stay on one line, with the complete
+  destination retained in the plan or body. The body retains readable space; outer scrolling exposes the header and
+  answers when they cannot fit. Normal windows retain pinned answers. Both engines pass the long-heading removal
+  geometry, native inner/outer scrolling and setup, refusal and uninstall cases at normal and 160px heights. The code,
+  tests and specification diff is 100 added/removed lines, within the gate. PR:
+  https://github.com/scode/farhelm/pull/2419/changes.
 
 ## summary-card-clips-lower-facts.md
 

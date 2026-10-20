@@ -846,6 +846,8 @@ pub(super) fn HostRemoveDialog(
     on_cancel: EventHandler<()>,
 ) -> Element {
     let shown_name = gui_host_name(&host.name, host.kind.is_this_machine());
+    // The shortened heading must leave the complete destination readable.
+    let destination = display_peer(host.destination.as_deref().unwrap_or(&host.name));
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             div {
@@ -875,6 +877,7 @@ pub(super) fn HostRemoveDialog(
                 }
                 div { class: "host-settings-body",
                     tabindex: "0", role: "region", aria_label: "host removal details",
+                    p { class: "host-settings-value peer-value host-dialog-destination", dir: "ltr", "{destination}" }
                     p { class: "host-remove-explanation",
                         "Farhelm will forget this host. Its supervisor and sessions keep running, and adding the destination again finds them."
                     }

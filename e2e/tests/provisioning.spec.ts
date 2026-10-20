@@ -799,6 +799,7 @@ for (const phone of [false, true]) {
    * Dismissing through the new header must retire the offer without a write.
    * A short viewport also proves keyboard access to the overflowing plan:
    * WebKit needs a tab stop on the scroll owner, not on the footer.
+   * Header controls must also scroll the whole card when fixed chrome cannot fit.
    */
   test(`host-setup-layout ${phone ? "phone" : "desktop"} keeps answers and exact plan text`, async ({ page, request }, testInfo) => {
     const remote = destination(testInfo, `layout-${phone ? "phone" : "desktop"}`);
@@ -839,6 +840,13 @@ for (const phone of [false, true]) {
     await testInfo.attach(`host-setup-${phone ? "phone" : "desktop"}`, { body: await dialog.screenshot(), contentType: "image/png" });
     await page.setViewportSize({ width: phone ? 390 : 1100, height: 420 });
     await expectKeyboardScroll(page, dialog.locator(".host-settings-dismiss"), dialog.getByRole("region", { name: "host setup plan", exact: true }));
+    await page.setViewportSize({ width: phone ? 390 : 1100, height: 160 });
+    await dialog.locator(".host-settings-dismiss").focus();
+    await expect(dialog.locator(".host-settings-dismiss")).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBe(0);
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
     await page.setViewportSize({ width: phone ? 390 : 1100, height: 850 });
     await expectCancelTooltipReturns(page, dialog.getByRole("button", { name: "cancel", exact: true }), dialog.getByRole("button", { name: "set up", exact: true }));
     await dialog.getByRole("button", { name: "cancel host setup", exact: true }).click();
