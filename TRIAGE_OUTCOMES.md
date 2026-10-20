@@ -16716,7 +16716,9 @@
 - Completion criteria: SPEC_impl.md states the actual behavior (recovery of an interrupted archive may clear the trust
   record for a different folder later placed at the old path, which then asks again) instead of claiming a reused path
   is never touched. No code change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
+- Execution: complete in change `yumsrzslltkurtrnwvxxuyzyskrppkzx`, bookmark
+  `plan/spec-scope-clarifications/05-recovery-trust-scope`,
+  [PR #2420](https://github.com/scode/farhelm/pull/2420/changes).
 
 ## noop-shortcut-approval-reports-missing-binding.md
 

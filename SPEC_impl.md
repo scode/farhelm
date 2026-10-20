@@ -2181,9 +2181,10 @@ admission until it settles, preventing reuse while an old remover can still touc
 listing use neither this guard nor the vendor lock. No-record checkouts retain ordinary metadata cleanup.
 Refused/released archives retain trust. Successful removal clears the record before private metadata cleanup, while
 failure is logged and retains evidence. Exclusive startup retries retired records only when the original path is absent
-and no active registry row claims it, and removes trust after successful pending-archive reconciliation. It never
-retries an old removal against a reused path. A busy vendor lock is logged and leaves the record for a later startup,
-without a user-facing notice.
+and no active registry row claims it. Recovery of an interrupted archive, at startup or on a Delete retry, removes trust
+after successful pending-archive reconciliation even if a different folder now occupies the original path. This may
+clear that replacement folder's trust record, causing Claude to ask about trust again. A busy vendor lock is logged and
+leaves the record for a later startup, without a user-facing notice.
 
 `ClaudeReader::trust_prompt` refines only the captured question, its answer labels and dialog footer, excluding an
 ordinary input box. A run-scoped sample bool is false after reload/replacement or failed capture, is shared by renames,
