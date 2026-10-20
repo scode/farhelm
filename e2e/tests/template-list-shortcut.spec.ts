@@ -116,6 +116,8 @@ test("Cmd-J yields to dialogs and hidden quick-launch preparation", async ({ pag
   const gate = routeGate();
   let catalogReads = 0;
   const created: string[] = [];
+  // An incomplete body keeps its original error if an owned release also fails.
+  let bodyFailed = true;
   try {
     await saveCommand(request, name);
     await patchPreferences(request, { quick_launch_template: name });
@@ -149,12 +151,20 @@ test("Cmd-J yields to dialogs and hidden quick-launch preparation", async ({ pag
     await expect(page.locator(".create-session-form")).toBeHidden();
     gate.release();
     await expect.poll(() => created.length).toBe(1);
+    bodyFailed = false;
   } finally {
-    gate.release();
-    await page.unrouteAll({ behavior: "wait" });
-    for (const id of created) await cleanupSession(request, id);
-    const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
-    expect(removed.ok() || removed.status() === 404).toBe(true);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["catalog gate", () => gate.release()],
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["created sessions", async () => {
+        // Draining routes can reveal a create that was still pending at failure.
+        await cleanupOwnedSteps(false, created.map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]));
+      }],
+      [name, async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }],
+    ]);
   }
 });
 
@@ -164,6 +174,7 @@ test("Cmd-J has no-match and partial-template fallbacks", async ({ page, request
   const name = `cmdj-partial-${Date.now()}`;
   const source = await createSession(request, { title: `${name}-source` });
   let posts = 0;
+  let bodyFailed = true;
   try {
     const saved = await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: { effort: "high" } });
     expect(saved.ok(), await saved.text()).toBe(true);
@@ -195,11 +206,16 @@ test("Cmd-J has no-match and partial-template fallbacks", async ({ page, request
     expect(posts).toBe(0);
     await page.keyboard.press("Control+Shift+j");
     await expect(page.locator(".quick-switcher-dialog")).toHaveCount(0);
+    bodyFailed = false;
   } finally {
-    await page.unrouteAll({ behavior: "wait" });
-    await cleanupSession(request, source.id);
-    const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
-    expect(removed.ok() || removed.status() === 404).toBe(true);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["source session", () => cleanupSession(request, source.id)],
+      [name, async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }],
+    ]);
   }
 });
 

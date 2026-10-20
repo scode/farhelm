@@ -160,6 +160,8 @@ test("quick launch numbers a template base name when its checkout is taken", asy
   const sentinel = path.join(occupied, "foreign");
   const ids: string[] = [];
   const previewRefusals: string[] = [];
+  // An incomplete body keeps its original error if an owned release also fails.
+  let bodyFailed = true;
   try {
     await fs.mkdir(occupied);
     await fs.writeFile(sentinel, "keep occupied checkout\n");
@@ -219,12 +221,18 @@ test("quick launch numbers a template base name when its checkout is taken", asy
     expect(session.title).toBe(`${base}-2`);
     expect(await fs.readFile(sentinel, "utf8")).toBe("keep occupied checkout\n");
     await expect(page.locator(".rename-dialog")).toHaveCount(0);
+    bodyFailed = false;
   } finally {
-    await page.unrouteAll({ behavior: "wait" });
-    for (const id of ids.reverse()) await cleanupSession(request, id);
-    await patchPreferences(request, { quick_launch_template: null });
-    await request.delete(`/api/templates/${name}`);
-    await fixture.close(request);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["created sessions", async () => {
+        // Draining routes can reveal a create that was still pending at failure.
+        await cleanupOwnedSteps(false, ids.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]));
+      }],
+      ["quick launch", () => patchPreferences(request, { quick_launch_template: null })],
+      [name, () => request.delete(`/api/templates/${name}`)],
+      ["checkout fixture", () => fixture.close(request)],
+    ]);
   }
 });
 
@@ -239,6 +247,7 @@ test("template name numbering yields to typed and fixed names", async ({ page, r
   const names = [`base-policy-${stamp}`, `fixed-policy-${stamp}`, `name-only-policy-${stamp}`];
   const base = "app-review";
   const occupied = path.join(fixture.root, `${fixture.repoName}-${base}`);
+  let bodyFailed = true;
   try {
     await fs.mkdir(occupied);
     await fs.writeFile(path.join(occupied, "foreign"), "preserve name conflict\n");
@@ -302,11 +311,14 @@ test("template name numbering yields to typed and fixed names", async ({ page, r
     await expect(form.locator(".create-session-submit")).toBeDisabled();
     expect(creates, "a fixed-name conflict never submits from the hidden launcher").toBe(0);
     expect(await fs.readFile(path.join(occupied, "foreign"), "utf8")).toBe("preserve name conflict\n");
+    bodyFailed = false;
   } finally {
-    await page.unrouteAll({ behavior: "wait" });
-    await patchPreferences(request, { quick_launch_template: null });
-    for (const name of names) await request.delete(`/api/templates/${name}`);
-    await fixture.close(request);
+    await cleanupOwnedSteps(bodyFailed, [
+      ["routes", () => page.unrouteAll({ behavior: "wait" })],
+      ["quick launch", () => patchPreferences(request, { quick_launch_template: null })],
+      ...names.map((name): [string, () => Promise<unknown>] => [name, () => request.delete(`/api/templates/${name}`)]),
+      ["checkout fixture", () => fixture.close(request)],
+    ]);
   }
 });
 
@@ -323,6 +335,7 @@ for (const fixed of [false, true]) {
     page.on("request", request => {
       if (request.method() === "POST" && new URL(request.url()).pathname === "/api/sessions") creates++;
     });
+    let bodyFailed = true;
     try {
       const occupied = path.join(fixture.root, `${fixture.repoName}-${base}`);
       await fs.mkdir(occupied);
@@ -358,9 +371,12 @@ for (const fixed of [false, true]) {
       expect(fields?.name_kind).toBe(fixed ? "fixed" : undefined);
       expect(creates, "saving a reusable name does not launch a checkout").toBe(0);
       expect(await fs.readFile(path.join(occupied, "foreign"), "utf8")).toBe("keep saved-name premise\n");
+      bodyFailed = false;
     } finally {
-      for (const name of [original, saved]) await request.delete(`/api/templates/${name}`);
-      await fixture.close(request);
+      await cleanupOwnedSteps(bodyFailed, [
+        ...[original, saved].map((name): [string, () => Promise<unknown>] => [name, () => request.delete(`/api/templates/${name}`)]),
+        ["checkout fixture", () => fixture.close(request)],
+      ]);
     }
   });
 }

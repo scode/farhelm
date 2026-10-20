@@ -139,6 +139,8 @@ test("launcher sequences apply from buttons and unselected search text", async (
   const stem = `launcher-sequence-${Date.now()}`;
   const first = `${stem}-one`;
   const second = `${stem}-two`;
+  // An incomplete body keeps its original error if an owned release also fails.
+  let bodyFailed = true;
   try {
     await template(request, first, { kind: "agent", agent: "codex", effort: "high", name: "first sequence" });
     await template(request, second, { kind: "agent", effort: "low", name: "second sequence" });
@@ -189,9 +191,12 @@ test("launcher sequences apply from buttons and unselected search text", async (
     await expect(form.getByLabel("name (optional)")).toHaveValue("first sequence");
     await expect(search).toHaveValue("keep selected text");
     await expect(search).toBeFocused();
+    bodyFailed = false;
   } finally {
-    await removeTemplate(request, first);
-    await removeTemplate(request, second);
+    await cleanupOwnedSteps(bodyFailed, [
+      [first, () => removeTemplate(request, first)],
+      [second, () => removeTemplate(request, second)],
+    ]);
   }
 });
 
@@ -201,6 +206,7 @@ test("a number shortcut applies to Clone's draft", async ({ page, request }) => 
   const name = `launcher-clone-${Date.now()}`;
   const source = await createSession(request, { title: `${name}-source` });
   let creates = 0;
+  let bodyFailed = true;
   try {
     await template(request, name, { kind: "command", name: "cloned by shortcut" });
     await patchPreferences(request, { template_shortcuts: { "1": name } });
@@ -221,9 +227,12 @@ test("a number shortcut applies to Clone's draft", async ({ page, request }) => 
     await expect(form.getByLabel("name (optional)")).toHaveValue("cloned by shortcut");
     await expect(search).toBeFocused();
     expect(creates, "applying a template never submits Clone").toBe(0);
+    bodyFailed = false;
   } finally {
-    await removeTemplate(request, name);
-    await cleanupSession(request, source.id);
+    await cleanupOwnedSteps(bodyFailed, [
+      [name, () => removeTemplate(request, name)],
+      ["source session", () => cleanupSession(request, source.id)],
+    ]);
   }
 });
 
@@ -235,6 +244,7 @@ test("Replace with refuses a whole sequence and yields to another modal", async 
   const local = (await listHosts(request)).find((host) => host.kind === "local")?.identity;
   expect(local, "premise: the local host has an install identity").toBeTruthy();
   const source = await createSession(request, { title: `${name}-source` });
+  let bodyFailed = true;
   try {
     await template(request, name, { host: local, name: "must not apply" });
     await template(request, first, { name: "applied after refusal" });
@@ -296,9 +306,12 @@ test("Replace with refuses a whole sequence and yields to another modal", async 
     await expect(nameField).toHaveValue("applied after refusal");
     await expect(form).toBeVisible();
     await overlay.evaluate((node) => node.remove());
+    bodyFailed = false;
   } finally {
-    await removeTemplate(request, name);
-    await removeTemplate(request, first);
-    await cleanupSession(request, source.id);
+    await cleanupOwnedSteps(bodyFailed, [
+      [name, () => removeTemplate(request, name)],
+      [first, () => removeTemplate(request, first)],
+      ["source session", () => cleanupSession(request, source.id)],
+    ]);
   }
 });
