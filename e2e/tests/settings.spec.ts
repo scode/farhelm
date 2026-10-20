@@ -634,6 +634,66 @@ test("settings saves and clears the all-hosts checkout folder", async ({ page, r
   }
 });
 
+/** Saving without editing must not rename a literal CLI-configured folder.
+ * Only edited text loses surrounding whitespace; independent API readback
+ * distinguishes stored spelling from the text left visible in the editor.
+ */
+test("settings preserves untouched literal checkout folders and trims edited paths", async ({ page, request }) => {
+  const previous = await readCheckoutRoot(request);
+  const submitted: Request[] = [];
+  let bodyFailed = false;
+  page.on("request", outgoing => {
+    if (outgoing.url().endsWith("/api/checkout-root") && outgoing.method() === "PUT") submitted.push(outgoing);
+  });
+  try {
+    const literal = "~/literal-checkouts ";
+    const seeded = await request.put("/api/checkout-root", { data: { root: literal } });
+    expect(seeded.ok()).toBe(true);
+    expect(await readCheckoutRoot(request)).toEqual({ root: literal });
+    await page.goto("/");
+    await page.getByRole("button", { name: "settings", exact: true }).click();
+    const field = page.getByRole("dialog", { name: "settings", exact: true }).locator(".checkout-root-field");
+    const folder = field.getByRole("textbox", { name: "checkout folder", exact: true });
+    await expect(folder).toBeEditable();
+    await expect(folder).toHaveValue(literal);
+    /** Each Save needs its own terminal reply; an old success notice cannot
+     * establish that the next configuration write has completed.
+     */
+    const saveAndWait = async () => {
+      const finished = page.waitForResponse(response =>
+        response.url().endsWith("/api/checkout-root") && response.request().method() === "PUT"
+      );
+      await field.getByRole("button", { name: "save", exact: true }).click();
+      expect((await finished).ok()).toBe(true);
+      await expect(field.getByRole("status")).toHaveText("checkout folder saved");
+    };
+    await saveAndWait();
+    expect(await readCheckoutRoot(request)).toEqual({ root: literal });
+    await expect(folder).toHaveValue(literal);
+    await folder.fill("  ~/edited-checkouts  ");
+    await saveAndWait();
+    expect(await readCheckoutRoot(request)).toEqual({ root: "~/edited-checkouts" });
+    await expect(folder).toHaveValue("~/edited-checkouts");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["submitted checkout saves", async () => {
+        for (const outgoing of submitted) {
+          const reply = await outgoing.response();
+          if (reply) await reply.finished();
+        }
+      }],
+      ["checkout folder", async () => {
+        const restored = await request.put("/api/checkout-root", { data: previous });
+        expect(restored.ok()).toBe(true);
+        expect(await readCheckoutRoot(request)).toEqual(previous);
+      }],
+    ]);
+  }
+});
+
 /** Save is a submitted operation even if Settings closes while it is pending.
  * Hold the real PUT before forwarding it, dismiss the mounted field, then
  * release it and inspect persistent state. Component-owned cancellation would

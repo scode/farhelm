@@ -23,9 +23,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`file-recognition-rejects-digit-leading-extensions.md`](file-recognition-rejects-digit-leading-extensions.md) —
   Printed filenames such as backup.7z cannot be hovered or downloaded unless the program includes a directory prefix.
 
-- [`checkout-folder-save-trims-literal-path.md`](checkout-folder-save-trims-literal-path.md) — Saving an existing
-  checkout-folder setting can change which directory it names, even without editing it.
-
 - [`short-main-pane-hides-approval-requests.md`](short-main-pane-hides-approval-requests.md) — In a sufficiently short
   window, waiting approval requests disappear until the user enlarges the window or changes the selected session.
 

@@ -8,9 +8,8 @@ use dioxus::prelude::*;
 use std::{cell::Cell, rc::Rc};
 
 /// Keep refused drafts editable and distinguish a typed value from a saved one.
-/// Saving trims surrounding whitespace, and an empty result clears the global
-/// folder: a pasted path's stray trailing space is invisible in the preview,
-/// and first-use creation would otherwise make a folder whose name ends in it. Loading or saving cannot submit a
+/// Saving trims edited text; an untouched saved folder keeps its exact name.
+/// An empty result clears the global folder. Loading or saving cannot submit a
 /// surrounding launcher form, and disabling is semantic rather than native so
 /// a write does not drop keyboard focus into the page behind a modal.
 /// A submitted save survives dismissal; only a still-mounted field receives
@@ -25,6 +24,7 @@ pub(crate) fn CheckoutRootField(note: String, on_saved: EventHandler<()>) -> Ele
     });
     let mut initialized = use_signal(|| false);
     let mut draft = use_signal(String::new);
+    let mut edited = use_signal(|| false);
     let mut saving = use_signal(|| false);
     let mut outcome = use_signal(|| None::<Result<(), String>>);
     let mounted = use_hook(|| Rc::new(Cell::new(true)));
@@ -55,7 +55,7 @@ pub(crate) fn CheckoutRootField(note: String, on_saved: EventHandler<()>) -> Ele
                     // A path's spelling and case identify the target folder.
                     autocorrect: "off", autocapitalize: "none",
                     oninput: move |event| {
-                        if initialized() && !saving() { draft.set(event.value()); outcome.set(None); }
+                        if initialized() && !saving() { draft.set(event.value()); edited.set(true); outcome.set(None); }
                     },
                     onkeydown: move |event: KeyboardEvent| {
                         // Enter must not fall through to the launcher's form:
@@ -82,7 +82,7 @@ pub(crate) fn CheckoutRootField(note: String, on_saved: EventHandler<()>) -> Ele
                         saving.set(true);
                         outcome.set(None);
                         let base = base.clone();
-                        let value = draft().trim().to_string();
+                        let value = if edited() { draft().trim().to_string() } else { draft() };
                         draft.set(value.clone());
                         let mounted = mounted.clone();
                         let saving_request = save_checkout_root(&base,
@@ -97,6 +97,7 @@ pub(crate) fn CheckoutRootField(note: String, on_saved: EventHandler<()>) -> Ele
                             let saved = result.is_ok();
                             outcome.set(Some(result));
                             if saved {
+                                edited.set(false);
                                 root.restart();
                                 on_saved.call(());
                             }

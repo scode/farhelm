@@ -16606,7 +16606,10 @@
 - Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3); about 5 lines.
 - Completion criteria: Save trims only a value the user edited and leaves an unedited stored value byte for byte, with a
   test. Gate: over about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-composer-drafts.md`.
+- Execution: complete in change `wwulltppswtkkxpvrkppxpvrpmwkrxvv`, bookmark
+  `plan/launcher-composer-drafts/04-preserve-literal-checkout-root`,
+  [PR #2397](https://github.com/scode/farhelm/pull/2397/changes). The fix totals 11 non-test lines, within the 15-line
+  gate, with a separate browser regression.
 
 ## cancelled-upload-retains-admission-entry.md
 
