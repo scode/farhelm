@@ -168,14 +168,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through. Overhaul it with more structure, such as tabs, so related settings are grouped and any one of them is easy to
   find. The grouping and layout are TBD. Plan: `plans/queue/structured-settings-dialog.md`.
 
-- **Keep focus inside host settings after a refused save.** A keyboard user can Tab into the host settings dialog's
-  scrollable body while a save is running. If the save is then refused, the body stops being focusable, but the dialog's
-  refocus step still picks it as the last usable element, so focus can land outside the dialog instead of on the
-  destination field, and the dialog's focus isolation swallows one keystroke to recover. A successful save is
-  unaffected. SSH help has the same shape if its commands arrive while its body has focus. Requiring the refocus target
-  to be keyboard-focusable would close it; add a test that checks focus after a refused save. Found while landing the
-  keyboard scroll audit (#2222, #2226). Plan: `plans/queue/host-settings-focus.md`.
-
 - **Tidy the launch-sequence hints.** The "cannot launch on its own" banner also appears for ⚡ alone with an incomplete
   template, and for a one-template sequence, where it tells the user to use the prefix they just used; SPEC.md describes
   it only for a single number key. If a sequence that includes ⚡ fails because a number is unbound, Templates also
