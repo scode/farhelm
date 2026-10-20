@@ -128,21 +128,23 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
     }
 }
 
-/// Commands stay literal in the clipboard while peer text is escaped on screen.
+/// Show the helm's command snapshot without changing its executable spelling.
+/// Labels and command text escape peer controls on screen; copying takes the
+/// original bytes, including any controls in a quoted path or destination.
 #[component]
 fn HostCommands(host: SshHostCommands) -> Element {
     rsx! {
         section { class: "ssh-help-host host-settings-section",
-            h3 { dir: "ltr", "{crate::peer::display_peer(&host.name)}" }
-            p { class: "peer-value", dir: "ltr", "{crate::peer::display_peer(&host.destination)}" }
+            h3 { dir: "ltr", "{host.name.escaped()}" }
+            p { class: "peer-value", dir: "ltr", "{host.destination.escaped()}" }
             for (label, command) in [("sessions connection", host.sessions), ("setup and updates connection", host.setup)] {
                 if let Some(command) = command {
                     div { class: "ssh-help-command",
                         strong { "{label}" }
-                        pre { dir: "ltr", "{crate::peer::display_peer(&command)}" }
+                        pre { dir: "ltr", "{command.escaped()}" }
                         button { r#type: "button", class: "btn btn-neutral", aria_label: "copy {label}",
                             "data-tooltip": "copy: the exact ssh command to run on the helm's machine",
-                            onclick: move |_| crate::session_view::copy_to_clipboard(&command), "copy" }
+                            onclick: move |_| crate::session_view::copy_to_clipboard(command.raw()), "copy" }
                     }
                 }
             }
