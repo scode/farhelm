@@ -114,6 +114,9 @@ pub(crate) async fn store_template(
         .fields
         .name_kind
         .filter(|kind| *kind == farhelm_proto::launcher::TemplateNameKind::Fixed);
+    // Agent-relay callers do not pass through HTTP ownership. This shared
+    // write-plus-announcement also preserves its JoinError-to-error mapping;
+    // the router's panic-resuming task cannot replace it.
     let task_state = Arc::clone(state);
     tokio::spawn(async move {
         let wrote = match precondition {
@@ -180,6 +183,8 @@ pub(crate) async fn remove_template(
     name: String,
     precondition: Precondition,
 ) -> anyhow::Result<bool> {
+    // Keep the same independently owned operation for HTTP and agent callers,
+    // including the task-panic error below rather than the router's unwind.
     let task_state = Arc::clone(state);
     tokio::spawn(async move {
         let deleted = match precondition {

@@ -499,44 +499,41 @@ pub(crate) async fn open_tunnel(
 }
 
 /// An idempotent local close never borrows another session's listener or needs a live host.
-/// The helm owns removal through shutdown and invalidation: dropping a caller
+/// The router owns removal through shutdown and invalidation: dropping a caller
 /// while the accept task is ending must not leave other clients' lists stale.
 pub(crate) async fn close_tunnel(
     State(state): State<Arc<AppState>>,
     Path((session, id)): Path<(String, String)>,
 ) -> Response {
-    crate::run_owned(async move {
-        if state.link_opener.is_none() {
-            return StatusCode::NOT_FOUND.into_response();
+    if state.link_opener.is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let session = match crate::sessions::resolve_session_ref(&state, &session).await {
+        Ok(session) => session,
+        Err(error) => return http_error(error),
+    };
+    let _mutation = state.tunnels.mutation.lock().await;
+    let entry = {
+        let mut listeners = state
+            .tunnels
+            .listeners
+            .lock()
+            .expect("tunnel listeners poisoned");
+        if listeners
+            .entries
+            .get(&id)
+            .is_some_and(|entry| entry.session == session)
+        {
+            listeners.entries.remove(&id)
+        } else {
+            None
         }
-        let session = match crate::sessions::resolve_session_ref(&state, &session).await {
-            Ok(session) => session,
-            Err(error) => return http_error(error),
-        };
-        let _mutation = state.tunnels.mutation.lock().await;
-        let entry = {
-            let mut listeners = state
-                .tunnels
-                .listeners
-                .lock()
-                .expect("tunnel listeners poisoned");
-            if listeners
-                .entries
-                .get(&id)
-                .is_some_and(|entry| entry.session == session)
-            {
-                listeners.entries.remove(&id)
-            } else {
-                None
-            }
-        };
-        if let Some(entry) = entry {
-            entry.stop().await;
-            state.manager.events().bump();
-        }
-        StatusCode::NO_CONTENT.into_response()
-    })
-    .await
+    };
+    if let Some(entry) = entry {
+        entry.stop().await;
+        state.manager.events().bump();
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// Keep refusal classification shared with ordinary session REST and agent responses.

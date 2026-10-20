@@ -427,9 +427,9 @@ pub(crate) async fn put(
 
 /// One user-initiated send waits under the short HTTP timeout, independently of
 /// background work. Closing the page does not retract its accepted request.
+/// The authenticated router owns the saved-settings read and the send together.
 pub(crate) async fn test(State(state): State<Arc<AppState>>) -> Response {
-    let alerts = state.ntfy.clone();
-    match crate::run_owned(async move { alerts.test().await }).await {
+    match state.ntfy.test().await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(reason) => (StatusCode::BAD_GATEWAY, reason).into_response(),
     }

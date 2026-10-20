@@ -77,6 +77,7 @@ pub(crate) async fn get_agent_trust(
 /// The legacy Claude route remains available with exactly the same grammar.
 /// Persistence and invalidation share ownership: SQLite can finish after a
 /// disconnected caller drops its waiter, and that write must still be announced.
+/// The authenticated router supplies that lifetime for the entire handler.
 pub(crate) async fn put_agent_trust(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
     axum::extract::Path(harness): axum::extract::Path<LaunchHarness>,
@@ -86,16 +87,13 @@ pub(crate) async fn put_agent_trust(
     if trust_column(harness).is_err() {
         return axum::http::StatusCode::BAD_REQUEST.into_response();
     }
-    crate::run_owned(async move {
-        match state.store.set_agent_trust(harness, body.enabled).await {
-            Ok(()) => {
-                state.manager.events().bump();
-                axum::http::StatusCode::NO_CONTENT.into_response()
-            }
-            Err(error) => crate::http_error(error),
+    match state.store.set_agent_trust(harness, body.enabled).await {
+        Ok(()) => {
+            state.manager.events().bump();
+            axum::http::StatusCode::NO_CONTENT.into_response()
         }
-    })
-    .await
+        Err(error) => crate::http_error(error),
+    }
 }
 
 /// SQL identifiers come only from this exhaustive capability map. A new
@@ -167,27 +165,24 @@ pub(crate) async fn get_claude_trust(
 
 /// Save the opt-in without changing the path-preview revision. It affects no
 /// directory selection, and accepted creates already carry their own snapshot.
-/// The event tail belongs to the helm even if the caller leaves during the write.
+/// The router owns the write and event tail even if the caller leaves.
 pub(crate) async fn put_claude_trust(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
     axum::Json(body): axum::Json<ClaudeTrustBody>,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
-    crate::run_owned(async move {
-        match state.store.set_claude_trust(body.enabled).await {
-            Ok(()) => {
-                state.manager.events().bump();
-                axum::http::StatusCode::NO_CONTENT.into_response()
-            }
-            Err(error) => crate::http_error(error),
+    match state.store.set_claude_trust(body.enabled).await {
+        Ok(()) => {
+            state.manager.events().bump();
+            axum::http::StatusCode::NO_CONTENT.into_response()
         }
-    })
-    .await
+        Err(error) => crate::http_error(error),
+    }
 }
 
 #[cfg(test)]
 mod claude_trust_tests {
-    use super::{ClaudeTrustBody, agent_trust_state, put_agent_trust, put_claude_trust};
+    use super::agent_trust_state;
     use crate::{rest_harness, store::HelmStore};
     use axum::{
         body::Body,
@@ -197,11 +192,14 @@ mod claude_trust_tests {
     use tower::ServiceExt;
 
     /// A disconnected settings save must still announce its committed opt-in.
-    /// Holding the real database parks persistence while the caller is dropped;
-    /// this catches the old write-without-invalidation gap on both route shapes.
+    /// The real router must retain both route shapes and every supported switch.
+    /// A body parked after its valid bytes proves authenticated ownership has
+    /// started before cancellation; calling a handler directly would bypass it.
     #[farhelm_testtrace::test]
     async fn cancelled_trust_saves_still_publish_the_committed_choice() {
-        use std::future::Future;
+        use axum::body::Bytes;
+        use std::time::Duration;
+        use tokio::sync::{mpsc, oneshot};
         for agent in [
             None,
             Some(LaunchHarness::Claude),
@@ -223,25 +221,55 @@ mod claude_trust_tests {
             );
             let mut events = helm.state.manager.events().subscribe();
             let revision = *events.borrow_and_update();
-            let db = helm.store.connection_for_test();
-            let mut caller = Box::pin(async {
-                let state = axum::extract::State(std::sync::Arc::clone(&helm.state));
-                let body = axum::Json(ClaudeTrustBody { enabled: true });
-                match agent {
-                    None => put_claude_trust(state, body).await,
-                    Some(agent) => put_agent_trust(state, axum::extract::Path(agent), body).await,
-                }
-            });
-            {
-                let _held = db.lock();
-                let mut context = std::task::Context::from_waker(std::task::Waker::noop());
-                // Neither handler suspends before handing the write to its
-                // task. The database lock prevents a lucky completed write
-                // from hiding the cancellation boundary under test.
-                assert!(caller.as_mut().poll(&mut context).is_pending());
-                drop(caller);
-            }
-            tokio::time::timeout(std::time::Duration::from_secs(5), events.changed())
+            let (send, receive) = mpsc::channel::<Result<Bytes, std::io::Error>>(2);
+            send.send(Ok(Bytes::from_static(br#"{"enabled":true}"#)))
+                .await
+                .unwrap();
+            let (at_eof, waiting) = oneshot::channel();
+            // Auth has passed when the extractor asks for EOF. Keeping its
+            // sender open prevents any save before the caller is cancelled;
+            // dropping it on failure also releases detached fixture work.
+            let stream = futures_util::stream::unfold(
+                (receive, Some(at_eof), false),
+                |(mut receive, mut at_eof, delivered)| async move {
+                    if delivered && let Some(at_eof) = at_eof.take() {
+                        let _ = at_eof.send(());
+                    }
+                    receive
+                        .recv()
+                        .await
+                        .map(|bytes| (bytes, (receive, at_eof, true)))
+                },
+            );
+            let uri = match agent {
+                None => "/api/checkout-claude-trust".to_string(),
+                Some(agent) => format!(
+                    "/api/checkout-agent-trust/{}",
+                    serde_json::to_value(agent).unwrap().as_str().unwrap()
+                ),
+            };
+            let request = Request::builder()
+                .method("PUT")
+                .uri(uri)
+                .header("host", "127.0.0.1:7433")
+                .header("content-type", "application/json")
+                .body(Body::from_stream(stream))
+                .unwrap();
+            let caller = tokio::spawn(helm.router().oneshot(request));
+            tokio::time::timeout(Duration::from_secs(5), waiting)
+                .await
+                .expect("the authenticated trust extractor must reach EOF")
+                .expect("the extractor must report entry");
+            assert_eq!(*events.borrow(), revision, "the gated save has not begun");
+            caller.abort();
+            let cancelled = tokio::time::timeout(Duration::from_secs(5), caller)
+                .await
+                .expect("the trust caller must stop after abort")
+                .expect_err("the gated caller must be cancelled");
+            assert!(cancelled.is_cancelled());
+            assert!(!send.is_closed(), "the router must retain extraction");
+            drop(send);
+            tokio::time::timeout(Duration::from_secs(5), events.changed())
                 .await
                 .expect("the committed trust save must announce after cancellation")
                 .expect("the helm still owns its event feed");
