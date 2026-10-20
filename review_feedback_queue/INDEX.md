@@ -34,10 +34,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`unselected-repository-keeps-stale-setup-eligibility.md`](unselected-repository-keeps-stale-setup-eligibility.md) —
   Checkout setup eligibility can remain stale while no repository is selected.
 
-- [`archive-recovery-clears-reused-path-trust.md`](archive-recovery-clears-reused-path-trust.md) — Startup recovery or
-  Delete retry of an interrupted archive can erase the trust choice for a different directory subsequently placed at the
-  old path.
-
 - [`stale-outcome-hides-successful-stop.md`](stale-outcome-hides-successful-stop.md) — A stale status publication can
   hide a successfully recorded user Stop until another lifecycle operation or reload repairs it.
 
