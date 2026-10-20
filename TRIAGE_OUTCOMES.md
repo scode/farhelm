@@ -17104,7 +17104,10 @@
 - Completion criteria: link targets are attribute-escaped and limited to http, https and relative links, with self-test
   cases. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
   changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/tooling-checks-oct19.md`.
+- Execution: complete in change `mtmlztxrkqwwvpoumlnlztsyptpomulv`, bookmark
+  `plan/tooling-checks-oct19/01-inert-review-links`. Targets are attribute-escaped and only HTTP(S) or relative links
+  become anchors; self-tests cover accepted, quoted, executable and malformed targets. Code/test/doc diff: 44 lines,
+  within the 100-line gate. [PR #2417](https://github.com/scode/farhelm/pull/2417/changes).
 
 ## instruction-check-allows-claude-local-shadowing.md
 

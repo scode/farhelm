@@ -50,6 +50,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 PR_URL = "https://github.com/scode/farhelm/pull/"
 
@@ -69,6 +70,24 @@ QUOTE_LIMIT = 70
 # ---- Markdown to HTML -------------------------------------------------------------------------------------------------
 
 
+def inline_link(match: re.Match) -> str:
+    """Keep draft links inert unless their target is HTTP(S) or relative.
+
+    Inline text is already escaped; decode that layer before URL parsing and
+    escape again for an attribute, where quotes have a different meaning.
+    """
+    # Browsers ignore leading C0 bytes and spaces. Normalize explicitly so
+    # the scheme check does not depend on the Python URL parser's version.
+    target = re.sub(r"^[\x00-\x20]+", "", html.unescape(match.group(2)))
+    try:
+        scheme = urlsplit(target).scheme.lower()
+    except ValueError:
+        return match.group(1)
+    if scheme not in ("", "http", "https"):
+        return match.group(1)
+    return f'<a href="{html.escape(target, quote=True)}">{match.group(1)}</a>'
+
+
 def inline(text: str) -> str:
     """Convert one line of inline Markdown to HTML, escaping everything else.
 
@@ -82,7 +101,7 @@ def inline(text: str) -> str:
         s = html.escape(part, quote=False)
         s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
         s = re.sub(r"\*(.+?)\*", r"<em>\1</em>", s)
-        s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', s)
+        s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", inline_link, s)
         out.append(s)
 
     def link_refs(m: re.Match) -> str:
@@ -353,6 +372,11 @@ def _run_page(page: str, stored: dict, action: str, workdir: Path) -> dict:
 
 
 def self_test() -> int:
+    """Draft markup must stay inert while review notes survive only their revision.
+
+    Exact link output distinguishes attribute escaping from scheme refusal;
+    the Node fixture separately exercises the unchanged feedback lifecycle.
+    """
     failures: list[str] = []
 
     def check(cond: bool, what: str) -> None:
@@ -363,6 +387,15 @@ def self_test() -> int:
     check('data-id="B1"' in page and 'data-id="A2"' in page and 'data-id="M1"' in page, "ids per category")
     check("<code>&lt;U+200B&gt;</code>" in page, "code spans are escaped literally")
     check('<a href="https://ntfy.sh/">ntfy</a>' in page, "inline links are kept")
+    for target in ("http://example.invalid/", "https://example.invalid/?a=1&b=2", "../notes", "#entry"):
+        check(inline(f"[safe]({target})") == f'<a href="{html.escape(target)}">safe</a>',
+              f"allowed link target: {target!r}")
+    check(inline('[quoted](https://example.invalid/" onmouseover="evil)')
+          == '<a href="https://example.invalid/&quot; onmouseover=&quot;evil">quoted</a>',
+          "link targets cannot introduce attributes")
+    for target in ("javascript:evil", "JaVaScRiPt:evil", "\tjava\nscript:evil", "\x01javascript:evil",
+                   "data:text/html,evil", "file:///x", "https://["):
+        check(inline(f"[blocked]({target})") == "blocked", f"inert link target: {target!r}")
     check("&amp; linked" in page, "plain text is escaped")
     check(f'<a href="{PR_URL}1/changes">#1</a>, <a href="{PR_URL}2/changes">#2</a>' in page, "PR references link")
     check("<em>requires</em>" in page, "italics")

@@ -100,7 +100,8 @@ Generic recorder wrapping is fine but not required for these; record each result
 - `dist generate --check`
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test`
 - `python3 releasing/finalize-release-notes.py --self-test`
-- `python3 releasing/notes-review-page.py --self-test`
+- `python3 releasing/notes-review-page.py --self-test` (includes link attribute escaping and HTTP(S)/relative-only
+  targets)
 - `python3 releasing/rehearse-release-gate.py --self-test`
 - `scripts/publish-docs-shots.sh --self-test`
 - `bash scripts/test-plans-watch.sh` and `python3 scripts/test-plans-queue.py`, with `shellcheck` over

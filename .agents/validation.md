@@ -181,9 +181,9 @@ that its required systemd or SSH substrate ran.
   on its GitHub release with the approved text, against bodies shaped like dist's, and the refusals that need no
   repository or release. Run it when that script or the checker's parser changes; seconds, no network.
 - `python3 releasing/notes-review-page.py --self-test` — the interactive page a stable release's draft notes are
-  reviewed on: entry ids, escaping and PR links, and, under node, that the copied feedback block carries each note and
-  that a regenerated page drops notes typed on its previous revision. Without node it says `SKIPPED` for the page script
-  part. Run it when that script changes; seconds, no network.
+  reviewed on: entry ids, attribute escaping, HTTP(S)/relative-only link targets and PR links; under node, it checks
+  that the copied feedback block carries each note and a regenerated page drops notes typed on its previous revision.
+  Without node it says `SKIPPED` for the page script part. Run it when that script changes; seconds, no network.
 
 This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, desktop
 compilation, the JS harness, the website build and its feedback endpoint tests, installer validation, generated-workflow
