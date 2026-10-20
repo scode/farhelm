@@ -75,6 +75,8 @@ pub(crate) async fn get_agent_trust(
 
 /// An explicit boolean changes only the selected harness's global opt-in.
 /// The legacy Claude route remains available with exactly the same grammar.
+/// Persistence and invalidation share ownership: SQLite can finish after a
+/// disconnected caller drops its waiter, and that write must still be announced.
 pub(crate) async fn put_agent_trust(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
     axum::extract::Path(harness): axum::extract::Path<LaunchHarness>,
@@ -84,13 +86,16 @@ pub(crate) async fn put_agent_trust(
     if trust_column(harness).is_err() {
         return axum::http::StatusCode::BAD_REQUEST.into_response();
     }
-    match state.store.set_agent_trust(harness, body.enabled).await {
-        Ok(()) => {
-            state.manager.events().bump();
-            axum::http::StatusCode::NO_CONTENT.into_response()
+    crate::run_owned(async move {
+        match state.store.set_agent_trust(harness, body.enabled).await {
+            Ok(()) => {
+                state.manager.events().bump();
+                axum::http::StatusCode::NO_CONTENT.into_response()
+            }
+            Err(error) => crate::http_error(error),
         }
-        Err(error) => crate::http_error(error),
-    }
+    })
+    .await
 }
 
 /// SQL identifiers come only from this exhaustive capability map. A new
@@ -162,28 +167,94 @@ pub(crate) async fn get_claude_trust(
 
 /// Save the opt-in without changing the path-preview revision. It affects no
 /// directory selection, and accepted creates already carry their own snapshot.
+/// The event tail belongs to the helm even if the caller leaves during the write.
 pub(crate) async fn put_claude_trust(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
     axum::Json(body): axum::Json<ClaudeTrustBody>,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
-    match state.store.set_claude_trust(body.enabled).await {
-        Ok(()) => {
-            state.manager.events().bump();
-            axum::http::StatusCode::NO_CONTENT.into_response()
+    crate::run_owned(async move {
+        match state.store.set_claude_trust(body.enabled).await {
+            Ok(()) => {
+                state.manager.events().bump();
+                axum::http::StatusCode::NO_CONTENT.into_response()
+            }
+            Err(error) => crate::http_error(error),
         }
-        Err(error) => crate::http_error(error),
-    }
+    })
+    .await
 }
 
 #[cfg(test)]
 mod claude_trust_tests {
+    use super::{ClaudeTrustBody, agent_trust_state, put_agent_trust, put_claude_trust};
     use crate::{rest_harness, store::HelmStore};
     use axum::{
         body::Body,
         http::{Request, StatusCode},
     };
+    use farhelm_proto::LaunchHarness;
     use tower::ServiceExt;
+
+    /// A disconnected settings save must still announce its committed opt-in.
+    /// Holding the real database parks persistence while the caller is dropped;
+    /// this catches the old write-without-invalidation gap on both route shapes.
+    #[farhelm_testtrace::test]
+    async fn cancelled_trust_saves_still_publish_the_committed_choice() {
+        use std::future::Future;
+        for agent in [
+            None,
+            Some(LaunchHarness::Claude),
+            Some(LaunchHarness::Codex),
+            Some(LaunchHarness::Muse),
+            Some(LaunchHarness::Pi),
+        ] {
+            let helm = rest_harness::idle_helm().await;
+            let selected = agent.unwrap_or(LaunchHarness::Claude);
+            assert!(
+                !agent_trust_state(
+                    selected,
+                    &helm.store.checkout_config_snapshot(None).await.unwrap(),
+                    &helm.store.preferences().await.unwrap(),
+                )
+                .unwrap()
+                .enabled,
+                "fixture premise: this save changes a disabled trust setting"
+            );
+            let mut events = helm.state.manager.events().subscribe();
+            let revision = *events.borrow_and_update();
+            let db = helm.store.connection_for_test();
+            let mut caller = Box::pin(async {
+                let state = axum::extract::State(std::sync::Arc::clone(&helm.state));
+                let body = axum::Json(ClaudeTrustBody { enabled: true });
+                match agent {
+                    None => put_claude_trust(state, body).await,
+                    Some(agent) => put_agent_trust(state, axum::extract::Path(agent), body).await,
+                }
+            });
+            {
+                let _held = db.lock();
+                let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+                // Neither handler suspends before handing the write to its
+                // task. The database lock prevents a lucky completed write
+                // from hiding the cancellation boundary under test.
+                assert!(caller.as_mut().poll(&mut context).is_pending());
+                drop(caller);
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(5), events.changed())
+                .await
+                .expect("the committed trust save must announce after cancellation")
+                .expect("the helm still owns its event feed");
+            let snapshot = helm.store.checkout_config_snapshot(None).await.unwrap();
+            let preferences = helm.store.preferences().await.unwrap();
+            assert!(
+                agent_trust_state(selected, &snapshot, &preferences)
+                    .unwrap()
+                    .enabled
+            );
+            assert_eq!(*events.borrow(), revision + 1);
+        }
+    }
 
     /// Construct the generic route through its public path grammar; storage
     /// assertions alone cannot catch a missing route or a permissive JSON body.
