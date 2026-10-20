@@ -45,3 +45,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`spec-scope-clarifications`](reports/spec-scope-clarifications.report.md) landed 2026-10-20 in #2413, #2414, #2416, #2418, #2420: Write the introduction-is-a-hook and published-notes principles and three scope statements into the spec, with no code change (8 triage outcomes).
 - [`tooling-checks-oct19`](reports/tooling-checks-oct19.report.md) landed 2026-10-20 in #2417, #2421, #2422: Fix the release-review page's link escaping and two instruction-checker gaps (3 triage outcomes).
 - [`triage-discards-oct19`](reports/triage-discards-oct19.report.md) landed 2026-10-20 in #2423: Close the four findings discarded in the 2026-10-19 triage, in one PR (4 triage outcomes).
+- [`host-settings-focus`](reports/host-settings-focus.report.md) landed 2026-10-20 in #2424: Keep keyboard focus inside host settings and SSH help when a save ends or SSH help's commands arrive (1 TODO entry).
