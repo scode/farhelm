@@ -16001,7 +16001,7 @@
   action", says the helm's state-directory claim outlives all work started on its runtime. Size gate: if the change
   exceeds about 300 lines of diff (code, tests and docs, not counting this ledger, the queue removal and the changelog
   fragment), block and bring it back to the user. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/helm-lock-outlives-work.md`.
 
 ## cancelled-startup-loses-archive-location.md
 
@@ -16254,7 +16254,10 @@
   Claude session with observed YOLO gets the observation in the card and not in the menu header. SPEC.md says what the
   card's agent line shows, including the observation; SPEC_impl.md updated if it describes the card. Complexity gate: if
   this is not about an hour of localized work, stop and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Superseded 2026-10-19 (scheduling): the user replaced the time-based complexity gate above with a size gate of about
+  150 lines of diff (code, tests and docs, not counting this ledger, the queue removal and the changelog fragment); over
+  that, block and bring it back to the user.
+- Execution: planned in `plans/queue/summary-card-observed-yolo.md`.
 
 ## expanded-setup-failure-displaces-open-menu.md
 
@@ -16279,7 +16282,10 @@
   menu below it, makes the run fail with a message, and expects the menu closed. Accepted side effect: a host row
   changing below an open host menu closes that menu. Complexity gate: if this is not about 1–2 hours of localized work,
   stop and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Superseded 2026-10-19 (scheduling): the user replaced the time-based complexity gate above with a size gate of about
+  150 lines of diff (code, tests and docs, not counting this ledger, the queue removal and the changelog fragment); over
+  that, block and bring it back to the user.
+- Execution: planned in `plans/queue/hosts-panel-menu-close.md`.
 
 ## template-list-can-launch-recreated-name.md
 
@@ -16298,7 +16304,7 @@
 - Completion criteria: SPEC.md's Cmd-J paragraph says a pick launches the template currently holding that name, and only
   a name missing from the catalog since the list opened gives the preparation error in New. No code change. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/template-list-current-labels.md`.
 
 ## template-list-advertises-rebound-shortcut.md
 
@@ -16320,7 +16326,10 @@
   bindings at open time. A move landing while the list is open may still show stale, as accepted in the recommendation.
   A unit test covers the refreshed badges. Complexity gate: if this is not about an hour of localized work, stop and
   bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Superseded 2026-10-19 (scheduling): the user replaced the time-based complexity gate above with a size gate of about
+  150 lines of diff (code, tests and docs, not counting this ledger, the queue removal and the changelog fragment); over
+  that, block and bring it back to the user.
+- Execution: planned in `plans/queue/template-list-current-labels.md`.
 
 ## queued-launch-capture-before-repaint.md
 
