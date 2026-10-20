@@ -1033,12 +1033,14 @@ read to succeed. While waiting, the launcher shows a cancellable loading state s
 edits. Clone/Replace revokes any pending choice, and closing clears the parent opening intent. Both kinds use the same
 search-accept callback as Enter and a clicked search result. Completed read failures follow that callback's ordinary
 refusal behavior; resource refreshes do not reapply the initial choice. Name and template picks do not submit the form.
-The templates-only mode passes its plain query through that same template matcher and shows the current shortcut labels
-beside bound rows. An exact case-sensitive name is selected over other substring matches unless the user arrows away;
-the same rule applies if the template snapshot arrives after typing. A row pick carries only its name across the modal
-removal handoff. The shared shortcut worker reads preferences and templates afresh and resolves that name before using
-the existing quick-launch admission, fallback and naming behavior. A name missing from the fresh catalog opens New with
-a preparation error rather than launching a stale captured definition.
+The templates-only mode passes its plain query through that same template matcher and refreshes shortcut labels when
+opened. Its separate preference read overlays unconfirmed local bindings and updates only the binding fields; a failed
+read leaves cached labels intact and does not hide templates. Later binding moves need not refresh an already-open list.
+An exact case-sensitive name is selected over other substring matches unless the user arrows away; the same rule applies
+if the template snapshot arrives after typing. A row pick carries only its name across the modal removal handoff. The
+shared shortcut worker reads preferences and templates afresh and resolves that name before using the existing
+quick-launch admission, fallback and naming behavior. A name missing from the fresh catalog opens New with a preparation
+error rather than launching a stale captured definition.
 
 Session-action shortcuts use an idempotent capture listener and a pure key matcher from `session-action-shortcuts.js`.
 The build's Mac-desktop condition selects Cmd+W for Delete; browsers use Ctrl+Shift+Backspace. A visible modal yields,

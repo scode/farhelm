@@ -8,9 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`template-list-advertises-rebound-shortcut.md`](template-list-advertises-rebound-shortcut.md) — Cached shortcut
-  badges can guide a later launch to a different template; the gesture and harm remain unverified.
-
 ## High priority: material UX degradation
 
 - [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
