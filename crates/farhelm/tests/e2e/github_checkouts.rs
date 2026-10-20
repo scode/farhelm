@@ -29,12 +29,15 @@ const SENTINEL_CONTENT: &str = "private checkout fixture\n";
 /// marker and retained untracked file distinguish replay from a second clone.
 /// A Base template must reuse the occupied explicit-title fixture by choosing
 /// `Fix parser-2`, while the explicit `--title` refusal above stays exact.
+/// Expected destinations use the fixture's canonical root, as admission does:
+/// macOS spells a temporary root differently after resolving its `/tmp` symlink.
 #[farhelm_testtrace::test]
 async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
     use crate::agent_listing_real_stack::{
         attach_terminal, hosts_until_attached, session_token, spawn_agent_command_args,
     };
     let stack = CheckoutStack::start().await;
+    let root_a = stack.root_a.path().canonicalize().unwrap();
     for (route, field) in [
         ("commands-without-asking", "commands_without_asking"),
         ("yolo-without-asking", "yolo_without_asking"),
@@ -88,10 +91,7 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
         .to_string();
     let session = await_server_session(&stack, "Fix parser").await;
     assert_eq!(session.id, id);
-    assert_eq!(
-        session.cwd,
-        stack.root_a.path().join("bar-fix-parser").to_str().unwrap()
-    );
+    assert_eq!(session.cwd, root_a.join("bar-fix-parser").to_str().unwrap());
     wait_for_agent_ready(
         &stack.supervisor.state.path().join("tmux.sock"),
         &bare_session_id(&id),
@@ -181,10 +181,7 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
     )
     .await;
     stack.git.assert_clone(&automatic.cwd);
-    assert_eq!(
-        automatic.cwd,
-        stack.root_a.path().join("bar-1").to_str().unwrap()
-    );
+    assert_eq!(automatic.cwd, root_a.join("bar-1").to_str().unwrap());
 
     // The first explicit-title checkout still occupies the literal base.
     // Reuse that proved fixture for a named Base and leave its foreign work
@@ -236,12 +233,7 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
     assert_eq!(numbered.id, numbered_id);
     assert_eq!(
         numbered.cwd,
-        stack
-            .root_a
-            .path()
-            .join("bar-fix-parser-2")
-            .to_str()
-            .unwrap()
+        root_a.join("bar-fix-parser-2").to_str().unwrap()
     );
     wait_for_agent_ready(
         &stack.supervisor.state.path().join("tmux.sock"),
