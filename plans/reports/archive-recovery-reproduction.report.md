@@ -69,3 +69,63 @@ The reviewer also raised a same-destination case; the executor retained the agre
 its unchanged-value limit instead of adding another filesystem observation. The reviewer accepted that scope, withdrew
 the finding as a requirement violation, and concluded that the acceptance criteria are met with no blocking findings.
 The two remaining documentation nits were corrected. The commit/PR text passed a fresh cold read after one rewrite.
+
+### Landing
+
+Landed as #2374 in its own landing round, unchanged from what the report describes. This was the plan's second goal: it
+was first a reproduction of the race, which the maintainer replaced on 2026-10-20 with this direct fix after the
+reproduction run was stopped.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the PR's base, main gained only documentation and plan bookkeeping: a triage record and new TODO entries before
+the landing started, and, while it ran, a planning change for five other triage outcomes and a change to how planning
+pages are served. None of them touches the supervisor. The two supervisor changes that landed shortly before this plan
+was based, workspace-trust-destination (a checkout's identity is checked before it is trusted) and
+launch-enters-working-dir (sessions enter their folder), were already in its base; a fresh-context reviewer confirmed
+that neither writes a checkout's recorded trash location, so neither interacts with the new guard. The only overlap was
+in the triage record, where the planning change edited other outcomes' entries. The landed code is identical to what the
+landing's checks below tested.
+
+The reviewer also confirmed that every place that writes a checkout's recorded trash location is now guarded, that a
+legitimate Delete or recovery cannot be refused by mistake (within one supervisor each write compares against the value
+it just read or wrote), and that the tests run one step at a time, with no racing supervisors, cancelled startups or
+pauses.
+
+#### Fixes made during the landing
+
+None.
+
+#### Things the landing found
+
+One behavior change to know about, needing no action: when a move into the trash is refused and its record is put back,
+and that put-back is itself refused because a newer attempt changed the record, Delete now reports that the checkout
+record changed state instead of "rename refused". Delete and startup recovery both handle this correctly, and the
+message Delete shows names the newer trash location.
+
+#### Possible follow-ups
+
+- The guard compares the recorded location's value, so one narrower schedule remains open, as the code and the report
+  already note: if both attempts recorded the same location, and the late attempt's rename then failed with "already
+  exists" rather than "missing source", it would record a fresh location again, and the checkout's files would again
+  stay on disk but drop out of the trash list. On local disks the "missing source" error wins, so this does not happen
+  there; network or unusual filesystems were not checked. Checking that the folder being moved still exists before
+  recording a new location would close it.
+
+#### Checks
+
+Run now, on the PR rebased onto main:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, the isolated test-sleep check, `dprint check` on the changed
+  Markdown, and `python3 releasing/check-changelog.py format`: all passed.
+- Through the test recorder with pinned nextest and tmux, four slots and no retries: the whole protocol, helm and
+  supervisor libraries, the `farhelm` binary's tests, and the end-to-end tests for managed checkouts, session lifecycle
+  and structured launches
+  (`cargo nextest run -p farhelm-proto -p farhelm-helm -p farhelm-supervisor -p farhelm --lib --bins --test e2e -E 'kind(lib) | kind(bin) | (binary(e2e) & (test(github_checkouts::) | test(session_lifecycle::) | test(structured_launches::)))'`):
+  2840 passed, run `3901ca21-19aa-46e6-a59f-79c9a3355feb`. The executor had run a narrower selection (75 tests covering
+  checkout records, the trash, collision retries, managed-checkout Delete and startup archive recovery).
+- Skipped: JavaScript, browser and desktop tests, since the change is confined to the supervisor's checkout records and
+  touches no UI.
+
+Nothing in the executor's report became untrue at landing.
