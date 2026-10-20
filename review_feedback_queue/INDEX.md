@@ -84,9 +84,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`cancelled-upload-retains-admission-entry.md`](cancelled-upload-retains-admission-entry.md) — Abandoned upload
   admission can accumulate pending requests until the host connection ends.
 
-- [`download-eof-cancellation-retains-route.md`](download-eof-cancellation-retains-route.md) — Cancellation during
-  successful download cleanup can retain completed-transfer bookkeeping.
-
 - [`tab-attach-blocks-host-reader-during-stop.md`](tab-attach-blocks-host-reader-during-stop.md) — Attaching a tab
   during Stop can temporarily block unrelated requests on the host connection.
 

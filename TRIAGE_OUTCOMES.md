@@ -16613,7 +16613,11 @@
   about 3 lines.
 - Completion criteria: the route is removed before the guard counts as finished (or equivalently), optionally with a
   test. Gate: over about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/transfer-leftover-cleanup.md`.
+- Execution: implemented in change `zvxvlnwkvxpokyrzwqnptyozvwrtvymz`, bookmark
+  `plan/transfer-leftover-cleanup/01-download-route-cleanup`. EOF disarms cancellation only after routing removal; the
+  regression cancels while that removal is contended and verifies cleanup on a live connection. The non-test change is
+  four added/removed lines including its explanatory comment, within the 15-line gate.
+  PR: https://github.com/scode/farhelm/pull/2395/changes.
 
 ## checkout-folder-save-trims-literal-path.md
 
