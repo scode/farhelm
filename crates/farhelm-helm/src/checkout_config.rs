@@ -2585,6 +2585,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN quick_launch_template;
                  ALTER TABLE preferences DROP COLUMN skip_session_confirmations;
                  ALTER TABLE preferences DROP COLUMN feedback_contact;
+                 -- Schema 66 added the shared visit history, which v26 did not have.
+                 ALTER TABLE preferences DROP COLUMN visit_history;
                  ALTER TABLE hosts DROP COLUMN icon;
                  ALTER TABLE hosts DROP COLUMN color;
                  ALTER TABLE hosts DROP COLUMN commands_without_asking;

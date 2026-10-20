@@ -1,6 +1,6 @@
 //! `GET`/`PUT /api/preferences` — the one client preference the helm
 //! remembers for every client (SPEC.md, Session list): the chosen list order,
-//! last user-selected session, compact-row choice, and the remembered
+//! last-selected session and bounded visit history, compact-row choice, and the remembered
 //! permissions choice of successful structured launches, per-agent trust-hint dismissals,
 //! host confirmation choices, terminal web-link ownership, quick-launch template,
 //! number-key bindings, welcome dismissal, tunnel consent, desktop download-opening
@@ -13,6 +13,8 @@
 //! in whichever client last wrote it. Every client fetches the row once
 //! after authenticating and writes a sparse patch on change; a field a
 //! patch leaves out is untouched, and an explicit `null` clears one.
+//! Selection writes also prepend that full reference to the helm-owned history;
+//! null clears both. Clients never send a history field or a second visit request.
 //! Tunnel consent is also an active-resource boundary: only true enables new
 //! listeners, and an acknowledged false/null write closes listeners and their
 //! accepted relays. That transaction survives a disconnected HTTP caller.
@@ -41,7 +43,7 @@
 //! refuse the patch, while null restores default interception.
 //! `last_selected` is NOT checked against the fleet — a session can be
 //! deleted after the write, so the reader has to tolerate a stale id
-//! regardless (the UI's auto-select falls back to the newest session), and
+//! regardless (the UI skips absent history entries when choosing), and
 //! a check here would only turn a race into a spurious refusal — but it IS
 //! checked as a full [`farhelm_proto::SessionRef`]. A bare ID has no host
 //! entry provenance and cannot be a selection in the public list. Syntax
@@ -94,8 +96,8 @@ pub(crate) async fn get_preferences(State(state): State<Arc<AppState>>) -> impl 
 /// `last_selected` that is not a full session reference, a feedback contact
 /// beyond its code-point cap, or an unmatchable download-opening list is a 400. The list is
 /// normalized before the sparse write, so the next read names exactly the
-/// types the helm checks. 204 on success: there is nothing
-/// to say back that the client did not just send.
+/// types the helm checks. 204 on success; the maintained visit history is
+/// available on the next GET rather than a second client write.
 pub(crate) async fn put_preferences(
     State(state): State<Arc<AppState>>,
     axum::Json(mut patch): axum::Json<PreferencePatch>,
@@ -782,7 +784,8 @@ mod tests {
 
     /// A remembered selection binds an entry without requiring it to remain
     /// registered. Refused bare or malformed IDs must leave every field of the
-    /// patch untouched, while explicit null still clears only the selection.
+    /// patch untouched, including history. Null clears selection and visits
+    /// together while leaving unrelated settings alone.
     #[farhelm_testtrace::test]
     async fn selection_requires_full_syntax_but_allows_stale_references() {
         let harness = rest_harness::idle_helm().await;
@@ -797,7 +800,17 @@ mod tests {
             .unwrap();
         assert_eq!(reply.status(), StatusCode::NO_CONTENT);
         assert_eq!(read(&harness).await.last_selected.as_deref(), Some(stale));
+        assert_eq!(read(&harness).await.visit_history, vec![stale]);
         let before = read(&harness).await;
+        let reply = harness
+            .router()
+            .oneshot(put(serde_json::json!({
+                "visit_history": [], "compact": false,
+            })))
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(read(&harness).await, before, "history is helm-maintained");
         for invalid in [
             "missing:session",
             "0F8C2B1E-6D0E-4C51-9A8E-1E2F3A4B5C6D:session",
@@ -824,6 +837,7 @@ mod tests {
             .unwrap();
         assert_eq!(reply.status(), StatusCode::NO_CONTENT);
         assert_eq!(read(&harness).await.last_selected, None);
+        assert!(read(&harness).await.visit_history.is_empty());
         assert_eq!(read(&harness).await.compact, Some(true));
     }
 
@@ -890,6 +904,7 @@ mod tests {
             Preferences {
                 list_sort: Some("title".to_string()),
                 last_selected: Some("0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-7".to_string()),
+                visit_history: vec!["0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-7".into()],
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
@@ -1006,6 +1021,7 @@ mod tests {
             Preferences {
                 list_sort: Some("title".to_string()),
                 last_selected: None,
+                visit_history: Vec::new(),
                 compact: Some(true),
                 remembered_permissions: Some("yolo".to_string()),
                 remembered_wrapper_prefixes: Default::default(),
@@ -1027,7 +1043,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
-            "an explicit null clears the field it names and only that one"
+            "an explicit null clears selection and visits without changing settings"
         );
 
         // A syntactically valid reference can be stale, including an entry
