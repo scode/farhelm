@@ -1286,10 +1286,11 @@ joined by `linkHoverText`, which reads the undocumented `extended.urlId` on the 
 contiguous tagged run per row, at most 128 rows and 8192 characters. Each run is read without trimming; only the ends of
 the joined string are trimmed. One synthetic empty padding cell before a terminal-wrapped wide character is omitted; an
 actual printed space is preserved. Agent cursor moves do not set `isWrapped`, so that flag is not a join condition.
-Whole text is compared normally. An adjacent continuation that exceeds a bound or has ambiguous runs yields Fragment:
-its hovered piece warns whenever it looks like an address, even if that piece happens to equal the target. A single row
-with repeated same-tag links keeps its existing comparison. An unavailable tag yields Unknown and restores the previous
-row-only comparison unchanged, including its false alarms and gaps.
+Within a complete bounded, unambiguous extent, rows whose addresses each independently match the target compare as
+separate occurrences. Otherwise the whole text is compared normally. An adjacent continuation that exceeds a bound or
+has ambiguous runs yields Fragment: its hovered piece warns whenever it looks like an address, even if that piece
+happens to equal the target. A single row with repeated same-tag links keeps its existing comparison. An unavailable tag
+yields Unknown and restores the previous row-only comparison unchanged, including its false alarms and gaps.
 
 Decided 2026-10-15: accept this read-only private field access, superseding the 2026-09-30 decision to accept
 wrapped-link false alarms. The bundle stays byte-identical to upstream. The field can change at a manual xterm upgrade;

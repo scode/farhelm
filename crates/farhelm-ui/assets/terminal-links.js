@@ -441,11 +441,14 @@
    * survive joining, since a space at a row edge can change the named target.
    * Only xterm's empty pad before a terminal-wrapped wide character is omitted.
    * No text outside the tagged cells is evidence for a match.
+   * Adjacent complete addresses may reuse an id. Compare the hovered run alone
+   * only when every run independently names the target within the same bounds.
    * @param {{buffer: {active: {getLine(y: number): any}}}} term
    * @param {{start: {x: number, y: number}, end: {x: number, y: number}} | undefined} range
+   * @param {string | undefined} uri Target for independent-row comparison.
    * @returns {{kind: 'whole' | 'fragment' | 'unknown', text: string | null}}
    */
-  function linkHoverText(term, range) {
+  function linkHoverText(term, range, uri) {
     const fragment = linkRowText(term, range);
     const unknown = { kind: 'unknown', text: fragment };
     if (fragment === null) return unknown;
@@ -506,7 +509,9 @@
         else rows.push(run.text);
       }
     }
-    return { kind: 'whole', text: rows.join('').trim() };
+    // A matching piece alone cannot excuse a split-host or suffix forgery.
+    const repeated = uri && rows.every(text => claimsAddress(text.trim()) && !linkTextMismatch(text, uri));
+    return { kind: 'whole', text: repeated ? fragment : rows.join('').trim() };
   }
 
   /** Snapshot every cell of a file link, including its wrapped continuation.

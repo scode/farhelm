@@ -53,9 +53,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`restored-terminal-snapshot-rejects-link-clicks.md`](restored-terminal-snapshot-rejects-link-clicks.md) — Restored
   terminal snapshots can retain hover effects while rejecting every web or file link click.
 
-- [`repeated-terminal-links-acquire-mismatch-warning.md`](repeated-terminal-links-acquire-mismatch-warning.md) —
-  Repeating one honest hyperlink on adjacent rows can produce a false destination-mismatch warning.
-
 - [`repository-discovery-inherits-bare-git-config.md`](repository-discovery-inherits-bare-git-config.md) — An inherited
   Git configuration selector can prevent repositories from appearing as launcher suggestions.
 

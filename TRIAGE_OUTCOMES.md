@@ -16856,7 +16856,12 @@
   split-host case the join exists for; tests for both. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
+- Execution: implemented in change `qpsnlmzyynsqrmtmtmyrtzuzxutqzltr`, bookmark
+  `plan/terminal-link-and-copy-fixes/05-compare-repeated-links`. Complete repeated addresses compare independently only
+  after the full bounded, unambiguous extent is established and every row names the target. Split-host and incomplete
+  continuation warnings remain; node tests and the real bundled-terminal browser fixture cover both hover positions.
+  Counted code/test/doc diff: 81 lines, within the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2401/changes.
 
 ## restored-terminal-snapshot-rejects-link-clicks.md
 
