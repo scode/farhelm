@@ -329,7 +329,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 64;
+const SCHEMA_VERSION: i64 = 65;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -792,25 +792,6 @@ pub struct CachedSlice {
     /// The subset of the requested hosts whose `cache_truncated` flag is
     /// set. A `Vec` rather than a set: it is a handful of ids at most.
     pub truncated_hosts: Vec<HostId>,
-}
-
-/// What one [`HelmStore::replace_host_sessions`] call did.
-///
-/// Two facts a wholesale replacement can only report from inside its own
-/// transaction: the ids it had to drop because another host already claims
-/// them, and whether the commit left this host's cache slice different from
-/// what it found.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CacheReplacement {
-    /// Session ids another host's cache already claims, so this refresh's
-    /// rows for them were skipped (first claim holds). Empty for
-    /// essentially every refresh that ever runs.
-    pub contested: Vec<String>,
-    /// Whether any stored row actually differs from what was there before
-    /// — the invalidation feed's changed-only rule (PLAN_M6_75.md item 5).
-    /// See [`HelmStore::replace_host_sessions`] for why the answer belongs
-    /// to the write rather than to a comparison made afterwards.
-    pub changed: bool,
 }
 
 /// The predicates a merged-view read is narrowed by — SPEC.md's filtering
@@ -1543,26 +1524,6 @@ pub enum HostStoreError {
     /// points at. Nothing was written.
     #[error("host {host} has been reconfigured since this attempt was made")]
     StaleAttempt { host: HostId },
-    /// Two hosts' caches both claim one session id, so there is no honest
-    /// answer to "which host owns this session".
-    ///
-    /// The `session_cache_one_owner` index makes this UNCONSTRUCTIBLE for
-    /// any writer this build controls, and a lookup still checks for it,
-    /// because the database file is a trust boundary like any other input —
-    /// a downgrade or a hand edit can present rows no current writer could
-    /// have made. Failing closed is the only safe answer: routing an
-    /// operation to one of two candidate hosts would mean a stop or a
-    /// delete aimed at one machine landing on another. Names both hosts so
-    /// the user can remove whichever entry does not belong.
-    #[error(
-        "session {session} is cached under both host {first} and host {second}; refusing to \
-         guess which one owns it"
-    )]
-    SessionOwnerAmbiguous {
-        session: String,
-        first: HostId,
-        second: HostId,
-    },
 }
 
 /// Canonicalize one optional host alias before it reaches durable storage.
@@ -2084,6 +2045,7 @@ pub struct HelmStore {
 ///   Legacy rows survive only when exactly one cached membership attributes them.
 /// - 64: qualify the remembered selection with its uniquely cached host entry.
 ///   Unowned, ambiguous or unrepresentable legacy selections are cleared.
+/// - 65: drop bare-ID uniqueness; the host/session primary key is the cache identity.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2242,27 +2204,8 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  info_json  TEXT NOT NULL,
                  PRIMARY KEY (host_id, session_id)
              ) STRICT;
-             -- At most one HOST may cache a given session id (schema
-             -- version 3). Session ids are supervisor-minted UUIDs, so two
-             -- hosts naming the same one is either a bug or a hostile
-             -- supervisor claiming a session it does not own -- and the
-             -- consequence is not cosmetic: owner lookup would resolve one
-             -- host while the merged list showed another's row, so a stop
-             -- aimed at one machine could land on a different one. Enforced
-             -- in SQL rather than checked before writing, for the same
-             -- reason hosts_identity_claim is: a check-then-write shape has
-             -- a window, and this one is a routing decision.
-             -- HelmStore::replace_host_sessions's conditional insert turns
-             -- the refusal into a skipped row plus a warning (first claim
-             -- holds) rather than a failed refresh.
-             --
-             -- The ONLY index on this table besides its primary key, by
-             -- contract (schema version 13): the session list is served
-             -- whole and sorted in memory, so an ordering index would have
-             -- no reader, and SPEC.md's Session list section says none is
-             -- wanted at any layer.
-             CREATE UNIQUE INDEX session_cache_one_owner
-                 ON session_cache (session_id);
+             -- The pair primary key is the cache's only index. Equal bare
+             -- IDs on different entries are independent; ordering is in memory.
              -- One recoverable web token. The fixed primary key makes the
              -- single-row rule a schema invariant rather than a convention
              -- shared by whichever commands happen to write it.
@@ -2409,7 +2352,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 64;",
+              PRAGMA user_version = 65;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3882,6 +3825,14 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("PRAGMA user_version = 64;")
             .context("migrating helm.db to schema version 64")?;
         version = 64;
+    }
+    if version == 64 {
+        // Public references already identify one entry. The pair primary key
+        // remains the only cache identity; equal suffixes on other entries are
+        // independent sessions and no longer compete for a global claim.
+        tx.execute_batch("DROP INDEX IF EXISTS session_cache_one_owner; PRAGMA user_version = 65;")
+            .context("migrating helm.db to schema version 65")?;
+        version = 65;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -6813,7 +6764,7 @@ impl HelmStore {
     ///
     /// ## Reports whether it CHANGED anything
     ///
-    /// [`CacheReplacement::changed`] is the invalidation feed's changed-only
+    /// The returned boolean is the invalidation feed's changed-only
     /// rule at its source (PLAN_M6_75.md item 5), and it is answered here
     /// rather than by a caller comparing lists afterwards because only this
     /// transaction can see both sides atomically. A refresh runs every few
@@ -6821,20 +6772,20 @@ impl HelmStore {
     /// was already there; a feed that treated every committed replacement as
     /// a change would wake every open client on that timer and be strictly
     /// worse than the polling it replaces. The comparison is over this
-    /// host's stored payloads before and after, so a row that was DROPPED as
-    /// contested is correctly not a change (it was not written either time).
+    /// host's stored payloads before and after. Other entries' rows never
+    /// participate in this host's changed-only comparison.
     pub async fn replace_host_sessions(
         &self,
         host: HostId,
         identity: &str,
         entries: Vec<SessionInfo>,
         truncated: bool,
-    ) -> anyhow::Result<CacheReplacement> {
+    ) -> anyhow::Result<bool> {
         for entry in &entries {
             crate::session_cache::ensure_recordable_session(entry)?;
         }
         let identity = identity.to_string();
-        self.conn.call("replace host sessions task panicked", move |conn: &mut Connection| -> anyhow::Result<CacheReplacement> {
+        self.conn.call("replace host sessions task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
             let tx = conn
                 .transaction()
                 .context("beginning cache replace transaction")?;
@@ -6897,7 +6848,6 @@ impl HelmStore {
                 rusqlite::params![host],
             )
             .context("clearing the stale cache")?;
-            let mut contested: Vec<String> = Vec::new();
             let mut changed = false;
             for mut entry in entries {
                 // A reloaded supervisor can identify a live pane before
@@ -6918,60 +6868,11 @@ impl HelmStore {
                     entry.status = crate::session_cache::merged_status(&old.status, entry.status);
                 }
                 let json = serde_json::to_string(&entry).context("serializing cached session")?;
-                let inserted = tx
-                    .execute(
-                        // Conditional on the one-owner index rather than
-                        // fallible against it: a supervisor reporting a
-                        // session id another host already caches must cost
-                        // that ONE row, not the whole refresh — the rest of
-                        // this host's list is perfectly good data, and
-                        // failing the refresh would also mean keeping the
-                        // previous cache forever for as long as the
-                        // collision persisted. First claim holds; the
-                        // skipped row is announced below rather than
-                        // swallowed.
-                        "INSERT INTO session_cache \
-                             (host_id, session_id, created_at, info_json) \
-                         VALUES (?1, ?2, ?3, ?4) \
-                         ON CONFLICT (session_id) DO NOTHING",
-                        rusqlite::params![host, &entry.id, entry.created_at, json],
-                    )
-                    .context("inserting cached session")?;
-                if inserted == 0 {
-                    let owner: Option<HostId> = tx
-                        .query_row(
-                            "SELECT host_id FROM session_cache WHERE session_id = ?1",
-                            rusqlite::params![entry.id],
-                            |r| r.get(0),
-                        )
-                        .optional()
-                        .context("reading the host that already claims this session id")?;
-                    // Two very different situations reach one conflict, and
-                    // they get opposite treatment. This host's own rows were
-                    // deleted at the top of this transaction, so a conflict
-                    // against THIS host can only mean the peer listed one
-                    // session id twice in a single reply — a malformed list,
-                    // which fails the whole refresh and keeps the previous
-                    // cache, exactly as this method has always treated a
-                    // list it could not store whole. A conflict against
-                    // ANOTHER host is the cross-host collision: one row is
-                    // dropped, the first claim holds, and the rest of this
-                    // host's perfectly good list is still cached.
-                    if owner == Some(host) {
-                        anyhow::bail!(
-                            "the host listed session id {:?} more than once in a single reply; \
-                             refusing to cache a list that contradicts itself",
-                            entry.id
-                        );
-                    }
-                    // Reported rather than logged here. One line per
-                    // colliding row per refresh tick is a log a hostile (or
-                    // merely confused) host writes for you; the caller
-                    // coalesces these into one bounded summary per refresh,
-                    // and holds the set as the host's live contested state.
-                    contested.push(entry.id.clone());
-                    continue;
-                }
+                tx.execute(
+                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![host, &entry.id, entry.created_at, json],
+                ).context("inserting cached session")?;
                 // A row that was already stored EXACTLY as it is being
                 // written back is not a change; anything else — a new id, a
                 // repaired timestamp, a different payload — is.
@@ -6999,17 +6900,7 @@ impl HelmStore {
                 != 0;
             let changed = changed || truncated_changed;
             tx.commit().context("committing cache replace")?;
-            // SORTED, so the set is compared by CONTENT rather than by the
-            // order a peer happened to list its sessions in. The published
-            // set is compared against the previous one to decide whether to
-            // invalidate every client (`crate::manager::FleetEvents`), and a
-            // peer that merely permuted its reply would otherwise look like a
-            // routing change and wake the fleet on every refresh tick.
-            contested.sort_unstable();
-            Ok(CacheReplacement {
-                changed,
-                contested,
-            })
+            Ok(changed)
         })
 .await
     }
@@ -7031,10 +6922,8 @@ impl HelmStore {
     /// adoption purged. A stale `identity` is [`HostStoreError::IdentityMismatch`]
     /// with nothing written.
     ///
-    /// Idempotent for the SAME host (the row is replaced), and refused for a
-    /// DIFFERENT one: a session id another host already claims is
-    /// [`HostStoreError::SessionOwnerAmbiguous`], because a create cannot be
-    /// the thing that resolves a collision — see that variant's docs.
+    /// Idempotent within this entry: a later reply replaces its own row. The
+    /// same bare ID on another entry is independent and never consulted here.
     ///
     /// Every session reference is checked through
     /// [`crate::session_cache::ensure_recordable_session`], including parent
@@ -7090,24 +6979,15 @@ impl HelmStore {
                     // at the bottom: it is a column of its own and part of the
                     // ordering key, so a row whose payload matches while its
                     // timestamp does not is a change like any other.
-                    let claimed: Option<(HostId, i64, String)> = tx
+                    let claimed: Option<(i64, String)> = tx
                         .query_row(
-                            "SELECT host_id, created_at, info_json FROM session_cache \
-                     WHERE session_id = ?1",
-                            rusqlite::params![entry.id],
-                            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                            "SELECT created_at, info_json FROM session_cache \
+                     WHERE host_id = ?1 AND session_id = ?2",
+                            rusqlite::params![host, entry.id],
+                            |r| Ok((r.get(0)?, r.get(1)?)),
                         )
                         .optional()
-                        .context("reading the current owner of this session id")?;
-                    if let Some((owner, _, _)) = &claimed
-                        && *owner != host
-                    {
-                        return Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
-                            session: entry.id.clone(),
-                            first: *owner,
-                            second: host,
-                        }));
-                    }
+                        .context("reading this entry's previously cached session")?;
                     // Read and merged INSIDE the transaction that overwrites it, so
                     // no refresh can land between "what did we know" and "what do
                     // we now record". A mutation's reply is authoritative about
@@ -7119,7 +6999,7 @@ impl HelmStore {
                     // helper serves the in-memory cache, so the two shapes cannot
                     // drift apart.
                     let mut entry = entry;
-                    if let Some((_, _, previous)) = &claimed
+                    if let Some((_, previous)) = &claimed
                         && let Ok(previous) = serde_json::from_str::<SessionInfo>(previous)
                     {
                         crate::session_cache::merge_cached_session(&previous, &mut entry);
@@ -7131,7 +7011,7 @@ impl HelmStore {
                         "INSERT INTO session_cache \
                      (host_id, session_id, created_at, info_json) \
                  VALUES (?1, ?2, ?3, ?4) \
-                 ON CONFLICT (session_id) DO UPDATE SET \
+                 ON CONFLICT (host_id, session_id) DO UPDATE SET \
                      created_at = excluded.created_at, info_json = excluded.info_json",
                         rusqlite::params![host, entry.id, entry.created_at, json],
                     )
@@ -7188,7 +7068,7 @@ impl HelmStore {
                     // ordering column, not a copy of something in the payload.
                     let changed = over_cap
                         || match &claimed {
-                            Some((_, created_at, stored)) => {
+                            Some((created_at, stored)) => {
                                 *created_at != entry.created_at || stored.as_str() != json.as_str()
                             }
                             None => true,
@@ -8035,7 +7915,7 @@ impl HelmStore {
     /// decodes to a session whose `id` or `created_at` disagrees with the
     /// columns it is filed under, or one of its session references fails the
     /// current admission rule. The second is poison too — the columns
-    /// are what the one-owner index and every lookup here are built on, so
+    /// are what the paired primary key and every lookup here are built on, so
     /// showing such a row would list it under one identity and route it
     /// under another. Neither row reaches the served list or its counts
     /// (see [`CachedRow`]); the warning, repeated on every read for as long
@@ -8224,57 +8104,6 @@ impl HelmStore {
                         |row| row.get(0),
                     )
                     .context("checking one host's cached session membership")
-                },
-            )
-            .await
-    }
-
-    /// The legacy cache's unique bare-ID owner, independent of display JSON.
-    /// Public routing uses [`Self::has_cached_session`] on its resolved pair;
-    /// this global query remains only for the cache constraint's tests.
-    ///
-    /// Deliberately does NOT read `info_json`. Routing is a question about
-    /// where to ask, not about what the session is, so a row whose payload
-    /// no longer decodes still routes correctly and a live session is never
-    /// made unreachable by a corrupt copy of its own metadata.
-    ///
-    /// `None` means no persisted cache holds the suffix. It says nothing
-    /// about an identity-less host's in-memory membership.
-    ///
-    /// FAILS CLOSED on two owners, with [`HostStoreError::SessionOwnerAmbiguous`].
-    /// The `session_cache_one_owner` index makes that unconstructible for
-    /// this build's writers, so the `LIMIT 2` here is defense against a
-    /// database this build did not write — and the alternative, picking the
-    /// lower host id, would mean silently routing a stop at whichever of two
-    /// machines sorted first.
-    pub async fn host_of_session(&self, session_id: &str) -> anyhow::Result<Option<HostId>> {
-        let session_id = session_id.to_string();
-        self.conn
-            .call(
-                "session owner lookup task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<Option<HostId>> {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT host_id FROM session_cache WHERE session_id = ?1 \
-                     ORDER BY host_id ASC LIMIT 2",
-                        )
-                        .context("preparing the session owner query")?;
-                    let owners: Vec<HostId> = stmt
-                        .query_map(rusqlite::params![session_id], |r| r.get(0))
-                        .context("looking up a cached session's host")?
-                        .collect::<Result<_, _>>()
-                        .context("reading session owner rows")?;
-                    match owners.as_slice() {
-                        [] => Ok(None),
-                        [only] => Ok(Some(*only)),
-                        [first, second, ..] => {
-                            Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
-                                session: session_id,
-                                first: *first,
-                                second: *second,
-                            }))
-                        }
-                    }
                 },
             )
             .await
@@ -10693,7 +10522,7 @@ mod tests {
                 .replace_host_sessions(host, "capped-identity", vec![session("s-1", 100)], true)
                 .await
                 .expect("first drain");
-            assert!(first.changed);
+            assert!(first);
             let row = |rows: Vec<HostRow>| rows.into_iter().find(|r| r.id == host).unwrap();
             assert!(
                 row(store.list_hosts().await.unwrap()).cache_truncated,
@@ -10705,7 +10534,7 @@ mod tests {
                 .await
                 .expect("same drain again");
             assert!(
-                !same.changed,
+                !same,
                 "the same rows under the same flag are not a change the feed should announce"
             );
             let cleared = store
@@ -10713,7 +10542,7 @@ mod tests {
                 .await
                 .expect("uncut drain");
             assert!(
-                cleared.changed,
+                cleared,
                 "the flag flipping IS a change: the notice it drives is on screen"
             );
             assert!(!row(store.list_hosts().await.unwrap()).cache_truncated);
@@ -11733,6 +11562,110 @@ mod tests {
         );
     }
 
+    /// Schema 65 removes only the old bare-ID index. Existing cache and viewer
+    /// facts survive, then a second entry can admit the same suffix without
+    /// sharing status, pins, seen state or deletion with the original entry.
+    #[farhelm_testtrace::test]
+    async fn schema_65_preserves_rows_and_allows_entry_local_suffixes() {
+        let (dir, store) = fresh_store().await;
+        let first = host_with_identity(&store, "first.example", "first").await;
+        let second = host_with_identity(&store, "second.example", "second").await;
+        store
+            .remember_session(first, "first", &session("shared", 100))
+            .await
+            .unwrap();
+        let a = SessionKey::new(first, "shared");
+        let b = SessionKey::new(second, "shared");
+        store.set_pinned(&a, true).await.unwrap();
+        store.mark_seen(&a, 11).await.unwrap();
+        store
+            .raise_notification_marks(&a, 3, NotificationMark::Read)
+            .await
+            .unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX session_cache_one_owner ON session_cache (session_id);
+             PRAGMA user_version = 64;",
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'session_cache_one_owner'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1,
+            "premise: a schema-64 cache still enforces bare-ID uniqueness"
+        );
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        assert!(store.has_cached_session(&a).await.unwrap());
+        assert!(
+            store
+                .pinned_sessions(&[a.clone(), b.clone()])
+                .await
+                .unwrap()
+                .contains(&a)
+        );
+        store
+            .replace_host_sessions(second, "second", vec![session("shared", 200)], false)
+            .await
+            .unwrap();
+        assert!(store.has_cached_session(&b).await.unwrap());
+        assert_eq!(store.cached_rows(&[first, second]).await.unwrap().len(), 2);
+        store.mark_seen(&b, 22).await.unwrap();
+        store
+            .raise_notification_marks(&b, 7, NotificationMark::Read)
+            .await
+            .unwrap();
+        let keys = [a.clone(), b.clone()];
+        assert_eq!(
+            store.seen_activity(&keys).await.unwrap(),
+            std::collections::HashMap::from([(a.clone(), 11), (b.clone(), 22),])
+        );
+        assert_eq!(
+            store.pinned_sessions(&keys).await.unwrap(),
+            std::collections::HashSet::from([a.clone()])
+        );
+        assert_eq!(
+            store.notification_marks(&keys).await.unwrap(),
+            std::collections::HashMap::from([(a.clone(), (3, 0)), (b.clone(), (7, 0)),])
+        );
+        let mut renamed = session("shared", 100);
+        renamed.title = "first entry renamed".into();
+        store
+            .remember_session(first, "first", &renamed)
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .cached_session(first, "shared")
+                .await
+                .unwrap()
+                .unwrap()
+                .title,
+            "first entry renamed"
+        );
+        assert_eq!(
+            store
+                .cached_session(second, "shared")
+                .await
+                .unwrap()
+                .unwrap()
+                .created_at,
+            200
+        );
+        store
+            .forget_session(first, "first", "shared")
+            .await
+            .unwrap();
+        assert!(!store.has_cached_session(&a).await.unwrap());
+        assert!(store.has_cached_session(&b).await.unwrap());
+    }
+
     /// A public row must have representable references throughout, including
     /// legacy rows that bypassed current ingress. Routing remains a raw paired
     /// membership question even when a row's metadata cannot be shown.
@@ -11866,8 +11799,11 @@ mod tests {
             if memberships == 2 {
                 // Old normal databases forbid this. Remove the invariant
                 // explicitly to exercise historical ambiguous membership.
-                conn.execute_batch("DROP INDEX session_cache_one_owner;")
-                    .unwrap();
+                conn.execute_batch(
+                    "CREATE UNIQUE INDEX session_cache_one_owner ON session_cache (session_id);
+             DROP INDEX session_cache_one_owner;",
+                )
+                .unwrap();
             }
             for host in [first, second].into_iter().take(memberships) {
                 conn.execute(
@@ -11937,7 +11873,8 @@ mod tests {
         drop(store);
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(&format!(
-            "DROP INDEX session_cache_one_owner;
+            "CREATE UNIQUE INDEX session_cache_one_owner ON session_cache (session_id);
+             DROP INDEX session_cache_one_owner;
              INSERT INTO session_cache (host_id, session_id, created_at, info_json)
              SELECT {second}, session_id, created_at, info_json FROM session_cache
              WHERE host_id = {first} AND session_id = 'duplicate';
@@ -17400,10 +17337,7 @@ mod tests {
             .replace_host_sessions(host, "startup-identity", vec![provisional.clone()], false)
             .await
             .unwrap();
-        assert!(
-            changed.changed,
-            "the fresh title still changes the cached row"
-        );
+        assert!(changed, "the fresh title still changes the cached row");
         let cached = store.cached_sessions(host).await.unwrap();
         assert_eq!(cached[0].status, SessionStatus::Idle);
         assert_eq!(cached[0].title, "fresh title");
@@ -17755,17 +17689,14 @@ mod tests {
             .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
             .await
             .unwrap();
-        assert!(
-            first.changed,
-            "filling an empty cache is a change by any reading"
-        );
+        assert!(first, "filling an empty cache is a change by any reading");
 
         let repeat = store
             .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
             .await
             .unwrap();
         assert!(
-            !repeat.changed,
+            !repeat,
             "a drain that writes back an identical row set must wake nobody"
         );
 
@@ -17781,7 +17712,7 @@ mod tests {
             .replace_host_sessions(host, "identity-1", vec![flipped], false)
             .await
             .unwrap();
-        assert!(changed.changed, "a status flip is a change");
+        assert!(changed, "a status flip is a change");
 
         // And so is losing a session, which no per-row comparison of the
         // NEW list against itself would ever notice.
@@ -17789,7 +17720,7 @@ mod tests {
             .replace_host_sessions(host, "identity-1", Vec::new(), false)
             .await
             .unwrap();
-        assert!(emptied.changed, "a session disappearing is a change");
+        assert!(emptied, "a session disappearing is a change");
     }
 
     /// A rewrite that repairs a drifted `created_at` COLUMN is a change, even
@@ -17835,7 +17766,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            repaired.changed,
+            repaired,
             "the row went from dropped to served, so clients must be told to look again"
         );
         // And the write that follows it, with nothing left to repair, is a
@@ -17845,7 +17776,7 @@ mod tests {
             .replace_host_sessions(host, "identity-1", vec![session("s-1", 100)], false)
             .await
             .unwrap();
-        assert!(!settled.changed);
+        assert!(!settled);
     }
 
     /// A mutation reply may push activity and work-start keys forward and

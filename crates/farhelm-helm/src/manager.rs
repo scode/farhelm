@@ -73,8 +73,7 @@ use crate::session_cache::{
     creation_order, ensure_recordable_session, eviction_victim, merge_cached_session, merged_status,
 };
 use crate::store::{
-    CacheReplacement, DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow,
-    HostStoreError,
+    DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow, HostStoreError,
 };
 use anyhow::Context as _;
 use farhelm_proto::io::VersionSkew;
@@ -297,10 +296,6 @@ struct RefreshStep {
     /// that has an identity: its sessions live in helm.db, and a second
     /// in-memory copy would be a second answer to the same question.
     live: LiveSessions,
-    /// The session ids this drain found already claimed by another host,
-    /// or `None` for a refresh that produced no evidence either way (a
-    /// failed one). See [`ActorStatus::contested`].
-    contested: Option<Arc<Vec<String>>>,
     /// Whether the supervisor's reply hit its cap, or `None` for a refresh
     /// that produced no reply to say. See [`ActorStatus::list_truncated`].
     truncated: Option<bool>,
@@ -634,11 +629,6 @@ pub struct HostSnapshot {
     /// a connection that is gone. `None` is the ordinary case for every
     /// host with an identity.
     pub live_sessions: Option<Arc<Vec<SessionInfo>>>,
-    /// Session ids this host reports that another host's cache already
-    /// claims — see [`ActorStatus::contested`]. Empty for essentially every
-    /// host, and read from the same borrow as everything else here so a
-    /// routing decision cannot pair one host's claims with another's state.
-    pub contested: Arc<Vec<String>>,
     /// Whether this host's last successful drain hit the wire's cap — see
     /// [`ActorStatus::list_truncated`].
     pub list_truncated: bool,
@@ -871,33 +861,12 @@ struct ActorStatus {
     /// `Arc` because every list read clones the published status, and a
     /// hosts-list poll must not copy a fleet's worth of `SessionInfo`.
     live_sessions: Option<Arc<Vec<SessionInfo>>>,
-    /// Session ids THIS host reports that another host's cache already
-    /// claims — rebuilt from scratch on every successful drain.
-    ///
-    /// Refresh state rather than a remembered incident, and that shape is
-    /// the whole design. A collision is a standing property of the fleet
-    /// ("two hosts both say they have session S"), not an event: it holds
-    /// while both keep reporting the id and stops holding the moment one
-    /// stops. Reconstructing it from each drain's own evidence means it
-    /// clears itself when the claimant stops reporting the id, goes with
-    /// the host when it is removed, goes with the cache when an adoption
-    /// purges it, and needs no schema to survive a helm restart — a restart
-    /// forgets the marker, and the next drains re-observe the collision if
-    /// it is still real. The cost of that reconstruction is a ONE-REFRESH
-    /// window after a restart in which a genuine collision routes to the
-    /// cached owner; said out loud rather than papered over, because the
-    /// alternative — persisting a marker — would outlive the situation it
-    /// describes and need its own invalidation rules.
-    ///
-    /// Empty for essentially every host that ever runs. `Arc` for the same
-    /// reason `live_sessions` is: every status read clones it.
-    contested: Arc<Vec<String>>,
     /// Whether this host's most recent successful drain was cut at the
     /// wire's cap (`farhelm_proto::LIST_SESSIONS_CAP`) — the per-host half
     /// of SPEC.md's "could not read to the end" notice, which the merged
     /// list raises when any contributing host says so.
     ///
-    /// Refresh state, like `contested`: the last successful drain's own
+    /// Refresh state: the last successful drain's own
     /// word, kept across a failed refresh (which produced no word). For a
     /// host that serves from its CACHE this is a copy of what the drain
     /// also wrote to helm.db (`HostRow::cache_truncated`), and the merged
@@ -1230,9 +1199,6 @@ pub struct HostStatus {
     /// the two fields above so a routing decision cannot straddle a
     /// transition.
     pub live_sessions: Option<Arc<Vec<SessionInfo>>>,
-    /// Session ids this host reports that another host's cache already
-    /// claims — see [`ActorStatus::contested`].
-    pub contested: Arc<Vec<String>>,
     /// Whether this host's last successful drain hit the wire's cap — see
     /// [`ActorStatus::list_truncated`].
     pub list_truncated: bool,
@@ -1634,10 +1600,6 @@ impl ConnectionManager {
                             // sessions belonged to the address the user
                             // just stopped pointing at.
                             status.live_sessions = None;
-                            // A contest is evidence from this client, so it
-                            // leaves with the client rather than blocking
-                            // routing for whatever reconnects next.
-                            status.contested = Arc::new(Vec::new());
                             // A retarget invalidates every outstanding
                             // claim by definition: the client is gone and
                             // what answers next may be a different machine
@@ -1716,7 +1678,6 @@ impl ConnectionManager {
             // because a claim is only made against a published client.
             incarnation: 0,
             refusal_attempt: 0,
-            contested: Arc::new(Vec::new()),
             list_truncated: false,
         }));
         let (nudge_tx, nudge_rx) = watch::channel(Nudge::default());
@@ -1836,7 +1797,6 @@ impl ConnectionManager {
                 };
                 withdrawn = status.client.take();
                 status.live_sessions = None;
-                status.contested = Arc::new(Vec::new());
                 status.incarnation =
                     incarnations.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             });
@@ -1884,7 +1844,6 @@ impl ConnectionManager {
                     alias: handle.row.alias.clone(),
                     state: published.state.clone(),
                     live_sessions: published.live_sessions.clone(),
-                    contested: Arc::clone(&published.contested),
                     list_truncated: published.list_truncated,
                     incarnation: published.incarnation,
                 }
@@ -1915,7 +1874,6 @@ impl ConnectionManager {
             state: published.state.clone(),
             client: published.client.clone(),
             live_sessions: published.live_sessions.clone(),
-            contested: Arc::clone(&published.contested),
             list_truncated: published.list_truncated,
             incarnation: published.incarnation,
             refusal_attempt: published.refusal_attempt,
@@ -2210,11 +2168,9 @@ impl ConnectionManager {
             }
             None => false,
         };
-        // A deleted session cannot be contested by anyone: whatever the
-        // collision was about is gone from this host.
         status.send_modify(|status| {
             // A durable write awaited above may outlive its connection. Keep
-            // both in-memory updates under one current-incarnation check.
+            // the in-memory update under one current-incarnation check.
             if status.incarnation != claim.incarnation || status.client.is_none() {
                 return;
             }
@@ -2225,16 +2181,6 @@ impl ConnectionManager {
                 entries.retain(|existing| existing.id != session_id);
                 changed = entries.len() != live.len();
                 status.live_sessions = Some(Arc::new(entries));
-            }
-            if status.contested.iter().any(|id| id == session_id) {
-                let remaining: Vec<String> = status
-                    .contested
-                    .iter()
-                    .filter(|id| id.as_str() != session_id)
-                    .cloned()
-                    .collect();
-                status.contested = Arc::new(remaining);
-                changed = true;
             }
         });
         seed_epoch.fetch_add(1, std::sync::atomic::Ordering::Release);
@@ -2371,9 +2317,8 @@ impl ConnectionManager {
     /// point: a retry drops the connection and returns the actor to its
     /// row-reload boundary, which is right for a user decision and
     /// catastrophically heavy-handed for "look again". This only cuts short
-    /// the wait BETWEEN refreshes — the connection, the identity, the
-    /// contested set and the retry regime all carry on exactly as they
-    /// were, and the next `ListSessions` simply happens now. It is the
+    /// the wait BETWEEN refreshes — the connection, identity and retry regime
+    /// carry on as they were, and the next `ListSessions` simply happens now. It is the
     /// primitive the nudge contract used to provide before that contract
     /// was deliberately widened, back under a name that says which of the
     /// two it is.
@@ -2410,95 +2355,6 @@ impl ConnectionManager {
             Arc::ptr_eq(&handle.status, status)
                 && handle.status.borrow().incarnation == claim.incarnation
         })
-    }
-
-    /// Which host holds `session_id` in memory, and that host's status —
-    /// from ONE hold of the actor map.
-    ///
-    /// The pairing is the point, and splitting it was a real bug: reading
-    /// ownership from a snapshot and then fetching the client through a
-    /// second call lets a reconnect land in between, so an operation
-    /// resolved against install A's in-memory session list would be sent on
-    /// install B's fresh client. That is the same hazard [`Self::status`]
-    /// exists to prevent for the cached case, and it deserves the same
-    /// answer rather than a second, weaker one.
-    ///
-    /// The SCAN, however, happens after the lock is released. Cloning the
-    /// candidate `Arc`s under the mutex and searching them outside it keeps
-    /// a global lock — the one every routing decision, every hosts poll and
-    /// every reconcile contends for — off a linear walk of every
-    /// identity-less host's whole session list. The clones are `Arc`s, so
-    /// this costs a refcount per candidate host and nothing per session.
-    ///
-    /// FAILS CLOSED on two claimants, naming both: picking one would mean a
-    /// stop aimed at one machine landing on another.
-    pub fn live_owner(&self, session_id: &str) -> anyhow::Result<Option<(HostId, HostStatus)>> {
-        let candidates: Vec<(HostId, Arc<Vec<SessionInfo>>, HostStatus)> = {
-            let map = self.actors.lock().expect("actor map mutex poisoned");
-            map.actors
-                .iter()
-                .filter_map(|(id, handle)| {
-                    let published = handle.status.borrow();
-                    let live = published.live_sessions.clone()?;
-                    Some((
-                        *id,
-                        live,
-                        HostStatus {
-                            entry_uuid: handle.row.entry_uuid.clone(),
-                            state: published.state.clone(),
-                            client: published.client.clone(),
-                            live_sessions: published.live_sessions.clone(),
-                            contested: Arc::clone(&published.contested),
-                            list_truncated: published.list_truncated,
-                            incarnation: published.incarnation,
-                            refusal_attempt: published.refusal_attempt,
-                        },
-                    ))
-                })
-                .collect()
-        };
-        let mut found: Option<(HostId, HostStatus)> = None;
-        for (id, live, status) in candidates {
-            if !live.iter().any(|info| info.id == session_id) {
-                continue;
-            }
-            if let Some((first, _)) = &found {
-                return Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
-                    session: session_id.to_string(),
-                    first: *first.min(&id),
-                    second: *first.max(&id),
-                }));
-            }
-            found = Some((id, status));
-        }
-        Ok(found)
-    }
-
-    /// Every host that currently reports `session_id` as CONTESTED — an id
-    /// it lists that another host's cache already claims.
-    ///
-    /// Reconstructed refresh state rather than a remembered incident (see
-    /// [`ActorStatus::contested`]), so a caller asking this question gets
-    /// the fleet as it stands rather than as it once was: a claimant that
-    /// has stopped reporting the id, or been removed, or had its cache
-    /// purged by an adoption, simply is not in the answer.
-    pub fn contested_claimants(&self, session_id: &str) -> Vec<HostId> {
-        let map = self.actors.lock().expect("actor map mutex poisoned");
-        let mut claimants: Vec<HostId> = map
-            .actors
-            .iter()
-            .filter(|(_, handle)| {
-                handle
-                    .status
-                    .borrow()
-                    .contested
-                    .iter()
-                    .any(|id| id == session_id)
-            })
-            .map(|(id, _)| *id)
-            .collect();
-        claimants.sort_unstable();
-        claimants
     }
 
     /// Accept the identity a mismatched host is reporting, purging the old
@@ -2561,7 +2417,7 @@ impl ConnectionManager {
     ///
     /// So the mismatch is replaced with `Connecting` here, along with
     /// everything else that described the superseded connection: its client,
-    /// its in-memory sessions, its contested claims, and its incarnation
+    /// its in-memory sessions and its incarnation
     /// token (which must not survive, or a mutation reply from the old
     /// connection could still present a claim that validates). A concurrent
     /// retirement is preserved: only a successful revival below can replace
@@ -2647,7 +2503,6 @@ impl ConnectionManager {
             };
             withdrawn = status.client.take();
             status.live_sessions = None;
-            status.contested = Arc::new(Vec::new());
             status.incarnation = self
                 .incarnations
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -3272,7 +3127,6 @@ impl HostActor {
             state,
             None,
             LiveSessions::Clear,
-            None,
             None,
             PublishGuard::Always,
             attempt,
@@ -3953,7 +3807,6 @@ impl HostActor {
             Some(Arc::clone(&client)),
             live,
             None,
-            None,
             PublishGuard::WhileIncarnation(incarnation),
             0,
         );
@@ -4047,7 +3900,6 @@ impl HostActor {
                 },
                 Some(Arc::clone(&client)),
                 step.live,
-                step.contested,
                 step.truncated,
                 PublishGuard::WhileCurrent,
                 0,
@@ -4228,7 +4080,6 @@ impl HostActor {
                     },
                     end_connection: Some("the host stopped answering its session list"),
                     live: LiveSessions::Retain,
-                    contested: None,
                     truncated: None,
                     cache_changed: false,
                     discarded: false,
@@ -4257,7 +4108,6 @@ impl HostActor {
                     health: RefreshHealth::Failed { error },
                     end_connection: None,
                     live: LiveSessions::Retain,
-                    contested: None,
                     truncated: None,
                     cache_changed: false,
                     discarded: false,
@@ -4283,7 +4133,6 @@ impl HostActor {
                     health: RefreshHealth::Ok { sessions },
                     end_connection: None,
                     live: LiveSessions::Retain,
-                    contested: None,
                     truncated: None,
                     cache_changed: false,
                     discarded: true,
@@ -4301,7 +4150,6 @@ impl HostActor {
                 health: RefreshHealth::Ok { sessions },
                 end_connection: None,
                 live: LiveSessions::Set(Arc::new(entries)),
-                contested: Some(Arc::new(Vec::new())),
                 truncated: Some(truncated),
                 cache_changed: false,
                 discarded: false,
@@ -4329,44 +4177,24 @@ impl HostActor {
                 health: RefreshHealth::Ok { sessions },
                 end_connection: None,
                 live: LiveSessions::Clear,
-                contested: None,
                 truncated: None,
                 cache_changed: false,
                 discarded: true,
             };
         }
-        let mut observations: Vec<_> = entries.iter().map(crate::ntfy::Observation::from).collect();
+        let observations: Vec<_> = entries.iter().map(crate::ntfy::Observation::from).collect();
         match self
             .store
             .replace_host_sessions(self.id, identity, entries, truncated)
             .await
         {
-            Ok(replacement) => {
-                let CacheReplacement { contested, changed } = replacement;
-                // Colliding ids were not admitted to this host's list; they
-                // must not generate a second host's alert for the same session.
-                let rejected: std::collections::HashSet<_> = contested.iter().collect();
-                observations.retain(|entry| !rejected.contains(&entry.id));
+            Ok(changed) => {
                 debug!(sessions, changed, "replaced the host's cached session list");
-                if let Some(sample) = contested.first() {
-                    // ONE summary line per refresh, not one per colliding
-                    // row: a host reporting a thousand ids that another
-                    // host owns still produces one event. The sample is
-                    // escaped because it is the peer's text.
-                    warn!(
-                        collisions = contested.len(),
-                        sample = peer_text(sample).as_str(),
-                        destination = %self.destination(),
-                        "this host reports session ids another host's cache already claims; \
-                         the first claim holds and these rows were dropped"
-                    );
-                }
                 RefreshStep {
                     alert_observations: Some(observations),
                     health: RefreshHealth::Ok { sessions },
                     end_connection: None,
                     live: LiveSessions::Clear,
-                    contested: Some(Arc::new(contested)),
                     truncated: Some(truncated),
                     cache_changed: changed,
                     discarded: false,
@@ -4409,7 +4237,6 @@ impl HostActor {
                         None
                     },
                     live: LiveSessions::Clear,
-                    contested: None,
                     truncated: None,
                     cache_changed: false,
                     discarded: false,
@@ -4475,16 +4302,11 @@ impl HostActor {
         client: Option<Arc<SupervisorClient>>,
         live: LiveSessions,
     ) {
-        self.publish_refresh(state, client, live, None, None, PublishGuard::Always, 0);
+        self.publish_refresh(state, client, live, None, PublishGuard::Always, 0);
     }
 
-    /// [`Self::publish_with_live`] plus this refresh's contested set.
-    ///
-    /// `None` leaves the previous set standing — a FAILED refresh produced
-    /// no evidence either way, and clearing a collision because one walk
-    /// did not finish would be inventing an answer. A successful drain
-    /// always supplies a set, empty or not, which is what makes the state
-    /// reconstructed rather than remembered (see [`ActorStatus::contested`]).
+    /// Publish one coherent refresh and its truncation evidence. A failed
+    /// refresh leaves the previous cap flag intact because it produced no new list.
     ///
     /// ## The changed-only rule lives here
     ///
@@ -4516,13 +4338,11 @@ impl HostActor {
     // Every argument is one field of the single `send_modify` this function
     // exists to make atomic; bundling them into a struct would only rename
     // them at each of the few call sites.
-    #[allow(clippy::too_many_arguments)]
     fn publish_refresh(
         &self,
         state: HostState,
         client: Option<Arc<SupervisorClient>>,
         live: LiveSessions,
-        contested: Option<Arc<Vec<String>>>,
         truncated: Option<bool>,
         guard: PublishGuard,
         refusal_attempt: u64,
@@ -4570,7 +4390,6 @@ impl HostActor {
             // client on its own cadence, forever. An `Arc` clone, so this
             // costs a refcount rather than a list copy.
             let published_live = status.live_sessions.clone();
-            let published_contested = Arc::clone(&status.contested);
             let live_sessions = match live {
                 LiveSessions::Retain => status.live_sessions.take(),
                 LiveSessions::Set(entries) => Some(entries),
@@ -4595,43 +4414,15 @@ impl HostActor {
                 // something is finished" are the same fact.
                 withdrawn = status.client.take();
             }
-            match (&contested, client.is_some()) {
-                (Some(contested), _) => status.contested = Arc::clone(contested),
-                // A host that is no longer connected takes its claims with
-                // it: nothing is reporting anything, so there is no
-                // standing collision left to assert. A FAILED refresh on a
-                // still-live connection keeps the previous set — it
-                // produced no evidence either way, and clearing on no
-                // evidence would be inventing an answer.
-                (None, false) => status.contested = Arc::new(Vec::new()),
-                (None, true) => {}
-            }
-            // Compared by VALUE, and only once every field this publish can
-            // touch has been settled — including `contested`, which the
-            // match above may have replaced.
-            //
-            // A fresh drain producing an identical list is a DIFFERENT
-            // allocation holding equal contents, so pointer comparison would
-            // call that a change on every single tick. And `contested` is in
-            // the comparison because it is not merely diagnostic: a session
-            // id moving into or out of that set changes which host
-            // `crate::sessions::resolve_owner` will route to — including to
-            // "neither, refuse". A SWAP of equal size (one collision
-            // resolving as another appears) is the case a length or an
-            // emptiness check would miss, and it is the case where a client
-            // holding the old answer sends an operation somewhere it must
-            // not go.
-            // A drain's cap flag is refresh state exactly like `contested`
-            // (a failed refresh says nothing and keeps the previous word),
-            // and it is observable: it decides whether every client shows
-            // the "could not read to the end" notice.
+            // Compare by value: equal rows in a fresh allocation do not change
+            // the list. A successful drain's cap flag is observable too; a
+            // failed drain retains its previous word.
             let published_truncated = status.list_truncated;
             if let Some(truncated) = truncated {
                 status.list_truncated = truncated;
             }
             observable_change = status.state != state
                 || published_live.as_deref() != live_sessions.as_deref()
-                || *published_contested != *status.contested
                 || published_truncated != status.list_truncated;
             status.state = state;
             status.client = client;
@@ -7371,124 +7162,6 @@ mod tests {
         assert_eq!(size(), 0, "the last release removes the entry");
     }
 
-    /// A delete that already entered its durable write must not clear collision
-    /// evidence published under a newer connection incarnation while it awaited.
-    #[farhelm_testtrace::test]
-    async fn a_stale_delete_completion_preserves_newer_collision_evidence() {
-        let fixture = fixture(
-            Cadence {
-                refresh: Duration::from_secs(3600),
-                ..Cadence::default()
-            },
-            |store, transport| async move {
-                let host = store
-                    .add_ssh_host("delete-claim.example", None, None)
-                    .await
-                    .unwrap();
-                transport.set_script(
-                    host,
-                    Script {
-                        identity: Some("delete-peer".to_string()),
-                        sessions: vec![session("deleted-session", 100)],
-                        ..Script::default()
-                    },
-                );
-            },
-        )
-        .await;
-        let host = fixture.store.list_hosts().await.unwrap()[1].id;
-        tokio::time::timeout(Duration::from_secs(10), fixture.manager.wait_for_state(host, |state| {
-            matches!(state, HostState::Connected {
-                identity: Some(identity), last_refresh: RefreshHealth::Ok { sessions: 1 }, ..
-            } if identity == "delete-peer")
-        })).await.unwrap_or_else(|error| panic!(
-            "initial durable refresh did not complete: {error}; state={:?}; incarnation/client={:?}; contested={:?}",
-            fixture.manager.state(host),
-            fixture.manager.status(host).map(|status| (status.incarnation, status.client.is_some())),
-            fixture.manager.contested_claimants("deleted-session"),
-        )).expect("registered host");
-        assert!(
-            fixture
-                .store
-                .cached_sessions(host)
-                .await
-                .unwrap()
-                .iter()
-                .any(|entry| entry.id == "deleted-session")
-        );
-        let current = fixture.manager.status(host).expect("connected host");
-        assert!(current.client.is_some());
-        let claim = SessionClaim {
-            host,
-            entry_uuid: current.entry_uuid.clone(),
-            incarnation: current.incarnation,
-            identity: Some("delete-peer".to_string()),
-        };
-        let (status, cache_lock) = {
-            let map = fixture
-                .manager
-                .actors
-                .lock()
-                .expect("actor map mutex poisoned");
-            let handle = &map.actors[&host];
-            (Arc::clone(&handle.status), Arc::clone(&handle.cache_lock))
-        };
-        // No task can interleave between this check and the single manual poll.
-        assert!(
-            cache_lock.try_lock().is_ok(),
-            "the initial refresh released cache admission"
-        );
-        let connection = fixture.store.connection_for_test();
-        let mut forgetting =
-            std::pin::pin!(fixture.manager.forget_session(&claim, "deleted-session"));
-        {
-            let _commit_gate = connection.lock();
-            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
-            assert!(
-                forgetting.as_mut().poll(&mut cx).is_pending(),
-                "the delete must await its gated durable write"
-            );
-            assert!(
-                cache_lock.try_lock().is_err(),
-                "the pending delete must have passed claim validation and taken cache admission"
-            );
-            let replacement = fixture
-                .manager
-                .incarnations
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            assert_ne!(replacement, claim.incarnation);
-            status.send_modify(|status| {
-                status.incarnation = replacement;
-                status.contested = Arc::new(vec!["deleted-session".to_string()]);
-            });
-            assert_eq!(
-                fixture.manager.contested_claimants("deleted-session"),
-                vec![host]
-            );
-        }
-        tokio::time::timeout(Duration::from_secs(10), forgetting).await
-            .unwrap_or_else(|error| panic!(
-                "released durable delete did not finish: {error}; state={:?}; incarnation/client={:?}; contested={:?}",
-                fixture.manager.state(host),
-                fixture.manager.status(host).map(|status| (status.incarnation, status.client.is_some())),
-                fixture.manager.contested_claimants("deleted-session"),
-            )).expect("durable deletion");
-        assert!(
-            fixture
-                .store
-                .cached_sessions(host)
-                .await
-                .unwrap()
-                .is_empty(),
-            "the old deletion really committed before its final publication was checked"
-        );
-        assert_eq!(
-            fixture.manager.contested_claimants("deleted-session"),
-            vec![host],
-            "the old completion must preserve the newer incarnation's collision evidence"
-        );
-    }
-
     /// Adoption must not hide a supervisor's retirement when the registry
     /// read needed to revive the actor fails. The store mutex gates the real
     /// adoption before commit; manual polling then keeps its post-await
@@ -7812,79 +7485,6 @@ mod tests {
             fixture.transport.dialed_destinations(host),
             vec!["before.example", "after.example"],
             "the edit must be dialed exactly once, not merely recorded"
-        );
-    }
-
-    /// Retargeting withdraws the collision evidence reported by the old
-    /// connection with the client and live list.
-    ///
-    /// A contested id blocks routing even when no cached row is ambiguous.
-    /// Once the reporting connection is gone, retaining that id would make
-    /// an obsolete host keep a session unroutable after the replacement is
-    /// already serving the row.
-    #[farhelm_testtrace::test(start_paused = true)]
-    async fn retargeting_withdraws_the_old_connections_contested_claims() {
-        let fixture = fixture(Cadence::default(), |store, transport| async move {
-            let host = store
-                .add_ssh_host("claims-before.example", None, None)
-                .await
-                .unwrap();
-            transport.set_script(host, Script::default());
-        })
-        .await;
-        let host = fixture.store.list_hosts().await.unwrap()[1].id;
-        let initial_refresh = tokio::time::timeout(
-            Duration::from_secs(10),
-            fixture.manager.wait_for_state(host, |state| {
-                matches!(
-                    state,
-                    HostState::Connected {
-                        last_refresh: RefreshHealth::Ok { sessions: 0 },
-                        ..
-                    }
-                )
-            }),
-        )
-        .await;
-        assert!(
-            matches!(initial_refresh, Ok(Some(_))),
-            "the fixture must finish its initial refresh before injecting a claim; state={:?}",
-            fixture.manager.state(host)
-        );
-        {
-            let map = fixture
-                .manager
-                .actors
-                .lock()
-                .expect("actor map mutex poisoned");
-            map.actors[&host].status.send_modify(|status| {
-                status.contested = Arc::new(vec!["stale-claim".to_string()]);
-            });
-        }
-        assert_eq!(
-            fixture.manager.contested_claimants("stale-claim"),
-            vec![host],
-            "the fixture must establish the routing block the retarget releases"
-        );
-
-        fixture
-            .store
-            .update_ssh_destination(host, "claims-after.example")
-            .await
-            .expect("retarget the host");
-        assert_eq!(
-            fixture.manager.contested_claimants("stale-claim"),
-            vec![host],
-            "the claim must survive the store await so reconciliation, not refresh, withdraws it"
-        );
-        fixture.manager.sync_registry().await.unwrap();
-
-        assert!(
-            fixture
-                .manager
-                .contested_claimants("stale-claim")
-                .is_empty(),
-            "a withdrawn connection must not keep an obsolete collision claim routable"
         );
     }
 

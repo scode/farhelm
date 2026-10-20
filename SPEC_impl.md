@@ -3395,11 +3395,12 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   `matching` describe rows a client can see and "showing 4 of 5" never appears over a row nobody can render (the
   corruption is for the log). The ordinary list reads as unfiltered — "M sessions" — and the filtered wording belongs to
   filters a person applied.
-- The cache still enforces at most one host per bare ID through its existing unique index. The first cached claim
-  remains and a later claimant is omitted; refresh state still records that contest for cache publication. Routing no
-  longer consults those global observations: full references choose the entry, and raw paired cache membership or that
-  entry's coherent identity-less live list proves membership. Equal suffixes cannot redirect a request. A host listing
-  one ID twice still contradicts itself and its whole refresh is refused, keeping the previous cache.
+- Helm schema 65 removes the global bare-ID unique index. The cache's `(host_id, session_id)` primary key is its only
+  index: equal suffixes on different entries are independent rows, with independent counts, mutation seeds and viewer
+  state. Identity-less live rows follow the same rule when merged. No contested-ID state, global owner lookup or
+  cross-entry list deduplication remains. Full references choose the entry, and raw paired cache membership or that
+  entry's coherent identity-less live list proves membership. A host listing one ID twice still contradicts itself and
+  its whole refresh is refused, keeping the previous cache; direct duplicate-row writes roll their transaction back.
 - The order a supervisor lists in is neither validated nor relied on. The helm sorts the union of every host's rows —
   cached and in-memory alike — per request, so an unsorted or differently sorted reply costs nothing and the one host
   that serves from memory rather than from the cache needs no special handling. Session ids are still bounded at every
@@ -3410,12 +3411,12 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   contradicting the answer the caller just got — a session that cannot be operated on, a restart that still reads
   `exited`, a deleted row sitting beside its replacement. All of it is best effort and none of it can fail the mutation:
   the operation succeeded, and reporting a success as a failure is the one outcome SPEC.md's creation contract rules
-  out. The current cache's uniqueness constraint still refuses a create whose bare ID another host caches; the creating
-  host is refreshed and nothing is rolled back on it. A create reply cannot select the other entry: output is always
-  qualified with its own immutable operation claim. Each write carries the CLAIM its operation was routed under — a
-  manager-wide connection token that is never reused, plus the identity — and is dropped if the connection has changed
-  since, so a delayed reply cannot file one install's session under another's name. Writes are serialized against the
-  host's own refresh, and a refresh whose drain predates one of them declines to commit rather than erasing it.
+  out. Another entry's equal suffix cannot refuse or redirect a create: output is always qualified with its own
+  immutable operation claim, including identity-less and reply-then-disconnect paths. Each write carries the CLAIM its
+  operation was routed under — a manager-wide connection token that is never reused, plus the identity — and is dropped
+  if the connection has changed since, so a delayed reply cannot file one install's session under another's name. Writes
+  are serialized against the host's own refresh, and a refresh whose drain predates one of them declines to commit
+  rather than erasing it.
 - One field of such a reply is NOT taken as given: a status of `unknown` never overwrites a definite one. The protocol
   is explicit that list and rename replies compute fresh pane liveness, while create and restart replies' `unknown`
   means "not yet known" rather than "not running" — a create's and a restart's replies carry it deliberately, because at
@@ -3651,11 +3652,11 @@ The helm observes fresh accepted session listings inside each host connection's 
 policy takes a small projection of session id, title and raw status, with an injected monotonic time; it never derives
 transitions from the restart-persistent session cache. The first successful list baselines waiting sessions. Subsequent
 waiting spells settle for 10 seconds on successful refresh observations and emit once. Unknown does not advance a spell,
-resolved non-waiting ends it, and removed sessions discard it. A discarded walk, failed cache write, contested id or
-withdrawn connection contributes no evidence. The raw projection precedes Unknown retention in the cache, including for
-identity-less hosts, so a cached Waiting value cannot fabricate new evidence. Publication and enqueue are checked under
-the connection's status read lock after the guarded publish, preventing a retarget during publication from alerting for
-the withdrawn connection.
+resolved non-waiting ends it, and removed sessions discard it. A discarded walk, failed cache write or withdrawn
+connection contributes no evidence. Equal suffixes on different entries belong to their separate connection-local
+policies. The raw projection precedes Unknown retention in the cache, including for identity-less hosts, so a cached
+Waiting value cannot fabricate new evidence. Publication and enqueue are checked under the connection's status read lock
+after the guarded publish, preventing a retarget during publication from alerting for the withdrawn connection.
 
 The manager owns one bounded 32-item queue and one sender task, also shared with AppState. Refresh uses try-send only.
 The sender reads the current dedicated settings and host display name; title and host characters that

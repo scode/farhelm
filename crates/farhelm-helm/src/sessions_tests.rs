@@ -7235,360 +7235,180 @@ async fn an_identity_less_hosts_sessions_serve_while_connected_and_vanish_after(
     );
 }
 
-/// Spec: a create whose reply names a session id another host already
-/// caches fails with a conflict naming the creating host, and the existing
-/// session stays listed, and routed, under its original host.
-///
-/// Why: before this, the create reported success while the write-back was
-/// refused, and until the creating host's next refresh marked the id
-/// contested, opening, typing into, or stopping the "new" session reached
-/// the other machine's session. Only a buggy or hostile supervisor can
-/// reply this way, since honest ones mint random ids, so the test plays
-/// one.
+/// A create can reuse another entry's suffix without naming that entry.
+/// Exercise durable and identity-less creators through REST while connected.
+/// Separately stage reply delivery, actual transport withdrawal, then the same
+/// acceptance helper REST uses: a stale seed cannot turn success into failure
+/// or change its captured entry prefix. The splice intentionally absorbs peer
+/// EOF, so the withdrawal cases explicitly take down the manager's connection.
 #[farhelm_testtrace::test]
-async fn a_create_reply_naming_another_hosts_session_id_is_refused() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, Frame};
+async fn a_create_with_another_entries_suffix_returns_its_own_prefix() {
+    use super::{CreateAcceptance, accept_created_session, create_target, qualify_session_info};
+    use crate::rest_harness::FakeSupervisor;
+    use farhelm_proto::ControlMsg;
 
-    let (creator_client, creator_peer) = tokio::io::duplex(64 * 1024);
-    let creator_task = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(creator_peer);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::CreateSession { req_id, .. } = request else {
-            panic!("expected CreateSession, got {request:?}");
-        };
-        // The id the OWNER host already holds.
-        writer
-            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+    for (identity, disconnect) in [
+        (Some("creator-install"), false),
+        (None, false),
+        (Some("creator-install"), true),
+        (None, true),
+    ] {
+        let (creator_client, creator_peer) = tokio::io::duplex(64 * 1024);
+        let (release, hold) = tokio::sync::oneshot::channel();
+        let creator_task = tokio::spawn(async move {
+            let mut peer = FakeSupervisor::accept(creator_peer).await;
+            let request = peer.recv().await;
+            let ControlMsg::CreateSession { req_id, .. } = request else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            peer.send(&ControlMsg::SessionCreated {
                 req_id,
                 session: rest_harness::session("shared", 200),
-            }))
+            })
+            .await;
+            if !disconnect {
+                let _ = hold.await;
+            }
+        });
+        let (builder, owner) = rest_harness::FleetBuilder::new()
             .await
-            .unwrap();
-    });
-
-    let (builder, owner) = rest_harness::FleetBuilder::new()
-        .await
-        .ssh(
-            "user@owner",
-            rest_harness::HostScript {
-                identity: Some("identity-owner".to_string()),
-                sessions: vec![rest_harness::session("shared", 100)],
-                ..rest_harness::HostScript::default()
-            },
-        )
-        .await;
-    let (builder, creator) = builder
-        .ssh(
-            "user@creator",
-            rest_harness::HostScript {
-                identity: Some("identity-creator".to_string()),
-                peer: Some(creator_client),
-                ..rest_harness::HostScript::default()
-            },
-        )
-        .await;
-    let harness = builder.start().await;
-    harness.await_refreshed(owner).await;
-    harness.await_refreshed(creator).await;
-
-    let (status, body) = post_text(
-        &harness,
-        "/api/sessions",
-        serde_json::json!({"host": creator, "cwd": "/work", "command": {"command": "agent", "yolo": false}}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
-    assert!(
-        body.contains(&format!("created on host {creator}")) && body.contains("shared"),
-        "the refusal must name the creating host and the colliding id: {body}"
-    );
-    let (_, value) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(row_ids(&value), vec![harness.session_ref(owner, "shared")]);
-    assert_eq!(
-        value["sessions"][0]["host"], owner,
-        "the owner's session keeps its host"
-    );
-    creator_task.await.unwrap();
-}
-
-/// Entry-scoped routes cannot borrow membership from a different entry.
-///
-/// The intermediate cache still keeps the first bare-ID claim and drops the
-/// second. That constraint makes the second entry's reference a 404, while
-/// the original entry remains independently routable. Refreshing away the
-/// claimant preserves that original reference; it never changes its owner.
-#[farhelm_testtrace::test]
-async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
-    use farhelm_proto::ControlMsg;
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-
-    let (owner_client, owner_peer) = tokio::io::duplex(64 * 1024);
-    let owner_task = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(owner_peer);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::StopSession { req_id, session_id } = request else {
-            panic!("expected StopSession, got {request:?}");
-        };
-        assert_eq!(session_id, "contested");
-        writer
-            .write_control(&ControlMsg::SessionStopped { req_id })
-            .await
-            .unwrap();
-    });
-    let (impostor_client, impostor_peer) = tokio::io::duplex(64 * 1024);
-    let (observe, impostor_task) = silent_supervisor(impostor_peer);
-
-    let (builder, owner) = rest_harness::FleetBuilder::new()
-        .await
-        .ssh(
-            "user@owner",
-            rest_harness::HostScript {
-                identity: Some("identity-owner".to_string()),
-                sessions: vec![rest_harness::session("contested", 100)],
-                peer: Some(owner_client),
-                ..rest_harness::HostScript::default()
-            },
-        )
-        .await;
-    let (builder, impostor) = builder
-        .ssh(
-            "user@impostor",
-            rest_harness::HostScript {
-                identity: Some("identity-impostor".to_string()),
-                // The same id, from a machine that does not own it.
-                sessions: vec![rest_harness::session("contested", 100)],
-                peer: Some(impostor_client),
-                // Held down until the owner has cached, so "first claim
-                // holds" has a defined first. Two hosts racing to claim
-                // one id is a real situation and either may win it, but
-                // a test whose subject is what happens to the LOSER
-                // cannot also leave who loses to chance.
-                reachable: false,
-                ..rest_harness::HostScript::default()
-            },
-        )
-        .await;
-    let harness = builder.start().await;
-    harness.await_refreshed(owner).await;
-
-    harness
-        .fleet
-        .edit(impostor, |script| script.reachable = true);
-    harness
-        .manager
-        .retry_now(impostor)
-        .await
-        .expect("the impostor is registered");
-    harness.await_refreshed(impostor).await;
-
-    let (_, value) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(
-        row_ids(&value),
-        vec![harness.session_ref(owner, "contested")],
-        "the contested id appears exactly once, not once per claimant: {value}"
-    );
-    assert_eq!(
-        value["sessions"][0]["host"], owner,
-        "the first claim holds; the later claimant's row is dropped"
-    );
-
-    // A full reference selects the cached entry even while another actor
-    // reports the same suffix. The claimant has no cached membership yet,
-    // so explicitly selecting it must refuse rather than fall back.
-    let (status, body) = post_text(
-        &harness,
-        &harness.session_uri(impostor, "/api/sessions/contested/stop"),
-        serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "{body}");
-
-    let (status, body) = post_text(
-        &harness,
-        &harness.session_uri(owner, "/api/sessions/contested/stop"),
-        serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(
-        status,
-        axum::http::StatusCode::OK,
-        "the cached entry remains routable despite another entry's standing claim: {body}"
-    );
-    owner_task.await.unwrap();
-
-    // Observe the entry-scoped refusal while the impostor's original connection is live.
-    // The next phase deliberately closes it to refresh its claim; that EOF
-    // cannot stand in for evidence that the refusal sent no request.
-    observe.send(()).expect("start post-request observation");
-    impostor_task.await.unwrap();
-
-    // The impostor stops claiming it. Nothing is told to forget
-    // anything — the contest is rebuilt from the next drain's evidence,
-    // and that evidence no longer contains the id.
-    harness
-        .fleet
-        .edit(impostor, |script| script.sessions = Vec::new());
-    harness.fleet.kill_connection(impostor);
-    harness
-        .await_refreshed_as(impostor, "identity-impostor", 0)
-        .await;
-
-    let (status, value) = get_json(
-        &harness,
-        &harness.session_uri(owner, "/api/sessions/contested"),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(
-        value["host"], owner,
-        "the detail route and the routing decision must name the SAME host"
-    );
-}
-
-/// Entry-scoped resolution must ignore another actor's standing collision.
-///
-/// The intermediate cache still admits one host per bare suffix. Moving its
-/// row while actors retain old contested observations proves that routing
-/// follows the selected pair's current membership, never a global winner or
-/// the sorted order of those observations. Entries without membership get a
-/// 404 even though the same suffix exists elsewhere.
-#[farhelm_testtrace::test]
-async fn resolve_owner_uses_only_selected_entry_after_a_cache_handoff() {
-    let (builder, original_owner) = rest_harness::FleetBuilder::new()
-        .await
-        .ssh(
-            "user@original-owner",
-            rest_harness::HostScript {
-                identity: Some("identity-original-owner".to_string()),
-                sessions: vec![rest_harness::session("contested-handoff", 100)],
-                ..rest_harness::HostScript::default()
-            },
-        )
-        .await;
-    let (builder, cached_owner) = builder
-        .ssh(
-            "user@cached-owner",
-            rest_harness::HostScript {
-                identity: Some("identity-cached-owner".to_string()),
-                sessions: vec![rest_harness::session("contested-handoff", 100)],
-                reachable: false,
-                ..rest_harness::HostScript::default()
-            },
-        )
-        .await;
-    let (builder, later_claimant) = builder
-        .ssh(
-            "user@later-claimant",
-            rest_harness::HostScript {
-                identity: Some("identity-later-claimant".to_string()),
-                sessions: vec![rest_harness::session("contested-handoff", 100)],
-                reachable: false,
-                ..rest_harness::HostScript::default()
-            },
-        )
-        .await;
-    let harness = builder.start().await;
-    harness.await_refreshed(original_owner).await;
-
-    for claimant in [cached_owner, later_claimant] {
-        harness
-            .fleet
-            .edit(claimant, |script| script.reachable = true);
-        harness
-            .manager
-            .retry_now(claimant)
-            .await
-            .expect("the claimant actor is registered");
-        harness.await_refreshed(claimant).await;
-    }
-    assert_eq!(
-        harness.manager.contested_claimants("contested-handoff"),
-        vec![cached_owner, later_claimant],
-        "both actors must still report the id before moving the cache owner"
-    );
-
-    harness
-        .store
-        .replace_host_sessions(original_owner, "identity-original-owner", Vec::new(), false)
-        .await
-        .expect("clear the original cache owner");
-    harness
-        .store
-        .replace_host_sessions(
-            cached_owner,
-            "identity-cached-owner",
-            vec![rest_harness::session("contested-handoff", 100)],
-            false,
-        )
-        .await
-        .expect("move the cache entry while the actor observations remain live");
-    assert_eq!(
-        harness
-            .store
-            .host_of_session("contested-handoff")
-            .await
-            .unwrap(),
-        Some(cached_owner),
-        "the cached owner must be the first sorted contested claimant"
-    );
-
-    let (owner, _) = resolve_owner(
-        &harness.state,
-        &store::SessionKey::new(cached_owner, "contested-handoff"),
-    )
-    .await
-    .expect("the selected entry owns the cached session");
-    assert_eq!(owner, cached_owner);
-    for absent in [original_owner, later_claimant] {
-        let err = resolve_owner(
-            &harness.state,
-            &store::SessionKey::new(absent, "contested-handoff"),
-        )
-        .await
-        .err()
-        .expect("another entry cannot borrow the cached owner's membership");
+            .ssh(
+                "owner.example",
+                rest_harness::HostScript {
+                    identity: Some("owner-install".to_string()),
+                    sessions: vec![rest_harness::session("shared", 100)],
+                    ..Default::default()
+                },
+            )
+            .await;
+        let (builder, creator) = builder
+            .ssh(
+                "creator.example",
+                rest_harness::HostScript {
+                    identity: identity.map(str::to_string),
+                    peer: Some(creator_client),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let harness = builder.start().await;
+        harness.await_refreshed(owner).await;
+        harness.await_refreshed(creator).await;
         assert!(
-            matches!(
-                err.downcast_ref::<crate::client::SupervisorError>(),
-                Some(crate::client::SupervisorError {
-                    kind: farhelm_proto::ErrorKind::NotFound,
-                    ..
-                })
-            ),
-            "{err:#}"
+            harness
+                .store
+                .has_cached_session(&store::SessionKey::new(owner, "shared"))
+                .await
+                .unwrap()
         );
+        assert!(
+            !harness
+                .store
+                .has_cached_session(&store::SessionKey::new(creator, "shared"))
+                .await
+                .unwrap()
+        );
+        let result: serde_json::Value = if disconnect {
+            let (claim, client) = create_target(&harness.state, Some(creator)).unwrap();
+            let reply = client
+                .create_session("/work", "agent", None, 80, 24)
+                .await
+                .expect("the successful create reply must arrive before withdrawal");
+            assert_eq!(reply.id, "shared");
+            harness.fleet.take_down(creator);
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                harness.manager.wait_for_state(creator, |state| {
+                    !matches!(state, crate::manager::HostState::Connected { .. })
+                }),
+            )
+            .await
+            .expect("the owned transport must withdraw before acceptance")
+            .expect("the creator's entry remains registered");
+            let withdrawn = harness.manager.status(creator).unwrap();
+            assert!(withdrawn.client.is_none());
+            assert_ne!(withdrawn.incarnation, claim.incarnation);
+            assert!(
+                harness
+                    .manager
+                    .remember_session(&claim, &reply)
+                    .await
+                    .is_err(),
+                "premise: this reply cannot be seeded through its stale connection claim"
+            );
+            let accepted = accept_created_session(
+                &harness.state,
+                &claim,
+                reply,
+                CreateAcceptance {
+                    github_repo: None,
+                    requested_cwd: "/work".into(),
+                    accept_result: None,
+                    explicit_selection: None,
+                },
+            )
+            .await
+            .expect("connection loss after a delivered reply cannot revoke success");
+            assert!(
+                !harness
+                    .store
+                    .has_cached_session(&store::SessionKey::new(creator, "shared"))
+                    .await
+                    .unwrap(),
+                "acceptance must not republish a stale connection's row"
+            );
+            assert!(
+                harness
+                    .manager
+                    .status(creator)
+                    .unwrap()
+                    .live_sessions
+                    .is_none(),
+                "a withdrawn identity-less connection must not regain live membership"
+            );
+            serde_json::to_value(qualify_session_info(&claim.entry_uuid, accepted).unwrap())
+                .unwrap()
+        } else {
+            let (status, body) = post_text(
+                &harness,
+                "/api/sessions",
+                serde_json::json!({
+                    "host": creator,
+                    "cwd": "/work",
+                    "command": {"command": "agent", "yolo": false},
+                }),
+            )
+            .await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+            serde_json::from_str(&body).unwrap()
+        };
+        assert_eq!(result["id"], harness.session_ref(creator, "shared"));
+        assert_ne!(result["id"], harness.session_ref(owner, "shared"));
+        let original = harness
+            .store
+            .cached_session(owner, "shared")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            original.created_at, 100,
+            "the other entry's row is untouched"
+        );
+        if !disconnect {
+            let (_, value) = get_json(&harness, "/api/sessions").await;
+            let mut ids = row_ids(&value);
+            ids.sort();
+            let mut expected = vec![
+                harness.session_ref(owner, "shared"),
+                harness.session_ref(creator, "shared"),
+            ];
+            expected.sort();
+            assert_eq!(ids, expected, "both entries remain visible: {value}");
+            assert_eq!(value["total"], 2);
+            let _ = release.send(());
+        }
+        creator_task.await.unwrap();
     }
-
-    harness
-        .fleet
-        .edit(later_claimant, |script| script.sessions = Vec::new());
-    harness.fleet.kill_connection(later_claimant);
-    harness
-        .await_refreshed_as(later_claimant, "identity-later-claimant", 0)
-        .await;
-    assert_eq!(
-        harness.manager.contested_claimants("contested-handoff"),
-        vec![cached_owner],
-        "the remaining claimant is the cached owner itself"
-    );
-    let (owner, _) = resolve_owner(
-        &harness.state,
-        &store::SessionKey::new(cached_owner, "contested-handoff"),
-    )
-    .await
-    .expect("a sole self-claim must remain routable");
-    assert_eq!(owner, cached_owner);
 }
 
 /// A refresh whose drain PREDATES a create must not erase the create.
@@ -8138,16 +7958,11 @@ async fn a_session_created_before_an_identity_less_hosts_first_refresh_is_routab
     peer.abort();
 }
 
-/// An identity-less host reporting an id another host already caches is
-/// listed once, under the cached (first) claimant, and counted once.
-///
-/// Within the cache the first claim already holds (SPEC_impl.md's duplicate
-/// id rule), but an identity-less host's rows come from memory and were
-/// appended to the merged list unchecked, so the session showed twice and
-/// `total` counted it twice. The rule is
-/// about keeping the LIST coherent, so it has to hold on both storage paths.
+/// Equal suffixes remain distinct across durable and identity-less entries.
+/// Both storage paths must contribute their own rows and counts; deduplicating
+/// by bare ID would hide a valid session the caller can address by its full ID.
 #[farhelm_testtrace::test]
-async fn an_identity_less_duplicate_of_a_cached_id_is_listed_once() {
+async fn an_identity_less_entry_can_list_the_same_suffix_as_a_cached_entry() {
     let (builder, unbound) = rest_harness::FleetBuilder::new()
         .await
         .local(rest_harness::HostScript {
@@ -8179,18 +7994,19 @@ async fn an_identity_less_duplicate_of_a_cached_id_is_listed_once() {
     ids.sort();
     let mut expected = vec![
         harness.session_ref(unbound, "only-unbound"),
+        harness.session_ref(unbound, "shared-id"),
         harness.local_session_ref("shared-id"),
     ];
     expected.sort();
     assert_eq!(ids, expected, "{value}");
-    assert_eq!(value["total"], 2, "the duplicate must not be counted twice");
+    assert_eq!(value["total"], 3, "each entry contributes its own sessions");
     let shared = value["sessions"]
         .as_array()
         .unwrap()
         .iter()
         .find(|row| row["id"] == harness.local_session_ref("shared-id"))
         .expect("the shared id is listed");
-    assert_eq!(shared["host"], local, "the cached (first) claim holds");
+    assert_eq!(shared["host"], local, "the cached entry keeps its own row");
 }
 
 /// A mutation reply that says `Unknown` must not erase a status the
@@ -11034,8 +10850,7 @@ async fn rest_session_routes_require_full_canonical_references() {
     peer.await.unwrap();
 }
 
-/// The same bare suffix can be routable from a cached entry and an
-/// identity-less entry before cache uniqueness is retired. Each full reference
+/// The same bare suffix is routable from two cached entries. Each full reference
 /// must reach its own peer, and the unchanged supervisor wire receives bare IDs.
 #[farhelm_testtrace::test]
 async fn full_references_route_same_suffix_only_on_the_selected_entry() {
@@ -11069,7 +10884,7 @@ async fn full_references_route_same_suffix_only_on_the_selected_entry() {
     let (cached_client, cached_peer) = tokio::io::duplex(64 * 1024);
     let cached = tokio::spawn(rename_once(cached_peer, "cached entry"));
     let (live_client, live_peer) = tokio::io::duplex(64 * 1024);
-    let live = tokio::spawn(rename_once(live_peer, "identity-less entry"));
+    let live = tokio::spawn(rename_once(live_peer, "second cached entry"));
     let (builder, remote) = rest_harness::FleetBuilder::new()
         .await
         .local(rest_harness::HostScript {
@@ -11080,9 +10895,9 @@ async fn full_references_route_same_suffix_only_on_the_selected_entry() {
         })
         .await
         .ssh(
-            "user@identity-less",
+            "second-cache.example",
             rest_harness::HostScript {
-                identity: None,
+                identity: Some("second-cached-install".into()),
                 sessions: vec![rest_harness::session("same-suffix", 100)],
                 peer: Some(live_client),
                 ..Default::default()
@@ -11093,25 +10908,17 @@ async fn full_references_route_same_suffix_only_on_the_selected_entry() {
     let local = rest_harness::local_id(&harness.store).await;
     harness.await_refreshed(local).await;
     harness.await_refreshed(remote).await;
-    assert!(
-        harness
-            .store
-            .cached_sessions(remote)
-            .await
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        harness.store.cached_sessions(remote).await.unwrap().len(),
+        1,
+        "premise: the second entry also has durable membership"
     );
     assert_eq!(
-        harness
-            .manager
-            .status(remote)
-            .unwrap()
-            .live_sessions
-            .unwrap()[0]
-            .id,
-        "same-suffix"
+        harness.store.cached_sessions(local).await.unwrap().len(),
+        1,
+        "premise: the first entry retains its own durable membership"
     );
-    for (host, title) in [(local, "cached entry"), (remote, "identity-less entry")] {
+    for (host, title) in [(local, "cached entry"), (remote, "second cached entry")] {
         let (status, body) = post_text(
             &harness,
             &harness.session_uri(host, "/api/sessions/same-suffix/rename"),

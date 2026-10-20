@@ -1243,9 +1243,7 @@ async fn resolve_host(
                 kind: ErrorKind::Conflict,
                 // `Conflict`, not `NotFound` or `InvalidRequest`: the
                 // request is well formed and the fleet is the thing
-                // that is incoherent, which is the same reading
-                // `HostStoreError::SessionOwnerAmbiguous` gets. The
-                // remedy is a rename the agent cannot perform, so the
+                // that is incoherent. The remedy is a rename the agent cannot perform, so the
                 // message says who has to do it.
                 message: format!(
                     "{duplicates} hosts registered with this helm are named {name:?}, so the \
@@ -1685,7 +1683,7 @@ async fn create_checkout_for_agent(
             &resolved.host_name,
         )?;
         if let Some(session) = settled {
-            crate::sessions::record_session(state, &claim, &session).await?;
+            crate::sessions::record_session(state, &claim, &session).await;
             return Ok(agent_created_reply(
                 state,
                 &claim,
@@ -5531,9 +5529,11 @@ mod tests {
             changed, 1,
             "fixture premise: the target's cached row exists"
         );
-        assert_eq!(
-            h.store.host_of_session("target").await.unwrap(),
-            Some(local),
+        assert!(
+            h.store
+                .has_cached_session(&SessionKey::new(local, "target"))
+                .await
+                .unwrap(),
             "fixture premise: the target still routes"
         );
         assert_eq!(
@@ -6062,7 +6062,12 @@ mod tests {
             ),
             "{outcome:?}"
         );
-        assert!(h.store.host_of_session("target").await.unwrap().is_none());
+        assert!(
+            !h.store
+                .has_cached_session(&SessionKey::new(local, "target"))
+                .await
+                .unwrap()
+        );
     }
 
     /// Auto-approval applies to Delete, but a lost destructive reply remains
@@ -8814,6 +8819,59 @@ mod tests {
             } => sessions,
             other => panic!("the listing verb must answer with a listing, got {other:?}"),
         }
+    }
+
+    /// Discovery must retain both cached entries reporting the same suffix,
+    /// while marking only the asking entry's row as current. Otherwise an agent
+    /// could mistake the other entry for itself despite having distinct full IDs.
+    #[farhelm_testtrace::test]
+    async fn same_suffix_cached_entries_have_distinct_ids_and_one_current_row() {
+        use crate::rest_harness;
+
+        let (builder, remote) = rest_harness::FleetBuilder::new()
+            .await
+            .local(rest_harness::HostScript {
+                identity: Some("local-install".into()),
+                sessions: vec![session("shared", 100)],
+                ..Default::default()
+            })
+            .await
+            .ssh(
+                "remote.example",
+                rest_harness::HostScript {
+                    identity: Some("remote-install".into()),
+                    sessions: vec![session("shared", 100)],
+                    ..Default::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        h.await_refreshed(remote).await;
+        for host in [local, remote] {
+            assert!(
+                h.store
+                    .has_cached_session(&SessionKey::new(host, "shared"))
+                    .await
+                    .unwrap(),
+                "premise: both entries have durable membership"
+            );
+        }
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let sessions = agent_sessions(&handler, origin_of(&h, local), "shared").await;
+        assert_eq!(sessions.len(), 2);
+        let own = sessions
+            .iter()
+            .find(|row| row.id == h.session_ref(local, "shared"))
+            .unwrap();
+        let other = sessions
+            .iter()
+            .find(|row| row.id == h.session_ref(remote, "shared"))
+            .unwrap();
+        assert!(own.current);
+        assert!(!other.current);
+        assert_ne!(own.id, other.id);
     }
 
     /// Spec: `create --command` succeeds through the shared agent path,

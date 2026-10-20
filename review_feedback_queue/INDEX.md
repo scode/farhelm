@@ -8,12 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`pending-approval-can-cross-host-entries.md`](pending-approval-can-cross-host-entries.md) — Waiting approvals and GUI
-  Delete/Replace consent can act on another host entry after session ownership changes.
-
-- [`create-reply-foreign-id-bypasses-cache-refusal.md`](create-reply-foreign-id-bypasses-cache-refusal.md) — A hostile
-  Create reply can select another host's existing session through paths that bypass the ownership refusal.
-
 - [`payload-workers-outlive-state-lock.md`](payload-workers-outlive-state-lock.md) — Old payload work can overlap a
   successor helm after releasing state ownership; the integrity consequence remains unresolved.
 

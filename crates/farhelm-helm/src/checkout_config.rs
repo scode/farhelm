@@ -2601,6 +2601,8 @@ mod tests {
                      session_id       TEXT NOT NULL PRIMARY KEY,
                      seen_activity_at INTEGER NOT NULL
                  ) STRICT;
+                 -- Schema 65 dropped the one-owner-per-session-id cache index v26 had.
+                 CREATE UNIQUE INDEX session_cache_one_owner ON session_cache (session_id);
                  PRAGMA user_version = 26;",
             )
             .unwrap();
