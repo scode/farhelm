@@ -132,30 +132,40 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through the public buffer API. Nothing has been filed upstream; filing is the maintainer's call. Farhelm vendors
   xterm.js unmodified, so an upstream fix arrives only with a stable release.
 
-- **Cheaper clones from the repository cache.** Look into whether a managed checkout's clone from the host's repository
-  cache can skip most of the compression and delta work git does today, so the clone stage finishes sooner. A first plan
-  was abandoned on 2026-10-18, pending the maintainer's review of what it found: cloning straight from the cache without
-  checking out, pointing the remote back at GitHub and then checking out does not behave like a plain GitHub clone. An
-  ordinary clone gives a long-running checkout filter (`filter.<name>.process`) the branch name and commit, which that
-  checkout does not, so such a filter could produce different files or refuse; filter, hook and reflog behavior also
-  differ. Revisit only with a checkout shown to match a plain clone, or after deciding to relax that requirement.
+- **Keep a spare checkout ready for managed-checkout launches.** Next to each host's repository cache, keep one spare
+  checkout made ahead of time with the launch's exact clone command. A launch takes it with a rename, then fetches and
+  checks out only what changed since it was made, and the next spare is built in the background. That turns the clone
+  stage into roughly rename plus fetch plus a small checkout, instead of today's several seconds of local work. Not yet
+  planned; the maintainer chose this over a scheduled repack on 2026-10-20 but has no time to finish planning it now.
 
-- **Repack the repository cache regularly.** Run `git repack -a -d` on each host's repository cache on a schedule (how
-  often, and whether from the launch path or in the background, is TBD; it has to happen under the cache's lock). Every
-  managed-checkout launch fetches into the cache and nothing ever repacks it, so packs and loose objects pile up until
-  git's own auto gc kicks in at 50 packs, and that gc would run in the foreground of some user's launch because the
-  fetch sets `gc.autoDetach=false` (inferred from the defaults and the code, not observed). Measured on 2026-10-18
-  against a copy of the eight-day-old `scode/farhelm` cache (git 2.43, 5 alternating runs per side after a discarded
-  warm-up): 23 packs and 388 loose objects, 111.5 MiB, became one 35.4 MiB pack in 5.0 s, and the launch's exact clone
-  command (`clone --reference <cache> --dissociate`) dropped from a 4.50 s to a 1.70 s median against GitHub, and from
-  3.75 s to 0.81 s against a local copy, so the saving is local work rather than network. Most of the size was blobs
-  stored whole instead of as deltas (95.8 MiB before, 19.7 MiB after), plus 28.8 MiB of repeated copies of 1,629
-  objects, which is what fixing up each fetched thin pack leaves behind when it appends full copies of delta bases the
-  cache already has. Independent of "Cheaper clones from the repository cache" above, which is about the clone itself.
+  Why the clone is slow today (measured on 2026-10-20 against a copy of the live `scode/farhelm` cache, git 2.43, 3 runs
+  per variant after a warm-up): the cache had 28 packs and 481 loose objects, and of its unique objects 83 MiB were
+  stored whole (79 MiB of them blobs) against 11 MiB stored as deltas, because each fetched thin pack gets its missing
+  delta bases appended whole and nothing recompresses them. `--dissociate` then repacks every borrowed object into the
+  new checkout, and git's own phase timers put most of a 4.8 s clone in that repack's delta search (2.2 s) and pack
+  writing (1.3 s). Loose objects are a small part: packing them alone saved about 0.25 s, and dropping the ones already
+  in a pack or adding a multi-pack index saved nothing. A full `git repack -a -d` of the cache (5.5 s, once) brought the
+  clone to 1.85 s against GitHub; `gc --keep-largest-pack` to 3.4 s; `repack --geometric=2` collapsed to one pack here
+  and matched the full repack. The cheap complement is to pass `-c gc.autoPackLimit=10` (or so) on the existing cache
+  fetch, so git's own foreground gc consolidates the cache under the cache lock, at the cost of one slower launch now
+  and then. A repack without that lock is not safe: git's documentation says a gc or repack running while a fetch writes
+  can delete an object the fetch just added and corrupt the repository.
+
+  Decisions this needs: (1) the spare is a plain clone made earlier and then updated, not a clone made at launch time,
+  so its reflog shows the update, unchanged files keep older modification times, and the user's hooks and checkout
+  filters (Git LFS, `filter.<name>.process`) ran when it was made and run again only for the update. An earlier
+  cheaper-clones plan, abandoned on 2026-10-18, required a checkout shown to match a plain GitHub clone; this has to
+  settle whether that difference is acceptable. (2) Building the spare is a background clone, which SPEC.md does not
+  allow today (the system never runs VCS operations implicitly, and cache refresh and clone run in the session terminal
+  so progress, credential prompts and failures are visible): decide its environment and credentials, and that a failed
+  spare just falls back to today's visible clone. (3) A rename is only instant on one filesystem, so the spare lives
+  inside the configured checkout folder, with a normal clone when that is not possible. Also: two launches at once (one
+  takes the spare, the other clones normally), building the spare in a temporary directory and moving it into place when
+  done, and discarding spares when the cache is evicted, the checkout folder changes, or the post-clone command changes.
 
 - **Give the Settings dialog more structure.** Settings has grown into one long page that takes endless scrolling to get
   through. Overhaul it with more structure, such as tabs, so related settings are grouped and any one of them is easy to
-  find. The grouping and layout are TBD.
+  find. The grouping and layout are TBD. Plan: `plans/queue/structured-settings-dialog.md`.
 
 - **Keep focus inside host settings after a refused save.** A keyboard user can Tab into the host settings dialog's
   scrollable body while a save is running. If the save is then refused, the body stops being focusable, but the dialog's
@@ -163,7 +173,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   destination field, and the dialog's focus isolation swallows one keystroke to recover. A successful save is
   unaffected. SSH help has the same shape if its commands arrive while its body has focus. Requiring the refocus target
   to be keyboard-focusable would close it; add a test that checks focus after a refused save. Found while landing the
-  keyboard scroll audit (#2222, #2226).
+  keyboard scroll audit (#2222, #2226). Plan: `plans/queue/host-settings-focus.md`.
 
 - **Tidy the launch-sequence hints.** The "cannot launch on its own" banner also appears for ⚡ alone with an incomplete
   template, and for a one-template sequence, where it tells the user to use the prefix they just used; SPEC.md describes
@@ -171,18 +181,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   shows the "Mark a template with ⚡" hint even when one is marked. Templates can call a template launchable when the
   launch check does not, for example a template set to run a command that names an agent but leaves the command empty;
   its number key then shows the "cannot launch on its own" banner. The Templates help paragraph does not yet mention
-  partial-template keys or sequences. Found while landing the quick-launch sequences (#2220, #2225, #2228).
+  partial-template keys or sequences. Found while landing the quick-launch sequences (#2220, #2225, #2228). Plan:
+  `plans/queue/launch-sequences.md`.
 
 - **Make the launch-sequence pill obvious.** After Cmd+X (Ctrl+Shift+X off the Mac) starts a quick-launch sequence, the
   status pill that floats over the bottom of the terminal area is easy to miss. Make it more prominent, probably by
   placing it in the middle of the terminal area instead of at the bottom and giving it a more noticeable color. Details
-  TBD.
+  TBD. Plan: `plans/queue/launch-sequences.md`.
 
 - **Stop rapid menu arrow presses from pulling focus back.** In the desktop app, a focus move already sent to the page
   cannot be recalled, so a rapid arrow press whose request was already on its way can still pull focus back after the
   user moved it: Down twice, click the fourth item, Down can still end on the fourth item when the second press's focus
   move was already sent. The menu focus fix (#2232) narrowed this and removed the earlier TODO entry; this entry tracks
-  the remaining case.
+  the remaining case. Plan: `plans/queue/menu-arrow-focus-race.md`.
 
 - **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
   session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
@@ -201,11 +212,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   attempt), but that does not cover this. The work is to find every other case like it, any way an Enter in the launcher
   can end without a launch or a message, and give each one a reason. For the `asdf` case specifically, one suggested
   behavior is to treat bare text as `name:asdf` (what the maintainer meant there); that is decided when the entry is
-  planned.
+  planned. Plan: `plans/queue/launcher-enter-feedback.md`.
 
 - **Activate the most recently opened session when another closes.** Closing a session should leave the most recently
   opened session selected and active; today it does not, and what actually gets selected instead is not yet confirmed.
-  Find what selection happens when a session closes, then make the newest session take over.
+  Find what selection happens when a session closes, then make the newest session take over. Plan:
+  `plans/queue/select-newest-on-close.md`.
 
 ## Doc todo
 
