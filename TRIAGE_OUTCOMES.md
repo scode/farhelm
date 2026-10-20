@@ -16549,7 +16549,11 @@
 - Completion criteria: copy-on-select acts only on primary-button selections, in the live and restored-snapshot paths,
   with a node test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or the changelog fragment). Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
+- Execution: implemented in change `oxtvnupupmxxmlstwynmvtmmwzmourms`, bookmark
+  `plan/terminal-link-and-copy-fixes/04-copy-primary-selections`. The shared predicate requires a primary-button press;
+  both live and restored snapshot listeners supply its button. Node cases preserve primary copying and reject middle,
+  right and absent buttons, including forced selection. Counted code/test/doc diff: 31 lines, within the 100-line gate.
+  PR: https://github.com/scode/farhelm/pull/2399/changes.
 
 ## native-download-quit-leaves-partial-files.md
 

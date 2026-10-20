@@ -1284,6 +1284,7 @@
     let pressed = null;
     const mouseDown = (event) => {
       pressed = {
+        button: event.button,
         trackingAtPress: !!(term.modes && term.modes.mouseTrackingMode !== "none"),
         forced: window.farhelmCopyOnSelect.pressForcesSelection(event, navigator.platform),
       };
@@ -5544,6 +5545,7 @@
             }
             if (
               !window.farhelmCopyOnSelect.copySelectionOnMouseUp({
+                button: press?.button,
                 hasSelection,
                 selectionText,
                 trackingAtPress: press && press.trackingAtPress,

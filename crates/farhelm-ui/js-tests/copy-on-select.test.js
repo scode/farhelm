@@ -5,7 +5,7 @@
 //
 // The decision is now trivial by design (see copy-on-select.js's header for
 // why an earlier "does this differ from the last copy" cache was removed as
-// a real bug, not simplified away for its own sake): copy when a gesture
+// a real bug, not simplified away for its own sake): copy when a primary gesture
 // allowed local selection and ended with non-empty text. What these
 // cases pin is that BOTH of xterm's own signals are consulted rather than
 // either one alone — `hasSelection()` and `getSelection()` are read
@@ -17,7 +17,7 @@ const { copySelectionOnMouseUp } = require("../assets/copy-on-select.js");
 
 test("a non-empty selection copies", () => {
   assert.equal(
-    copySelectionOnMouseUp({ hasSelection: true, selectionText: "hello" }),
+    copySelectionOnMouseUp({ button: 0, hasSelection: true, selectionText: "hello" }),
     true,
   );
 });
@@ -30,21 +30,21 @@ test("a selection identical to one already copied still copies again", () => {
   // really the same case as the one above, asserted under the name of the
   // bug it fixes rather than merely restated.
   assert.equal(
-    copySelectionOnMouseUp({ hasSelection: true, selectionText: "hello" }),
+    copySelectionOnMouseUp({ button: 0, hasSelection: true, selectionText: "hello" }),
     true,
   );
 });
 
 test("hasSelection true but empty selection text skips", () => {
   assert.equal(
-    copySelectionOnMouseUp({ hasSelection: true, selectionText: "" }),
+    copySelectionOnMouseUp({ button: 0, hasSelection: true, selectionText: "" }),
     false,
   );
 });
 
 test("a plain click without a drag skips (no selection, no text)", () => {
   assert.equal(
-    copySelectionOnMouseUp({ hasSelection: false, selectionText: "" }),
+    copySelectionOnMouseUp({ button: 0, hasSelection: false, selectionText: "" }),
     false,
   );
 });
@@ -54,10 +54,20 @@ test("an unforced press under mouse tracking does not re-copy a retained selecti
   // The program owns this press, so that old text must not replace whatever
   // the user has since copied elsewhere. Forcing the press still selects
   // locally; turning tracking off still permits deliberate reselection.
-  const retained = { hasSelection: true, selectionText: "old selection" };
+  const retained = { button: 0, hasSelection: true, selectionText: "old selection" };
   assert.equal(copySelectionOnMouseUp({ ...retained, trackingAtPress: true, forced: false }), false);
   assert.equal(copySelectionOnMouseUp({ ...retained, trackingAtPress: true, forced: true }), true);
   assert.equal(copySelectionOnMouseUp({ ...retained, trackingAtPress: false, forced: false }), true);
+});
+
+/** Other buttons cannot refresh retained text over a newer clipboard value. */
+test("only a primary press can copy a retained local selection", () => {
+  const retained = { hasSelection: true, selectionText: "old selection", trackingAtPress: false, forced: false };
+  assert.equal(copySelectionOnMouseUp({ ...retained, button: 0 }), true);
+  for (const button of [1, 2, undefined]) {
+    assert.equal(copySelectionOnMouseUp({ ...retained, button }), false, String(button));
+    assert.equal(copySelectionOnMouseUp({ ...retained, button, forced: true }), false, `forced ${button}`);
+  }
 });
 
 test("browser-global branch: window.farhelmCopyOnSelect exists with no module present", () => {
@@ -78,6 +88,7 @@ test("browser-global branch: window.farhelmCopyOnSelect exists with no module pr
   assert.equal(typeof sandbox.window.farhelmCopyOnSelect.copySelectionOnMouseUp, "function");
   assert.equal(
     sandbox.window.farhelmCopyOnSelect.copySelectionOnMouseUp({
+      button: 0,
       hasSelection: true,
       selectionText: "hello",
     }),
