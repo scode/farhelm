@@ -56,9 +56,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
   — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
 
-- [`trash-sidebar-calls-unchecked-archives-empty.md`](trash-sidebar-calls-unchecked-archives-empty.md) — The trash
-  button can advertise an empty collection while unchecked archives remain.
-
 - [`over-limit-trash-total-loses-partial-size.md`](over-limit-trash-total-loses-partial-size.md) — A successful listing
   above the deletion limit can lose the global partial-size warning.
 
