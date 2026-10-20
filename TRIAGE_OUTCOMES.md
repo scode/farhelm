@@ -16616,8 +16616,8 @@
 - Execution: implemented in change `zvxvlnwkvxpokyrzwqnptyozvwrtvymz`, bookmark
   `plan/transfer-leftover-cleanup/01-download-route-cleanup`. EOF disarms cancellation only after routing removal; the
   regression cancels while that removal is contended and verifies cleanup on a live connection. The non-test change is
-  four added/removed lines including its explanatory comment, within the 15-line gate.
-  PR: https://github.com/scode/farhelm/pull/2395/changes.
+  four added/removed lines including its explanatory comment, within the 15-line gate. PR:
+  https://github.com/scode/farhelm/pull/2395/changes.
 
 ## checkout-folder-save-trims-literal-path.md
 
@@ -16644,7 +16644,11 @@
 - Completion criteria: a cancelled upload also releases its admission entry, mirroring `cancel_download`, with a
   regression test. Gate: over about 15 lines of non-test code, discard instead. Remove the feedback file and its index
   entry.
-- Execution: planned in `plans/queue/transfer-leftover-cleanup.md`.
+- Execution: implemented in change `sooovyqtqpzytnklywupqtplklvwmkqr`, bookmark
+  `plan/transfer-leftover-cleanup/02-upload-admission-cleanup`. The guard retires its admission and route before sending
+  Abort; the live-peer regression repeats cancellation with writer backpressure, an unrelated pending request and a late
+  reply. The non-test change is ten added/removed lines including comments, within the 15-line gate. PR:
+  https://github.com/scode/farhelm/pull/2400/changes.
 
 ## over-limit-trash-total-loses-partial-size.md
 

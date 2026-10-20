@@ -81,9 +81,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Delete retry of an interrupted archive can erase the trust choice for a different directory subsequently placed at the
   old path.
 
-- [`cancelled-upload-retains-admission-entry.md`](cancelled-upload-retains-admission-entry.md) — Abandoned upload
-  admission can accumulate pending requests until the host connection ends.
-
 - [`tab-attach-blocks-host-reader-during-stop.md`](tab-attach-blocks-host-reader-during-stop.md) — Attaching a tab
   during Stop can temporarily block unrelated requests on the host connection.
 

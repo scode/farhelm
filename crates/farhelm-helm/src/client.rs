@@ -3739,14 +3739,15 @@ impl SupervisorClient {
         self.uploads.lock().await.insert(channel, progress_tx);
         // Armed from this line on: every exit below either disarms the
         // guard explicitly or lets it drop, and a drop is an abort.
+        let req_id = self.req_id();
         let mut guard = UploadGuard {
             client: Arc::clone(self),
             channel,
+            admission_req_id: req_id,
             progress: progress_rx,
             retired: false,
         };
 
-        let req_id = self.req_id();
         let result = self
             .request(
                 req_id,
@@ -3807,6 +3808,8 @@ impl SupervisorClient {
 pub struct UploadGuard {
     client: Arc<SupervisorClient>,
     channel: u32,
+    /// Abort may suppress admission's reply; the guard owns its cleanup too.
+    admission_req_id: u64,
     progress: watch::Receiver<UploadProgress>,
     /// Set once the local entry has been removed by an owner-driven path,
     /// so `Drop` knows there is nothing left to clean up or abort.
@@ -4107,6 +4110,7 @@ impl Drop for UploadGuard {
         let needs_abort = self.terminal_reason().is_none();
         let client = Arc::clone(&self.client);
         let channel = self.channel;
+        let admission_req_id = self.admission_req_id;
         // Guards normally drop inside a task, but a destructor can run
         // anywhere; without a runtime there is nothing to clean up on
         // either — the connection is going away with the process.
@@ -4114,13 +4118,15 @@ impl Drop for UploadGuard {
             return;
         };
         handle.spawn(async move {
+            // Retire locally before an Abort can wait on writer capacity.
+            client.uploads.lock().await.remove(&channel);
+            client.pending.lock().await.map.remove(&admission_req_id);
             if needs_abort {
                 let _ = client
                     .writer_tx
                     .send(Frame::control(&ControlMsg::AbortUpload { channel }).into())
                     .await;
             }
-            client.uploads.lock().await.remove(&channel);
         });
     }
 }
@@ -4246,6 +4252,8 @@ mod tests {
     /// credit-window, stall, ack-validation and teardown behavior, not
     /// about the begin handshake, so scripting that handshake in every one
     /// of them would only obscure what each test is actually pinning.
+    /// Reserve an otherwise unused admission id so dropping this synthetic
+    /// guard cannot retire an unrelated request that the fixture registered.
     ///
     /// `declared` is `BeginUpload`'s size, which ack validation checks
     /// against, so a test that means to send N bytes must declare at least
@@ -4265,6 +4273,7 @@ mod tests {
         UploadGuard {
             client: Arc::clone(client),
             channel,
+            admission_req_id: client.req_id(),
             progress: progress_rx,
             retired: false,
         }
@@ -7264,6 +7273,122 @@ mod tests {
             ),
             "the only frame after a mismatch must be the abort — never upload data"
         );
+    }
+
+    /// Pending admission is retired asynchronously, independently of sending
+    /// Abort. Waiting for this entry rather than the whole map preserves the
+    /// unrelated request that the cancellation fixture deliberately keeps live.
+    async fn await_no_upload_admission(client: &SupervisorClient, req_id: u64) {
+        timeout(Duration::from_secs(5), async {
+            while client.pending.lock().await.map.contains_key(&req_id) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("cancelled upload admission was never retired");
+    }
+
+    /// Admission can end without a reply when the supervisor cancels its
+    /// response send. Cleanup must retire only that admission even while its
+    /// Abort waits for writer capacity; unrelated and late replies still work.
+    #[farhelm_testtrace::test]
+    async fn cancelled_upload_admission_retires_only_its_pending_request() {
+        use farhelm_proto::{DownloadFileInfo, DownloadFileStatus};
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            AgentPeer { reader, writer }
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let mut peer = peer.await.unwrap();
+        let info = DownloadFileInfo {
+            path: "/fixture/other.txt".into(),
+            size: Some(1),
+            status: DownloadFileStatus::Ready,
+        };
+        for _ in 0..3 {
+            let admission = tokio::spawn({
+                let client = Arc::clone(&client);
+                async move { client.begin_upload("s1", "file.txt", 1).await }
+            });
+            let ControlMsg::BeginUpload {
+                req_id, channel, ..
+            } = peer.next_control().await
+            else {
+                panic!("expected upload admission");
+            };
+            assert!(client.uploads.lock().await.contains_key(&channel));
+            let stat = tokio::spawn({
+                let client = Arc::clone(&client);
+                async move { client.stat_file("s1", "other.txt").await }
+            });
+            let ControlMsg::StatFile {
+                req_id: stat_id, ..
+            } = peer.next_control().await
+            else {
+                panic!("expected unrelated stat request");
+            };
+            {
+                let pending = client.pending.lock().await;
+                assert!(!pending.closed, "peer must stay live");
+                assert_eq!(pending.map.len(), 2);
+                assert!(pending.map.contains_key(&req_id));
+                assert!(pending.map.contains_key(&stat_id));
+            }
+            // Admission reached the live peer. Reserve all remaining writer
+            // capacity so local cleanup cannot depend on Abort being sent.
+            let permits = client
+                .writer_tx
+                .reserve_many(SUPERVISOR_WRITER_QUEUE)
+                .await
+                .unwrap();
+            assert_eq!(client.writer_tx.capacity(), 0);
+            assert!(!client.writer_tx.is_closed());
+            admission.abort();
+            assert!(matches!(admission.await, Err(error) if error.is_cancelled()));
+            await_no_upload_admission(&client, req_id).await;
+            assert!(!client.uploads.lock().await.contains_key(&channel));
+            {
+                let pending = client.pending.lock().await;
+                assert!(!pending.closed, "disconnect must not supply cleanup");
+                assert!(!pending.map.contains_key(&req_id));
+                assert_eq!(pending.map.len(), 1);
+                assert!(pending.map.contains_key(&stat_id));
+            }
+            drop(permits);
+            assert_eq!(
+                peer.next_control().await,
+                ControlMsg::AbortUpload { channel }
+            );
+            peer.writer
+                .write_control(&ControlMsg::UploadStarted { req_id, channel })
+                .await
+                .unwrap();
+            peer.writer
+                .write_control(&ControlMsg::FileStat {
+                    req_id: stat_id,
+                    info: info.clone(),
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                timeout(Duration::from_secs(5), stat)
+                    .await
+                    .expect("the live peer must answer stat after the late reply")
+                    .unwrap()
+                    .unwrap(),
+                info
+            );
+            let pending = client.pending.lock().await;
+            assert!(!pending.closed);
+            assert!(pending.map.is_empty());
+        }
     }
 
     /// Dropping the future that owns an upload — an HTTP handler cancelled
