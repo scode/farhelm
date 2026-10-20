@@ -462,7 +462,7 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
         // before the first pill render, using the last published bindings.
         span { class: "launch-sequence-bindings", hidden: true, "data-bindings": bindings }
         if let Some(references) = references {
-        div { class: "launch-sequence-indicator", role: "status",
+        div { class: "launch-sequence-indicator", role: "status", "data-in-launcher": if in_launcher() { "true" } else { "false" },
             if references.is_empty() {
                 if in_launcher() {
                     "Apply sequence: press number keys to queue templates, Enter to apply, Esc to cancel."

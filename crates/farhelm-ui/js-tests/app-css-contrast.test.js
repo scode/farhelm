@@ -126,6 +126,9 @@ function contrastRatio(hexA, hexB) {
 // added, so it is the pair a retune of either token is likeliest to break.
 const ROW_SURFACES = ["--bg-1", "--bg-2", "--accent-fill", "--accent-fill-hover"];
 const REQUIRED_BINDINGS = [
+  // The centered sequence pill uses amber for its queue and Enter/Escape
+  // instructions; the attention fill must keep both readable as small text.
+  ["--warn", "--warn-bg", 4.5],
   // Decorative host colors must stay legible on the sidebar, selections,
   // settings/header and picker rows. Binding each tint to every actual
   // surface catches a later palette retune that screenshots cannot reveal.

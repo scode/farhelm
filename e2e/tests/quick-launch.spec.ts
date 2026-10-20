@@ -278,9 +278,9 @@ test("launch sequence stacks a number template and bolt without showing New", as
 
 /** Cancelling by ordinary typing must deliver that same key to the old agent.
  * Escape and programmatic modal focus instead cancel without creating anything.
- * The pending-sequence pill sits over the bottom of the terminal, above the
- * open session's details bar, so it never hides that session's name or host. */
-test("launch sequence cancellation leaves ordinary terminal input and modals in control", async ({ page, request }) => {
+ * The attention pill is centered on the terminal, including the Mac chrome
+ * offset, but moves to the bottom while applying to an editable launcher. */
+test("launch sequence cancellation leaves ordinary terminal input and modals in control", async ({ page, request }, testInfo) => {
   const source = await createSession(request, { title: `sequence-cancel-${Date.now()}` });
   try {
     await pinAutoSelect(page, source.id);
@@ -293,15 +293,30 @@ test("launch sequence cancellation leaves ordinary terminal input and modals in 
     await expect(details, "the open session shows its details bar below the terminal").toBeVisible();
     await page.keyboard.press("Control+Shift+KeyX");
     await expect(indicator).toBeVisible();
-    await expect.poll(async () => {
+    /** Compare the actual terminal bounds so the Mac's taller title band
+     * cannot silently pull the pill above the terminal's center. */
+    const expectCentered = async () => expect.poll(async () => {
       const pill = await indicator.boundingBox();
       const bar = await details.boundingBox();
       const terminal = await page.locator(".terminal-panes").boundingBox();
       if (!pill || !bar || !terminal) return `missing: pill ${!!pill}, bar ${!!bar}, terminal ${!!terminal}`;
       if (pill.y + pill.height > bar.y) return `pill bottom ${pill.y + pill.height} overlaps bar top ${bar.y}`;
       if (pill.y < terminal.y || pill.y + pill.height > terminal.y + terminal.height) return "pill outside the terminal area";
+      if (Math.abs(pill.x + pill.width / 2 - terminal.x - terminal.width / 2) > 1) return "pill not horizontally centered";
+      if (Math.abs(pill.y + pill.height / 2 - terminal.y - terminal.height / 2) > 1) return "pill not vertically centered";
       return "ok";
-    }, { message: "the pill is inside the terminal area and clear of the details bar" }).toBe("ok");
+    }, { message: "the pill is centered inside the terminal and clear of the details bar" }).toBe("ok");
+    await expectCentered();
+    await expect(indicator).toHaveCSS("pointer-events", "none");
+    await expect(indicator).toHaveCSS("opacity", "1");
+    await testInfo.attach("launch-sequence-centered", { body: await page.screenshot(), contentType: "image/png" });
+    // Emulate only the existing CSS class, not a native AppKit window.
+    await page.locator(".app-shell").evaluate(node => node.classList.add("macos-window"));
+    await expect(page.locator(".session-topbar")).toHaveCSS("min-height", "48px");
+    await expectCentered();
+    await page.locator(".app-shell").evaluate(node => node.classList.remove("macos-window"));
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(indicator).toHaveCSS("animation-name", "none");
     const probe = `sequence-pass-${Date.now()}`;
     await page.keyboard.type(probe);
     await page.keyboard.press("Enter");
@@ -329,6 +344,27 @@ test("launch sequence cancellation leaves ordinary terminal input and modals in 
     await expect(page.locator("#sequence-modal-fixture")).toBeFocused();
     await expect(indicator).toHaveCount(0);
     await page.locator("#sequence-modal-fixture").evaluate((dialog) => dialog.remove());
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await expect(form.locator(".launch-composer-search input")).toBeFocused();
+    await page.keyboard.press("Control+Shift+KeyX");
+    await expect(indicator).toContainText("Apply sequence");
+    // Preserve the old fixed bottom reservation. WebKit can give the details
+    // bar 31px rather than its 30px minimum, so an exact 14px gap is not its contract.
+    await expect.poll(async () => {
+      const pill = await indicator.boundingBox();
+      const bar = await details.boundingBox();
+      const main = await page.locator(".app-main").boundingBox();
+      if (!pill || !bar || !main) return `missing: pill ${!!pill}, bar ${!!bar}, main ${!!main}`;
+      const gap = bar.y - pill.y - pill.height;
+      const reservation = main.y + main.height - pill.y - pill.height;
+      if (gap > 0 && Math.abs(reservation - 44) < 1) return "ok";
+      return `gap ${gap}, bar height ${bar.height}, bottom reservation ${reservation}`;
+    }, { message: "the apply pill keeps its bottom position above the details bar" }).toBe("ok");
+    await page.keyboard.press("Escape");
+    await expect(indicator).toHaveCount(0);
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
   } finally {
     await cleanupSession(request, source.id);
   }

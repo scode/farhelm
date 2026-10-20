@@ -4961,18 +4961,21 @@ visible modal. Busy launch and template-save states consume and drop a press.
 The shared template-shortcut asset owns the synchronous armed flag, a pure key classifier and the context rule. Rust
 holds the ordered references in app-owned transient context; the sidebar's hidden relays mutate that signal
 synchronously, and the main area renders its non-modal status pill, using "apply" while the launcher is open. No storage
-or general keymap is involved. Prefix and number modifiers follow the build's Mac-desktop choice; the bolt keeps its
-existing operating-system chord, including Cmd+P in a Mac browser. The shared listener installs after the composition
-guard and before other command listeners, consuming with stopImmediatePropagation because same-window capture listeners
-otherwise still run. Pointer/click, blur, visibility, modal focus and the existing modal-opening hook cancel both state
-owners. A launcher-owned text field admits the prefix only without selected text; other editors keep their usual key
-action. Hidden quick-launch preparation consumes recognized keys without enqueuing a relay. The relays stay mounted and
-enabled across render-delayed armed state. The indicator publishes its raw binding projection beside the visible names
-in the same render, retaining a hidden projection while idle for rapid input before the first pill render. Physical
-Enter copies that DOM projection into the existing press snapshot; the worker pairs it with the raw reference queue
-before starting the existing generation-fenced quick-launch read. Starting the prefix refreshes shared bindings once; a
-cancelled or superseded sequence cannot publish its late preference read. Enter never refreshes the captured bindings.
-Missing captured names reveal New with its existing named-template refusal, including within multi-template sequences.
+or general keymap is involved. CSS centers the amber pill in the main area, using a fixed 9px downward correction for an
+open Mac session's taller top bar. Its launcher context keeps the old bottom placement. Existing warning tokens provide
+text, border, fill and a soft halo; a single 200ms fade/scale entrance is disabled for reduced motion. Prefix and number
+modifiers follow the build's Mac-desktop choice; the bolt keeps its existing operating-system chord, including Cmd+P in
+a Mac browser. The shared listener installs after the composition guard and before other command listeners, consuming
+with stopImmediatePropagation because same-window capture listeners otherwise still run. Pointer/click, blur,
+visibility, modal focus and the existing modal-opening hook cancel both state owners. A launcher-owned text field admits
+the prefix only without selected text; other editors keep their usual key action. Hidden quick-launch preparation
+consumes recognized keys without enqueuing a relay. The relays stay mounted and enabled across render-delayed armed
+state. The indicator publishes its raw binding projection beside the visible names in the same render, retaining a
+hidden projection while idle for rapid input before the first pill render. Physical Enter copies that DOM projection
+into the existing press snapshot; the worker pairs it with the raw reference queue before starting the existing
+generation-fenced quick-launch read. Starting the prefix refreshes shared bindings once; a cancelled or superseded
+sequence cannot publish its late preference read. Enter never refreshes the captured bindings. Missing captured names
+reveal New with its existing named-template refusal, including within multi-template sequences.
 
 Number bindings accept partial templates; the bolt keeps its runnable-template affordance. A single partial-template key
 passes a number-key banner to New for a prominent alert explaining the prefix. Dispatch carries an explicit origin:
