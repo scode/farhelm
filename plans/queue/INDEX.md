@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 6b3646] `workspace-trust-destination.md` — Inherited spawns recompute workspace trust for their destination; launch cards show trust plainly; a replaced checkout folder loses trust (3 triage outcomes).
 - [pending] `host-entry-session-ids.md` — Identify sessions by a helm-assigned host-entry UUID plus the session ID, so approvals and confirmations cannot reach another host entry (2 triage outcomes, plus one triage already folded in). (after `agent-spawned-session-rules.md`, `workspace-trust-destination.md`)
 - [complete] `launch-enters-working-dir.md` — Agent launches, Restart, Replace and terminal tabs enter the session folder themselves and fail with a clear error instead of starting in HOME (1 triage outcome).
 - [complete] `session-header-and-row-fixes.md` — Automatic terminal recovery leaves an open Restart/Replace/Delete question focused; the copy warning follows the copied value; accessible names escape titles (3 triage outcomes).

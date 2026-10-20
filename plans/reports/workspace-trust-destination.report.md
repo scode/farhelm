@@ -113,3 +113,70 @@ Commit and PR wording passed separate cold reads, and a documentation pass cover
 review outcomes are recorded in the working log; their private artifacts disappeared during the interruption. The rebase
 changed only mechanical feedback-index conflict resolution, so the reviewed source remains applicable. The independent
 recovery check passed. This reconstructed report passed its fresh independent cold read.
+
+### Landing
+
+Landed as #2349, #2353 and #2354, merged bottom-up, unchanged from what the report describes. It was the first of eight
+plans in this landing round. The next one, launch-enters-working-dir, failed its checks at landing and was blocked
+rather than landed; the six after it were tested with this plan, without launch-enters-working-dir.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained link-hover-covers (link clicks refused under the Mac app's tunnel-error notice, and
+the desktop file-opening fix) and plan bookkeeping; the base already included agent-spawned-session-rules, which also
+edits the helm's agent requests. A fresh-context reviewer and I read this plan against those and against the seven other
+plans in the round:
+
+- The folder whose trust this plan settles on is the folder the launch then enters, including under
+  launch-enters-working-dir's change, which the reviewer read against this plan before that plan was blocked.
+- The approval-card note added here and link-hover-covers' changes to how refusal messages cover approval cards touch
+  different parts of the card area; the approval and trust browser tests below ran on the combined result.
+- Nothing else in the round touches workspace trust, inherited spawns or managed-checkout identity.
+
+The only conflicts were in the review feedback queue's index, where every plan in the round removes its own entries; all
+removals are kept. The landed code is identical to what was tested.
+
+#### Fixes made during the landing
+
+None.
+
+#### Things the landing found
+
+None of these needs action; they are recorded so the behavior is not a surprise later.
+
+- Deciding whether a session's folder is a managed checkout now looks at the folder on disk, not only at its path. If
+  that look fails for an unexpected reason (a parent folder the session's account cannot read, say), an agent's request
+  to create a session with automatic trust is refused with that error, where before the path alone decided. The report
+  mentions only that such errors "remain errors".
+- An inherited spawn whose stored launch carries trust flags that do not match its recorded trust choice is refused,
+  even on a host that otherwise allows YOLO launches without asking. Cloning a session already refuses the same case,
+  and the report records the choice.
+- The check that a command wrapper an agent supplies needs its own Allow or Deny card now also runs once earlier, for
+  every agent create that can carry trust. Its result there is discarded and the card is still decided by the same check
+  at approval, so nothing a user sees changes.
+
+#### Checks
+
+Run now, on this plan rebased onto main with the round's six other landing plans stacked above it
+(launch-enters-working-dir removed after it failed):
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed file, `python3 releasing/check-changelog.py format` and the website
+  build: all passed.
+- Through the test recorder with pinned nextest and tmux, four slots and no retries: the whole protocol, helm,
+  supervisor and UI libraries, the `farhelm` binary's own tests, the agent command-line test file, and the end-to-end
+  tests for launches, terminal tabs, managed checkouts, structured launches, session lifecycle, agent relay, agent
+  listing and wrapper launches: 3489 passed, run `cdabc40d-ecaa-418e-938f-01f2cbe4da64`. Its output has no runtime
+  `SKIPPED` marker, so the end-to-end tests ran on the real systemd and tmux setup. The executor had run selected tests
+  only.
+- The UI's desktop-only Rust tests: 706 passed, run `4926be34-2adf-40e5-a588-663695e00161`. `node --test` in the UI's
+  JavaScript test directory: 311 passed, run `fcb2b9cf-4424-4fc2-8148-dede8454a5ea`.
+- After `cargo build` and the release web build, `npx playwright test` on header, terminal replay rename, session
+  confirmations, approval layout, agent relay, workspace trust, Claude trust, quick launch, launcher template shortcuts,
+  managed checkouts and tooltip coverage, on Chromium and WebKit, one worker, no retries: 242 passed, run
+  `1484ba9a-0aab-4e7f-a7a4-716faede7c66`. These include the approval card and trust tests this plan's card note affects.
+- Skipped: installer, provisioning, the native Mac app and the rest of the browser suite; this plan changes the helm's
+  launch resolution, the supervisor's checkout identity check and one approval card line.
+
+Nothing in the executor's report became untrue at landing.
