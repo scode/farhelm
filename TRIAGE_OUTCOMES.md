@@ -15981,6 +15981,27 @@
   destruction was not reproduced. Awaiting a new decision; feedback file kept. Change
   `ysxrrvxzlzxxpszrwqxnkxutvmzqnonv`, bookmark `plan/payload-lock-reproduction/01-payload-race-evidence`,
   https://github.com/scode/farhelm/pull/2356/changes.
+- Superseded 2026-10-19: the reproduction's evidence was brought back to the user, who asked how expensive a fix would
+  be. Sizing by code reading on main 6d9c1db5 (nothing run) narrowed the trigger: a desktop startup failure after the
+  embedded helm is ready cannot have provisioning running (no client exists yet), so the gap opens only when the helm
+  panics, or the desktop's embedded shutdown fires, during a host install or update; ordinary Quit, SIGTERM and Ctrl-C
+  end the process and leave no gap. Tokio's runtime drop already waits for started blocking work, but the
+  state-directory lock drops before it (`lib.rs` around 2025–2133, `token_control.rs` around 79–93). The cheapest sound
+  fix found: release the lock only after the runtime is dropped, through synchronous helm entry points that own the lock
+  slot outside the runtime, used by the desktop helm thread and `farhelm helm run`. Weaker or costlier alternatives were
+  a shared lock copy held by every payload task and making the cache safe for concurrent writers.
+- Outcome (2026-10-19, supersedes `other` above): `fix code`.
+- Decision (2026-10-19): the user chose fix code, with a size gate instead of a time gate: "the gate shouldn't be in
+  time (these time estimates are useless anyway), just have it block if it's more than.... 300 lines".
+- Completion criteria: the helm's state-directory lock is released only after every task started on the helm's runtime
+  has finished (the runtime has been dropped), on normal return, embedded shutdown and panic unwind, in both the desktop
+  embedded helm and `farhelm helm run`; ordinary Quit is unchanged. Do not use a shutdown timeout that would reopen the
+  gap. A regression test parks a blocking task on the helm's runtime, triggers shutdown, and shows a second ownership
+  attempt is refused while the task is parked and succeeds after it finishes. SPEC_impl.md, "Who owns an accepted
+  action", says the helm's state-directory claim outlives all work started on its runtime. Size gate: if the change
+  exceeds about 300 lines of diff (code, tests and docs, not counting this ledger, the queue removal and the changelog
+  fragment), block and bring it back to the user. Remove the feedback file and its index entry.
+- Execution: pending.
 
 ## cancelled-startup-loses-archive-location.md
 
@@ -16213,3 +16234,107 @@
   - SPEC.md and SPEC_impl.md state the principle and the rules above; the agent instructions describe full IDs.
   - Remove this feedback file and `create-reply-foreign-id-bypasses-cache-refusal.md`, with their index entries.
 - Execution: planned in `plans/queue/host-entry-session-ids.md`.
+
+## summary-card-omits-observed-yolo.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by reading current main (6d9c1db5); the card was not rendered. The hover summary card's agent
+  line and the actions-menu header share one helper that reads only the stored launch (`list/summary_card.rs` around
+  100–103, `list/row.rs` around 222–250), so a guarded Claude session whose status line shows bypass permissions reads
+  `claude · guarded` there, while the row's shield switches to YOLO and its hover and screen-reader text name the
+  observed mode (`row.rs` around 483–497 and 565–583). Observed YOLO is display only; no admission, guard or approval
+  path reads it (SPEC.md around 1446–1456). Neither spec covers the card's permission wording (SPEC.md around 1432–1434,
+  SPEC_impl.md around 298–304 and 644–645); the hover-text landing report named this case and recommended leaving it,
+  which was not a decision. The shield stays visible beside the card. Suggested bucket on reassessment: other.
+- Decision: on 2026-10-19 the user chose "Card says guarded, YOLO observed" from the triage page, whose recommendation
+  carried a complexity gate in line with the 2026-10-18 "aids, not safeguards, but fix if cheap" choices.
+- Completion criteria: the summary card's agent line, for agent launches whose harness has a status-line reading and
+  whose session has observed YOLO, says the stored permission together with the observation (for example
+  `guarded, YOLO observed`); the actions-menu header keeps describing the stored launch. A unit test shows a guarded
+  Claude session with observed YOLO gets the observation in the card and not in the menu header. SPEC.md says what the
+  card's agent line shows, including the observation; SPEC_impl.md updated if it describes the card. Complexity gate: if
+  this is not about an hour of localized work, stop and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## expanded-setup-failure-displaces-open-menu.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (6d9c1db5); no browser run. The host-list shape that closes open sidebar
+  menus on layout change (`list/view.rs` around 1032–1053 and 1107–1120) tracks host count, loading, refresh error,
+  collapsed trace shapes and auto-disclosure membership, but an expanded setup run stays disclosed when it fails and
+  publishes no trace (`provisioning.rs` around 2701–2716 and 3032–3054), while its step and run messages make the row
+  taller (around 3118–3142). An open session menu, or a host menu lower down, then stays at its measured position beside
+  a different row; dispatch stays bound to the original target, the header names it, and the original row keeps its
+  tint. Stop has no confirmation, and with "skip session confirmations" Delete and Restart act on the first click, still
+  on the named target. Not a sub-second race: setups take seconds to minutes. The code comment at `view.rs` around
+  1095–1106 accepts host-row line growth moving menus, contradicting SPEC_impl.md around 652 ("closes on any layout
+  change that could have moved the row it was measured against"); #1402 (2026-10-02) left that host-row residual under
+  `row-menu-drifts-on-row-height-change.md`'s "if not, leave it and say so". Suggested bucket on reassessment: other.
+- Decision: on 2026-10-19 the user chose "Close menus on any hosts-panel height change" from the triage page, whose
+  recommendation carried a complexity gate.
+- Completion criteria: an open sidebar session or host menu closes when the hosts panel changes height (for example a
+  resize observer on the panel bumping the existing close trigger, ignoring the observer's initial callback), which
+  covers an expanded setup run failing and the host-row line growth #1402 left. The code comment that accepts host-row
+  growth is removed or corrected so code and SPEC_impl.md agree. A browser test leaves a setup run expanded, opens a
+  menu below it, makes the run fail with a message, and expects the menu closed. Accepted side effect: a host row
+  changing below an open host menu closes that menu. Complexity gate: if this is not about 1–2 hours of localized work,
+  stop and bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## template-list-can-launch-recreated-name.md
+
+- Outcome: `fix spec`.
+- Assessment: the mechanism is confirmed by reading current main (6d9c1db5); no runtime sequence was run. A Cmd-J
+  template-list pick hands over only the name (`list/quick_switcher.rs` around 32–33 and 394–395), and the launch reads
+  templates afresh and resolves that name (`list/view.rs` around 3678–3682, `launch_sequence.rs` around 319–334), so a
+  template deleted and recreated under the same name while the list is open launches the new definition directly while
+  the row still shows the old summary. This is the intended fresh-by-name contract (SPEC_impl.md around 1036–1039;
+  SPEC.md around 752): an ordinary same-name edit already changes host, command and agent, and the recreate adds only
+  dropping fields or switching between agent and command launch. By default both agent writes show approval cards with
+  the whole resulting template. Templates have no identity besides their name. SPEC.md around 1978 ("A template renamed
+  or deleted since the list opened shows a preparation error in New") conflicts only if "deleted" is read literally.
+  Suggested bucket on reassessment: other.
+- Decision: on 2026-10-19 the user chose "Yes: clarify the spec": a pick follows the name's current definition.
+- Completion criteria: SPEC.md's Cmd-J paragraph says a pick launches the template currently holding that name, and only
+  a name missing from the catalog since the list opened gives the preparation error in New. No code change. Remove the
+  feedback file and its index entry.
+- Execution: pending.
+
+## template-list-advertises-rebound-shortcut.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by reading current main (6d9c1db5); nothing was run. The Cmd-J list draws number and ⚡ badges
+  from the window's cached shared preferences (`list/quick_switcher.rs` around 173–185 and 399), while a template
+  shortcut press reads bindings fresh (`list/view.rs` around 3506–3536). An agent's approved shortcut move only bumps
+  the helm's generic change revision, and no GUI consumer of that feed re-reads bindings, so the badge stays stale until
+  the next template shortcut press, a rename in Templates, or a reload; at most one press is misled. Cmd plus a number
+  key launches directly with no preview. SPEC.md's reload clause covers behavior, not display, "One GUI at a time"
+  excuses other GUIs rather than agents (SPEC.md around 3164–3167), and SPEC_impl.md around 1034 says the list shows
+  "the current shortcut labels", so the spec does not accept this. Mitigations: by default the move was on an approval
+  card, and host and YOLO questions still apply; the result is an unwanted, deletable session. Suggested bucket on
+  reassessment: other.
+- Decision: on 2026-10-19 the user chose "Read bindings fresh when Cmd-J opens" from the triage page, whose
+  recommendation carried a complexity gate.
+- Completion criteria: opening the Cmd-J list in template mode fetches preferences alongside the templates and updates
+  the cached shortcut bindings (reusing the existing binding overlay the shortcut press uses), so its badges match the
+  bindings at open time. A move landing while the list is open may still show stale, as accepted in the recommendation.
+  A unit test covers the refreshed badges. Complexity gate: if this is not about an hour of localized work, stop and
+  bring it back. Remove the feedback file and its index entry.
+- Execution: pending.
+
+## queued-launch-capture-before-repaint.md
+
+- Outcome: `other`.
+- Assessment: partly correct, by reading current main (6d9c1db5); no event/render interleaving was run. Enter captures
+  names from the same preferences signal the pill renders from (`list/view.rs` around 3743–3751, `launch_sequence.rs`
+  around 262–281 and 351–372), so they can disagree only between a change and the redraw. In the web build a signal
+  write and the DOM update happen in one synchronous poll (Dioxus 0.7.10), so no keydown runs between them; in the
+  desktop build the window is estimated at a few milliseconds plus up to one frame of paint (not measured). The only
+  writer that can overlap an armed sequence is the window's own earlier shortcut dispatch, reachable only inside an open
+  New, Clone or Replace-with form, where Enter applies templates to the visible draft without launching (SPEC.md around
+  782–783). No path to a wrong-host or wrong-folder launch was found.
+- Decision: on 2026-10-19 the user chose "Covered by the spec, remove it": SPEC.md "One GUI at a time", the 2026-10-10
+  confirmation that "an action a user takes inside a sub-second window before the screen updates … may be carried out as
+  delivered".
+- Completion criteria: remove the feedback file and its index entry; no spec or code change.
+- Execution: complete (queue cleanup during triage, per `review_feedback_queue/AGENTS.md`, "Lifecycle").
