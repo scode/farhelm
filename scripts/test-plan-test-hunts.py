@@ -183,7 +183,7 @@ class DiscoveryTest(unittest.TestCase):
             scripts = root / "scripts"
             scripts.mkdir()
             for name in ("plan-test-hunts.py", "test_hunt.py", "record-test-run.py", "test_run_nextest.py",
-                         "test_run_playwright.py", "test_run_traces.py"):
+                         "test_run_playwright.py", "test_run_timings.py", "test_run_traces.py"):
                 shutil.copyfile(pathlib.Path(__file__).with_name(name), scripts / name)
             (root / "Cargo.toml").write_text('[workspace]\nmembers=["crates/app"]\n')
             package = root / "crates/app"

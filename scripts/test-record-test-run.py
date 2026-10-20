@@ -950,7 +950,10 @@ class RecorderTest(unittest.TestCase):
             "finish()\n"
         )
         node.chmod(0o700)
+        # XDG_STATE_HOME keeps the durable timing record (test_run_timings.py)
+        # inside this test's private tree instead of the real home directory.
         return self.environment(PATH=f"{bin_dir}:{os.environ.get('PATH', '')}",
+                                XDG_STATE_HOME=os.fspath(self.base / "state"),
                                 PLAYWRIGHT_SKIP_TEST_OUTPUT="ambient", PWTEST_RETRIES="ambient")
 
     def test_playwright_mode_preserves_report_and_child_status(self):
@@ -971,6 +974,34 @@ class RecorderTest(unittest.TestCase):
                 self.assertEqual(manifest["runner"]["report"]["complete"], not missing)
                 self.assertEqual(manifest["runner"]["removed_environment_names"],
                                  ["PLAYWRIGHT_SKIP_TEST_OUTPUT", "PWTEST_RETRIES"])
+                self.assert_timing_record(manifest, written=not missing)
+
+    def assert_timing_record(self, manifest, *, written):
+        """A complete browser report leaves one durable timing record per run, and only then.
+
+        The record is what survives the temporary evidence tree, so it must
+        name its run and carry each (engine, spec file) project's counts. A
+        run whose report is missing has nothing trustworthy to time and
+        writes nothing rather than a misleading empty record.
+        """
+        directory = self.base / "state" / "farhelm-e2e-timings"
+        if not written:
+            self.assertNotIn("timing_record", manifest["runner"])
+            return
+        path = pathlib.Path(manifest["runner"]["timing_record"]["path"])
+        self.assertEqual(path.parent, directory)
+        self.assertTrue(path.name.endswith(f"-{manifest['run_id']}.json"))
+        record = json.loads(path.read_text())
+        self.assertEqual(record["run_id"], manifest["run_id"])
+        self.assertEqual(record["started_at"], manifest["started_at"])
+        self.assertIsNotNone(record["finished_at"])
+        self.assertEqual(record["labels"]["selection"], manifest["labels"]["selection"])
+        self.assertEqual(record["workers"], RECORDER.test_run_playwright.WORKERS)
+        self.assertEqual([(u["project"], u["engine"], u["tests"], u["passed"]) for u in record["units"]],
+                         [("chromium", "chromium", 1, 1), ("webkit", "webkit", 1, 1)])
+        # The fixture's results carry no duration; that is flagged, not hidden.
+        self.assertEqual([u["missing_durations"] for u in record["units"]], [1, 1])
+        self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
 
     def test_playwright_sigterm_uses_sigint_cleanup_without_changing_operator_result(self):
         """The browser runner receives graceful SIGINT while the recorder retains operator SIGTERM.
@@ -1431,7 +1462,7 @@ class RecorderTest(unittest.TestCase):
         scripts.mkdir()
         for name in (
             "record-test-run.py", "test_run_traces.py", "test_run_nextest.py",
-            "test_run_playwright.py",
+            "test_run_playwright.py", "test_run_timings.py",
         ):
             shutil.copyfile(SCRIPT.with_name(name), scripts / name)
         run_checked(["git", "config", "core.excludesFile", os.devnull], self.repo)
@@ -2287,6 +2318,59 @@ class RecorderTest(unittest.TestCase):
         self.assertEqual(result.returncode, 125)
         self.assertFalse(unsafe.exists())
         self.assertIn(b"inside live Farhelm state", result.stderr)
+
+
+class TimingRecordTest(unittest.TestCase):
+    """What the durable browser timing records contain and where they go."""
+
+    def test_units_sum_durations_and_keep_blocked_cases_apart_from_skips(self):
+        """A unit's counts agree with the recorder's own classification of the same report.
+
+        Playwright reports a case blocked by a failed setup or serial suite as
+        a skipped result, although nobody meant to skip it. Counting it as a
+        skip would make a broken file look intentionally trimmed in the
+        timing history, and disagree with the run's manifest, which calls it
+        not run.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = pathlib.Path(tmp)
+            def case(title, expected, status, duration=None):
+                result = {"status": status, "retry": 0}
+                if duration is not None:
+                    result["duration"] = duration
+                return {"id": title, "file": "a.spec.ts", "title": title,
+                        "tests": [{"projectId": "p1", "expectedStatus": expected, "results": [result]}]}
+            report = {"config": {"projects": [{"id": "p1", "name": "webkit-a"}]}, "suites": [{"specs": [
+                case("ran", "passed", "passed", 1500),
+                case("meant to skip", "skipped", "skipped", 0),
+                case("blocked", "passed", "skipped", 0),
+                case("no duration", "passed", "passed"),
+            ]}]}
+            policy = {"projects": [{"name": "webkit-a", "engine": "webkit"}]}
+            (run_dir / "playwright.json").write_text(json.dumps(report))
+            (run_dir / "playwright-policy.json").write_text(json.dumps(policy))
+            [unit] = RECORDER.test_run_timings.unit_timings(run_dir)
+        self.assertEqual(
+            {key: unit[key] for key in ("project", "engine", "file", "tests", "passed", "skipped", "not_run",
+                                        "duration_ms", "missing_durations")},
+            {"project": "webkit-a", "engine": "webkit", "file": "a.spec.ts", "tests": 4, "passed": 2,
+             "skipped": 1, "not_run": 1, "duration_ms": 1500, "missing_durations": 1},
+        )
+
+    def test_xdg_state_home_wins_only_when_absolute(self):
+        """The records follow the XDG state convention and never land inside live Farhelm state.
+
+        A relative XDG_STATE_HOME is not a usable base (the XDG spec says to
+        ignore it), so it falls back to the home directory like an unset one.
+        The directory is a sibling of `farhelm`, the live installation's state.
+        """
+        timings = RECORDER.test_run_timings
+        self.assertEqual(timings.timings_dir({"XDG_STATE_HOME": "/state", "HOME": "/home/x"}),
+                         pathlib.Path("/state/farhelm-e2e-timings"))
+        self.assertEqual(timings.timings_dir({"XDG_STATE_HOME": "relative", "HOME": "/home/x"}),
+                         pathlib.Path("/home/x/.local/state/farhelm-e2e-timings"))
+        self.assertEqual(timings.timings_dir({"HOME": "/home/x"}),
+                         pathlib.Path("/home/x/.local/state/farhelm-e2e-timings"))
 
 
 if __name__ == "__main__":

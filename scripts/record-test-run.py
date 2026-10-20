@@ -41,6 +41,7 @@ try:
     import test_run_traces
     import test_run_nextest
     import test_run_playwright
+    import test_run_timings
 finally:
     sys.dont_write_bytecode = _previous_bytecode_setting
     del _previous_bytecode_setting
@@ -1878,6 +1879,17 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
                 manifest.data["outcome"] = "recorder-error"
                 manifest.data["recorder"]["exit_code"] = final_exit
                 manifest.data["recorder"]["error"] = report_problem
+            # The durable timing record (test_run_timings.py) outlives this
+            # run's evidence. It is written only from a structurally complete
+            # report, after the outcome above is final, and a failure to write
+            # it is noted here without touching the run's result.
+            if args.runner == "playwright" and report.get("complete") is True:
+                try:
+                    timing_path = test_run_timings.publish(
+                        ambient, manifest.data, run_dir, test_run_playwright.WORKERS)
+                    manifest.data["runner"]["timing_record"] = {"path": os.fspath(timing_path)}
+                except Exception as error:
+                    manifest.data["runner"]["timing_record"] = {"error": type(error).__name__}
             try:
                 manifest.write()
             except Exception as error:

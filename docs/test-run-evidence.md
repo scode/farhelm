@@ -97,6 +97,16 @@ test process groups needs an allowance longer than its internal termination grac
 
 `--help` and `-h` work without the required labels or a command. Help after the `--` boundary belongs to the child argv.
 
+The one thing a recorded browser run keeps outside that temporary tree is its timing record: after every
+`--runner playwright` run whose report is structurally complete, the recorder writes one small JSON file to
+`$XDG_STATE_HOME/farhelm-e2e-timings/` (`~/.local/state/farhelm-e2e-timings/` without an absolute `XDG_STATE_HOME`),
+named `<date>-<run id>.json`. It holds the run's id, start, commit, labels, worker count and host, and for every
+(engine, spec file) project its summed test time and outcome counts, so the history of how long the suite and its parts
+take survives the evidence cleanup. Each run writes only its own file, which is why this fixed directory under the home
+directory does not reintroduce the collisions the shared-machine rules in `AGENTS.md` guard against. Writing it never
+changes the run's result; the manifest records the record's path, or the error that kept it from being written. Nothing
+prunes the directory; a record is a few kilobytes.
+
 The default root is `$TMPDIR/farhelm-tmp/test-runs` when `TMPDIR` is an absolute path, otherwise
 `/tmp/farhelm-tmp/test-runs`: the agent scratch tree root AGENTS.md describes. The default used to be
 `~/.local/state/farhelm-test-runs`, where nothing ever pruned it, and agents running thousands of recorded commands grew
