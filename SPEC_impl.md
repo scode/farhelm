@@ -5204,9 +5204,11 @@ follows the actual main-pane rectangle and the terminal area's top, falling back
 terminal surface is shown. Anchoring below the conditional bands and tunnel strip keeps approval cards from covering
 notices or tunnel chips. This accounts for sidebar width, narrow-window shell scrolling, native top chrome, and
 conditional notices without fixed offsets. Width is capped at 660px with 12px margins; the whole region's height is
-capped at 55% of the pane and at the space remaining below its top. Pane, sidebar and chrome sizes and direct chrome
-structure are observed, not terminal output mutations; listeners and observers are released when the region leaves the
-DOM. Sidebar size is an input even at the pane's minimum width, where a resize moves the pane without changing its size.
+capped at 55% of the pane and at the space remaining below its top. Below 44px of available height it instead uses the
+whole viewport, keeping answer controls scrollable even when session chrome exhausts the pane. Pane, sidebar and chrome
+sizes and direct chrome structure are observed, not terminal output mutations; listeners and observers are released when
+the region leaves the DOM. Sidebar size is an input even at the pane's minimum width, where a resize moves the pane
+without changing its size.
 
 "A GUI is connected" means at least one subscriber to the fleet invalidation feed, which every GUI holds open for its
 whole life and which the cards rely on to appear without a reload. The desktop app's process ends when its window closes

@@ -16730,7 +16730,11 @@
   height or a fallback placement), with a browser test in a short viewport. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it
   back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/reachable-at-small-sizes.md`.
+- Execution: implemented in change `wzqynkoymrtvsnxswspwswkwqrrrusnz`, bookmark
+  `plan/reachable-at-small-sizes/01-short-window-approvals`. The region uses the full viewport when its normal placement
+  leaves less than 44px. Both engines reproduced the old zero-height region at a 48px viewport; the regression scrolls
+  to and answers the same request. The code, test and specification diff is 73 added/removed lines including comments,
+  within the 100-line gate. PR: https://github.com/scode/farhelm/pull/2406/changes.
 
 ## outage-card-content-can-overflow-above-view.md
 

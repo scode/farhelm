@@ -2450,23 +2450,24 @@ a session is open and clear of the sidebar and the terminal's prompt. The oldest
 appear as labelled headers below it; selecting a header expands that request instead, and it stays selected until
 answered or expired, after which the oldest remaining request opens. The card shows the total waiting count. Its compact
 fact grid reflows in a narrow main area, and the whole request region scrolls once it reaches its height cap, well short
-of the full main area; command text stays full and wrapped. The rest of the app stays usable, and cards remain
-answerable over open dialogs. Answer buttons pause for 700ms whenever the waiting list or the expanded request changes,
-so a click already aimed at the previous request cannot answer the next one. It names the requesting session and its
-host, the action, and its target. For a launch it shows the target host, the folder (the exact previewed directory and
-source-qualified repository for a managed checkout), the agent type and its choices or the full command and resume
-command text, and whether the launch is YOLO. For a template write it shows the whole resulting template, including the
-command and resume command text that the templates listing withholds from agents. When the write changes ⚡ or a number
-key, the card shows each assignment or removal and names the template a moved mark or key leaves. For a template delete
-it shows the template being deleted. Text an agent controls (session titles, folders, command lines) is shown as
-labelled data, never in a way that could pass for Farhelm's own wording. Link cards likewise show the entire URL as
-data. The card offers Allow, Always allow from the requesting host, and Deny (Open and Dismiss for a preapproved web
-link). Always allow turns that host's setting on and then approves the request; if turning the setting on fails, nothing
-is approved and the card stays up with the reason. It approves only the request it was answered on: other cards already
-waiting from that host stay until they are answered. Asking, target and clone-source session IDs occupy full-width
-identity rows: the complete entry-prefixed ID is shown with spaces, formatting characters and literal escape notation
-spelled distinctly. Each row offers Copy for the complete raw ID, including characters shown as escapes. Answering the
-card still uses its approval ID.
+of the full main area; command text stays full and wrapped. If session chrome leaves too little height to reach an
+answer, the request region uses the window's full height and can cover session chrome. At ordinary sizes the rest of the
+app stays usable, and cards remain answerable over open dialogs. Answer buttons pause for 700ms whenever the waiting
+list or the expanded request changes, so a click already aimed at the previous request cannot answer the next one. It
+names the requesting session and its host, the action, and its target. For a launch it shows the target host, the folder
+(the exact previewed directory and source-qualified repository for a managed checkout), the agent type and its choices
+or the full command and resume command text, and whether the launch is YOLO. For a template write it shows the whole
+resulting template, including the command and resume command text that the templates listing withholds from agents. When
+the write changes ⚡ or a number key, the card shows each assignment or removal and names the template a moved mark or
+key leaves. For a template delete it shows the template being deleted. Text an agent controls (session titles, folders,
+command lines) is shown as labelled data, never in a way that could pass for Farhelm's own wording. Link cards likewise
+show the entire URL as data. The card offers Allow, Always allow from the requesting host, and Deny (Open and Dismiss
+for a preapproved web link). Always allow turns that host's setting on and then approves the request; if turning the
+setting on fails, nothing is approved and the card stays up with the reason. It approves only the request it was
+answered on: other cards already waiting from that host stay until they are answered. Asking, target and clone-source
+session IDs occupy full-width identity rows: the complete entry-prefixed ID is shown with spaces, formatting characters
+and literal escape notation spelled distinctly. Each row offers Copy for the complete raw ID, including characters shown
+as escapes. Answering the card still uses its approval ID.
 
 If no Farhelm window is open to show the card (no GUI is connected to the helm), a request that needs approval is
 refused at once, with a message saying there is no Farhelm window to ask in and to open Farhelm and retry. Otherwise it
