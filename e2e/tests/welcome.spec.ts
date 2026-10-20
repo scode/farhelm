@@ -129,7 +129,9 @@ test("welcome suppression survives sign-in recovery in the same page", async ({ 
   await page.goto("/");
   await expect(page.locator(".new-session-button")).toBeVisible();
   await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
-  expect(reads).toBe(1);
+  // The failed seed, then automatic selection's own reread before it picks a
+  // session; that later successful read must not reconsider this load's welcome.
+  await expect.poll(() => reads).toBe(2);
   const sort = page.locator(".sort-select");
   await expect(sort).toBeVisible();
   await expect(sort).toBeEnabled();
@@ -147,7 +149,8 @@ test("welcome suppression survives sign-in recovery in the same page", async ({ 
   await page.locator(".auth-token-input").fill("AAAAAAAAAAAAAAAAAAAAAA");
   await page.locator(".auth-submit").click();
   await expect(page.locator(".new-session-button")).toBeVisible();
-  await expect.poll(() => reads).toBe(2);
+  // Exactly one reseed after recovery.
+  await expect.poll(() => reads).toBe(3);
   await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toHaveCount(0);
   await expect(page.locator(".build-skew")).toHaveCount(0);
 });
@@ -174,7 +177,9 @@ test("welcome waits for initial sign-in before deciding", async ({ page }) => {
   await page.locator(".auth-token-input").fill("AAAAAAAAAAAAAAAAAAAAAA");
   await page.locator(".auth-submit").click();
   await expect(page.getByRole("dialog", { name: "welcome to farhelm", exact: true })).toBeVisible();
-  await expect.poll(() => reads).toBe(2);
+  // The refused read, the one reseed after sign-in, and automatic selection's
+  // own reread before it picks a session.
+  await expect.poll(() => reads).toBe(3);
 });
 
 /** Failed persistence cannot trap a user in the card. A later full load may

@@ -187,10 +187,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   behavior is to treat bare text as `name:asdf` (what the maintainer meant there); that is decided when the entry is
   planned. Plan: `plans/queue/launcher-enter-feedback.md`.
 
-- **Activate the most recently opened session when another closes.** Closing a session should leave the most recently
-  opened session selected and active; today it does not, and what actually gets selected instead is not yet confirmed.
-  Find what selection happens when a session closes, then make the newest session take over. Plan:
-  `plans/queue/select-newest-on-close.md`.
 - **Say which step of a supervisor connection stalled.** When a session card reads "Session unavailable — waiting for
   supervisor", the detail is only "the connection attempt did not complete within 20s (dial, supervisor hello or
   browser-forwarding setup did not finish)": `deadlined_attempt` in `crates/farhelm-helm/src/manager.rs` runs dial,

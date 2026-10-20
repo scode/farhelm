@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
     self, ListSort, Preferences, SessionFilter, SessionListing, delete_session, fetch_hosts,
-    fetch_session, fetch_sessions, queue_seen_write, rename_session, replace_session, stop_session,
+    fetch_sessions, queue_seen_write, rename_session, replace_session, stop_session,
 };
 use crate::app_bar::AppBar;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
@@ -21,9 +21,8 @@ use crate::ops::{ConfirmSlot, OpLock, ReadGate, use_confirm_slot};
 use crate::provisioning::ProvisioningTraceShape;
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::rows::{
-    self, absence_is_evidence, apply_optimistic_renames, count_banner, listing_is_complete,
-    menu_row_reordered, remove_row_reporting_menu_move, retire_vanished_renames,
-    settle_optimistic_renames,
+    self, absence_is_evidence, apply_optimistic_renames, count_banner, menu_row_reordered,
+    remove_row_reporting_menu_move, retire_vanished_renames, settle_optimistic_renames,
 };
 use crate::{ApiBase, HostId, Session, SessionStatus};
 
@@ -212,21 +211,21 @@ fn focus_rename_destination(id: &str, terminal: bool) {
 /// makes this persistence best-effort, and a failed write costs the next
 /// launch, never the current choice.
 ///
-/// Only USER-initiated selections are remembered (row clicks, creation).
-/// The auto-select fallback deliberately never writes: a remembered row
-/// that happens to sit beyond a TRUNCATED listing's bound must survive
-/// that listing, not be overwritten by whichever row the fallback picked.
+/// Every accepted selection is remembered, including an automatic pick.
+/// Before that pick the list rereads only selection inputs from the helm;
+/// unrelated settings retain their existing reload behavior. The cached
+/// visits also mirror local choices so a failed read can still choose.
 ///
 /// Because the row is the helm's, a "second client" attaches to whatever
 /// was most recently selected ANYWHERE, taking it over per the
 /// one-attached-client rule — the consequence SPEC.md's Terminal
 /// experience section names.
 ///
-/// One signal for all three fields, so a write to one dirties every reader
+/// One signal for the preference fields, so a write to one dirties every reader
 /// of the struct: a sort change with an empty right pane re-runs the
 /// auto-select effect. That effect is idempotent (its `resolving_*`
 /// guards), so this is a wasted run rather than a wrong one, and one
-/// signal keeps the seed and the three writers trivially consistent.
+/// signal keeps the seed and writers consistent.
 #[derive(Clone, Copy)]
 pub(crate) struct SharedPreferences(pub(crate) Signal<Preferences>);
 
@@ -263,24 +262,13 @@ impl DeleteNotice {
     }
 }
 
-/// The remembered selection, if any: the bare session id.
-///
-/// A bare id rather than the `{helm, id}` record the browser once kept in
-/// localStorage. That record was keyed by helm identity because origin-
-/// scoped storage could outlive a state-directory swap and hand one helm
-/// another's session id; a row in this helm's own database cannot describe
-/// any other helm's fleet, so the key would guard against nothing.
-fn stored_selection(preferences: SharedPreferences) -> Option<String> {
-    preferences.0.read().last_selected.clone()
-}
-
-/// Record a USER-initiated selection (a row click, a creation): the signal
+/// Record an accepted selection (manual or automatic): the signal
 /// first, so the choice is in force in this client whatever the helm says,
 /// then a one-field patch through `api::store_preference`'s serialized
-/// queue. The auto-select fallback never calls this (see
-/// `SharedPreferences`).
+/// queue. The helm updates its capped visit history in that same write;
+/// the local mirror supplies fallback input if a later preference read fails.
 pub(crate) fn remember_selection(base: &str, mut preferences: SharedPreferences, id: &str) {
-    preferences.0.write().last_selected = Some(id.to_string());
+    preferences.0.write().record_selection(id);
     api::store_preference(base, api::PreferenceValue::Selected(id.to_string()));
 }
 
@@ -390,12 +378,40 @@ const SORT_OPTIONS: [(ListSort, &str); 3] = [
 ///   REVERSED comparator is what implements "first of the maxima":
 ///   `Iterator::max_by` returns the LAST maximal element, which would make
 ///   the winner depend on the listing's length rather than on its head.
-fn newest_created_fallback(sessions: &[Session]) -> Option<&Session> {
-    sessions
+fn newest_created_fallback<'a>(
+    sessions: &'a [Session],
+    excluded: Option<&str>,
+) -> Option<&'a Session> {
+    let mut eligible = sessions
         .iter()
+        .filter(|session| Some(session.id.as_str()) != excluded);
+    eligible
+        .clone()
         .filter(|session| session.created_at > 0)
         .min_by(|a, b| b.created_at.cmp(&a.created_at))
-        .or_else(|| sessions.first())
+        .or_else(|| eligible.next())
+}
+
+/// Choose within the current listing, for both startup and a cleared pane.
+/// History outranks creation time; missing or filtered-out visits are skipped.
+/// An empty history uses the retained last selection as one known visit, so
+/// upgrading does not replace it merely because the new column starts empty.
+/// Once history exists it is authoritative, even if the legacy value differs.
+/// Exited and disconnected rows count normally. Excluding the last open ID
+/// prevents a just-deleted row in a not-yet-refreshed listing from reopening.
+fn automatic_selection<'a>(
+    sessions: &'a [Session],
+    history: &[String],
+    last_selected: Option<&str>,
+    excluded: Option<&str>,
+) -> Option<&'a Session> {
+    history
+        .iter()
+        .map(String::as_str)
+        .chain(last_selected.filter(|_| history.is_empty()))
+        .filter(|id| Some(*id) != excluded)
+        .find_map(|id| sessions.iter().find(|session| session.id == id))
+        .or_else(|| newest_created_fallback(sessions, excluded))
 }
 
 /// Whether a listing reply may touch this view at all.
@@ -721,7 +737,7 @@ pub(crate) fn ListView(
     on_renamed: EventHandler<(String, String)>,
     /// The currently selected session's id, or `None` when the right pane
     /// is empty — which is the state auto-select exists to end (see
-    /// `stored_selection`): whenever a committed listing has rows and
+    /// `automatic_selection`): whenever a committed listing has rows and
     /// nothing is selected, this list opens one. A signal rather than a
     /// plain prop because `commit_listing` consults it at REPLY time (a
     /// captured prop value would be as old as the render that made the
@@ -2904,9 +2920,6 @@ pub(crate) fn ListView(
         {
             return false;
         }
-        // A USER-initiated selection is what gets remembered — the
-        // auto-select fallback deliberately never writes (see
-        // `SharedPreferences`).
         remember_selection(&open_base, preferences, &session.id);
         on_open.call(session);
         true
@@ -2922,43 +2935,26 @@ pub(crate) fn ListView(
     let row_open = use_callback(move |session| {
         guarded_open.call(session);
     });
-    // Auto-select (BUGS_BURNDOWN.md issue 5, interviewed): an empty right
-    // pane is a state to END, not to show — the remembered selection if
-    // its row is still listed, else the newest-created row.
-    // That fallback is picked by `created_at` rather than by position (see
-    // `newest_created_fallback`), and has to be: the list is no longer
-    // necessarily read in creation order, so the first row is whatever the
-    // client's chosen sort put there while SPEC.md's fallback is
-    // specifically the newest-created session.
-    // Everything consulted is a TRACKED read, deliberately: the
-    // effect must rerun when the listing commits, when the selection
-    // clears, and when the write gates drain — an auto-select refused
-    // during a busy operation would otherwise be lost until unrelated
-    // fleet activity. The remembered id itself needs no waiting on: the
-    // helm's preference was read before this component mounted.
-    //
-    // A remembered id ABSENT from a TRUNCATED listing is not evidence it
-    // is gone (the helm's cap cut the view); it is resolved directly
-    // instead, and only a definite not-found retires it in favor of the
-    // fallback. The fallback itself deliberately does not re-persist:
-    // overwriting the user's real choice with whichever row a cut listing
-    // happened to hold would erase it permanently (see `SharedPreferences`).
-    //
-    // The fallback picks from the rows in hand even when the listing is
-    // incomplete. Under a non-creation order the newest session may sit
-    // past the cut, so the pick can be merely the newest row the reply
-    // reached — accepted, because a listing cut at the helm's cap is a
-    // fleet of hundreds of sessions, the auto-select exists to keep the
-    // pane from sitting empty rather than to be exact, and the alternative
-    // (a second request for one row in creation order) was a whole extra
-    // API shape for that corner.
+    // An empty pane uses one rule on startup and after a noticed removal:
+    // first listed visit, else newest-created among the same eligible rows.
+    // A filter or cutoff narrows candidates; it does not prove that an
+    // already-open session disappeared (that separate gate remains above).
+    // Re-read visits just before choosing so another window's choices count,
+    // then remember the pick through the same sparse writer as a row click.
     let resolve_base = base.clone();
-    let mut resolving_remembered = use_signal(|| false);
-    let mut remembered_dead = use_signal(|| None::<String>);
+    let mut resolving_selection = use_signal(|| false);
+    // Keep one transient exclusion across Some -> None. A local delete can
+    // clear the pane before the refreshed listing drops its old row.
+    let mut last_opened = use_signal(|| None::<String>);
     use_effect(move || {
-        if selected.read().is_some() {
+        if let Some(id) = selected.read().as_ref() {
+            if last_opened.peek().as_ref() != Some(id) {
+                last_opened.set(Some(id.clone()));
+            }
             return;
         }
+        // Tracked admission reads matter: a pick deferred during an operation
+        // must run when it ends, even if no new fleet event arrives.
         let page_busy = ops.busy();
         let rows_busy = *row_ops.read() > 0;
         let listing_read = listing.read();
@@ -2968,66 +2964,56 @@ pub(crate) fn ListView(
         if page_busy || rows_busy {
             return;
         }
-        // A TRACKED read: retiring the remembered id (the 404 arm below)
-        // must rerun this effect so the fallback can proceed.
-        let remembered =
-            stored_selection(preferences).filter(|id| remembered_dead.read().as_ref() != Some(id));
-        let in_page = listing_ok
+        if !listing_ok
             .sessions
             .iter()
-            .find(|s| remembered.as_deref() == Some(s.id.as_str()));
-        if in_page.is_none()
-            && let Some(id) = remembered.clone()
-            && !listing_is_complete(listing_ok)
+            .any(|session| last_opened.peek().as_deref() != Some(session.id.as_str()))
+            || *resolving_selection.read()
         {
-            if !*resolving_remembered.peek() {
-                resolving_remembered.set(true);
-                let base = resolve_base.clone();
-                spawn(async move {
-                    match fetch_session(&base, &id).await {
-                        // The lookup can take up to a minute, so it re-checks
-                        // at completion the same guards the synchronous branch
-                        // below applies: a row the user clicked meanwhile, or
-                        // an action in progress, wins over the late answer.
-                        Ok(Some(session)) => {
-                            let idle = selected.peek().is_none()
-                                && !ops.busy_now()
-                                && !row_phases
-                                    .peek()
-                                    .values()
-                                    .any(|phase| *phase == RowPhase::Pending);
-                            if idle {
-                                on_open.call(session);
-                            }
-                        }
-                        // Definitely gone: the fallback may proceed on the
-                        // next effect run.
-                        Ok(None) => remembered_dead.set(Some(id)),
-                        // A failed or timed-out read says nothing about the
-                        // session; the next listing commit reruns this effect
-                        // and tries again.
-                        Err(_) => {}
-                    }
-                    resolving_remembered.set(false);
-                });
-            }
             return;
         }
-        // The newest-created row among the ones in hand (see
-        // `newest_created_fallback` for why that is not simply the first).
-        let candidate = in_page.or_else(|| newest_created_fallback(&listing_ok.sessions));
-        if let Some(session) = candidate {
-            // The same synchronous handler-time guard a click gets.
-            if ops.busy_now()
-                || row_phases
+        resolving_selection.set(true);
+        let base = resolve_base.clone();
+        spawn(async move {
+            let fresh = api::fetch_preferences(&base).await;
+            // A manual selection or operation admitted during the read wins.
+            // Choose from the latest committed rows, not a pre-await snapshot.
+            if selected.peek().is_none()
+                && !ops.busy_now()
+                && *row_ops.peek() == 0
+                && !row_phases
                     .peek()
                     .values()
                     .any(|phase| *phase == RowPhase::Pending)
             {
-                return;
+                let mut preferences = preferences;
+                if let Ok(fresh) = fresh {
+                    // An incidental read must not refresh unrelated settings
+                    // or replace optimistic choices in their open controls.
+                    let mut local = preferences.0.write();
+                    local.last_selected = fresh.last_selected;
+                    local.visit_history = fresh.visit_history;
+                }
+                let candidate = listing
+                    .peek()
+                    .as_ref()
+                    .and_then(|result| result.as_ref().ok())
+                    .and_then(|rows| {
+                        automatic_selection(
+                            &rows.sessions,
+                            &preferences.0.peek().visit_history,
+                            preferences.0.peek().last_selected.as_deref(),
+                            last_opened.peek().as_deref(),
+                        )
+                        .cloned()
+                    });
+                if let Some(session) = candidate {
+                    remember_selection(&base, preferences, &session.id);
+                    on_open.call(session);
+                }
             }
-            on_open.call(session.clone());
-        }
+            resolving_selection.set(false);
+        });
     });
     // Snapshot concrete signals, without adding reactive subscriptions or
     // another scheduled effect. Selection agreement keeps a not-yet-mounted
@@ -3046,7 +3032,7 @@ pub(crate) fn ListView(
             "selected": selected.peek().clone(),
             "listing_answered": matches!(rows.as_ref(), Some(Ok(_))),
             "has_rows": rows.as_ref().is_some_and(|result| result.as_ref().is_ok_and(|rows| !rows.sessions.is_empty())),
-            "resolving_remembered": *resolving_remembered.peek(),
+            "resolving_selection": *resolving_selection.peek(),
             "readers": [listing_surface.peek().test_snapshot(), hosts_surface.peek().test_snapshot()],
         })
     });
@@ -5181,7 +5167,7 @@ mod tests {
         // first-row fallback would miss it.
         let by_title = [row("aaa", 300), row("mmm", 100), row("zzz", 500)];
         assert_eq!(
-            newest_created_fallback(&by_title).map(|s| s.id.as_str()),
+            newest_created_fallback(&by_title, None).map(|s| s.id.as_str()),
             Some("zzz")
         );
 
@@ -5190,7 +5176,7 @@ mod tests {
         // — and would change its answer as unrelated rows were appended.
         let tied = [row("first", 500), row("second", 100), row("third", 500)];
         assert_eq!(
-            newest_created_fallback(&tied).map(|s| s.id.as_str()),
+            newest_created_fallback(&tied, None).map(|s| s.id.as_str()),
             Some("first"),
             "equal creation stamps must resolve to the listing's own head"
         );
@@ -5200,7 +5186,7 @@ mod tests {
         // one an ordering over zeroes would single out.
         let stampless = [row("head", 0), row("tail", 0)];
         assert_eq!(
-            newest_created_fallback(&stampless).map(|s| s.id.as_str()),
+            newest_created_fallback(&stampless, None).map(|s| s.id.as_str()),
             Some("head")
         );
 
@@ -5208,12 +5194,86 @@ mod tests {
         // allowed to beat it by being earlier in the list.
         let mixed = [row("unknown", 0), row("stamped", 1)];
         assert_eq!(
-            newest_created_fallback(&mixed).map(|s| s.id.as_str()),
+            newest_created_fallback(&mixed, None).map(|s| s.id.as_str()),
             Some("stamped"),
             "a real timestamp outranks a missing one wherever the row sits"
         );
 
-        assert_eq!(newest_created_fallback(&[]), None);
+        assert_eq!(newest_created_fallback(&[], None), None);
+    }
+
+    /// A cleared pane returns to its first listed visit even when creation
+    /// order disagrees. A filter narrows candidates, and a stale deleted row
+    /// cannot win through either history or the creation-time fallback.
+    #[farhelm_testtrace::test]
+    fn automatic_selection_respects_visits_listing_and_removed_exclusion() {
+        let rows = [
+            Session {
+                created_at: 100,
+                ..crate::list::row::row_specimen("a")
+            },
+            Session {
+                created_at: 200,
+                ..crate::list::row::row_specimen("b")
+            },
+            Session {
+                created_at: 300,
+                ..crate::list::row::row_specimen("c")
+            },
+        ];
+        let history = ["missing", "b", "a"].map(String::from);
+        let pick = |listed: &[Session], history: &[String], removed| {
+            automatic_selection(listed, history, None, removed).map(|session| session.id.clone())
+        };
+        assert_eq!(pick(&rows, &history, None).as_deref(), Some("b"));
+        assert_eq!(pick(&rows, &history, Some("b")).as_deref(), Some("a"));
+        assert_eq!(
+            pick(&rows[2..], &history, None).as_deref(),
+            Some("c"),
+            "filtered-out visits are not candidates"
+        );
+        assert_eq!(pick(&rows, &[], None).as_deref(), Some("c"));
+        assert_eq!(pick(&rows, &[], Some("c")).as_deref(), Some("b"));
+        assert_eq!(pick(&rows[..1], &history, Some("a")), None);
+        assert_eq!(pick(&[], &history, None), None);
+        let unknown = [
+            crate::list::row::row_specimen("gone"),
+            crate::list::row::row_specimen("survivor"),
+        ];
+        assert_eq!(
+            pick(&unknown, &[], Some("gone")).as_deref(),
+            Some("survivor")
+        );
+    }
+
+    /// Migration leaves the new history empty but retains a known selection.
+    /// Treat that value as one visit until normal writes establish history;
+    /// it must obey the same candidate/exclusion rules and never override or
+    /// extend nonempty history.
+    #[farhelm_testtrace::test]
+    fn automatic_selection_preserves_a_known_visit_with_empty_history() {
+        let rows = [
+            Session {
+                created_at: 100,
+                ..crate::list::row::row_specimen("a")
+            },
+            Session {
+                created_at: 300,
+                ..crate::list::row::row_specimen("c")
+            },
+        ];
+        let pick = |history: &[String], legacy, removed| {
+            automatic_selection(&rows, history, legacy, removed).map(|session| session.id.as_str())
+        };
+        assert_eq!(pick(&[], Some("a"), None), Some("a"));
+        assert_eq!(pick(&[], Some("a"), Some("a")), Some("c"));
+        assert_eq!(pick(&[], Some("absent"), None), Some("c"));
+        assert_eq!(pick(&["c".into()], Some("a"), None), Some("c"));
+        assert_eq!(
+            pick(&["missing".into()], Some("a"), None),
+            Some("c"),
+            "nonempty stale history must not append a differing legacy value"
+        );
     }
 
     /// Spec (`YoloReplaceQuestion`): an answer to the sidebar's YOLO

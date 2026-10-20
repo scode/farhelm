@@ -1322,56 +1322,57 @@ One flat list across all registered hosts, with an always-visible host selector.
 means the registered local host, and configured remote hosts follow in registry order, including unavailable hosts whose
 last-known sessions remain useful. Choosing a host sends a server-side query immediately and is not persisted. The list
 can be ordered independently by most recent activity, by creation time, or by title; the order someone picks is
-remembered by the helm as one preference shared by every client, together with the last-selected session and compact-row
-choice, and most recent activity is what a client shows until someone picks otherwise. The same shared preference row
-carries terminal web-link click ownership, the quick-launch template name and number-key bindings, the
+remembered by the helm as one preference shared by every client, together with the last-selected session, visit history
+and compact-row choice, and most recent activity is what a client shows until someone picks otherwise. The same shared
+preference row carries terminal web-link click ownership, the quick-launch template name and number-key bindings, the
 session-confirmation opt-out, the quick-launch naming choice, terminal-frame coloring, the desktop download-opening
 types, and whether host setup or host removal confirmation should be skipped after an explicit permanent answer; a
-client that has already loaded its preferences keeps its previous behavior until it reloads, except that template
-shortcuts read their bindings on each invocation and the desktop helm reads the current file-opening list for each hover
-and open request. The gear immediately to the right of the sidebar version opens a settings dialog with an
-off-by-default **skip session confirmations** switch under **sessions**. Its help names Delete, Replace, Restart and tab
-Close and excludes YOLO, host and trash questions (see Lifecycle operations). Beside it, **name sessions on quick
-launch** is on by default, including when the helm has never stored a choice. Turning it off disables the naming prompt
-for quick launches. Beside it, **color terminal frames by host** starts off and colors every session's thin terminal
-frame to match its host icon when turned on. The dialog also has the host switches `set up new hosts without asking` and
-`remove hosts without asking`, on when the respective confirmation is skipped. Turning one off restores that
-confirmation; turning one on makes the same choice as the host dialog's permanent answer. Changes take effect
-immediately in the current client. Each switch explains the current behavior, and each host dialog's permanent answer
-points to the gear as the place to undo it. A separate **terminal links** section chooses whether web links open in
-Farhelm without passing the click on (the default), open in Farhelm and also pass the click on, or only pass the click
-on. The latter two choices explain the risk of a second browser tab and that a program without mouse reporting cannot
-act on a click. This choice covers every client of the helm and takes effect in every mounted terminal of the current
-client immediately; other open clients pick it up when they reload, like the host choices. In the desktop app, the
-**terminal links** section also has a free-form, comma-separated **file types to open with Cmd-click** field (Ctrl-click
-outside macOS). It defaults to `md, txt, json`; saving an empty list disables opening while downloads still save. This
-field requires an explicit, acknowledged save, but its value lives in the shared preference row. The dialog shows one
-prominent warning beside the field for each listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a
-browser-specific warning, and all other unrecognized types have a generic warning. The warnings follow the draft as
-typed, including when another entry is malformed. A refused save leaves the draft and current helm policy unchanged and
-shows the reason inline. Sounds has three device switches (see Status). A separate **ntfy alerts** section has an
-off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (min, low,
-default, high, urgent; default default). These are explicitly saved helm configuration, shared by every client, outside
-the preference row. Save refusals appear inline. The stored token is never returned: the form shows whether one exists
-and allows replacing or clearing it. Changing to another server clears a saved token unless a new one is entered, and
-the form says so before saving. **Send test** uses the saved configuration, even while disabled, and reports success or
-failure inline. The dialog also holds the explicitly saved all-hosts checkout folder and, below it, a monospace
-multi-line post-clone command field (see [Managed checkouts](#managed-checkouts)). The folder's help explains expansion
-on each host, first-use folder creation, and that command-line host overrides keep their folder. The command's help
-explains that it runs in each new checkout on its host, after cloning and before the agent starts, that changes affect
-future checkouts only, and that command-line host overrides keep their command. The installed desktop app's dialog also
-has a switch for installing updates automatically (see [Installation and updates](#installation-and-updates)); unlike
-the host choices it is a setting of that app installation, kept with the app rather than by the helm, and a browser
-never shows it. The two host confirmation choices apply to every host and client of this helm; existing controls with a
-natural place in the main UI stay there. No client keeps its own copy: every client reads the helm's preference once
-after authenticating and writes it on change, so a browser tab and the desktop app open in the same order and on the
-same session. Per-client persistence — browser storage, a desktop state file, anything that lets two clients remember
-different answers — is not wanted for these shared preferences, including welcome-card dismissal (sidebar width,
-terminal text size and sound switches, by contrast, are deliberately per device; see Session list, Terminal experience
-and Status). A client that asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions
-may carry an optional parent reference usable by the API, but parentage does not nest the list and implies nothing about
-VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create`
-and `clone` need not record the asking session.
+client that has already loaded its preferences keeps its previous behavior until it reloads, except that automatic
+session selection rereads the shared visits immediately before choosing, template shortcuts read their bindings on each
+invocation and the desktop helm reads the current file-opening list for each hover and open request. The gear
+immediately to the right of the sidebar version opens a settings dialog with an off-by-default **skip session
+confirmations** switch under **sessions**. Its help names Delete, Replace, Restart and tab Close and excludes YOLO, host
+and trash questions (see Lifecycle operations). Beside it, **name sessions on quick launch** is on by default, including
+when the helm has never stored a choice. Turning it off disables the naming prompt for quick launches. Beside it,
+**color terminal frames by host** starts off and colors every session's thin terminal frame to match its host icon when
+turned on. The dialog also has the host switches `set up new hosts without asking` and `remove hosts without asking`, on
+when the respective confirmation is skipped. Turning one off restores that confirmation; turning one on makes the same
+choice as the host dialog's permanent answer. Changes take effect immediately in the current client. Each switch
+explains the current behavior, and each host dialog's permanent answer points to the gear as the place to undo it. A
+separate **terminal links** section chooses whether web links open in Farhelm without passing the click on (the
+default), open in Farhelm and also pass the click on, or only pass the click on. The latter two choices explain the risk
+of a second browser tab and that a program without mouse reporting cannot act on a click. This choice covers every
+client of the helm and takes effect in every mounted terminal of the current client immediately; other open clients pick
+it up when they reload, like the host choices. In the desktop app, the **terminal links** section also has a free-form,
+comma-separated **file types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to `md, txt, json`;
+saving an empty list disables opening while downloads still save. This field requires an explicit, acknowledged save,
+but its value lives in the shared preference row. The dialog shows one prominent warning beside the field for each
+listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a browser-specific warning, and all other
+unrecognized types have a generic warning. The warnings follow the draft as typed, including when another entry is
+malformed. A refused save leaves the draft and current helm policy unchanged and shows the reason inline. Sounds has
+three device switches (see Status). A separate **ntfy alerts** section has an off-by-default switch, server URL (default
+`https://ntfy.sh`), topic, optional access token, and priority (min, low, default, high, urgent; default default). These
+are explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear
+inline. The stored token is never returned: the form shows whether one exists and allows replacing or clearing it.
+Changing to another server clears a saved token unless a new one is entered, and the form says so before saving. **Send
+test** uses the saved configuration, even while disabled, and reports success or failure inline. The dialog also holds
+the explicitly saved all-hosts checkout folder and, below it, a monospace multi-line post-clone command field (see
+[Managed checkouts](#managed-checkouts)). The folder's help explains expansion on each host, first-use folder creation,
+and that command-line host overrides keep their folder. The command's help explains that it runs in each new checkout on
+its host, after cloning and before the agent starts, that changes affect future checkouts only, and that command-line
+host overrides keep their command. The installed desktop app's dialog also has a switch for installing updates
+automatically (see [Installation and updates](#installation-and-updates)); unlike the host choices it is a setting of
+that app installation, kept with the app rather than by the helm, and a browser never shows it. The two host
+confirmation choices apply to every host and client of this helm; existing controls with a natural place in the main UI
+stay there. No client keeps its own copy: every client reads the helm's preference once after authenticating and writes
+it on change, so a browser tab and the desktop app open in the same order and on the same session. Per-client
+persistence — browser storage, a desktop state file, anything that lets two clients remember different answers — is not
+wanted for these shared preferences, including welcome-card dismissal (sidebar width, terminal text size and sound
+switches, by contrast, are deliberately per device; see Session list, Terminal experience and Status). A client that
+asks the helm for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent
+reference usable by the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking
+is not comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record
+the asking session.
 
 The sidebar can be resized by dragging its right edge, between 240px and 600px, with 340px as the default. Double-click
 the edge to reset it, or focus the separator and use Left and Right to step by 10px. Its width is remembered per device,
@@ -1732,21 +1733,26 @@ whatever the agent renders is what you see. There is no composer, no message abs
   contents are gone, and recovering the conversation is the agent's job (resume). A stopped or exited session's terminal
   stays viewable while its host is up, since the terminal outlives the process. Viewable means what the terminal itself
   holds: a full-screen program's last frame is not retained after it exits, and no snapshot of it is taken or stored.
-- Opening a session attaches to it — and opening a CLIENT counts as opening a session: with a non-empty fleet, a freshly
-  loaded client selects and attaches the session the user most recently selected from any client — the helm remembers
-  one selection for all of them (see Session list) — falling back to the newest-created one (chosen from the rows the
-  listing carries, so when the list was cut at its cap under an order other than creation time the pick can be the
-  newest the reply reached rather than the fleet's true newest — the accepted edge of the whole-list cap), so launching
-  the app is itself the deliberate act the attach semantics below key off. Opening a second client therefore attaches to
-  whatever was most recently selected anywhere and takes the terminal over exactly as clicking the same session there
-  would. The attached client owns input and terminal dimensions: the PTY resizes to that client, and the last size
-  sticks when nothing is attached. Reconnecting replays the terminal so the session looks as it would have had the
-  client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and
-  replay covers, at least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the selected
-  session's row whenever that session is listed, so which session the main pane is interacting with is readable at a
-  glance rather than only from the bottom bar's session name. A filter that excludes the selected session leaves no row
-  to mark — the bottom bar's session name remains the identifier in that state, and the main pane deliberately stays put
-  (filtering the list is not deselecting).
+- Opening a session attaches to it — and opening a CLIENT counts as opening a session. A freshly loaded client and a
+  client whose open session disappears use the same choice: the first currently listed session in the helm's shared
+  visit history, excluding the session just removed, else the newest-created listed session. While history is empty, the
+  retained last selection counts as one visit under those same rules. A filter or the listing's cap narrows candidates;
+  exited sessions and sessions on disconnected hosts still count. The helm keeps the 32 most recent distinct visits
+  across clients, reloads and restarts. Row clicks, quick switching, creation, replacement and automatic selection
+  record visits. Immediately before an automatic pick the client rereads shared preferences, falling back to its current
+  in-memory copy on failure, and remembers the result. Removing an unselected session leaves the pane alone; removing
+  the last session leaves it empty. Existing removal detection still needs a complete, unfiltered fleet reply to infer
+  an external deletion or host removal; filtering or a capped reply does not unselect an already-open session. Replace
+  keeps selecting its replacement, and closing a terminal tab is not a session removal. Launching the app is itself the
+  deliberate act the attach semantics below key off. Opening a second client therefore takes over its chosen session
+  exactly as clicking that session there would. The attached client owns input and terminal dimensions: the PTY resizes
+  to that client, and the last size sticks when nothing is attached. Reconnecting replays the terminal so the session
+  looks as it would have had the client stayed attached, modulo redraws caused by dimension changes. The floor: the
+  host-side terminal retains, and replay covers, at least the current screen plus 10,000 lines of scrollback. The
+  sidebar visibly marks the selected session's row whenever that session is listed, so which session the main pane is
+  interacting with is readable at a glance rather than only from the bottom bar's session name. A filter that excludes
+  the selected session leaves no row to mark — the bottom bar's session name remains the identifier in that state, and
+  the main pane deliberately stays put (filtering the list is not deselecting).
 - The typical session view has one top row, with terminal tabs on the left and Restart, Restart with, Replace, Clone,
   Replace with, and Delete on the right, followed by the terminal and a slim details bar below it. All six actions
   remain fully visible and keyboard reachable from a 650px main pane; the tab strip takes the remaining width and
@@ -3481,6 +3487,11 @@ starts fresh. Agent IDs remembered before this update are refused except for the
 `farhelm agent sessions` as the remedy. Agent host IDs and the meaning of discovery's caller and own-row markers change
 with schema version 7. An approval card waiting during the update may get no answer. Existing sessions keep running, and
 supervisors from older releases remain compatible through their normal update path.
+
+The shared visit-history migration starts existing installations with no visits, while retaining their legacy last
+selection. Until history exists, automatic choice treats that retained selection as one visit, subject to the same
+listed-row and removed-session rules. Its normal selection save then records the visit. The new history column follows
+the normal one-way schema migration.
 
 Until upgrade epochs exist (TODO.md), no change may break the upgrade path of the desktop app, the helm, or the
 supervisor. An installation of any stable release from v0.23.0 on, the first one the in-app updater and get.farhelm.io

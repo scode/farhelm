@@ -198,13 +198,13 @@ not change it. An older helm refuses this schema.
 
 The session list's chosen ORDER, last-selected session, compact-row choice, and the launch composer's remembered
 permissions, host confirmation choices, and remembered feedback contact are one preference the HELM keeps, in a
-singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`, `remembered_permissions`,
-`remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`, `feedback_contact`,
-`remembered_wrapper_prefixes`, `terminal_link_click`, `skip_session_confirmations`, `name_session_on_quick_launch`,
-`color_terminal_frames`, `quick_launch_template`, `template_shortcuts`, `welcome_seen`) behind
-`GET`/`PUT /api/preferences`, device-authenticated like every other route. The remembered permission field and per-agent
-wrapper-prefix map are written by the helm after a successful user agent launch; no client PUTs them. A launch without a
-prefix removes that agent type's entry. Agent-origin launches and command launches leave the map alone. The
+singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `visit_history`, `compact`,
+`remembered_permissions`, `remembered_workspace_trust`, `skip_host_remove_confirmation`, `skip_host_setup_confirmation`,
+`feedback_contact`, `remembered_wrapper_prefixes`, `terminal_link_click`, `skip_session_confirmations`,
+`name_session_on_quick_launch`, `color_terminal_frames`, `quick_launch_template`, `template_shortcuts`, `welcome_seen`)
+behind `GET`/`PUT /api/preferences`, device-authenticated like every other route. The remembered permission field and
+per-agent wrapper-prefix map are written by the helm after a successful user agent launch; no client PUTs them. A launch
+without a prefix removes that agent type's entry. Agent-origin launches and command launches leave the map alone. The
 `remembered_workspace_trust` column remains for upgrade compatibility but is neither read nor written. Remembered
 permissions describe accepted launches rather than one client's claim. Both clients read the row once after
 authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the sort
@@ -220,7 +220,10 @@ land on the helm in reverse order; the write queue is process state outside the 
 credential recovery the gate overlays and replays any local choice whose write never got through, so reauthentication
 cannot roll the current client back to the helm's older row. The desktop app never signs in again, so nothing remounts
 its tree. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered", so a
-stalled preference endpoint cannot blank the page for the funnel's full sixty seconds.
+stalled preference endpoint cannot blank the page for the funnel's full sixty seconds. Before each automatic session
+choice the list makes one more GET under that same short deadline. Only selection/history inputs refresh; unrelated
+settings retain their reload contract. A failed GET uses the current optimistic preference mirror. Selection writes
+update both values in that mirror before queueing their existing single-field PUT, including recovery overlays.
 
 The GUI's HTTP funnel orders reads and actions after this client's earlier configuration saves: quick-launch and
 number-key bindings, template save/delete, checkout folder, post-clone command, and ntfy settings. A save registers
@@ -253,7 +256,7 @@ validated it. Nothing is kept per client: no localStorage key, no field in `desk
 credentials either, only the webview readiness counter the desktop smoke reads and the desktop app's automatic-updates
 setting, which is a setting of that app installation rather than one of these shared preferences), no eval round trip.
 The visible consequences are the ones SPEC.md names — one answer shared by every client, and a second client attaching
-to whatever was selected most recently anywhere.
+to its first listed surviving visit.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
@@ -272,23 +275,35 @@ it got. Because the rows and both counts come from one snapshot on the helm's si
 render dropped from all three at the source — there is nothing for the list to change under and no count contradiction
 to detect: the flag is the whole of what the UI reads off a reply about completeness, and the rows are never compared
 against the counts (that comparison was the paged design's "underfilled listing" detector, and it went with the pages).
-"Short" is one predicate with three readers rather than a rule each place restates: it is exactly the condition the
-count banner prints "showing N of M" for, the same answer decides whether an absence may be read as a departure
-(otherwise the missing row's optimistic rename is retired, its editor is left usable, and — if it is the selected one —
-its pane is left alone), and the same answer decides whether a remembered selection missing from the list is resolved
-directly rather than treated as gone. A complete authoritative absence changes a ListView-owned rename editor to an
-unavailable-target state instead of closing it, preserving its draft for copying or cancellation; seeing the exact
-source again clears only that state. A UI that tells the user its list is incomplete and then reasons as though it were
-complete would be disagreeing with the one line whose job is to be believed.
+"Short" is one predicate with two readers rather than a rule each place restates: it is exactly the condition the count
+banner prints "showing N of M" for, the same answer decides whether an absence may be read as a departure (otherwise the
+missing row's optimistic rename is retired, its editor is left usable, and — if it is the selected one — its pane is
+left alone). Automatic selection uses only listed candidates even on a short reply; it never resolves missing visits
+directly. A complete authoritative absence changes a ListView-owned rename editor to an unavailable-target state instead
+of closing it, preserving its draft for copying or cancellation; seeing the exact source again clears only that state. A
+UI that tells the user its list is incomplete and then reasons as though it were complete would be disagreeing with the
+one line whose job is to be believed.
 
 One consequence is worth recording because nothing on screen shows it: the auto-select fallback (SPEC.md's
-"newest-created session", for a client with no remembered selection) cannot be assumed to be the first row of the
-listing, because the first row is whatever the chosen order put there. It picks by the session's `created_at` instead,
-which is why that field is decoded by the UI at all, and treats a missing stamp (an older helm) as unknown rather than
-as 1970 — a fleet with no stamps degrades to the listing's own first row. It picks from the rows in hand even when the
-cap cut the listing, where under a non-creation order the newest session may sit past the cut: a cut listing is a fleet
-of hundreds, the fallback exists to keep the pane from sitting empty rather than to be exact, and the alternative was a
-second request shape for that corner.
+"newest-created session", when no eligible listed visit remains) cannot be assumed to be the first row of the listing,
+because the first row is whatever the chosen order put there. It picks by the session's `created_at` instead, which is
+why that field is decoded by the UI at all, and treats a missing stamp (an older helm) as unknown rather than as 1970 —
+a fleet with no stamps degrades to the listing's own first row. It picks from the rows in hand even when the cap cut the
+listing, where under a non-creation order the newest session may sit past the cut: a cut listing is a fleet of hundreds,
+the fallback exists to keep the pane from sitting empty rather than to be exact, and the alternative was a second
+request shape for that corner.
+
+One pure chooser serves startup and removal: first listed history entry, else that newest-created fallback. When stored
+history is empty, the retained last selection is one effective visit under the same eligibility and exclusion rules; it
+is never appended behind nonempty history. This preserves the known choice after the empty-history migration, and the
+ordinary automatic save establishes stored history. The list retains its most recent actually-open reference as a
+transient exclusion when the pane clears, because a successful local delete can precede the listing refresh. The
+exclusion applies to both history and fallback. One in-flight guard holds the pre-pick preference read; completion
+checks the current selection, operation gates and latest admitted rows, so a manual selection during the read wins. No
+eligible rows means no read and no pick. Automatic selections use the same selection writer as manual ones, so reload
+remembers the resulting visit. This listed-only rule replaces the old direct restoration of a remembered session beyond
+a truncated listing; absence still cannot retire an already-open session without the separate complete/unfiltered
+disappearance gate.
 
 The sidebar uses an identity line and, outside compact mode, a host/directory line plus a detail line when there is
 ended status or a stale qualifier to explain. Its identity line is status, locality, title, a one- or two-glyph agent

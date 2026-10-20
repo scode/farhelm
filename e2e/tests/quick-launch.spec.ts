@@ -10,6 +10,7 @@ import {
   FAKE_AGENT,
   listHosts,
   listSessions,
+  observeFeedReaders,
   openHostsPanel,
   openRowMenu,
   patchPreferences,
@@ -18,6 +19,7 @@ import {
   resetPreferences,
   setLocalYoloWithoutAsking,
   stubFeed,
+  waitForFeedReadersSettled,
 } from "./helpers/fleet";
 import { attachSession, waitForTermText } from "./helpers/term";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
@@ -904,19 +906,26 @@ for (const failed of [false, true]) {
 
 /** A preparation refusal has no host ownership. Binding the ordinary New
  * defaults must keep its explanation, rather than clearing it as an error
- * from a previous target. Only the shortcut's second preference read fails. */
+ * from a previous target. Only the shortcut's preference read fails: reads stay
+ * live until the page's startup readers, automatic selection included, have
+ * settled, since that selection reads preferences too while the page loads. */
 test("a quick preparation error survives New's first host binding", async ({ page, request }) => {
   const local = (await listHosts(request)).find((host) => host.kind === "local");
   expect(local?.identity).toBeTruthy();
-  let reads = 0;
+  let failReads = false;
+  let failed = 0;
   await page.route("**/api/preferences", async (route) => {
-    if (route.request().method() !== "GET" || ++reads === 1) return route.continue();
+    if (route.request().method() !== "GET" || !failReads) return route.continue();
+    failed++;
     await fulfillQuickFixture(route, request, 503, "quick preference-read fixture failure");
   });
+  await observeFeedReaders(page);
   try {
     await page.goto("/");
     await openHostsPanel(page);
     await expect(page.locator(`[data-host-id="${local!.id}"] .host-name`)).toBeVisible();
+    await waitForFeedReadersSettled(page);
+    failReads = true;
     await chord(page);
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
@@ -927,7 +936,7 @@ test("a quick preparation error survives New's first host binding", async ({ pag
     await expect(form).not.toHaveAttribute("data-create-target-fingerprint", "");
     await expect(form.locator(".create-session-error")).toContainText("couldn't prepare quick launch");
     await expect(form.locator(".create-session-error")).toContainText("quick preference-read fixture failure");
-    expect(reads).toBe(2);
+    expect(failed).toBe(1);
   } finally {
     await page.unroute("**/api/preferences");
   }

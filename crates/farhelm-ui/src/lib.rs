@@ -1791,9 +1791,8 @@ fn AppBody() -> Element {
                         // browser-specific.
                         onresize: move |_| layout_epoch += 1,
                         ListView {
-                            // Selection memory lives in `ListView` (it knows
-                            // which selections were user-initiated, and writes
-                            // those to the helm's shared preference); this
+                            // Selection memory lives in `ListView` (manual
+                            // and automatic picks share its preference writer); this
                             // handler records the selection and its raw Rename seed.
                             on_open: move |session: Session| {
                                 open_session_title.set(Some((session.id.clone(), session.title.clone())));

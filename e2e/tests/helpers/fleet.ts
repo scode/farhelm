@@ -46,7 +46,7 @@ type ReaderSnapshot = {
   selected?: string | null;
   listing_answered?: boolean;
   has_rows?: boolean;
-  resolving_remembered?: boolean;
+  resolving_selection?: boolean;
   id?: string;
   stale?: boolean;
   host_absent?: boolean;
@@ -126,7 +126,7 @@ async function waitForFeedReaderBoundary(
     if (lists.length !== 1 || sounds.length !== 1 ||
       last.length !== lists.length + sessions.length + sounds.length ||
       list.healthy !== feedHealthy || list.skew !== withdrawn || list.listing_answered !== true ||
-      list.resolving_remembered !== false || typeof list.notices !== "string" ||
+      list.resolving_selection !== false || typeof list.notices !== "string" ||
       typeof list.has_rows !== "boolean" ||
       (list.selected !== null && typeof list.selected !== "string") ||
       (list.has_rows && !list.selected)) return false;
@@ -274,6 +274,8 @@ export interface SessionRow {
   /** The full entry-bound reference returned by the helm, not a supervisor credential ID. */
   id: string;
   title: string;
+  /** Second-resolution stamp used to distinguish visit order from creation order. */
+  created_at: number;
   status?: { state: string };
   /** Whether Restart can resume the session ("resume"), or why it cannot
    * ("not_captured", "no_conversation_reporting"). */
@@ -1033,6 +1035,8 @@ export interface Preferences {
   claude_trust_hint_dismissed?: boolean;
   list_sort?: string;
   last_selected?: string;
+  /** Helm-maintained visits, newest first; omitted when empty. */
+  visit_history?: string[];
   compact?: boolean;
   /** The permissions mode ("yolo") of the last successful STRUCTURED launch,
    * helm-wide — written only by the helm itself, never by a client PUT (see
@@ -1108,6 +1112,7 @@ export async function patchPreferences(
  * Every active field `patchPreferences` accepts belongs in this reset, or a
  * choice made by another spec can leak into an unrelated fixture. Retired
  * trust memory is supplied only by controlled read responses in its own tests.
+ * Clearing last_selected also clears the helm-maintained visit history.
  */
 export async function resetPreferences(request: APIRequestContext): Promise<void> {
   await patchPreferences(request, {
@@ -1132,9 +1137,9 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
 /**
  * Pin which session the page will auto-select on its next load.
  *
- * Auto-select (BUGS_BURNDOWN.md issue 5) opens the remembered session — the
- * helm's shared preference `last_selected`, one row for every client — falling
- * back to the newest-created one. Tests that stage route holds
+ * Auto-select opens the first currently listed visit, falling back to the
+ * newest-created row. This write puts id at the shared history's head.
+ * Tests that stage route holds
  * or stubs around a SPECIFIC session's first reads must pin the selection
  * AWAY from that session (usually to the shared e2e-session) before `goto`,
  * or the auto-open races the staging exactly like a user clicking too early.
@@ -1150,13 +1155,12 @@ export async function pinAutoSelect(page: Page, id: string): Promise<void> {
 
 /**
  * The opposite of {@link pinAutoSelect}: guarantee the next load has NO
- * remembered selection.
+ * remembered selection or visit history. One null selection write clears both.
  *
  * For the tests whose subject is the FALLBACK — what a client with nothing
- * remembered opens (SPEC.md's newest-created session). A
- * remembered id short-circuits that path entirely: the sidebar resolves it
- * against the helm and opens it, and the fallback the test came to check
- * never runs. Such a test has to state the precondition rather than inherit
+ * remembered opens (SPEC.md's newest-created session). A listed visit
+ * short-circuits that path, so clearing only the currently remembered id
+ * would leave earlier choices able to win. State the empty-history premise rather than inherit
  * it, because the row is shared: every earlier test that clicked a row left
  * its selection there.
  */

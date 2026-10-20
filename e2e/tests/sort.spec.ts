@@ -724,8 +724,8 @@ test.describe("session list ordering", () => {
     const ids = await threeOrderedSessions(request, stamp);
 
     // Stamped for the same reason as the failed read above; the captured
-    // bodies are what prove a write was actually ATTEMPTED — without them,
-    // a UI that silently stopped writing preferences would pass this test.
+    // bodies are what prove the sort write was actually ATTEMPTED. Automatic
+    // selection also saves a preference; it is outside this sort-failure fixture.
     const helm = await helmStamp(request);
     const puts: unknown[] = [];
     await page.route("**/api/preferences", async (route) => {
@@ -733,7 +733,9 @@ test.describe("session list ordering", () => {
         await route.continue();
         return;
       }
-      puts.push(route.request().postDataJSON());
+      const patch = route.request().postDataJSON();
+      if (!("list_sort" in patch)) return route.fallback();
+      puts.push(patch);
       await fulfillAsHelm(route, helm, {
         status: 500,
         contentType: "text/plain",
@@ -798,7 +800,7 @@ test.describe("session list ordering", () => {
       await fulfillAsHelm(route, helm, {
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ list_sort: "title", last_selected: ids.m, welcome_seen: true }),
+        body: JSON.stringify({ list_sort: "title", last_selected: ids.m, visit_history: [ids.m], welcome_seen: true }),
       });
     });
     const asked = await watchSortParameters(page);
@@ -1040,11 +1042,9 @@ test.describe("session list ordering", () => {
    * was incomplete; that request is gone, and the recorded list is how the
    * test below proves it stays gone.
    *
-   * Also states the precondition the whole fallback rests on: NOTHING
-   * remembered. SPEC.md's fallback is what a client with no remembered
-   * selection opens, and a remembered id skips it — under a truncated walk
-   * the sidebar resolves that id with the helm and opens whatever it names,
-   * which is a real session rather than one of the rows below. The suite's
+   * Also states the precondition the whole fallback rests on: no visits
+   * remembered. A listed history entry would win before creation time,
+   * so the shared helm row must be cleared before staging these rows. The suite's
    * shared `storageState` is supposed to hold only the device secret, but it
    * is rewritten mid-run by auth.spec.ts and once carried a selection out of
    * that rewrite, which failed a test on this fixture on both engines in
@@ -1087,7 +1087,7 @@ test.describe("session list ordering", () => {
 
   /**
    * The auto-select fallback picks the newest-created session out of the
-   * rows in hand, under a non-creation order, with no extra request.
+   * rows in hand, under a non-creation order, with no extra listing request.
    *
    * SPEC.md's fallback is "the newest-created session" for a
    * client with no remembered selection. The rows arrive in title order, so
