@@ -448,8 +448,27 @@ test("destination type keeps unselected repositories separate from the folder", 
   await expect(repository).toHaveValue("");
   await expect(folder).toHaveValue("");
   await expect(form.locator(".create-session-submit")).toBeDisabled();
+  const globalSearch = form.locator(".launch-composer-search input");
+  await globalSearch.fill("host:no-host-for-repository-dismissal");
+  await expect(form.locator("#launch-composer-search-results")).toHaveText("no host matches");
+  await repository.click();
+  await expect(form.locator("#launch-composer-search-results")).toHaveCount(0);
+  await expect(form.locator("#checkout-repository-options")).toBeVisible();
+  // Retire the dismissed query before the later destination-readiness checks.
+  await globalSearch.fill("");
   await repository.fill("invalid!");
+  const repositoryArea = form.locator("#checkout-repository-options");
+  await expect(repositoryArea).toHaveText("no repository matches; enter owner/repo");
   await repository.press("Enter");
+  await expect(repositoryArea).toHaveText("no repository matches; enter owner/repo");
+  await form.getByLabel("name (optional)", { exact: true }).click();
+  await expect(repositoryArea).toHaveCount(0);
+  await repository.focus();
+  await expect(repositoryArea).toHaveText("no repository matches; enter owner/repo");
+  await repository.press("Escape");
+  await expect(repositoryArea).toHaveCount(0);
+  await repository.press("Enter");
+  await expect(repositoryArea).toHaveText("no repository matches; enter owner/repo");
   await expect(form.locator(".launch-composer-refusal")).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toBeDisabled();
   await repository.fill("acme/bar");
@@ -459,6 +478,13 @@ test("destination type keeps unselected repositories separate from the folder", 
   await expect(form.getByRole("listbox", { name: "repositories" }).getByRole("option", { name: "acme/bar", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(form.locator(".launch-composer-refusal")).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toBeDisabled();
+  // A hidden suggestion must become visible before a separate Enter can
+  // select it and grant checkout-preview authority.
+  await repository.press("Escape");
+  await expect(repositoryArea).toHaveCount(0);
+  await repository.press("Enter");
+  await expect(form.getByRole("option", { name: "acme/bar", exact: true })).toBeVisible();
+  await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
   await repository.press("Enter");
   await expect(form.locator(".launch-composer-refusal")).toHaveCount(0);
   await expect(repository).toBeFocused();
