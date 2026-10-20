@@ -16365,7 +16365,9 @@
 - Completion criteria: SPEC.md's Cmd-J paragraph says a pick launches the template currently holding that name, and only
   a name missing from the catalog since the list opened gives the preparation error in New. No code change. Remove the
   feedback file and its index entry.
-- Execution: planned in `plans/queue/template-list-current-labels.md`.
+- Execution: implemented in change `wspvxzux`, bookmark `plan/template-list-current-labels/01-pick-follows-name`.
+  SPEC.md now distinguishes a missing name from one whose current template was edited or recreated; no code change. PR:
+  https://github.com/scode/farhelm/pull/2381/changes.
 
 ## template-list-advertises-rebound-shortcut.md
 

@@ -8,9 +8,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Highest priority: security or data loss
 
-- [`template-list-can-launch-recreated-name.md`](template-list-can-launch-recreated-name.md) — A stale template-list row
-  can launch a replacement recreated under the same name; harmful execution remains unverified.
-
 - [`template-list-advertises-rebound-shortcut.md`](template-list-advertises-rebound-shortcut.md) — Cached shortcut
   badges can guide a later launch to a different template; the gesture and harm remain unverified.
 
