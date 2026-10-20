@@ -16528,7 +16528,12 @@
 - Completion criteria: bare names with digit-leading extensions are recognized, while tokens that are not plausibly
   files (version numbers, `1.5x` and the like) stay unrecognized; unit tests for both. Size gate: about 100 lines, as
   above. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
+- Execution: implemented in change `wyyypmmlxsxlmlnpovupyvpyvvtxqrlt`, bookmark
+  `plan/terminal-link-and-copy-fixes/03-recognize-digit-extensions`. Bare digit-leading extensions are admitted while
+  numeric version-like tokens remain excluded; explicit paths still work. Node cases cover both boundaries and the
+  existing real local/SSH download fixture uses `backup.7z`. Signed quantities remain plain text, and a bounded child
+  regression checks long numeric-looking stems cannot stall recognition. Counted code/test/doc diff: 41 lines, within
+  the 100-line gate. PR: https://github.com/scode/farhelm/pull/2396/changes.
 
 ## terminal-right-click-recopies-stale-selection.md
 
