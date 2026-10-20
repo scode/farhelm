@@ -123,8 +123,10 @@ pub(crate) struct LaunchHistoryEntry {
     /// The accepted destination belongs to this launch row. Older helm
     /// replies may lack it; callers then keep the display spelling separate
     /// instead of consulting mutable folder suggestions.
-    pub(crate) canonical_cwd: Option<String>,
-    pub(crate) cwd: String,
+    pub(crate) canonical_cwd: Option<crate::peer::PeerText>,
+    /// Preserve the accepted spelling for later requests; labels choose its
+    /// escaped form separately so opening a recent never rewrites its path.
+    pub(crate) cwd: crate::peer::PeerText,
     pub(crate) selection: LaunchSelection,
     pub(crate) created_at: i64,
     /// `None` is an older supervisor's timestamp/id-ordered observation.
@@ -137,13 +139,15 @@ pub(crate) struct LaunchHistoryEntry {
 /// the spelling that makes a suggestion recognizable to the person who used
 /// it. Accepted creates already establish the canonical destination; browsing
 /// is another way to obtain a display spelling that may differ from it.
+/// Both remain operational path bytes. The display spelling is escaped only
+/// when rendered, never before matching or seeding an untouched folder field.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct FolderHistoryEntry {
     pub(crate) host: HostId,
-    pub(crate) canonical_cwd: String,
+    pub(crate) canonical_cwd: crate::peer::PeerText,
     #[serde(default)]
     pub(crate) canonical_proven: bool,
-    pub(crate) display_cwd: String,
+    pub(crate) display_cwd: crate::peer::PeerText,
     pub(crate) created_at: i64,
     pub(crate) creation_seq: Option<u64>,
 }
@@ -170,11 +174,14 @@ pub(crate) struct LaunchHistory {
 pub(crate) use farhelm_proto::launcher::LaunchCatalogModel;
 
 /// One bounded response from the selected host's directory browser.
+///
+/// Paths retain their raw spelling for activation, independently of the
+/// escaped button labels; a selected directory must round-trip unchanged.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct DirectoryBrowse {
-    pub(crate) cwd: String,
-    pub(crate) parent: Option<String>,
-    pub(crate) children: Vec<String>,
+    pub(crate) cwd: crate::peer::PeerText,
+    pub(crate) parent: Option<crate::peer::PeerText>,
+    pub(crate) children: Vec<crate::peer::PeerText>,
     pub(crate) truncated: bool,
 }
 
@@ -5339,6 +5346,42 @@ mod tests {
         let fresh: LaunchHistoryEntry = serde_json::from_value(body).unwrap();
         assert_eq!(fresh.github_repo.unwrap().identifier(), "acme/bar");
         assert_eq!(fresh.cwd, legacy.cwd);
+    }
+
+    /// History and browser paths must retain request bytes even when their
+    /// visible labels need escapes or placeholders. A literal escape spelling
+    /// is still an ordinary path, not a request to decode a control character.
+    #[test]
+    fn history_and_directory_paths_preserve_peer_bytes_when_decoded() {
+        for raw in ["", "   ", "/work/left\u{202e}right", "/work/<U+202E>"] {
+            let history: LaunchHistory = serde_json::from_value(serde_json::json!({
+                "launches": [{
+                    "host": 1, "canonical_cwd": raw, "cwd": raw,
+                    "selection": {"harness": "codex"}, "created_at": 1
+                }],
+                "folders": [{
+                    "host": 1, "canonical_cwd": raw, "display_cwd": raw,
+                    "created_at": 1
+                }]
+            }))
+            .unwrap();
+            let browser: DirectoryBrowse = serde_json::from_value(serde_json::json!({
+                "cwd": raw, "parent": raw, "children": [raw], "truncated": false
+            }))
+            .unwrap();
+            for path in [
+                history.launches[0].canonical_cwd.as_ref().unwrap(),
+                &history.launches[0].cwd,
+                &history.folders[0].canonical_cwd,
+                &history.folders[0].display_cwd,
+                &browser.cwd,
+                browser.parent.as_ref().unwrap(),
+                &browser.children[0],
+            ] {
+                assert_eq!(path.raw(), raw);
+                assert_eq!(path.escaped(), crate::peer::display_peer(raw));
+            }
+        }
     }
 
     /// Only the middleware's structured marker means device authentication;

@@ -14,7 +14,7 @@ use crate::github_checkout::{
 };
 use crate::launch_controls::{DestinationTypeControl, LaunchControls, enter_choice};
 use crate::ops::{ConfirmSlot, OpLock, use_confirm_slot};
-use crate::peer::{DetailPart, PeerLine, display_peer};
+use crate::peer::{DetailPart, PeerLine, PeerText, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{
     ApiBase, CommandLaunch, HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
@@ -182,6 +182,8 @@ enum FolderChoice {
 
 /// Keep the server's newest-first ordering, filtering only an edited field.
 /// Prefilled clone paths and `~` are seeds, not searches; they show eight recents.
+/// Filtering uses original path text, so a visible escape marker never becomes
+/// an alias for the control character it represents.
 fn folder_suggestions<'a>(
     folders: &'a [api::FolderHistoryEntry],
     text: &str,
@@ -190,15 +192,15 @@ fn folder_suggestions<'a>(
     let query = text.to_lowercase();
     folders
         .iter()
-        .filter(|folder| !edited || folder.display_cwd.to_lowercase().contains(&query))
+        .filter(|folder| !edited || folder.display_cwd.raw().to_lowercase().contains(&query))
         .take(8)
         .collect()
 }
 
 /// Preserve the distinguishing tail without splitting UTF-8. The full escaped
 /// path remains the option's accessible name and tooltip; this is only its label.
-fn folder_tail_label(path: &str) -> String {
-    let visible = display_peer(path);
+fn folder_tail_label(path: &PeerText) -> String {
+    let visible = path.escaped();
     let count = visible.chars().count();
     if count <= 36 {
         return visible;
@@ -1238,7 +1240,7 @@ fn apply_composer_search_result(
                     &mut cwd_raw_seed,
                     &mut cwd_edited,
                     &mut folder_is_explicit,
-                    &entry.cwd,
+                    entry.cwd.raw(),
                 );
             }
         }
@@ -3552,7 +3554,8 @@ pub(super) fn CreateSessionForm(
     let folder_choices = folder_recents
         .iter()
         .map(|folder| FolderChoice::Recent {
-            cwd: folder.display_cwd.clone(),
+            // The callback owns an operational path, not its visible spelling.
+            cwd: folder.display_cwd.raw().to_owned(),
             target: current_history_target.clone(),
         })
         .chain([FolderChoice::Home, FolderChoice::LocalHome])
@@ -3981,7 +3984,7 @@ pub(super) fn CreateSessionForm(
                     &mut cwd_raw_seed,
                     &mut cwd_edited,
                     &mut folder_is_explicit,
-                    &entry.cwd,
+                    entry.cwd.raw(),
                 );
             }
             // Admission precedes the mode transition so a stale destination
@@ -6928,8 +6931,8 @@ pub(super) fn CreateSessionForm(
                                         for (index, folder) in folder_recents.iter().enumerate() {
                                             button { r#type: "button", role: "option", id: "launcher-folder-{index}", tabindex: "-1",
                                                 aria_selected: folder_highlight == Some(index), disabled: busy,
-                                                aria_label: "{display_peer(&folder.display_cwd)}",
-                                                "data-tooltip": "{display_peer(&folder.display_cwd)}",
+                                                aria_label: "{folder.display_cwd.escaped()}",
+                                                "data-tooltip": "{folder.display_cwd.escaped()}",
                                                 onmousedown: move |evt| evt.prevent_default(),
                                                 onclick: { let choice = folder_choices[index].clone(); move |_| choose_folder.call(choice.clone()) },
                                                 span { class: "launch-composer-folder-path", dir: "ltr", span { "{folder_tail_label(&folder.display_cwd)}" } }
@@ -7471,7 +7474,7 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, &selected_cwd);
+                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, selected_cwd.raw());
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
@@ -7479,7 +7482,7 @@ pub(super) fn CreateSessionForm(
                                 intent_key.set(None);
                             }
                         },
-                        "use {display_peer(&result.cwd)}"
+                        "use {result.cwd.escaped()}"
                     }
                     if let Some(parent) = result.parent.clone() {
                         button {
@@ -7501,7 +7504,7 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, &parent);
+                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, parent.raw());
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
@@ -7509,7 +7512,7 @@ pub(super) fn CreateSessionForm(
                                 intent_key.set(None);
                             }
                             },
-                            "parent: {display_peer(&parent)}"
+                            "parent: {parent.escaped()}"
                         }
                     }
                     if result.truncated {
@@ -7535,7 +7538,7 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, &child);
+                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &mut folder_is_explicit, child.raw());
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
@@ -7543,7 +7546,7 @@ pub(super) fn CreateSessionForm(
                                 intent_key.set(None);
                             }
                             },
-                            "{display_peer(&child)}"
+                            "{child.escaped()}"
                         }
                     }
                 }
@@ -7653,12 +7656,13 @@ mod tests {
         let folders = (0..12)
             .map(|index| super::api::FolderHistoryEntry {
                 host: 1,
-                canonical_cwd: format!("/work/{index}"),
+                canonical_cwd: format!("/work/{index}").into(),
                 canonical_proven: true,
                 display_cwd: format!(
                     "/work/{}-{index}",
                     if index % 2 == 0 { "MATCH" } else { "other" }
-                ),
+                )
+                .into(),
                 created_at: 12 - index,
                 creation_seq: Some((12 - index) as u64),
             })
@@ -7683,14 +7687,14 @@ mod tests {
     /// names. Peer control characters still pass through the display escaping.
     #[test]
     fn folder_dropdown_labels_preserve_the_escaped_tail() {
-        assert_eq!(super::folder_tail_label("~/short"), "~/short");
+        assert_eq!(super::folder_tail_label(&"~/short".into()), "~/short");
         let long = format!("/{}終わり", "界".repeat(40));
-        let label = super::folder_tail_label(&long);
+        let label = super::folder_tail_label(&long.into());
         assert_eq!(label.chars().count(), 36);
         assert!(label.starts_with('…'));
         assert!(label.ends_with("終わり"));
         assert_eq!(
-            super::folder_tail_label("/tmp/\nname"),
+            super::folder_tail_label(&"/tmp/\nname".into()),
             super::display_peer("/tmp/\nname")
         );
     }
