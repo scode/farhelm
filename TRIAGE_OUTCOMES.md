@@ -12301,7 +12301,7 @@
   exceeds one reply frame (about 8 MiB, roughly 130 templates near the per-field cap) is outside the supported scale and
   agent template listing may then fail until templates are removed; the GUI is unaffected. No code change. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
 
 ## dropping-upload-guard-outside-tokio-runtime-skips.md
 
@@ -16393,7 +16393,7 @@
   override and a zero-width space. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
   the queue removal or the changelog fragment); over it, block and bring it back to the user. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
 
 ## web-link-redraw-lowers-refusal.md
 
@@ -16408,7 +16408,7 @@
 - Completion criteria: a redraw under a resting pointer keeps a refused web link's explanation raised until the pointer
   leaves the link, as for file links; the existing browser test is extended to redraw the row. Size gate: about 100
   lines, as above; over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
 
 ## repository-discovery-inherits-bare-git-config.md
 
@@ -16422,7 +16422,7 @@
 - Decision: on 2026-10-19 the user chose "Fix all ten, 100-line gate each" (question 1).
 - Completion criteria: production repository discovery also removes bare `GIT_CONFIG`, with a test. Size gate: about 100
   lines, as above. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/repository-discovery-git-config.md`.
 
 ## current-agent-chip-erases-custom-flags.md
 
@@ -16436,7 +16436,7 @@
 - Completion criteria: re-selecting the current agent leaves the custom flags text byte for byte, with a test. Size
   gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog
   fragment). Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-composer-drafts.md`.
 
 ## incomplete-custom-flags-reset-compatible-effort.md
 
@@ -16451,7 +16451,7 @@
 - Completion criteria: the effort check ignores the permission flags' state, so a compatible effort survives incomplete
   or empty custom flags; a test covers both. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or the changelog fragment). Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-composer-drafts.md`.
 
 ## template-table-omits-custom-permission-flags.md
 
@@ -16463,7 +16463,7 @@
 - Completion criteria: the table shows the custom flags beside "custom", rendered the way the wrapper value is, with a
   test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
   changelog fragment). Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/template-editor-and-listing.md`.
 
 ## file-recognition-rejects-digit-leading-extensions.md
 
@@ -16478,7 +16478,7 @@
 - Completion criteria: bare names with digit-leading extensions are recognized, while tokens that are not plausibly
   files (version numbers, `1.5x` and the like) stay unrecognized; unit tests for both. Size gate: about 100 lines, as
   above. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
 
 ## terminal-right-click-recopies-stale-selection.md
 
@@ -16494,7 +16494,7 @@
 - Completion criteria: copy-on-select acts only on primary-button selections, in the live and restored-snapshot paths,
   with a node test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
   removal or the changelog fragment). Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
 
 ## native-download-quit-leaves-partial-files.md
 
@@ -16509,7 +16509,7 @@
 - Completion criteria: leftover staging directories from an earlier run are removed (at the next launch, or by an
   equivalent owner), without touching a save another running instance still owns; a test. Size gate: about 100 lines, as
   above. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/download-staging-sweep.md`.
 
 ## tab-attach-blocks-host-reader-during-stop.md
 
@@ -16527,7 +16527,7 @@
   precedent), and the UI's retry does not spin; the existing test is updated. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or the changelog fragment). Remove the feedback file and
   its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/tab-attach-no-wait.md`.
 
 ## abandoned-planners-exhaust-global-planning-slots.md
 
@@ -16542,7 +16542,7 @@
   one is about 8 lines.
 - Completion criteria: `stop_probe` bounds its stderr wait like the existing bounded join, with a test. Gate: if it
   needs more than about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/planning-probe-bound.md`.
 
 ## download-eof-cancellation-retains-route.md
 
@@ -16554,7 +16554,7 @@
   about 3 lines.
 - Completion criteria: the route is removed before the guard counts as finished (or equivalently), optionally with a
   test. Gate: over about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/transfer-leftover-cleanup.md`.
 
 ## checkout-folder-save-trims-literal-path.md
 
@@ -16565,7 +16565,7 @@
 - Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3); about 5 lines.
 - Completion criteria: Save trims only a value the user edited and leaves an unedited stored value byte for byte, with a
   test. Gate: over about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-composer-drafts.md`.
 
 ## cancelled-upload-retains-admission-entry.md
 
@@ -16578,7 +16578,7 @@
 - Completion criteria: a cancelled upload also releases its admission entry, mirroring `cancel_download`, with a
   regression test. Gate: over about 15 lines of non-test code, discard instead. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/transfer-leftover-cleanup.md`.
 
 ## over-limit-trash-total-loses-partial-size.md
 
@@ -16590,7 +16590,7 @@
 - Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3); about 8 lines.
 - Completion criteria: the global total is partial whenever any settled listing's totals are, with a test. Gate: over
   about 15 lines of non-test code, discard instead. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/trash-unknown-totals.md`.
 
 ## empty-initial-prompt-skipped-by-tab.md
 
@@ -16602,7 +16602,7 @@
 - Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3), whose recommendation
   discarded this as probably fixed.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-discards-oct19.md`.
 
 ## stale-outcome-hides-successful-stop.md
 
@@ -16614,7 +16614,7 @@
 - Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3): not super cheap,
   discard.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-discards-oct19.md`.
 
 ## archive-recovery-clears-reused-path-trust.md
 
@@ -16630,7 +16630,7 @@
 - Completion criteria: SPEC_impl.md states the actual behavior (recovery of an interrupted archive may clear the trust
   record for a different folder later placed at the old path, which then asks again) instead of claiming a reused path
   is never touched. No code change. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
 
 ## noop-shortcut-approval-reports-missing-binding.md
 
@@ -16643,7 +16643,7 @@
 - Decision: on 2026-10-19 the user applied the 2026-10-11 rule with a 15-line cut (question 3), whose recommendation
   discarded this one as not a real failure.
 - Completion criteria: remove the feedback file and its index entry; no spec or code change.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-discards-oct19.md`.
 
 ## short-main-pane-hides-approval-requests.md
 
@@ -16658,7 +16658,7 @@
   height or a fallback placement), with a browser test in a short viewport. Size gate: about 100 lines of diff (code,
   tests and docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it
   back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/reachable-at-small-sizes.md`.
 
 ## outage-card-content-can-overflow-above-view.md
 
@@ -16672,7 +16672,7 @@
   off the top, and keyboard-reachable), with a browser test. Size gate: about 100 lines of diff (code, tests and docs,
   not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/reachable-at-small-sizes.md`.
 
 ## pinned-host-dialog-chrome-can-hide-content.md
 
@@ -16688,7 +16688,7 @@
   scrolls the whole card), with a geometry test. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/reachable-at-small-sizes.md`.
 
 ## summary-card-clips-lower-facts.md
 
@@ -16702,7 +16702,7 @@
 - Completion criteria: SPEC.md says a hover summary may clip very long values or rows in a short window, which the
   session view shows in full, replacing the promise of the full directory there. No code change. Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
 
 ## update-check-replacement-loses-focus.md
 
@@ -16714,7 +16714,7 @@
   hovers and labels, choosing "Fix all ten, 100-line gate each, discard over the gate" (question 6).
 - Completion criteria: when the check button is replaced while focused, focus moves to the restart toggle; a test. Size
   gate: about 100 lines; over it, discard instead. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/app-dialog-focus.md`.
 
 ## ssh-help-close-loses-replaced-opener-focus.md
 
@@ -16726,7 +16726,7 @@
 - Completion criteria: closing help falls back to a surviving control in the Add dialog when its opener is gone; a test.
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog
   fragment); over it, discard. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/app-dialog-focus.md`.
 
 ## automatic-notification-dismissal-loses-focus.md
 
@@ -16739,7 +16739,7 @@
 - Completion criteria: any close of the list while focus is inside it returns focus to its bell (handled in the bell
   itself, so every automatic close is covered, including the hosts-panel one); a browser test. Size gate: about 100
   lines; over it, discard. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/sidebar-bell-follows-row.md`.
 
 ## notification-popup-drifts-after-local-delete.md
 
@@ -16752,7 +16752,7 @@
 - Completion criteria: a row removal that moves an open notification list closes it, as #1154 does for the row menu; a
   test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
   changelog fragment); over it, discard. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/sidebar-bell-follows-row.md`.
 
 ## delayed-host-confirmation-conflicts-with-other-dialogs.md
 
@@ -16766,7 +16766,7 @@
   time, by guards or stack-aware isolation, the executor's choice); a browser test. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or the changelog fragment); over it, discard.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/app-dialog-focus.md`.
 
 ## replace-yolo-questions-remain-separate.md
 
@@ -16780,7 +16780,7 @@
   cancelling it is reflected in both; a test. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/replace-yolo-shared-question.md`.
 
 ## repeated-terminal-links-acquire-mismatch-warning.md
 
@@ -16794,7 +16794,7 @@
   split-host case the join exists for; tests for both. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
 
 ## restored-terminal-snapshot-rejects-link-clicks.md
 
@@ -16808,7 +16808,7 @@
   hovers are suppressed, whichever is cheaper; a test. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback file and its
   index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
 
 ## trash-sidebar-calls-unchecked-archives-empty.md
 
@@ -16821,7 +16821,7 @@
 - Completion criteria: unchecked entries keep the sidebar button, tooltip and accessible name from saying empty; a unit
   test. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
   changelog fragment); over it, discard. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/trash-unknown-totals.md`.
 
 ## template-name-editor-conceals-formatting.md
 
@@ -16837,7 +16837,7 @@
   say) must stay usable, which may rule that variant out. A test. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/template-editor-and-listing.md`.
 
 ## stale-template-dialog-undoes-agent-shortcut.md
 
@@ -16855,7 +16855,7 @@
   gains the principle above. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or the changelog fragment); over it, block and bring it back. Remove the feedback file and its index
   entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/template-editor-and-listing.md`.
 
 ## checkout-config-refresh-erases-setup-draft.md
 
@@ -16870,7 +16870,7 @@
   while eligibility is being re-checked, or lift the draft); a test. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback
   file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-composer-drafts.md`.
 
 ## unselected-repository-keeps-stale-setup-eligibility.md
 
@@ -16882,7 +16882,7 @@
   cheap" (question 7): a display that lags until the next interaction is accepted.
 - Completion criteria: remove the feedback file and its index entry; no code change. The principle is written into
   SPEC.md under `stale-template-dialog-undoes-agent-shortcut.md`.
-- Execution: pending.
+- Execution: planned in `plans/queue/triage-discards-oct19.md`.
 
 ## introduction-promises-waiting-alerts-for-every-agent.md
 
@@ -16897,7 +16897,7 @@
   guides, and a claim there that holds on the main path is not a defect.
 - Completion criteria: SPEC.md states that principle, where it governs the README introduction and Overview. No change
   to the introduction, Overview or artwork. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
 
 ## introduction-omits-automatic-install-prerequisites.md
 
@@ -16910,7 +16910,7 @@
 - Completion criteria: covered by the SPEC.md principle recorded under
   `introduction-promises-waiting-alerts-for-every-agent.md` (one spec change for all three); no change to the artwork.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
 
 ## introduction-promises-universal-reboot-resume.md
 
@@ -16922,7 +16922,7 @@
 - Decision: on 2026-10-19, the same answer as `introduction-promises-waiting-alerts-for-every-agent.md` (question 8).
 - Completion criteria: covered by that SPEC.md principle; no change to the README or Overview. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
 
 ## template-screenshot-implies-deletion-needs-save.md
 
@@ -16937,7 +16937,7 @@
   catastrophically major with huge user impact.
 - Completion criteria: SPEC.md states that principle, in a place the existing frozen-material rules for published
   release notes can point to. No change to the published notes or shots. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
 
 ## draft-release-note-promises-update-confirmation.md
 
@@ -16949,7 +16949,7 @@
 - Completion criteria: covered by the SPEC.md principle recorded under
   `template-screenshot-implies-deletion-needs-save.md` (one spec change for both); no change to the published notes.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
 
 ## release-review-links-allow-page-script.md
 
@@ -16963,7 +16963,7 @@
 - Completion criteria: link targets are attribute-escaped and limited to http, https and relative links, with self-test
   cases. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the
   changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/tooling-checks-oct19.md`.
 
 ## instruction-check-allows-claude-local-shadowing.md
 
@@ -16976,7 +16976,7 @@
 - Completion criteria: the checker also refuses `CLAUDE.local.md`, with a self-test fixture. Size gate: about 100 lines
   of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog fragment); over it, block
   and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/tooling-checks-oct19.md`.
 
 ## instruction-check-misses-mixed-case-spec-typo.md
 
@@ -16988,7 +16988,7 @@
 - Completion criteria: mixed-case spec-name typos are rejected as documented, with a self-test fixture. Size gate: about
   100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog fragment); over
   it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/tooling-checks-oct19.md`.
 
 ## agent-checkout-test-compares-lexical-tmp.md
 
@@ -17001,7 +17001,7 @@
 - Completion criteria: those assertions compare canonical paths. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove
   the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct19.md`.
 
 ## notification-test-cleanup-skips-preference-restoration.md
 
@@ -17014,7 +17014,7 @@
 - Completion criteria: the cleanup steps run independently (reusing `cleanupOwnedSteps`), so a failure in one does not
   skip the others. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
   or the changelog fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct19.md`.
 
 ## shortcut-tests-skip-owned-cleanup.md
 
@@ -17029,7 +17029,7 @@
   `github-checkouts.spec.ts` stay out of scope. Size gate: about 100 lines of diff (code, tests and docs, not counting
   this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the feedback file
   and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct19.md`.
 
 ## terminal-focus-tests-arm-cleanup-late.md
 
@@ -17041,7 +17041,7 @@
 - Completion criteria: cleanup is armed as soon as the session exists. Size gate: about 100 lines of diff (code, tests
   and docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back.
   Remove the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/test-hygiene-oct19.md`.
 
 ## launcher-retries-ignore-settled-refusal-proof.md
 
@@ -17063,7 +17063,7 @@
   sentence to every launcher with the principle above. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-retry-identity.md`.
 
 ## auth-refusal-forgets-partial-replace.md
 
@@ -17080,7 +17080,7 @@
   resumes the same Replace; the docstring is corrected; a unit test. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove
   the feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-retry-identity.md`.
 
 ## unchanged-template-drops-launch-retry-key.md
 
@@ -17097,4 +17097,4 @@
   that alters the request still mints a new one; a test. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove the
   feedback file and its index entry.
-- Execution: pending.
+- Execution: planned in `plans/queue/launcher-retry-identity.md`.

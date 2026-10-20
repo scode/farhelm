@@ -6,3 +6,21 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `helm-lock-outlives-work.md` — Keep the helm's state-directory lock until every task on its runtime has finished, so a successor cannot claim the directory while old install work still writes the release cache (1 triage outcome).
 - [complete] `hosts-panel-menu-close.md` — Close open sidebar menus when the hosts panel changes height, so a failing expanded setup cannot leave a menu beside the wrong row (1 triage outcome).
 - [complete] `template-list-current-labels.md` — Reword the Cmd-J spec so a pick follows the name's current template, and refresh the list's shortcut labels when it opens (2 triage outcomes).
+- [pending] `launcher-retry-identity.md` — Make every launcher keep a retry's identity until it succeeds or the helm settles it, so retries neither replay a settled refusal nor start duplicate sessions (3 triage outcomes).
+- [pending] `launcher-composer-drafts.md` — Keep what the user typed in the launcher and checkout-folder fields: custom flags, compatible effort, the inline checkout-folder draft, and an unedited folder name (4 triage outcomes).
+- [pending] `terminal-link-and-copy-fixes.md` — Fix six terminal link, hover and copy problems, from unescaped host errors to hovers on frozen snapshots (6 triage outcomes).
+- [pending] `transfer-leftover-cleanup.md` — Release a cancelled download's route and a cancelled upload's admission entry, if each fix is super cheap (2 triage outcomes).
+- [pending] `download-staging-sweep.md` — Remove hidden partial downloads a desktop Quit left behind, without touching another instance's save (1 triage outcome). (after `helm-lock-outlives-work.md`)
+- [pending] `sidebar-bell-follows-row.md` — Make the notification list hand focus back on every close and close when its row moves (2 triage outcomes). (after `hosts-panel-menu-close.md`)
+- [pending] `trash-unknown-totals.md` — Stop trash summaries calling unchecked archives empty or an over-limit total complete (2 triage outcomes).
+- [pending] `reachable-at-small-sizes.md` — Keep approval cards, the outage card and host dialogs reachable in very small windows (3 triage outcomes).
+- [pending] `app-dialog-focus.md` — Fix focus handoffs for the update and SSH help controls, and keep a delayed host confirmation from freezing another dialog (3 triage outcomes).
+- [pending] `template-editor-and-listing.md` — Escape template names in the editor, stop an open Templates dialog undoing agent shortcut moves, and list custom flags in the CLI table (3 triage outcomes). (after `template-list-current-labels.md`)
+- [pending] `replace-yolo-shared-question.md` — Make the header and sidebar Replace controls share one YOLO question per session (1 triage outcome).
+- [pending] `tab-attach-no-wait.md` — Stop a tab attach during Stop from stalling every session on that host (1 triage outcome).
+- [pending] `planning-probe-bound.md` — Bound a host planning probe's output wait so a lingering ssh helper cannot hold a planning slot forever, if super cheap (1 triage outcome).
+- [pending] `repository-discovery-git-config.md` — Make repository suggestions ignore an inherited GIT_CONFIG, as the test fixture already does (1 triage outcome).
+- [pending] `spec-scope-clarifications.md` — Write the introduction-is-a-hook and published-notes principles and three scope statements into the spec, with no code change (8 triage outcomes).
+- [pending] `tooling-checks-oct19.md` — Fix the release-review page's link escaping and two instruction-checker gaps (3 triage outcomes).
+- [pending] `test-hygiene-oct19.md` — Fix a macOS path comparison in checkout tests and three browser-test cleanups that stop early or arm late (4 triage outcomes). (after `host-entry-session-ids.md`)
+- [pending] `triage-discards-oct19.md` — Close the four findings discarded in the 2026-10-19 triage, in one PR (4 triage outcomes).
