@@ -341,7 +341,8 @@ fn template_host<'a>(hosts: &'a [HostOption], identity: &str) -> Option<&'a Host
 /// action the launcher already has (so it has exactly the effects of the
 /// same action taken by hand), or a direct setting for a field no search
 /// action covers (the launch kind, the command fields, a choice reset to
-/// its default).
+/// its default). The whole template preserves the old retry binding for
+/// submit to compare, even when an individual search action clears it.
 enum TemplateEdit {
     Search(crate::launch_composer::ComposerSearchResult),
     Set(Box<dyn FnOnce()>),
@@ -682,6 +683,8 @@ fn validated_template_batch(
 /// A refusal sets `template_error` and makes no edit at all. Only then is it replayed as
 /// the launcher's own actions, so remembered defaults, recent setups and a
 /// pending checkout preview react exactly as they would to the same clicks.
+/// The retained retry binding survives the whole batch: submit already mints
+/// a new key when its final request differs, while unchanged retries must recover.
 /// `host_fixed` is Replace with, which keeps the source's host.
 fn template_edits(
     result: crate::launch_composer::ComposerSearchResult,
@@ -727,6 +730,7 @@ fn template_edits(
     let kind = applied.kind.unwrap_or(LauncherKind::Agent);
     let mut edits = Vec::new();
     let mut t = t;
+    let retry = t.intent_key.peek().clone();
     // Shared application may clear an incompatible prompt when changing the
     // agent. Replay its result too; an absent prompt field otherwise leaves
     // the current first message intact, including a deliberate empty edit.
@@ -878,7 +882,9 @@ fn template_edits(
     }
     edits.push(TemplateEdit::Set(Box::new(move || {
         t.prompt.set(applied_prompt.clone());
-        t.intent_key.set(None);
+        // Search edits may clear this along the way. Compare the completed
+        // request at submit, not an intermediate template field transition.
+        t.intent_key.set(retry);
     })));
     edits
 }
@@ -5017,6 +5023,7 @@ pub(super) fn CreateSessionForm(
             "data-initial-templates-ready": launch_templates.read().is_some(),
             "data-history-fetched-revision": "{fetched_history_revision}",
             "data-composer-mode": if *launch_tab.read() == LaunchTab::Agent { "structured" } else { "command" },
+            "data-browse-generation": "{browse_generation()}",
             "data-browse-live-connection": "{live_browse_connection().unwrap_or_default()}",
             "data-browse-activation-attempts": "{browse_activation_attempts}",
             "data-browse-reply-completions": "{browse_reply_completions}",

@@ -9,6 +9,7 @@ import {
   createSession,
   FAKE_AGENT,
   listHosts,
+  listSessions,
   openHostsPanel,
   openRowMenu,
   patchPreferences,
@@ -1123,9 +1124,11 @@ test(`${numbered ? "number shortcut" : "quick launch"} reveals the ordinary YOLO
 
 /** A refusal spends the shortcut attempt, while a later deliberate Launch
  * reuses the mounted draft. Its eventual success must retain the ordinary
- * New flow, including the name the user already had a chance to edit. */
+ * New flow. After a committed create loses its reply, reapplying a template
+ * must recover that create unless the effective request changes. */
 for (const numbered of [false, true]) {
-test(`${numbered ? "number shortcut" : "quick launch"} reveals a refusal without automatically retrying`, async ({ page, request }) => {
+for (const retry of ["refusal", "unchanged-template", "changed-template"] as const) {
+test(`${numbered ? "number shortcut" : "quick launch"} ${retry === "refusal" ? "reveals a refusal without automatically retrying" : `reapplies ${retry} after a lost reply`}`, async ({ page, request }) => {
   const name = `quick-refused-${Date.now()}`;
   const bodies: any[] = [];
   const created: string[] = [];
@@ -1133,11 +1136,12 @@ test(`${numbered ? "number shortcut" : "quick launch"} reveals a refusal without
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     bodies.push(route.request().postDataJSON());
-    if (bodies.length === 1) await fulfillQuickFixture(route, request, 409, "quick fixture refusal");
+    if (bodies.length === 1 && retry === "refusal") await fulfillQuickFixture(route, request, 409, "quick fixture refusal");
     else {
       const response = await route.fetch();
       if (response.ok()) created.push((await response.json()).id);
-      await route.fulfill({ response });
+      if (bodies.length === 1) await route.abort(); // The helm committed; only the browser loses the reply.
+      else await route.fulfill({ response });
     }
   });
   try {
@@ -1147,27 +1151,50 @@ test(`${numbered ? "number shortcut" : "quick launch"} reveals a refusal without
     if (numbered) await numberChord(page); else await chord(page);
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    await expect(form.locator(".create-session-error")).toContainText("quick fixture refusal");
+    await expect(form.locator(".create-session-error")).toBeVisible();
+    if (retry === "refusal") await expect(form.locator(".create-session-error")).toContainText("quick fixture refusal");
     await expect(form.getByLabel("agent command", { exact: true })).toHaveValue(FAKE_AGENT);
     expect(bodies).toHaveLength(1);
+    if (retry !== "refusal") {
+      expect(created).toHaveLength(1);
+      expect((await listSessions(request)).sessions.filter((one) => one.title.startsWith(name))).toHaveLength(1);
+      const title = retry === "changed-template" ? `${name}-changed` : bodies[0].title;
+      // Include the same folder explicitly, exercising search edits too.
+      const saved = await request.put(`/api/templates/${name}`, {
+        data: { kind: "command", command: FAKE_AGENT, yolo: false, name: title, destination: { folder: bodies[0].cwd } },
+      });
+      expect(saved.ok(), await saved.text()).toBe(true);
+      const generation = await form.getAttribute("data-browse-generation");
+      expect(generation).toMatch(/^\d+$/);
+      if (numbered) await numberChord(page); else await chord(page);
+      // Template acceptance invalidates browsing synchronously with its edits;
+      // unchanged field text alone would not prove the replay finished.
+      await expect(form).not.toHaveAttribute("data-browse-generation", generation!);
+      await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+      expect(bodies).toHaveLength(1);
+    }
     await form.locator(".create-session-submit").click();
     await expect.poll(() => bodies.length).toBe(2);
-    expect(bodies[1]).toEqual(bodies[0]);
-    await expect.poll(() => created.length).toBe(1);
-    await echoAfterNaming(page, created[0], `refused-revealed-${Date.now()}`);
+    if (retry === "changed-template") expect(bodies[1].intent_key).not.toBe(bodies[0].intent_key);
+    else expect(bodies[1]).toEqual(bodies[0]);
+    await expect.poll(() => created.length).toBe(retry === "refusal" ? 1 : 2);
+    expect((await listSessions(request)).sessions.filter((one) => one.title.startsWith(name)))
+      .toHaveLength(retry === "changed-template" ? 2 : 1);
+    await echoAfterNaming(page, created.at(-1)!, `refused-revealed-${Date.now()}`);
   } catch (error) {
     bodyFailed = true;
     throw error;
   } finally {
     await cleanupOwnedSteps(bodyFailed, [
       ["routes", () => page.unrouteAll({ behavior: "wait" })],
-      ["created sessions", () => cleanupOwnedSteps(false, created.map((id) => [id, () => cleanupSession(request, id)]))],
+      ["created sessions", () => cleanupOwnedSteps(false, [...new Set(created)].map((id) => [id, () => cleanupSession(request, id)]))],
       ["template", async () => {
         expect((await request.delete(`/api/templates/${encodeURIComponent(name)}`)).ok()).toBe(true);
       }],
     ]);
   }
 });
+}
 }
 
 /** Unbound and incomplete number bindings use the existing Templates/New
