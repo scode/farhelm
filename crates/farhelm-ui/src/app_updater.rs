@@ -94,6 +94,36 @@ pub(crate) fn separate_progress_spinner(readout: &Readout, shown: InlineStatus) 
     shown.spinning() && !matches!(readout_control(Some(readout)), ReadoutControl::Check { .. })
 }
 
+/// Hand keyboard ownership from the disappearing check button to Restart.
+/// The observer lasts only as long as that check control. Remember focus before
+/// removal, since the browser has already moved it to body when mutations arrive;
+/// an intervening focus change must never pull the user back to the readout.
+const CHECK_FOCUS_HANDOFF: &str = r#"
+(() => {
+    const check = document.querySelector('.app-version-check');
+    if (!check) return;
+    let owned = document.activeElement === check;
+    const remember = () => { owned = document.activeElement === check; };
+    // Removal can dispatch blur before disconnecting the node. A deliberate
+    // blur leaves it connected once the current DOM operation finishes.
+    check.addEventListener('blur', () => queueMicrotask(() => {
+        if (check.isConnected) owned = false;
+    }));
+    document.addEventListener('focusin', remember);
+    const observer = new MutationObserver(() => {
+        if (check.isConnected) return;
+        observer.disconnect();
+        document.removeEventListener('focusin', remember);
+        const toggle = document.querySelector('[data-bar-menu="update"] .bar-menu-toggle');
+        if (owned && document.hasFocus() && document.activeElement === document.body
+            && toggle && !toggle.closest('[hidden], [inert]')) {
+            toggle.focus({preventScroll: true});
+        }
+    });
+    observer.observe(check.parentElement, {childList: true});
+})();
+"#;
+
 /// Render the real check action independently of the native worker subscription.
 ///
 /// The app bar supplies its updater's check callback, shared with the help menu.
@@ -119,6 +149,7 @@ pub(crate) fn check_readout(
             // Retry advice leads so a reinstall command at the end of the
             // hover remains unambiguous to copy.
             "data-tooltip": "Select this to check for updates. {tooltip}",
+            onmounted: move |_| { document::eval(CHECK_FOCUS_HANDOFF); },
             onclick: move |_| on_check.call(()),
             for mark in marks {
                 span { class: mark.class, "aria-hidden": "true", "{mark.glyph}" }

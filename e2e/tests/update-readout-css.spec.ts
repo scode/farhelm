@@ -114,3 +114,30 @@ test("visible check owns the refresh spin and honors reduced motion", async ({ p
   await expect.poll(() => readoutStyle(page)).toMatchObject({ animation: "none", transform: "none" });
   await expect(page.locator(".app-update-status")).toHaveText("checking…");
 });
+
+/** Run the shipped handoff script against the desktop-only DOM transition.
+ * Installation must preserve its check control's focus without taking another
+ * control's focus when the user moved on while the download was running. */
+for (const focus of ["check", "parking", "body"]) {
+  test(`installed update transfers only check focus: ${focus}`, async ({ page }) => {
+    await mountReadout(page, false);
+    const source = readFileSync(join(ASSETS, "../src/app_updater.rs"), "utf8");
+    const script = source.match(/const CHECK_FOCUS_HANDOFF: &str = r#"([\s\S]*?)"#;/)![1];
+    await page.evaluate(script);
+    const check = page.locator(".app-version-check");
+    await check.focus();
+    await expect(check).toBeFocused();
+    if (focus === "parking") await page.locator("#parking").focus();
+    if (focus === "body") await check.evaluate((button: HTMLElement) => button.blur());
+    await expect(page.locator(focus === "check" ? ".app-version-check" : focus === "parking" ? "#parking" : "body")).toBeFocused();
+    await page.evaluate(() => {
+      const check = document.querySelector(".app-version-check")!;
+      const menu = document.createElement("span");
+      menu.setAttribute("data-bar-menu", "update");
+      menu.innerHTML = '<button class="bar-menu-toggle">restart</button>';
+      check.before(menu);
+      check.remove();
+    });
+    await expect(page.locator(focus === "check" ? ".bar-menu-toggle" : focus === "parking" ? "#parking" : "body")).toBeFocused();
+  });
+}
