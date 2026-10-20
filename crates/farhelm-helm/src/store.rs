@@ -38,9 +38,9 @@
 //!   the alternative is trusting every future caller of this module to
 //!   never get the one-helm assumption wrong.
 //! - **`PRAGMA foreign_keys = ON`.** The supervisor's schema has no foreign
-//!   keys at all. This one does: `session_cache` references `hosts` with
-//!   `ON DELETE CASCADE`, which is how removing a host purges its cache in
-//!   one statement (SPEC.md's disposal rule) instead of a second,
+//!   keys at all. This one does: the cache and viewer-state tables reference
+//!   `hosts` with `ON DELETE CASCADE`, which is how removing a host purges its
+//!   state in one statement (SPEC.md's disposal rule) instead of a second,
 //!   separately-fallible delete this module would otherwise have to keep in
 //!   sync by hand. SQLite enforces foreign keys only when a connection asks
 //!   for it, so the pragma is set once at open — unlike `user_version`, it
@@ -329,7 +329,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 62;
+const SCHEMA_VERSION: i64 = 63;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -390,39 +390,15 @@ const LAUNCH_TEMPLATES_SCHEMA: &str = "CREATE TABLE launch_templates (
                  updated_at  INTEGER NOT NULL
              ) STRICT;";
 
-/// The per-session "last seen" stamp (schema version 17): the activity
-/// stamp that was current the last time some client had this session open,
-/// compared against `SessionInfo::effective_activity` to decide whether a
-/// session has unseen output (SPEC.md, Status; `SessionRow::seen_activity_at`
-/// is what a listing reply carries this through as).
-///
-/// A separate table rather than a `session_cache` column, unlike most of
-/// this file's per-session state: `session_cache` rows are replaced
-/// WHOLESALE by `replace_host_sessions` on every host refresh under the
-/// changed-only rule, and a column there would need that write to carry
-/// forward a field the SUPERVISOR never reported — putting a viewer fact
-/// inside the host-payload mirror and complicating the one write the cache
-/// has. Keyed by session id alone, with no foreign key to `hosts` and no
-/// `ON DELETE CASCADE`: session ids are supervisor-minted UUIDs the cache
-/// already treats as globally unique (`session_cache_one_owner`), and a
-/// bare id key is what lets this row survive a retarget or an adoption —
-/// both of which are supposed to keep the session, unlike a host removal.
-///
-/// `sessions::delete_session` removes this row explicitly when THIS helm
-/// deletes a session. A session deleted through another helm, or dropped
-/// from a cache because its host was removed here, can leave a row behind:
-/// that garbage is bounded by the number of sessions that ever existed, at
-/// a few dozen bytes each, and is not worth a reaper yet — a later
-/// migration could sweep rows whose id no `session_cache` row names.
+/// Historical schema 17 DDL, retained for databases entering the migration
+/// ladder before seen state existed. Schema 63 replaces the bare key below.
 const SESSION_SEEN_SCHEMA: &str = "CREATE TABLE session_seen (
                  session_id       TEXT NOT NULL PRIMARY KEY,
                  seen_activity_at INTEGER NOT NULL
              ) STRICT;";
 
-/// Shared pin membership, separate from the supervisor-owned cache so a
-/// refresh cannot overwrite it. Like seen stamps, pins follow session ids
-/// across host adoption/retargeting and have no host foreign key. This helm
-/// removes them on deletion; other deletion paths may leave bounded strays.
+/// Historical schema 52 pin DDL. Do not retrofit the paired key here: old
+/// migrations must still produce the input that schema 63 attributes.
 const SESSION_PINS_SCHEMA: &str = "CREATE TABLE session_pins (
                  session_id TEXT NOT NULL PRIMARY KEY
              ) STRICT;";
@@ -436,22 +412,48 @@ pub enum NotificationMark {
     Cleared,
 }
 
-/// The per-session notification marks (schema version 41): how far through a
-/// session's notifications every client has read, and how far they have
-/// cleared (SPEC.md, Status; SPEC_impl.md's notification storage note).
-///
-/// Sequence numbers, not times: the supervisor numbers a session's
-/// notifications with a sequence that only grows, so "everything up to N"
-/// needs no clock and a notification that ages out of the supervisor's cap
-/// never gets its number reused. Keyed by session id alone with no foreign
-/// key, for `session_seen`'s reasons (a retarget or adoption keeps the
-/// session), and removed explicitly when this helm deletes the session.
-/// Clearing implies reading, so a clear raises both marks.
+/// Historical schema 41 notification DDL, before viewer state was attributed
+/// to entries. Clearing implies reading, so a clear raises both marks.
 const SESSION_NOTIFICATION_MARKS_SCHEMA: &str = "CREATE TABLE session_notification_marks (
                  session_id      TEXT NOT NULL PRIMARY KEY,
                  read_through    INTEGER NOT NULL DEFAULT 0,
                  cleared_through INTEGER NOT NULL DEFAULT 0
              ) STRICT;";
+
+/// Viewer state belongs to a registry entry and an opaque supervisor ID.
+/// These tables deliberately reference hosts, not the refreshable cache:
+/// refresh, cache loss, retarget and adoption keep the user's choices, while
+/// removing the entry cascades them. A session deleted elsewhere can leave
+/// bounded stray rows until its entry is removed; no cache reaper owns them.
+const SESSION_SEEN_PAIRED_SCHEMA: &str = "CREATE TABLE session_seen (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 session_id TEXT NOT NULL,
+                 seen_activity_at INTEGER NOT NULL,
+                 PRIMARY KEY (host_id, session_id)
+             ) STRICT;";
+
+/// Presence alone records a shared pin. Keep the same entry lifetime as seen
+/// state, including when no cache row currently describes the session.
+const SESSION_PINS_PAIRED_SCHEMA: &str = "CREATE TABLE session_pins (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 session_id TEXT NOT NULL,
+                 PRIMARY KEY (host_id, session_id)
+             ) STRICT;";
+
+/// Monotone notification sequence marks share the same entry boundary as
+/// seen state. Sequence numbers are supervisor-local, so the host is part of
+/// their meaning even when another host reports the same bare session ID.
+const SESSION_NOTIFICATION_MARKS_PAIRED_SCHEMA: &str = "CREATE TABLE session_notification_marks (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 session_id TEXT NOT NULL,
+                 read_through INTEGER NOT NULL DEFAULT 0,
+                 cleared_through INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY (host_id, session_id)
+             ) STRICT;";
+
+/// Two SQL variables per key, under even SQLite's historical 999-variable
+/// floor. Listing size is fleet-wide; it must not become a SQL variable cap.
+const SESSION_KEY_BATCH: usize = 400;
 
 /// Where fresh checkouts may be created and what runs after cloning
 /// (schema version 27), shared verbatim by the fresh-create branch and the
@@ -509,6 +511,30 @@ const CHECKOUT_CONFIG_SCHEMA: &str = "\
 /// path (SPEC.md's remove-merely-forgets contract), so this collision is
 /// not a hypothetical the schema can afford to leave open.
 pub type HostId = i64;
+
+/// One session within one durable host entry, for helm-local storage only.
+///
+/// Host IDs are never reused in this database. The opaque suffix is the bare
+/// ID reported by that entry's supervisor, not a public full reference and
+/// not necessarily a UUID. Construct this from an already resolved owner or
+/// the same snapshot as the session; looking up an owner again can pair old
+/// content with a new entry. Construction performs no ownership or admission
+/// check. This key survives retarget/adoption, but never entry removal.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SessionKey {
+    pub host: HostId,
+    pub session_id: String,
+}
+
+impl SessionKey {
+    /// Bind an opaque bare ID to the caller's already established entry.
+    pub fn new(host: HostId, session_id: impl Into<String>) -> Self {
+        Self {
+            host,
+            session_id: session_id.into(),
+        }
+    }
+}
 
 /// The on-disk spelling of each [`HostKind`], the one place it is written:
 /// [`HostKind::column`], [`HostKind::from_column`], and the SQL statements
@@ -2049,6 +2075,8 @@ pub struct HelmStore {
 /// - 62: a helm-assigned UUID on each host entry, independent of the installation
 ///   it currently reaches. Existing entries receive one without rebuilding hosts
 ///   or disturbing the foreign-key rows that belong to them.
+/// - 63: bind seen stamps, pins and notification marks to their host entry.
+///   Legacy rows survive only when exactly one cached membership attributes them.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2364,17 +2392,17 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  fallback_order INTEGER NOT NULL CHECK (fallback_order IN (0, 1)),
                  PRIMARY KEY (host_id, host_identity)
              ) STRICT;
-              {SESSION_SEEN_SCHEMA}
-              {SESSION_PINS_SCHEMA}
+              {SESSION_SEEN_PAIRED_SCHEMA}
+              {SESSION_PINS_PAIRED_SCHEMA}
               {CHECKOUT_CONFIG_SCHEMA}
               {LAUNCH_TEMPLATES_SCHEMA}
-              {SESSION_NOTIFICATION_MARKS_SCHEMA}
+              {SESSION_NOTIFICATION_MARKS_PAIRED_SCHEMA}
               {NTFY_ALERTS_SCHEMA}
               {REGISTRY_NAMESPACE_SCHEMA}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 62;",
+              PRAGMA user_version = 63;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3739,6 +3767,61 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 62")?;
         version = 62;
     }
+    if version == 62 {
+        // Bare state has no durable owner of its own. Attribute only IDs with
+        // exactly one persisted cache membership; ownerless or duplicate IDs
+        // start fresh. The old normal cache's unique index prevents duplicates,
+        // and its in-memory contested markers cannot be recovered after restart.
+        // Process each table independently: older migration fixtures sometimes
+        // recreate one historical table while leaving the others already paired.
+        for (table, schema, columns) in [
+            (
+                "session_seen",
+                SESSION_SEEN_PAIRED_SCHEMA,
+                "seen_activity_at",
+            ),
+            ("session_pins", SESSION_PINS_PAIRED_SCHEMA, ""),
+            (
+                "session_notification_marks",
+                SESSION_NOTIFICATION_MARKS_PAIRED_SCHEMA,
+                "read_through, cleared_through",
+            ),
+        ] {
+            let paired: bool = tx.query_row(
+                &format!(
+                    "SELECT count(*) != 0 FROM pragma_table_info('{table}') WHERE name = 'host_id'"
+                ),
+                [],
+                |row| row.get(0),
+            )?;
+            if paired {
+                // Version-only rewinds already carry attributed state. Never
+                // rejoin it through a cache that may since have been emptied.
+                continue;
+            }
+            tx.execute_batch(&format!(
+                "ALTER TABLE {table} RENAME TO {table}_legacy; {schema}"
+            ))?;
+            let tail = if columns.is_empty() {
+                String::new()
+            } else {
+                format!(", {columns}")
+            };
+            tx.execute_batch(&format!(
+                "INSERT INTO {table} (host_id, session_id{tail})
+                 SELECT owner.host_id, legacy.session_id{tail}
+                 FROM {table}_legacy AS legacy
+                 JOIN (SELECT session_id, MIN(host_id) AS host_id FROM session_cache
+                       GROUP BY session_id HAVING COUNT(*) = 1) AS owner
+                   ON owner.session_id = legacy.session_id;
+                 DROP TABLE {table}_legacy;"
+            ))
+            .with_context(|| format!("attributing legacy {table} rows to host entries"))?;
+        }
+        tx.execute_batch("PRAGMA user_version = 63;")
+            .context("migrating helm.db to schema version 63")?;
+        version = 63;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -5009,55 +5092,65 @@ impl HelmStore {
 
     // ---- Per-session "seen" state ---------------------------------------
 
-    /// The recorded `seen_activity_at` stamp for every id in `ids` that has
+    /// The recorded `seen_activity_at` stamp for every key in `ids` that has
     /// one. An id with no row — never seen, or unknown to this table
     /// entirely — is simply absent from the map rather than present with a
     /// placeholder, the same "absence carries meaning" shape
     /// `SessionRow::seen_activity_at` serializes onto the wire.
     ///
-    /// Bounded by the caller's own id list (`WHERE session_id IN (...)`,
-    /// same shape as [`Self::cached_slice`]'s host scoping) rather than
-    /// reading the whole table: the one caller today,
-    /// `aggregate::session_list_staged`, already knows every id the reply
-    /// will carry before it needs this map, so there is no reason to pull
-    /// rows for sessions outside the current listing.
+    /// Read only the caller's paired keys, in SQL batches small enough for
+    /// SQLite's variable limit. Listing and detail callers already know the
+    /// sessions they will serve; no read needs unrelated viewer metadata.
     pub async fn seen_activity(
         &self,
-        ids: &[String],
-    ) -> anyhow::Result<std::collections::HashMap<String, i64>> {
+        ids: &[SessionKey],
+    ) -> anyhow::Result<std::collections::HashMap<SessionKey, i64>> {
         if ids.is_empty() {
             return Ok(std::collections::HashMap::new());
         }
         let conn = self.conn.clone();
         let ids = ids.to_vec();
         tokio::task::spawn_blocking(
-            move || -> anyhow::Result<std::collections::HashMap<String, i64>> {
+            move || -> anyhow::Result<std::collections::HashMap<SessionKey, i64>> {
                 let conn = conn.lock();
-                let placeholders = (1..=ids.len())
-                    .map(|index| format!("?{index}"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let mut stmt = conn
-                    .prepare(&format!(
-                        "SELECT session_id, seen_activity_at FROM session_seen \
-                         WHERE session_id IN ({placeholders})"
-                    ))
-                    .context("preparing the seen-activity query")?;
-                let rows: Vec<(String, i64)> = stmt
-                    .query_map(rusqlite::params_from_iter(ids.iter()), |r| {
-                        Ok((r.get(0)?, r.get(1)?))
-                    })
-                    .context("querying seen-activity rows")?
-                    .collect::<Result<_, _>>()
-                    .context("reading seen-activity rows")?;
-                Ok(rows.into_iter().collect())
+                let mut result = std::collections::HashMap::new();
+                for batch in ids.chunks(SESSION_KEY_BATCH) {
+                    let placeholders = (0..batch.len())
+                        .map(|_| "(?, ?)")
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let mut stmt = conn
+                        .prepare(&format!(
+                            "SELECT host_id, session_id, seen_activity_at FROM session_seen \
+                         WHERE (host_id, session_id) IN (VALUES {placeholders})"
+                        ))
+                        .context("preparing the seen-activity query")?;
+                    let values = batch.iter().flat_map(|key| {
+                        [
+                            rusqlite::types::Value::Integer(key.host),
+                            rusqlite::types::Value::Text(key.session_id.clone()),
+                        ]
+                    });
+                    let rows: Vec<(SessionKey, i64)> = stmt
+                        .query_map(rusqlite::params_from_iter(values), |r| {
+                            Ok((
+                                SessionKey::new(r.get(0)?, r.get::<_, String>(1)?),
+                                r.get(2)?,
+                            ))
+                        })
+                        .context("querying seen-activity rows")?
+                        .collect::<Result<_, _>>()
+                        .context("reading seen-activity rows")?;
+                    result.extend(rows);
+                }
+                Ok(result)
             },
         )
         .await
         .context("seen-activity read task panicked")?
     }
 
-    /// Monotonically upsert `session_id`'s seen stamp to `activity_at` (a
+    /// Monotonically upsert `key`'s seen stamp to `activity_at` (a
     /// manual "mark read", or the automatic mark the session view issues on
     /// open and on every activity advance), returning whether the stored value
     /// actually changed. Only [`Self::clear_seen`] moves a stamp downward.
@@ -5073,23 +5166,28 @@ impl HelmStore {
     /// behind it, or a client retrying a PUT whose response it missed,
     /// would re-bump the revision for nothing, waking every other
     /// connected client to redraw a dot that never moved.
-    pub async fn mark_seen(&self, session_id: &str, activity_at: i64) -> anyhow::Result<bool> {
-        let session_id = session_id.to_string();
-        self.conn.call("seen-stamp write task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
-            let changed = conn
-                .execute(
-                    "INSERT INTO session_seen (session_id, seen_activity_at) VALUES (?1, ?2) \
-                     ON CONFLICT (session_id) DO UPDATE SET seen_activity_at = excluded.seen_activity_at \
+    pub async fn mark_seen(&self, key: &SessionKey, activity_at: i64) -> anyhow::Result<bool> {
+        let key = key.clone();
+        self.conn
+            .call(
+                "seen-stamp write task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let changed = conn
+                        .execute(
+                            "INSERT INTO session_seen (host_id, session_id, seen_activity_at) \
+                     VALUES (?1, ?2, ?3) ON CONFLICT (host_id, session_id) DO UPDATE \
+                     SET seen_activity_at = excluded.seen_activity_at \
                      WHERE session_seen.seen_activity_at < excluded.seen_activity_at",
-                    rusqlite::params![session_id, activity_at],
-                )
-                .context("writing the seen stamp")?;
-            Ok(changed > 0)
-        })
-.await
+                            rusqlite::params![key.host, key.session_id, activity_at],
+                        )
+                        .context("writing the seen stamp")?;
+                    Ok(changed > 0)
+                },
+            )
+            .await
     }
 
-    /// Delete `session_id`'s seen stamp — a manual "mark unread", which
+    /// Delete `key`'s seen stamp — a manual "mark unread", which
     /// [`SessionInfo::effective_activity`] then reads as unseen because any
     /// recorded activity is newer than no stamp at all. Returns whether a
     /// row actually existed to delete, the clear-direction twin of
@@ -5100,17 +5198,18 @@ impl HelmStore {
     /// Also the primitive `sessions::delete_session` calls, unconditionally
     /// and discarding the flag, to drop this table's row when the session
     /// itself is deleted — see SPEC_impl.md's `session_seen` paragraph for
-    /// why a deleted session's row does not simply cascade away on its own.
-    pub async fn clear_seen(&self, session_id: &str) -> anyhow::Result<bool> {
-        let session_id = session_id.to_string();
+    /// why cache forgetting must not itself delete viewer state. Removing the
+    /// entry cascades it, but individual session deletion still clears it here.
+    pub async fn clear_seen(&self, key: &SessionKey) -> anyhow::Result<bool> {
+        let key = key.clone();
         self.conn
             .call(
                 "seen-stamp clear task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<bool> {
                     let changed = conn
                         .execute(
-                            "DELETE FROM session_seen WHERE session_id = ?1",
-                            rusqlite::params![session_id],
+                            "DELETE FROM session_seen WHERE host_id = ?1 AND session_id = ?2",
+                            rusqlite::params![key.host, key.session_id],
                         )
                         .context("clearing the seen stamp")?;
                     Ok(changed > 0)
@@ -5119,44 +5218,61 @@ impl HelmStore {
             .await
     }
 
-    /// Read pin membership for the listing's ids in one bounded query.
-    /// Missing ids are unpinned, including sessions unknown to this table.
+    /// Read pin membership for exactly the listing's paired keys, in bounded
+    /// SQL batches. Missing keys are unpinned, even if another entry has that ID.
     pub async fn pinned_sessions(
         &self,
-        ids: &[String],
-    ) -> anyhow::Result<std::collections::HashSet<String>> {
+        ids: &[SessionKey],
+    ) -> anyhow::Result<std::collections::HashSet<SessionKey>> {
         if ids.is_empty() {
             return Ok(std::collections::HashSet::new());
         }
         let ids = ids.to_vec();
         self.conn
             .call("pin read task panicked", move |conn: &mut Connection| {
-                let placeholders = (1..=ids.len())
-                    .map(|n| format!("?{n}"))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let mut stmt = conn.prepare(&format!(
-                    "SELECT session_id FROM session_pins WHERE session_id IN ({placeholders})"
-                ))?;
-                Ok(stmt
-                    .query_map(rusqlite::params_from_iter(&ids), |row| row.get(0))?
-                    .collect::<Result<_, _>>()?)
+                let mut result = std::collections::HashSet::new();
+                for batch in ids.chunks(SESSION_KEY_BATCH) {
+                    let placeholders = (0..batch.len())
+                        .map(|_| "(?, ?)")
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let mut stmt = conn.prepare(&format!(
+                        "SELECT host_id, session_id FROM session_pins \
+                     WHERE (host_id, session_id) IN (VALUES {placeholders})"
+                    ))?;
+                    let values = batch.iter().flat_map(|key| {
+                        [
+                            rusqlite::types::Value::Integer(key.host),
+                            rusqlite::types::Value::Text(key.session_id.clone()),
+                        ]
+                    });
+                    let rows = stmt
+                        .query_map(rusqlite::params_from_iter(values), |row| {
+                            Ok(SessionKey::new(row.get(0)?, row.get::<_, String>(1)?))
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    result.extend(rows);
+                }
+                Ok(result)
             })
             .await
     }
 
     /// Set shared pin membership, reporting only a real change so retrying
     /// a PUT does not wake every client for a pin that already matched.
-    pub async fn set_pinned(&self, id: &str, pinned: bool) -> anyhow::Result<bool> {
-        let id = id.to_string();
+    pub async fn set_pinned(&self, key: &SessionKey, pinned: bool) -> anyhow::Result<bool> {
+        let key = key.clone();
         self.conn
             .call("pin write task panicked", move |conn: &mut Connection| {
                 let sql = if pinned {
-                    "INSERT OR IGNORE INTO session_pins (session_id) VALUES (?1)"
+                    "INSERT OR IGNORE INTO session_pins (host_id, session_id) VALUES (?1, ?2)"
                 } else {
-                    "DELETE FROM session_pins WHERE session_id = ?1"
+                    "DELETE FROM session_pins WHERE host_id = ?1 AND session_id = ?2"
                 };
-                Ok(conn.execute(sql, [&id]).context("writing session pin")? > 0)
+                Ok(conn
+                    .execute(sql, rusqlite::params![key.host, key.session_id])
+                    .context("writing session pin")?
+                    > 0)
             })
             .await
     }
@@ -5165,64 +5281,93 @@ impl HelmStore {
     /// A failed delete can leave both sessions, so this copies membership;
     /// the caller clears the old id only after the supervisor confirms it.
     /// Returns whether the replacement gained a pin, for event publication.
-    pub async fn inherit_pin(&self, source: &str, replacement: &str) -> anyhow::Result<bool> {
-        let source = source.to_string();
-        let replacement = replacement.to_string();
-        self.conn.call("replacement pin task panicked", move |conn: &mut Connection| {
-            let changed = conn.execute(
-                "INSERT OR IGNORE INTO session_pins (session_id) SELECT ?2 FROM session_pins WHERE session_id = ?1",
-                [&source, &replacement],
-            ).context("copying replacement pin")?;
-            Ok(changed > 0)
-        }).await
+    pub async fn inherit_pin(
+        &self,
+        source: &SessionKey,
+        replacement: &SessionKey,
+    ) -> anyhow::Result<bool> {
+        let source = source.clone();
+        let replacement = replacement.clone();
+        self.conn
+            .call(
+                "replacement pin task panicked",
+                move |conn: &mut Connection| {
+                    let changed = conn
+                        .execute(
+                            "INSERT OR IGNORE INTO session_pins (host_id, session_id) \
+                 SELECT ?3, ?4 FROM session_pins WHERE host_id = ?1 AND session_id = ?2",
+                            rusqlite::params![
+                                source.host,
+                                source.session_id,
+                                replacement.host,
+                                replacement.session_id
+                            ],
+                        )
+                        .context("copying replacement pin")?;
+                    Ok(changed > 0)
+                },
+            )
+            .await
     }
 
     /// The notification marks (read through, cleared through) of each of
-    /// `ids` that has any, for the listing's row building; a session with no
-    /// row has read and cleared nothing.
+    /// paired `ids` that has any, for listing/detail row building; a session
+    /// with no row has read and cleared nothing. SQL batches retain the full
+    /// key while bounding SQLite variables for a fleet-sized list.
     pub async fn notification_marks(
         &self,
-        ids: &[String],
-    ) -> anyhow::Result<std::collections::HashMap<String, (u64, u64)>> {
+        ids: &[SessionKey],
+    ) -> anyhow::Result<std::collections::HashMap<SessionKey, (u64, u64)>> {
         if ids.is_empty() {
             return Ok(std::collections::HashMap::new());
         }
         let conn = self.conn.clone();
         let ids = ids.to_vec();
         tokio::task::spawn_blocking(
-            move || -> anyhow::Result<std::collections::HashMap<String, (u64, u64)>> {
+            move || -> anyhow::Result<std::collections::HashMap<SessionKey, (u64, u64)>> {
                 let conn = conn.lock();
-                let placeholders = (1..=ids.len())
-                    .map(|index| format!("?{index}"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let mut stmt = conn
-                    .prepare(&format!(
-                        "SELECT session_id, read_through, cleared_through \
-                         FROM session_notification_marks WHERE session_id IN ({placeholders})"
-                    ))
-                    .context("preparing the notification-marks query")?;
-                let rows: Vec<(String, (u64, u64))> = stmt
-                    .query_map(rusqlite::params_from_iter(ids.iter()), |r| {
-                        Ok((
-                            r.get(0)?,
-                            (
-                                r.get::<_, i64>(1)?.max(0) as u64,
-                                r.get::<_, i64>(2)?.max(0) as u64,
-                            ),
+                let mut result = std::collections::HashMap::new();
+                for batch in ids.chunks(SESSION_KEY_BATCH) {
+                    let placeholders = (0..batch.len())
+                        .map(|_| "(?, ?)")
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let mut stmt = conn
+                        .prepare(&format!(
+                            "SELECT host_id, session_id, read_through, cleared_through \
+                         FROM session_notification_marks \
+                         WHERE (host_id, session_id) IN (VALUES {placeholders})"
                         ))
-                    })
-                    .context("querying notification marks")?
-                    .collect::<Result<_, _>>()
-                    .context("reading notification marks")?;
-                Ok(rows.into_iter().collect())
+                        .context("preparing the notification-marks query")?;
+                    let values = batch.iter().flat_map(|key| {
+                        [
+                            rusqlite::types::Value::Integer(key.host),
+                            rusqlite::types::Value::Text(key.session_id.clone()),
+                        ]
+                    });
+                    let rows: Vec<(SessionKey, (u64, u64))> = stmt
+                        .query_map(rusqlite::params_from_iter(values), |r| {
+                            Ok((
+                                SessionKey::new(r.get(0)?, r.get::<_, String>(1)?),
+                                (
+                                    r.get::<_, i64>(2)?.max(0) as u64,
+                                    r.get::<_, i64>(3)?.max(0) as u64,
+                                ),
+                            ))
+                        })
+                        .context("querying notification marks")?
+                        .collect::<Result<_, _>>()
+                        .context("reading notification marks")?;
+                    result.extend(rows);
+                }
+                Ok(result)
             },
         )
         .await
         .context("notification-marks read task panicked")?
     }
 
-    /// Raise `session_id`'s read mark to `through`, and its cleared mark too
+    /// Raise `key`'s read mark to `through`, and its cleared mark too
     /// for [`NotificationMark::Cleared`] (clearing implies reading),
     /// returning whether either mark moved. A mark never moves backwards, so
     /// a stale or retried request is a no-op, which the caller must not bump
@@ -5230,7 +5375,7 @@ impl HelmStore {
     /// A mark of 0 is where every session already stands and writes nothing.
     pub async fn raise_notification_marks(
         &self,
-        session_id: &str,
+        key: &SessionKey,
         through: u64,
         mark: NotificationMark,
     ) -> anyhow::Result<bool> {
@@ -5243,7 +5388,7 @@ impl HelmStore {
         if through == 0 {
             return Ok(false);
         }
-        let session_id = session_id.to_string();
+        let key = key.clone();
         let cleared = match mark {
             NotificationMark::Read => 0,
             NotificationMark::Cleared => through,
@@ -5255,13 +5400,13 @@ impl HelmStore {
                     let changed = conn
                         .execute(
                             "INSERT INTO session_notification_marks \
-                             (session_id, read_through, cleared_through) VALUES (?1, ?2, ?3) \
-                             ON CONFLICT (session_id) DO UPDATE SET \
+                             (host_id, session_id, read_through, cleared_through) VALUES (?1, ?2, ?3, ?4) \
+                             ON CONFLICT (host_id, session_id) DO UPDATE SET \
                                  read_through = MAX(read_through, excluded.read_through), \
                                  cleared_through = MAX(cleared_through, excluded.cleared_through) \
                              WHERE session_notification_marks.read_through < excluded.read_through \
                                 OR session_notification_marks.cleared_through < excluded.cleared_through",
-                            rusqlite::params![session_id, through, cleared],
+                            rusqlite::params![key.host, key.session_id, through, cleared],
                         )
                         .context("writing notification marks")?;
                     Ok(changed > 0)
@@ -5270,17 +5415,17 @@ impl HelmStore {
             .await
     }
 
-    /// Delete `session_id`'s notification marks, when this helm deletes the
+    /// Delete `key`'s notification marks, when this helm deletes the
     /// session (the [`Self::clear_seen`] counterpart for this table).
-    pub async fn clear_notification_marks(&self, session_id: &str) -> anyhow::Result<()> {
-        let session_id = session_id.to_string();
+    pub async fn clear_notification_marks(&self, key: &SessionKey) -> anyhow::Result<()> {
+        let key = key.clone();
         self.conn
             .call(
                 "notification-marks clear task panicked",
                 move |conn: &mut Connection| -> anyhow::Result<()> {
                     conn.execute(
-                        "DELETE FROM session_notification_marks WHERE session_id = ?1",
-                        rusqlite::params![session_id],
+                        "DELETE FROM session_notification_marks WHERE host_id = ?1 AND session_id = ?2",
+                        rusqlite::params![key.host, key.session_id],
                     )
                     .context("clearing notification marks")?;
                     Ok(())
@@ -11107,6 +11252,20 @@ mod tests {
 
     // ---- Per-session "seen" state ---------------------------------------
 
+    /// Give viewer-only fixtures a real entry without implying that viewer
+    /// metadata depends on cache membership. Multi-entry tests construct their
+    /// keys explicitly; these older single-entry tests use the reserved local row.
+    fn viewer_key(store: &HelmStore, id: &str) -> SessionKey {
+        let host = store
+            .conn
+            .lock()
+            .query_row("SELECT id FROM hosts WHERE kind = 'local'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        SessionKey::new(host, id)
+    }
+
     /// The whole read/write/clear cycle behind the idle-dot's blue/grey
     /// split (SPEC.md, Status): marking sets the stamp,
     /// re-marking a DIFFERENT stamp replaces it, and clearing removes it
@@ -11121,29 +11280,41 @@ mod tests {
 
         assert!(
             store
-                .seen_activity(&["s-1".to_string()])
+                .seen_activity(&[viewer_key(&store, "s-1")])
                 .await
                 .unwrap()
                 .is_empty(),
             "an id nothing has marked has no row at all"
         );
 
-        store.mark_seen("s-1", 1_700_000_000).await.unwrap();
-        let map = store.seen_activity(&["s-1".to_string()]).await.unwrap();
-        assert_eq!(map.get("s-1"), Some(&1_700_000_000));
+        store
+            .mark_seen(&viewer_key(&store, "s-1"), 1_700_000_000)
+            .await
+            .unwrap();
+        let map = store
+            .seen_activity(&[viewer_key(&store, "s-1")])
+            .await
+            .unwrap();
+        assert_eq!(map.get(&viewer_key(&store, "s-1")), Some(&1_700_000_000));
 
         // Re-marking with a NEWER stamp replaces the row rather than
         // refusing a second write — the store records whatever the caller
         // last observed, exactly as `update_preferences` does for its own
         // fields.
-        store.mark_seen("s-1", 1_700_000_100).await.unwrap();
-        let map = store.seen_activity(&["s-1".to_string()]).await.unwrap();
-        assert_eq!(map.get("s-1"), Some(&1_700_000_100));
+        store
+            .mark_seen(&viewer_key(&store, "s-1"), 1_700_000_100)
+            .await
+            .unwrap();
+        let map = store
+            .seen_activity(&[viewer_key(&store, "s-1")])
+            .await
+            .unwrap();
+        assert_eq!(map.get(&viewer_key(&store, "s-1")), Some(&1_700_000_100));
 
-        store.clear_seen("s-1").await.unwrap();
+        store.clear_seen(&viewer_key(&store, "s-1")).await.unwrap();
         assert!(
             store
-                .seen_activity(&["s-1".to_string()])
+                .seen_activity(&[viewer_key(&store, "s-1")])
                 .await
                 .unwrap()
                 .is_empty(),
@@ -11159,17 +11330,20 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn seen_activity_joins_a_mixed_id_list() {
         let (_dir, store) = fresh_store().await;
-        store.mark_seen("has-a-row", 42).await.unwrap();
+        store
+            .mark_seen(&viewer_key(&store, "has-a-row"), 42)
+            .await
+            .unwrap();
 
         let ids = vec![
-            "has-a-row".to_string(),
-            "never-marked".to_string(),
-            "also-never-marked".to_string(),
+            viewer_key(&store, "has-a-row"),
+            viewer_key(&store, "never-marked"),
+            viewer_key(&store, "also-never-marked"),
         ];
         let map = store.seen_activity(&ids).await.unwrap();
         assert_eq!(map.len(), 1, "only the marked id produces an entry");
-        assert_eq!(map.get("has-a-row"), Some(&42));
-        assert_eq!(map.get("never-marked"), None);
+        assert_eq!(map.get(&viewer_key(&store, "has-a-row")), Some(&42));
+        assert_eq!(map.get(&viewer_key(&store, "never-marked")), None);
     }
 
     /// The store's own half of "bump the fleet-events revision on a
@@ -11182,28 +11356,40 @@ mod tests {
         let (_dir, store) = fresh_store().await;
 
         assert!(
-            store.mark_seen("s-1", 100).await.unwrap(),
+            store
+                .mark_seen(&viewer_key(&store, "s-1"), 100)
+                .await
+                .unwrap(),
             "the first mark for an id always changes the stored state"
         );
         assert!(
-            !store.mark_seen("s-1", 100).await.unwrap(),
+            !store
+                .mark_seen(&viewer_key(&store, "s-1"), 100)
+                .await
+                .unwrap(),
             "re-marking the SAME stamp must report no change"
         );
         assert!(
-            store.mark_seen("s-1", 200).await.unwrap(),
+            store
+                .mark_seen(&viewer_key(&store, "s-1"), 200)
+                .await
+                .unwrap(),
             "a genuinely different stamp must report a change"
         );
 
         assert!(
-            store.clear_seen("s-1").await.unwrap(),
+            store.clear_seen(&viewer_key(&store, "s-1")).await.unwrap(),
             "clearing a row that exists must report a change"
         );
         assert!(
-            !store.clear_seen("s-1").await.unwrap(),
+            !store.clear_seen(&viewer_key(&store, "s-1")).await.unwrap(),
             "clearing an id with no row must report no change"
         );
         assert!(
-            !store.clear_seen("never-marked-at-all").await.unwrap(),
+            !store
+                .clear_seen(&viewer_key(&store, "never-marked-at-all"))
+                .await
+                .unwrap(),
             "clearing an id this table has never heard of is a no-op, not an error"
         );
     }
@@ -11215,15 +11401,36 @@ mod tests {
     async fn mark_seen_rejects_an_older_activity_stamp() {
         let (_dir, store) = fresh_store().await;
 
-        assert!(store.mark_seen("s-1", 200).await.unwrap());
-        assert!(!store.mark_seen("s-1", 100).await.unwrap());
+        assert!(
+            store
+                .mark_seen(&viewer_key(&store, "s-1"), 200)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .mark_seen(&viewer_key(&store, "s-1"), 100)
+                .await
+                .unwrap()
+        );
         assert_eq!(
-            store.seen_activity(&["s-1".to_string()]).await.unwrap()["s-1"],
+            store
+                .seen_activity(&[viewer_key(&store, "s-1")])
+                .await
+                .unwrap()[&viewer_key(&store, "s-1")],
             200
         );
-        assert!(store.mark_seen("s-1", 300).await.unwrap());
+        assert!(
+            store
+                .mark_seen(&viewer_key(&store, "s-1"), 300)
+                .await
+                .unwrap()
+        );
         assert_eq!(
-            store.seen_activity(&["s-1".to_string()]).await.unwrap()["s-1"],
+            store
+                .seen_activity(&[viewer_key(&store, "s-1")])
+                .await
+                .unwrap()[&viewer_key(&store, "s-1")],
             300
         );
     }
@@ -11240,38 +11447,38 @@ mod tests {
             let store = store.clone();
             async move {
                 store
-                    .notification_marks(&["s-1".to_string()])
+                    .notification_marks(&[viewer_key(&store, "s-1")])
                     .await
                     .unwrap()
-                    .get("s-1")
+                    .get(&viewer_key(&store, "s-1"))
                     .copied()
             }
         };
 
         assert!(
             !store
-                .raise_notification_marks("s-1", 0, NotificationMark::Read)
+                .raise_notification_marks(&viewer_key(&store, "s-1"), 0, NotificationMark::Read)
                 .await
                 .unwrap(),
             "a mark of 0 is where every session already stands"
         );
         assert!(
             store
-                .raise_notification_marks("s-1", 3, NotificationMark::Read)
+                .raise_notification_marks(&viewer_key(&store, "s-1"), 3, NotificationMark::Read)
                 .await
                 .unwrap()
         );
         assert_eq!(marks(&store).await, Some((3, 0)));
         assert!(
             !store
-                .raise_notification_marks("s-1", 2, NotificationMark::Read)
+                .raise_notification_marks(&viewer_key(&store, "s-1"), 2, NotificationMark::Read)
                 .await
                 .unwrap(),
             "an older read mark is a no-op"
         );
         assert!(
             !store
-                .raise_notification_marks("s-1", 3, NotificationMark::Read)
+                .raise_notification_marks(&viewer_key(&store, "s-1"), 3, NotificationMark::Read)
                 .await
                 .unwrap(),
             "a repeated read mark is a no-op"
@@ -11280,7 +11487,7 @@ mod tests {
 
         assert!(
             store
-                .raise_notification_marks("s-1", 2, NotificationMark::Cleared)
+                .raise_notification_marks(&viewer_key(&store, "s-1"), 2, NotificationMark::Cleared)
                 .await
                 .unwrap()
         );
@@ -11291,7 +11498,7 @@ mod tests {
         );
         assert!(
             store
-                .raise_notification_marks("s-1", 5, NotificationMark::Cleared)
+                .raise_notification_marks(&viewer_key(&store, "s-1"), 5, NotificationMark::Cleared)
                 .await
                 .unwrap()
         );
@@ -11301,7 +11508,10 @@ mod tests {
             "a clear raises both marks"
         );
 
-        store.clear_notification_marks("s-1").await.unwrap();
+        store
+            .clear_notification_marks(&viewer_key(&store, "s-1"))
+            .await
+            .unwrap();
         assert_eq!(marks(&store).await, None);
     }
 
@@ -11311,19 +11521,52 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn session_pins_round_trip_and_replacement_inheritance() {
         let (dir, store) = fresh_store().await;
-        let ids = ["source".to_string(), "new".to_string()];
+        let ids = [viewer_key(&store, "source"), viewer_key(&store, "new")];
         assert!(store.pinned_sessions(&ids).await.unwrap().is_empty());
-        assert!(store.set_pinned("source", true).await.unwrap());
-        assert!(!store.set_pinned("source", true).await.unwrap());
-        // Replace notifies other clients only when this reports a copy.
-        assert!(store.inherit_pin("source", "new").await.unwrap());
-        assert_eq!(store.pinned_sessions(&ids).await.unwrap().len(), 2);
-        assert!(store.set_pinned("source", false).await.unwrap());
-        assert!(!store.set_pinned("source", false).await.unwrap());
-        assert!(!store.inherit_pin("absent", "not-pinned").await.unwrap());
         assert!(
             store
-                .pinned_sessions(&["not-pinned".into()])
+                .set_pinned(&viewer_key(&store, "source"), true)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .set_pinned(&viewer_key(&store, "source"), true)
+                .await
+                .unwrap()
+        );
+        // Replace notifies other clients only when this reports a copy.
+        assert!(
+            store
+                .inherit_pin(&viewer_key(&store, "source"), &viewer_key(&store, "new"))
+                .await
+                .unwrap()
+        );
+        assert_eq!(store.pinned_sessions(&ids).await.unwrap().len(), 2);
+        assert!(
+            store
+                .set_pinned(&viewer_key(&store, "source"), false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .set_pinned(&viewer_key(&store, "source"), false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .inherit_pin(
+                    &viewer_key(&store, "absent"),
+                    &viewer_key(&store, "not-pinned")
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .pinned_sessions(&[viewer_key(&store, "not-pinned")])
                 .await
                 .unwrap()
                 .is_empty()
@@ -11333,7 +11576,7 @@ mod tests {
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
         assert_eq!(
             store.pinned_sessions(&ids).await.unwrap(),
-            std::collections::HashSet::from(["new".to_string()])
+            std::collections::HashSet::from([viewer_key(&store, "new")])
         );
     }
 
@@ -11343,7 +11586,10 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn schema_52_adds_empty_session_pins() {
         let (dir, store) = fresh_store().await;
-        store.mark_seen("kept", 123).await.unwrap();
+        store
+            .mark_seen(&viewer_key(&store, "kept"), 123)
+            .await
+            .unwrap();
         let path = dir.path().join("helm.db");
         drop(store);
         let conn = Connection::open(&path).unwrap();
@@ -11362,20 +11608,353 @@ mod tests {
         let store = HelmStore::open(&path).await.unwrap();
         assert!(
             store
-                .pinned_sessions(&["kept".into()])
+                .pinned_sessions(&[viewer_key(&store, "kept")])
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert_eq!(
             store
-                .seen_activity(&["kept".into()])
+                .seen_activity(&[viewer_key(&store, "kept")])
                 .await
                 .unwrap()
-                .get("kept"),
+                .get(&viewer_key(&store, "kept")),
             Some(&123)
         );
-        assert!(store.set_pinned("kept", true).await.unwrap());
+        assert!(
+            store
+                .set_pinned(&viewer_key(&store, "kept"), true)
+                .await
+                .unwrap()
+        );
+    }
+
+    /// Legacy viewer facts can be kept only when the cache attributes them
+    /// to exactly one entry. Exercise every table with owned, ownerless and
+    /// duplicate memberships, and prove that unrelated host-owned data survives.
+    /// Normal old databases forbid persisted duplicates; this fixture explicitly
+    /// drops that index rather than pretending in-memory contested markers persist.
+    #[farhelm_testtrace::test]
+    async fn schema_63_attributes_only_uniquely_cached_viewer_state() {
+        let (dir, store) = fresh_store().await;
+        let first = host_with_identity(&store, "viewer-first.example", "first").await;
+        let second = host_with_identity(&store, "viewer-second.example", "second").await;
+        store
+            .replace_host_sessions(
+                first,
+                "first",
+                vec![session("owned", 1), session("duplicate", 2)],
+                false,
+            )
+            .await
+            .unwrap();
+        store
+            .record_create_history(first, "first", &session("owned", 1))
+            .await
+            .unwrap();
+        let history = history_counts(&store, first, "first");
+        assert!(
+            history.0 > 0,
+            "premise: the host owns retained launch history"
+        );
+        let hosts = store.list_hosts().await.unwrap();
+        let path = dir.path().join("helm.db");
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&format!(
+            "DROP INDEX session_cache_one_owner;
+             INSERT INTO session_cache (host_id, session_id, created_at, info_json)
+             SELECT {second}, session_id, created_at, info_json FROM session_cache
+             WHERE host_id = {first} AND session_id = 'duplicate';
+             DROP TABLE session_seen;
+             DROP TABLE session_pins;
+             DROP TABLE session_notification_marks;
+             {SESSION_SEEN_SCHEMA} {SESSION_PINS_SCHEMA} {SESSION_NOTIFICATION_MARKS_SCHEMA}
+             INSERT INTO session_seen VALUES ('owned', 11), ('unowned', 22), ('duplicate', 33);
+             INSERT INTO session_pins VALUES ('owned'), ('unowned'), ('duplicate');
+             INSERT INTO session_notification_marks VALUES ('owned', 7, 4), ('unowned', 8, 5), ('duplicate', 9, 6);
+             PRAGMA user_version = 62;"
+        )).unwrap();
+        for (id, count) in [("owned", 1), ("unowned", 0), ("duplicate", 2)] {
+            assert_eq!(
+                conn.query_row(
+                    "SELECT COUNT(*) FROM session_cache WHERE session_id = ?1",
+                    [id],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                count,
+                "premise: {id} has the intended persisted membership"
+            );
+        }
+        for table in ["session_seen", "session_pins", "session_notification_marks"] {
+            assert_eq!(
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                3
+            );
+            assert_eq!(
+                conn.query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = 'host_id'"
+                    ),
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0,
+                "premise: {table} really carries the old bare key"
+            );
+        }
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        let keys: Vec<_> = [first, second]
+            .into_iter()
+            .flat_map(|host| ["owned", "unowned", "duplicate"].map(|id| SessionKey::new(host, id)))
+            .collect();
+        let owned = SessionKey::new(first, "owned");
+        assert_eq!(
+            store.seen_activity(&keys).await.unwrap(),
+            std::collections::HashMap::from([(owned.clone(), 11)])
+        );
+        assert_eq!(
+            store.pinned_sessions(&keys).await.unwrap(),
+            std::collections::HashSet::from([owned.clone()])
+        );
+        assert_eq!(
+            store.notification_marks(&keys).await.unwrap(),
+            std::collections::HashMap::from([(owned.clone(), (7, 4))])
+        );
+        let after = store.list_hosts().await.unwrap();
+        assert_eq!(after.len(), hosts.len());
+        for original in hosts {
+            let actual = after.iter().find(|row| row.id == original.id).unwrap();
+            assert_eq!(actual.entry_uuid, original.entry_uuid);
+            assert_eq!(actual.host_identity, original.host_identity);
+            assert_eq!(actual.destination, original.destination);
+        }
+        assert_eq!(history_counts(&store, first, "first"), history);
+        assert_eq!(cached_ids(&store, first).await, ["duplicate", "owned"]);
+
+        // A rewound current fixture already knows its entry. Emptying the
+        // cache must not cause a second attribution pass to discard that fact.
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("DELETE FROM session_cache; PRAGMA user_version = 62;")
+            .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM session_cache", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(conn);
+        let store = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            store.seen_activity(&keys).await.unwrap().get(&owned),
+            Some(&11)
+        );
+        assert!(store.pinned_sessions(&keys).await.unwrap().contains(&owned));
+        assert_eq!(
+            store.notification_marks(&keys).await.unwrap().get(&owned),
+            Some(&(7, 4))
+        );
+    }
+
+    /// Equal bare IDs on different entries must never share viewer state.
+    /// Cache refresh/loss, retarget and adoption preserve those entry-owned
+    /// facts; removing the entry disposes of them before a re-add gets a new ID.
+    #[farhelm_testtrace::test]
+    async fn viewer_state_is_paired_and_follows_only_the_entry_lifetime() {
+        let (_dir, store) = fresh_store().await;
+        let first = host_with_identity(&store, "viewer-first.example", "first").await;
+        let second = host_with_identity(&store, "viewer-second.example", "second").await;
+        let a = SessionKey::new(first, "same:bare");
+        let b = SessionKey::new(second, "same:bare");
+        let keys = [a.clone(), b.clone()];
+        for (key, stamp, through) in [(&a, 100, 3), (&b, 200, 7)] {
+            assert!(store.mark_seen(key, stamp).await.unwrap());
+            assert!(store.set_pinned(key, true).await.unwrap());
+            assert!(
+                store
+                    .raise_notification_marks(key, through, NotificationMark::Cleared)
+                    .await
+                    .unwrap()
+            );
+        }
+        assert_eq!(
+            store.seen_activity(&keys).await.unwrap(),
+            std::collections::HashMap::from([(a.clone(), 100), (b.clone(), 200)])
+        );
+        assert_eq!(
+            store.notification_marks(&keys).await.unwrap(),
+            std::collections::HashMap::from([(a.clone(), (3, 3)), (b.clone(), (7, 7))])
+        );
+        store.clear_seen(&a).await.unwrap();
+        store.set_pinned(&a, false).await.unwrap();
+        store.clear_notification_marks(&a).await.unwrap();
+        assert_eq!(
+            store.seen_activity(&keys).await.unwrap(),
+            std::collections::HashMap::from([(b.clone(), 200)])
+        );
+        assert_eq!(
+            store.pinned_sessions(&keys).await.unwrap(),
+            std::collections::HashSet::from([b.clone()])
+        );
+        assert_eq!(
+            store.notification_marks(&keys).await.unwrap(),
+            std::collections::HashMap::from([(b.clone(), (7, 7))])
+        );
+        store.mark_seen(&a, 100).await.unwrap();
+        store.set_pinned(&a, true).await.unwrap();
+        store
+            .raise_notification_marks(&a, 3, NotificationMark::Cleared)
+            .await
+            .unwrap();
+        let replacement = SessionKey::new(first, "replacement");
+        assert!(store.inherit_pin(&a, &replacement).await.unwrap());
+        assert!(!store.inherit_pin(&a, &replacement).await.unwrap());
+        assert!(
+            !store
+                .pinned_sessions(&[SessionKey::new(second, "replacement")])
+                .await
+                .unwrap()
+                .contains(&SessionKey::new(second, "replacement"))
+        );
+        store
+            .replace_host_sessions(first, "first", vec![session("same:bare", 1)], false)
+            .await
+            .unwrap();
+        store
+            .replace_host_sessions(first, "first", vec![], false)
+            .await
+            .unwrap();
+        assert!(
+            cached_ids(&store, first).await.is_empty(),
+            "premise: cache membership is gone"
+        );
+        store
+            .replace_host_sessions(first, "first", vec![session("same:bare", 1)], false)
+            .await
+            .unwrap();
+        assert_eq!(
+            cached_ids(&store, first).await,
+            ["same:bare"],
+            "premise: adoption has cached state to purge"
+        );
+        store
+            .update_ssh_destination(first, "viewer-retarget.example")
+            .await
+            .unwrap();
+        store
+            .adopt_identity(first, &dialed_as(&store, first).await, "first", "adopted")
+            .await
+            .unwrap();
+        assert!(cached_ids(&store, first).await.is_empty());
+        assert_eq!(
+            store.seen_activity(&keys).await.unwrap().get(&a),
+            Some(&100)
+        );
+        assert_eq!(store.pinned_sessions(&keys).await.unwrap().len(), 2);
+        assert_eq!(
+            store.notification_marks(&keys).await.unwrap().get(&a),
+            Some(&(3, 3))
+        );
+        store.remove_ssh_host(first).await.unwrap();
+        assert_eq!(
+            store.seen_activity(&keys).await.unwrap(),
+            std::collections::HashMap::from([(b.clone(), 200)])
+        );
+        assert_eq!(
+            store
+                .pinned_sessions(&[a.clone(), b.clone(), replacement])
+                .await
+                .unwrap(),
+            std::collections::HashSet::from([b.clone()])
+        );
+        assert_eq!(
+            store.notification_marks(&keys).await.unwrap(),
+            std::collections::HashMap::from([(b, (7, 7))])
+        );
+        let readded = store
+            .add_ssh_host("viewer-retarget.example", None, None)
+            .await
+            .unwrap();
+        assert_ne!(readded, first);
+        let fresh = [SessionKey::new(readded, "same:bare")];
+        assert!(store.seen_activity(&fresh).await.unwrap().is_empty());
+        assert!(store.pinned_sessions(&fresh).await.unwrap().is_empty());
+        assert!(store.notification_marks(&fresh).await.unwrap().is_empty());
+        assert!(
+            store.mark_seen(&a, 300).await.is_err(),
+            "a removed entry cannot receive new viewer rows"
+        );
+        assert!(store.set_pinned(&a, true).await.is_err());
+        assert!(
+            store
+                .raise_notification_marks(&a, 9, NotificationMark::Read)
+                .await
+                .is_err()
+        );
+    }
+
+    /// A fleet-sized listing can exceed one SQL batch. Keep the host dimension
+    /// through every chunk and omit unrequested rows rather than reading each
+    /// host's entire metadata table as a workaround for the variable bound.
+    #[farhelm_testtrace::test]
+    async fn viewer_state_reads_cross_bounded_batches() {
+        let (_dir, store) = fresh_store().await;
+        let first = viewer_key(&store, "unused").host;
+        let second = store
+            .add_ssh_host("viewer-other.example", None, None)
+            .await
+            .unwrap();
+        let keys: Vec<_> = (0..SESSION_KEY_BATCH + 3)
+            .map(|index| {
+                SessionKey::new(
+                    if index % 2 == 0 { first } else { second },
+                    format!("s-{index}"),
+                )
+            })
+            .collect();
+        {
+            let mut conn = store.conn.lock();
+            let tx = conn.transaction().unwrap();
+            for key in &keys {
+                tx.execute(
+                    "INSERT INTO session_seen VALUES (?1, ?2, 42)",
+                    rusqlite::params![key.host, key.session_id],
+                )
+                .unwrap();
+                tx.execute(
+                    "INSERT INTO session_pins VALUES (?1, ?2)",
+                    rusqlite::params![key.host, key.session_id],
+                )
+                .unwrap();
+                tx.execute(
+                    "INSERT INTO session_notification_marks VALUES (?1, ?2, 3, 2)",
+                    rusqlite::params![key.host, key.session_id],
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let requested = &keys[..keys.len() - 1];
+        let seen = store.seen_activity(requested).await.unwrap();
+        let pins = store.pinned_sessions(requested).await.unwrap();
+        let marks = store.notification_marks(requested).await.unwrap();
+        assert_eq!(seen.len(), requested.len());
+        assert_eq!(pins.len(), requested.len());
+        assert_eq!(marks.len(), requested.len());
+        for key in requested {
+            assert_eq!(seen.get(key), Some(&42));
+            assert!(pins.contains(key));
+            assert_eq!(marks.get(key), Some(&(3, 2)));
+        }
+        assert!(!seen.contains_key(keys.last().unwrap()));
+        assert!(!pins.contains(keys.last().unwrap()));
+        assert!(!marks.contains_key(keys.last().unwrap()));
     }
 
     // ---- Schema and the version mechanism ----------------------------
@@ -11403,7 +11982,10 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn schema_54_namespaces_existing_registries_without_breaking_offline_open() {
         let (dir, store) = fresh_store().await;
-        store.mark_seen("retained", 123).await.unwrap();
+        store
+            .mark_seen(&viewer_key(&store, "retained"), 123)
+            .await
+            .unwrap();
         let path = dir.path().join("helm.db");
         drop(store);
         let conn = Connection::open(&path).unwrap();
@@ -11435,10 +12017,10 @@ mod tests {
         assert_eq!(namespace.len(), 32);
         assert_eq!(
             migrated
-                .seen_activity(&["retained".into()])
+                .seen_activity(&[viewer_key(&migrated, "retained")])
                 .await
                 .unwrap()
-                .get("retained"),
+                .get(&viewer_key(&migrated, "retained")),
             Some(&123)
         );
         drop(migrated);
@@ -13572,14 +14154,17 @@ mod tests {
         let migrated = HelmStore::open(&path).await.expect("migrate");
         assert!(
             migrated
-                .seen_activity(&["anything".to_string()])
+                .seen_activity(&[viewer_key(&migrated, "anything")])
                 .await
                 .unwrap()
                 .is_empty(),
             "the fresh table starts with nothing marked"
         );
         assert!(
-            migrated.mark_seen("s-1", 1_700_000_000).await.unwrap(),
+            migrated
+                .mark_seen(&viewer_key(&migrated, "s-1"), 1_700_000_000)
+                .await
+                .unwrap(),
             "the migrated table must accept writes exactly like a fresh one"
         );
         assert!(

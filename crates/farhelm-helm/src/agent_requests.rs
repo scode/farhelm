@@ -5711,7 +5711,10 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        h.store.set_pinned("target", true).await.unwrap();
+        h.store
+            .set_pinned(&crate::store::SessionKey::new(local, "target"), true)
+            .await
+            .unwrap();
         let _gui = h.state.manager.events().admit(1).unwrap();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);

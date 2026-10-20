@@ -3599,28 +3599,35 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   supervisor; the cap ages records out there. The UI renders each text as peer text, marks resolved entries grey with a
   "resolved" word, and excludes them from unread counts and "new" styling without moving the helm's read mark.
 - Per-session "seen" state (the idle dot's grey/blue split and the read/unread toggle; SPEC.md, Status) lives in its own
-  `session_seen` table keyed by session id alone, not as a `session_cache` column: that cache is replaced WHOLESALE by
-  each host's refresh, so a column there would need every refresh to carry forward a viewer fact the supervisor never
-  reported, and a bare id key (no foreign key to `hosts`, no `ON DELETE CASCADE`) is what lets the state survive a
-  retarget or an adoption, both of which keep the session. The stored value is the ACTIVITY STAMP that was current the
-  last time some client had the session open, never a wall-clock "seen at" time — comparing a later activity stamp
-  against an earlier one from the SAME host involves no clock at all, where a wall-clock comparison would pit the
-  session's host's clock against the helm's own, on a remote host a different machine's clock entirely (the same reason
-  the relative-age column reads an activity stamp rather than a "last seen" timestamp). One caveat follows directly: the
-  supervisor quantizes `last_activity_at` at the source, advancing it only when what it observes is at least a minute
-  newer than what it already holds, so work landing within that minute after a mark-read does not yet register as unseen
-  — cosmetic, and not worth a second, finer-grained stamp. The table is a helm-local write with nothing to refuse:
-  `PUT /api/sessions/{id}/seen` does not route through a session's owning host at all (unlike every lifecycle verb
-  above), so a session on an unreachable host can still be marked read or unread, and the write bumps the fleet-events
-  revision only when the stored value actually changed — a client re-marking the SAME stamp it already recorded — which
-  happens when a session is reopened with no new activity behind it, or when a client retries a PUT whose response it
-  missed — must not wake every other connected client to redraw a dot that has not moved. Deleting a session drops its
-  `session_seen` row explicitly, since nothing else cascades into a table with no foreign key; a session deleted through
-  ANOTHER helm, or dropped from a cache because its host was removed here, can leave a row behind, which is accepted as
-  garbage bounded by the number of sessions that ever existed, at a few dozen bytes each.
+  `session_seen` table keyed by `(host_id, session_id)`, not as a `session_cache` column: that cache is replaced
+  WHOLESALE by each host's refresh, so a column there would need every refresh to carry forward a viewer fact the
+  supervisor never reported. The host number names the durable registry entry, so retargeting and adoption preserve the
+  state; a foreign key to `hosts` with `ON DELETE CASCADE` removes it with that entry. The stored value is the ACTIVITY
+  STAMP that was current the last time some client had the session open, never a wall-clock "seen at" time — comparing a
+  later activity stamp against an earlier one from the SAME host involves no clock at all, where a wall-clock comparison
+  would pit the session's host's clock against the helm's own, on a remote host a different machine's clock entirely
+  (the same reason the relative-age column reads an activity stamp rather than a "last seen" timestamp). One caveat
+  follows directly: the supervisor quantizes `last_activity_at` at the source, advancing it only when what it observes
+  is at least a minute newer than what it already holds, so work landing within that minute after a mark-read does not
+  yet register as unseen — cosmetic, and not worth a second, finer-grained stamp. The table is a helm-local write with
+  nothing to refuse: `PUT /api/sessions/{id}/seen` does not route through a session's owning host at all (unlike every
+  lifecycle verb above), so a session on an unreachable host can still be marked read or unread, and the write bumps the
+  fleet-events revision only when the stored value actually changed — a client re-marking the SAME stamp it already
+  recorded — which happens when a session is reopened with no new activity behind it, or when a client retries a PUT
+  whose response it missed — must not wake every other connected client to redraw a dot that has not moved. Deleting a
+  session drops its `session_seen` row explicitly, since the viewer row is independent of the cache; a session deleted
+  through ANOTHER helm can leave a row behind until its host entry is removed, which is accepted as garbage bounded by
+  the number of sessions that ever existed, at a few dozen bytes each.
 
-- Shared pins live in the presence-only `session_pins (session_id TEXT NOT NULL PRIMARY KEY) STRICT` table (helm schema
-  52). Like `session_seen`, it has no foreign key, survives retarget/adoption, is cleared explicitly on deletion, and
+- Helm schema 63 re-keys `session_seen`, `session_pins` and `session_notification_marks` from bare IDs to
+  `(host_id, session_id)`. Migration retains a legacy row only when exactly one cached host claims its ID; ownerless or
+  multiply claimed rows are dropped. Existing live contested markers were never persisted, so migration cannot recover a
+  contest forgotten at restart. Each table is rebuilt in the schema transaction; hosts and their cache are retained.
+  Store APIs carry the pair from the caller's resolved or snapshotted host, and batch results use the pair as their key.
+  Equal bare IDs on different entries cannot share viewer state.
+
+- Shared pins live in the presence-only `session_pins` table, keyed by `(host_id, session_id)` since helm schema 63.
+  Like `session_seen`, it cascades on host removal, survives retarget/adoption, is cleared explicitly on deletion, and
   accepts bounded stray rows from other deletion paths without a reaper. `PUT /api/sessions/{id}/pin` requires a
   `{pinned: bool}` body, verifies helm-local ownership even for an unreachable host, and bumps the event revision only
   when membership changes. Listing and detail rows carry `pinned: bool`; the list reads membership in one batch for both

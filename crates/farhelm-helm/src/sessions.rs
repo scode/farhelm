@@ -2644,21 +2644,26 @@ pub(crate) async fn get_session(
     // One-id seen-state read, same table and same reason as the listing's
     // own join (`aggregate::session_list_staged`): this route answers with
     // exactly the shape a listing row has, so it must carry the same field.
-    let seen_activity_at = match state.store.seen_activity(std::slice::from_ref(&id)).await {
-        Ok(map) => map.get(&id).copied(),
+    let key = store::SessionKey::new(host, &id);
+    let seen_activity_at = match state.store.seen_activity(std::slice::from_ref(&key)).await {
+        Ok(map) => map.get(&key).copied(),
         Err(e) => return http_error(e),
     };
-    let pinned = match state.store.pinned_sessions(std::slice::from_ref(&id)).await {
-        Ok(pins) => pins.contains(&id),
+    let pinned = match state
+        .store
+        .pinned_sessions(std::slice::from_ref(&key))
+        .await
+    {
+        Ok(pins) => pins.contains(&key),
         Err(e) => return http_error(e),
     };
     // And the notification marks, for the same reason.
     let marks = match state
         .store
-        .notification_marks(std::slice::from_ref(&id))
+        .notification_marks(std::slice::from_ref(&key))
         .await
     {
-        Ok(map) => map.get(&id).copied().unwrap_or_default(),
+        Ok(map) => map.get(&key).copied().unwrap_or_default(),
         Err(e) => return http_error(e),
     };
 
@@ -3019,12 +3024,9 @@ pub(crate) struct DeleteQuery {
 /// It also clears the session's `session_seen` and
 /// `session_notification_marks` rows (SPEC_impl.md's `session_seen`
 /// paragraph and its notification storage note).
-/// That table carries no foreign key to the session it names — it survives a
-/// retarget or an adoption on purpose (`store::SESSION_SEEN_SCHEMA`'s own
-/// comment) — so it does not disappear on its own the way the cache row
-/// `forget_session` clears does; a genuine delete has to say so explicitly,
-/// or the row becomes exactly the harmless garbage that comment already
-/// accepts for every OTHER path a session can vanish by. Best-effort like
+/// These tables reference the host entry rather than its refreshable cache:
+/// cache replacement, retarget and adoption preserve them. A genuine session
+/// delete clears them explicitly on its captured entry. Best-effort like
 /// the manager-side forget below: the session is already gone on the host by
 /// this point, and refusing the whole delete over a local bookkeeping table
 /// would contradict SPEC.md's "changes ... appear in all other connected
@@ -3087,15 +3089,18 @@ async fn forget_deleted_session(state: &AppState, claim: &manager::SessionClaim,
     // publish after deletion closed the old listener but before ownership vanishes.
     let _tunnel_mutation = state.tunnels.mutation.lock().await;
     state.tunnels.close_session_locked(id).await;
-    if let Err(error) = state.store.set_pinned(id, false).await {
+    // The completed delete's claim owns this cleanup even if another host
+    // now reports the same bare ID. Never resolve fleet ownership again here.
+    let key = store::SessionKey::new(claim.host, id);
+    if let Err(error) = state.store.set_pinned(&key, false).await {
         warn!(session_id = manager::peer_text(id).as_str(), error = %error,
             "could not clear the deleted session's pin; a stray row may remain");
     }
-    if let Err(error) = state.store.clear_seen(id).await {
+    if let Err(error) = state.store.clear_seen(&key).await {
         warn!(session_id = manager::peer_text(id).as_str(), error = %error,
             "could not clear the deleted session's seen state; a stray row may remain");
     }
-    if let Err(error) = state.store.clear_notification_marks(id).await {
+    if let Err(error) = state.store.clear_notification_marks(&key).await {
         warn!(session_id = manager::peer_text(id).as_str(), error = %error,
             "could not clear the deleted session's notification marks; a stray row may remain");
     }
@@ -3144,9 +3149,9 @@ where
 /// still listed and clearly marked stale (SPEC.md), and its dot still has a
 /// colour — so it must still be markable. The existence check is the SAME
 /// "no host has ever reported this id" lookup [`get_session`] uses
-/// ([`resolve_owner`]) rather than a bespoke one, but only for the 404: the
-/// resolved host and connection status are irrelevant to a write that never
-/// reaches a supervisor, and are discarded.
+/// ([`resolve_owner`]) rather than a bespoke one. The resolved host scopes the
+/// viewer state; its connection status does not gate a write that never reaches
+/// a supervisor.
 ///
 /// Bumps the fleet-events revision only when the store reports the write
 /// actually changed something. Without that check, the same stamp being
@@ -3173,12 +3178,14 @@ pub(crate) async fn mark_seen(
     // Helm-owned for the reason `create_session` is: the store write is
     // followed by the event that tells other open clients about it.
     crate::run_owned(async move {
-        if let Err(e) = resolve_owner(&state, &id).await {
-            return http_error(e);
-        }
+        let (host, _) = match resolve_owner(&state, &id).await {
+            Ok(owner) => owner,
+            Err(e) => return http_error(e),
+        };
+        let key = store::SessionKey::new(host, &id);
         let changed = match req.seen_activity_at {
-            Some(activity_at) => state.store.mark_seen(&id, activity_at).await,
-            None => state.store.clear_seen(&id).await,
+            Some(activity_at) => state.store.mark_seen(&key, activity_at).await,
+            None => state.store.clear_seen(&key).await,
         };
         match changed {
             Ok(changed) => {
@@ -3208,10 +3215,12 @@ pub(crate) async fn set_pin(
     axum::Json(req): axum::Json<SetPinReq>,
 ) -> impl IntoResponse {
     crate::run_owned(async move {
-        if let Err(e) = resolve_owner(&state, &id).await {
-            return http_error(e);
-        }
-        match state.store.set_pinned(&id, req.pinned).await {
+        let (host, _) = match resolve_owner(&state, &id).await {
+            Ok(owner) => owner,
+            Err(e) => return http_error(e),
+        };
+        let key = store::SessionKey::new(host, &id);
+        match state.store.set_pinned(&key, req.pinned).await {
             Ok(changed) => {
                 if changed {
                     state.manager.events().bump();
@@ -3307,7 +3316,7 @@ async fn raise_notification_marks(
         let through = through.min(newest);
         match state
             .store
-            .raise_notification_marks(&id, through, mark)
+            .raise_notification_marks(&store::SessionKey::new(host, &id), through, mark)
             .await
         {
             Ok(changed) => {
@@ -3777,7 +3786,10 @@ async fn finish_replacement(
     let _deleting = state.approvals.deny_session(id);
     // Preserve the user's pin before the destructive half of Replace. A
     // storage failure must not delete the only session that still has it.
-    if state.store.inherit_pin(id, &created.id).await.with_context(|| {
+    if state.store.inherit_pin(
+        &store::SessionKey::new(claim.host, id),
+        &store::SessionKey::new(claim.host, &created.id),
+    ).await.with_context(|| {
         format!("created replacement session {} but could not copy the original's pin; the original {id} was not removed", created.id)
     })? {
         state.manager.events().bump();

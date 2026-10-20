@@ -553,19 +553,24 @@ async fn session_list_staged(
     // every id this reply could possibly carry — cache-served rows and
     // identity-less hosts' in-memory ones alike — gathered before either
     // build loop below rather than looked up per row, so a fleet-sized
-    // listing costs one `session_seen` query instead of one per session.
+    // listing reads bounded batches instead of one query per session. Pair
+    // each ID with the host from this same row/snapshot; viewer state must
+    // never follow a bare ID onto a different entry.
     // Unlike the identity join above, there is no read-ordering hazard here
     // to document: a `mark_seen`/`clear_seen` racing this read merely shows
     // up on the next poll instead of this one, the same staleness every
     // other field in this reply already tolerates.
-    let mut seen_ids: Vec<String> = slice
+    let mut seen_ids: Vec<store::SessionKey> = slice
         .rows
         .iter()
-        .map(|cached| cached.info.id.clone())
+        .map(|cached| store::SessionKey::new(cached.host, &cached.info.id))
         .collect();
     for snapshot in &snapshots {
         if let Some(live) = &snapshot.live_sessions {
-            seen_ids.extend(live.iter().map(|info| info.id.clone()));
+            seen_ids.extend(
+                live.iter()
+                    .map(|info| store::SessionKey::new(snapshot.id, &info.id)),
+            );
         }
     }
     let seen_activity = store.seen_activity(&seen_ids).await?;
@@ -578,12 +583,10 @@ async fn session_list_staged(
             // is a window during removal; its rows have nowhere to hang.
             continue;
         };
-        let seen = seen_activity.get(&cached.info.id).copied();
-        let pinned = pins.contains(&cached.info.id);
-        let marks = notification_marks
-            .get(&cached.info.id)
-            .copied()
-            .unwrap_or_default();
+        let key = store::SessionKey::new(cached.host, &cached.info.id);
+        let seen = seen_activity.get(&key).copied();
+        let pinned = pins.contains(&key);
+        let marks = notification_marks.get(&key).copied().unwrap_or_default();
         view.push(row_of(
             host,
             identities.get(&cached.host).and_then(Option::as_deref),
@@ -635,17 +638,15 @@ async fn session_list_staged(
             if !listed.insert(info.id.clone()) {
                 continue;
             }
-            let seen = seen_activity.get(&info.id).copied();
-            let marks = notification_marks
-                .get(&info.id)
-                .copied()
-                .unwrap_or_default();
+            let key = store::SessionKey::new(snapshot.id, &info.id);
+            let seen = seen_activity.get(&key).copied();
+            let marks = notification_marks.get(&key).copied().unwrap_or_default();
             view.push(row_of(
                 snapshot,
                 identity,
                 info.clone(),
                 seen,
-                pins.contains(&info.id),
+                pins.contains(&key),
                 marks,
             ));
         }
@@ -1526,7 +1527,8 @@ mod tests {
 
     /// Pin membership must join both listing sources without changing the
     /// served sort: otherwise one class of host loses pins, or quick-switcher
-    /// order silently follows a sidebar-only preference.
+    /// order silently follows a sidebar-only preference. Viewer metadata for
+    /// another entry with the same bare ID must not decorate either source.
     #[farhelm_testtrace::test]
     async fn pins_join_cached_and_identityless_rows_without_changing_sort() {
         use crate::rest_harness;
@@ -1552,7 +1554,38 @@ mod tests {
         let live = rest_harness::local_id(&harness.store).await;
         harness.await_refreshed(live).await;
         harness.await_refreshed(cached).await;
-        harness.store.set_pinned("live-pin", true).await.unwrap();
+        for key in [
+            store::SessionKey::new(cached, "live-pin"),
+            store::SessionKey::new(live, "cached-pin"),
+        ] {
+            harness.store.set_pinned(&key, true).await.unwrap();
+            harness.store.mark_seen(&key, 42).await.unwrap();
+            harness
+                .store
+                .raise_notification_marks(&key, 9, store::NotificationMark::Read)
+                .await
+                .unwrap();
+        }
+        let untouched = session_list(
+            &harness.manager,
+            &harness.store,
+            &store::SessionFilter::default(),
+            store::ListSort::Created,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ids(&untouched.sessions), ["cached-pin", "live-pin"]);
+        assert!(
+            untouched.sessions.iter().all(|row| !row.pinned
+                && row.seen_activity_at.is_none()
+                && row.notifications_read_through == 0),
+            "viewer facts on the other entry must not join by bare ID"
+        );
+        harness
+            .store
+            .set_pinned(&store::SessionKey::new(live, "live-pin"), true)
+            .await
+            .unwrap();
         let list = session_list(
             &harness.manager,
             &harness.store,
@@ -1564,7 +1597,11 @@ mod tests {
         assert_eq!(ids(&list.sessions), ["cached-pin", "live-pin"]);
         assert!(!list.sessions[0].pinned);
         assert!(list.sessions[1].pinned);
-        harness.store.set_pinned("cached-pin", true).await.unwrap();
+        harness
+            .store
+            .set_pinned(&store::SessionKey::new(cached, "cached-pin"), true)
+            .await
+            .unwrap();
         let filtered = session_list(
             &harness.manager,
             &harness.store,
@@ -1593,9 +1630,13 @@ mod tests {
             rest_harness::session("unseen-1", 1_700_000_100),
         ])
         .await;
+        let viewer_host = rest_harness::local_id(&harness.store).await;
         harness
             .store
-            .mark_seen("seen-1", 1_700_000_000)
+            .mark_seen(
+                &store::SessionKey::new(viewer_host, "seen-1"),
+                1_700_000_000,
+            )
             .await
             .expect("mark seen-1 seen");
 
