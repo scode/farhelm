@@ -112,12 +112,14 @@ struct SessionMatch {
 ///
 /// Input is already newest-activity first. Two stable buckets deliberately
 /// avoid an additional sort or score, and there is no client-side result cap.
+/// Matching uses raw metadata; highlight positions are then computed against
+/// its escaped spelling so presentation never changes which sessions match.
 fn session_matches(sessions: &[Session], query: &str) -> Vec<SessionMatch> {
     let query = query.trim();
     let mut title_matches = Vec::new();
     let mut metadata_matches = Vec::new();
     for (index, session) in sessions.iter().enumerate() {
-        let title = matching_positions(&session.title, query);
+        let title = matching_positions(session.title.raw(), query);
         let host = session
             .host_name
             .as_deref()
@@ -130,7 +132,7 @@ fn session_matches(sessions: &[Session], query: &str) -> Vec<SessionMatch> {
         let matched = SessionMatch {
             index,
             title: title
-                .and_then(|_| matching_positions(&display_peer(&session.title), query))
+                .and_then(|_| matching_positions(&session.title.escaped(), query))
                 .unwrap_or_default(),
             host: host
                 .and_then(|_| matching_positions(&display_peer(host_name(session)), query))
@@ -439,7 +441,7 @@ pub(super) fn QuickSwitcher(
                             for (position, matched) in matches.iter().enumerate() {
                                 { let session = listing.sessions[matched.index].clone();
                                   let host = session.host.and_then(|id| host_rows.iter().find(|host| host.id == id));
-                                  let badge = status_badge(&session.status, session.annotation.as_deref(), session.has_unseen_output());
+                                  let badge = status_badge(&session.status, session.annotation.as_ref().map(crate::peer::PeerText::raw), session.has_unseen_output());
                                   let ended = badge.as_ref().is_some_and(|badge| badge.visible);
                                   rsx! {
                                     button {
@@ -452,7 +454,9 @@ pub(super) fn QuickSwitcher(
                                                 StatusBadgeView { badge, dot_onclick: move |_| {}, dot_title: None }
                                             }
                                         }
-                                        span { class: "quick-switcher-title", MatchedText { text: listing.sessions[matched.index].title.clone(), positions: matched.title.clone() } }
+                                        // MatchedText owns escaping and isolation; matching above
+                                        // still uses the original title rather than its display spelling.
+                                        span { class: "quick-switcher-title", MatchedText { text: listing.sessions[matched.index].title.raw().to_owned(), positions: matched.title.clone() } }
                                         span { class: "quick-switcher-agent", "{agent_label(&listing.sessions[matched.index])}" }
                                         span { class: "quick-switcher-host",
                                             if let Some(host) = host {
@@ -557,6 +561,25 @@ mod tests {
         assert_eq!(matching_positions("café", "FÉ"), Some(vec![2, 3]));
         assert_eq!(matching_positions("api", "pa"), None);
         assert_eq!(matching_positions("any title", ""), Some(vec![]));
+    }
+
+    /// Search matches the title's original bytes, while highlighting uses its
+    /// visible spelling. Escaping a decoded title must not make escape notation
+    /// searchable or discard a match for an actual invisible character.
+    #[test]
+    fn peer_titles_keep_raw_matching_separate_from_display_highlights() {
+        let sessions = [serde_json::from_value::<Session>(serde_json::json!({
+            "id": "peer", "title": "left\u{200B}right", "cwd": "/work",
+            "invocation": "command"
+        }))
+        .unwrap()];
+        assert_eq!(sessions[0].title.raw(), "left\u{200B}right");
+        assert_eq!(sessions[0].title.escaped(), "left<U+200B>right");
+        let matched = session_matches(&sessions, "\u{200B}");
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].index, 0);
+        assert!(matched[0].title.is_empty());
+        assert!(session_matches(&sessions, "<U+200B>").is_empty());
     }
 
     /// Long peer values remain a bounded number of render runs, rather than

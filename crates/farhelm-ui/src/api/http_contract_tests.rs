@@ -19,6 +19,24 @@ const SESSION_LIST_JSON: &str =
     include_str!("../../../farhelm-helm/http-contract/session-list.json");
 const HOST_LIST_JSON: &str = include_str!("../../../farhelm-helm/http-contract/host-list.json");
 
+/// Decoding must not bake presentation markers into data that rename, clone
+/// and status interpretation still consume raw. These three fields cross the
+/// same wire boundary, including values with no ordinary visible characters.
+#[farhelm_testtrace::test]
+fn session_labels_and_notifications_preserve_peer_bytes_when_decoded() {
+    for raw in ["", "   ", "name\u{200B}\u{202E}tail", "<U+200B>"] {
+        let session: crate::Session = serde_json::from_value(serde_json::json!({
+            "id": "peer", "title": raw, "cwd": "/work", "invocation": "command",
+            "annotation": raw, "notifications": [{ "seq": 1, "at": 2, "text": raw }]
+        }))
+        .unwrap();
+        assert_eq!(session.title.raw(), raw);
+        assert_eq!(session.annotation.as_ref().unwrap().raw(), raw);
+        assert_eq!(session.notifications[0].text.raw(), raw);
+        assert_eq!(session.title.escaped(), crate::peer::display_peer(raw));
+    }
+}
+
 /// Why this matters: a row field the UI silently fails to read (a renamed
 /// key decodes to its default) shows wrong status, ages, or host data with no
 /// error anywhere.
@@ -37,7 +55,7 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
         panic!("the fixture holds exactly one row");
     };
     assert_eq!(row.id, "11111111-1111-4111-8111-111111111111:fh-0123abcd");
-    assert_eq!(row.title, "Fix the widget");
+    assert_eq!(row.title.raw(), "Fix the widget");
     assert_eq!(row.cwd, "~/src/widgets");
     assert_eq!(row.canonical_cwd.as_deref(), Some("/home/user/src/widgets"));
     assert_eq!(
@@ -57,7 +75,10 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
         })
     );
     assert_eq!(row.status, SessionStatus::Exited { exit_code: Some(3) });
-    assert_eq!(row.annotation.as_deref(), Some("left a note"));
+    assert_eq!(
+        row.annotation.as_ref().map(crate::peer::PeerText::raw),
+        Some("left a note")
+    );
     assert_eq!(row.restart_offer, RestartOffer::Resume);
     assert_eq!(row.created_at, 1_700_000_000);
     assert_eq!(row.last_activity_at, 1_700_000_100);
@@ -77,7 +98,7 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
         vec![crate::SessionNotification {
             seq: 4,
             at: 1_700_000_095,
-            text: "Restart stopped offering to resume the conversation.".to_string(),
+            text: "Restart stopped offering to resume the conversation.".into(),
             resolved: true,
         }]
     );

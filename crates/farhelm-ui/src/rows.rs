@@ -67,7 +67,7 @@ pub(crate) fn apply_optimistic_renames(
         .iter()
         .map(|session| match renamed.get(&session.id) {
             Some((title, _)) => Session {
-                title: title.clone(),
+                title: title.clone().into(),
                 ..session.clone()
             },
             None => session.clone(),
@@ -119,7 +119,7 @@ pub(crate) fn settle_optimistic_renames(
 ) {
     renamed.retain(|id, (title, observed_from)| {
         match server.iter().find(|session| &session.id == id) {
-            Some(session) if &session.title == title => false,
+            Some(session) if session.title.raw() == title.as_str() => false,
             Some(_) => index < *observed_from,
             // Absence proves nothing here — see `retire_vanished_renames`.
             None => true,
@@ -252,7 +252,7 @@ pub(crate) fn any_shown_above<'a>(
 pub(crate) fn has_detail_line(session: &Session) -> bool {
     status_badge(
         &session.status,
-        session.annotation.as_deref(),
+        session.annotation.as_ref().map(crate::peer::PeerText::raw),
         session.has_unseen_output(),
     )
     .is_some_and(|badge| badge.visible)
@@ -744,7 +744,11 @@ mod tests {
         ];
         let shown = held_display_order(&held, &served);
         assert_eq!(ids(&shown), vec!["a", "c", "d", "e"]);
-        assert_eq!(shown[0].title, "a renamed", "rows show the served data");
+        assert_eq!(
+            shown[0].title.raw(),
+            "a renamed",
+            "rows show the served data"
+        );
         assert_eq!(ids(&held_display_order(&[], &served)), ids(&served));
     }
 
@@ -882,7 +886,7 @@ mod tests {
             .collect();
 
         let rendered = apply_optimistic_renames(&listing, &renamed);
-        assert_eq!(rendered[0].title, "new-a");
+        assert_eq!(rendered[0].title.raw(), "new-a");
         assert_eq!(rendered[0].cwd, listing[0].cwd, "only the title is ours");
         assert!(
             rendered[0].screen_yolo,

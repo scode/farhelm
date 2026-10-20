@@ -357,7 +357,9 @@ pub struct Session {
     #[serde(default)]
     pub workspace_trust_prompt: bool,
     pub id: String,
-    pub title: String,
+    /// Peer-authored label. Presentation must choose escaping; operational
+    /// adapters such as rename retain its exact raw bytes.
+    pub title: peer::PeerText,
     pub cwd: String,
     /// The supervisor's accepted directory identity, kept apart from the
     /// submitted spelling in `cwd`. The list UI does not render it, but the
@@ -388,8 +390,9 @@ pub struct Session {
     /// exited session says who ended it. No `#[serde(default)]` is needed
     /// or present, unlike the fields above: serde already decodes a
     /// missing key on an `Option` as `None`, so the same old-peer
-    /// tolerance holds without the attribute.
-    pub annotation: Option<String>,
+    /// tolerance holds without the attribute. The decoded vocabulary is open:
+    /// unknown annotations retain their bytes and are escaped by the badge.
+    pub annotation: Option<peer::PeerText>,
     /// Whether restarting this session can resume its conversation, and why
     /// not when it cannot — the supervisor recomputes it on every reply, so
     /// a session whose identity was captured a moment ago starts offering a
@@ -564,7 +567,7 @@ pub struct Session {
 /// about the session that the user can act on (SPEC.md, Status).
 ///
 /// `text` is written by the session's supervisor and is peer text, so every
-/// renderer shows it through `peer::PeerLine` or `display_peer`.
+/// renderer chooses an escaped presentation, usually through `peer::PeerLine`.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct SessionNotification {
     /// The supervisor's per-session sequence number: it only grows, and the
@@ -572,7 +575,9 @@ pub struct SessionNotification {
     pub seq: u64,
     /// When the supervisor recorded it, in Unix seconds.
     pub at: i64,
-    pub text: String,
+    /// Supervisor-authored message, retaining the original spelling until its
+    /// renderer chooses how to escape and isolate it.
+    pub text: peer::PeerText,
     /// Resolved history counts as read even above the helm's read mark.
     /// Missing on older supervisors/helms, which retain the old warning display.
     #[serde(default)]
@@ -1795,7 +1800,7 @@ fn AppBody() -> Element {
                             // and automatic picks share its preference writer); this
                             // handler records the selection and its raw Rename seed.
                             on_open: move |session: Session| {
-                                open_session_title.set(Some((session.id.clone(), session.title.clone())));
+                                open_session_title.set(Some((session.id.clone(), session.title.raw().to_owned())));
                                 current.set(Some(session));
                             },
                             // The selected session survives sidebar filtering.
@@ -1822,7 +1827,7 @@ fn AppBody() -> Element {
                                     && let Some(session) = current.write().as_mut()
                                 {
                                     open_session_title.set(Some((id, title.clone())));
-                                    session.title = title;
+                                    session.title = title.into();
                                 }
                             },
                             ops: page_ops,
@@ -1900,7 +1905,7 @@ fn AppBody() -> Element {
                                     session: session.clone(),
                                     gate: ops::PaneGate::new(page_ops, row_ops),
                                     on_replaced: move |replacement: Session| {
-                                        open_session_title.set(Some((replacement.id.clone(), replacement.title.clone())));
+                                        open_session_title.set(Some((replacement.id.clone(), replacement.title.raw().to_owned())));
                                         current.set(Some(replacement));
                                     },
                                     selection: current,
@@ -2825,7 +2830,7 @@ mod tests {
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
             id: "s1".to_string(),
-            title: "demo".to_string(),
+            title: "demo".into(),
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
@@ -2894,7 +2899,7 @@ mod tests {
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
             id: "s1".to_string(),
-            title: "demo".to_string(),
+            title: "demo".into(),
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),

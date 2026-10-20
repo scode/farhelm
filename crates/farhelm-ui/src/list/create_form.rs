@@ -1958,7 +1958,9 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
             .as_ref()
             .map(|checkout| checkout.repo.clone())
             .or_else(|| session.github_repo.clone()),
-        title: session.title.clone(),
+        // Clone's local draft and untouched-submit seed both start from the
+        // original bytes; editable escaping happens when that seed is applied.
+        title: session.title.raw().to_owned(),
         invocation: session.invocation.clone(),
         launch: session.agent_selection().cloned(),
         command: match &session.launch {
@@ -8367,7 +8369,7 @@ mod tests {
     fn prefill_from_carries_title_cwd_host_and_identity_verbatim() {
         let session = Session {
             cwd: "/work/api".to_string(),
-            title: "my session".to_string(),
+            title: "my session".into(),
             host: Some(7),
             host_identity: Some(Some("install-7".to_string())),
             ..row_specimen("s1")

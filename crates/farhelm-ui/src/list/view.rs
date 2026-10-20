@@ -2838,7 +2838,9 @@ pub(crate) fn ListView(
         spawn(async move {
             match rename_session(&base, &id, &title).await {
                 Ok(session) => {
-                    on_renamed.call((id.clone(), session.title.clone()));
+                    // Accepted titles enter the existing local rename state as
+                    // raw bytes, never as the editor's escaped spelling.
+                    on_renamed.call((id.clone(), session.title.raw().to_owned()));
                     // The sequence number is read AFTER the reply, never
                     // before the request: it names the first poll
                     // GUARANTEED to have started after this response
@@ -2852,7 +2854,7 @@ pub(crate) fn ListView(
                     let observed_from = poll_sequence.peek().to_owned();
                     renamed
                         .write()
-                        .insert(id.clone(), (session.title.clone(), observed_from));
+                        .insert(id.clone(), (session.title.raw().to_owned(), observed_from));
                     // The response owns only the exact editor it started.
                     // Any later editor for the same id is a new generation,
                     // so old deferred work cannot close its fresh draft or
@@ -4186,7 +4188,7 @@ pub(crate) fn ListView(
                         let naming = name_created_session(
                             new_was_never_shown,
                             preferences.0.peek().name_session_on_quick_launch,
-                        ).then(|| (session.id.clone(), session.title.clone()));
+                        ).then(|| (session.id.clone(), session.title.raw().to_owned()));
                         on_open.call(session);
                         if let Some((id, title)) = naming {
                             // Selection and the modal mount share this completion

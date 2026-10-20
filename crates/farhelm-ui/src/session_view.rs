@@ -472,7 +472,7 @@ fn admit_detail(
 /// selection's previous value, because the parent's copy is not updated by
 /// the view's own reads: a rename back to a title the parent still held is
 /// no change to the parent's value, yet the view's copy must follow it.
-fn followed_title(selected: Option<&Session>, shown: &Session) -> Option<String> {
+fn followed_title(selected: Option<&Session>, shown: &Session) -> Option<crate::peer::PeerText> {
     let selected = selected?;
     (selected.id == shown.id && selected.title != shown.title).then(|| selected.title.clone())
 }
@@ -1210,7 +1210,9 @@ pub(crate) fn SessionView(
         {
             return;
         }
-        let title = Some((shown.id.clone(), shown.title.clone()));
+        // This signal feeds the list's String-based rename editor; retain its
+        // raw seed rather than publishing the escaped display spelling.
+        let title = Some((shown.id.clone(), shown.title.raw().to_owned()));
         if *open_session_title.peek() != title {
             open_session_title.set(title);
         }
@@ -3250,8 +3252,8 @@ pub(crate) fn SessionView(
                 // `peer.rs`), tooltips included. A tooltip is one attribute
                 // string and cannot be isolated, so escaping is what keeps it
                 // honest there.
-                span { class: "title", "data-tooltip": "{display_peer(&shown_title)}",
-                    span { class: "peer-value", dir: "ltr", "{display_peer(&shown_title)}" }
+                span { class: "title", "data-tooltip": "{shown_title.escaped()}",
+                    span { class: "peer-value", dir: "ltr", "{shown_title.escaped()}" }
                 }
                 if let Some(name) = &shown.host_name {
                     span { class: "session-details-host",
@@ -3409,7 +3411,7 @@ fn seen_effect_eligible(session: &Session) -> bool {
 fn status_badge_destination(session: &Session) -> (Option<StatusBadge>, Option<StatusBadge>) {
     let badge = status_badge(
         &session.status,
-        session.annotation.as_deref(),
+        session.annotation.as_ref().map(crate::peer::PeerText::raw),
         session.has_unseen_output(),
     );
     if session.stale {
@@ -4110,7 +4112,7 @@ mod tests {
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
             id: "sess".to_string(),
-            title: "sess".to_string(),
+            title: "sess".into(),
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
@@ -4618,7 +4620,7 @@ mod tests {
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
                 id: id.to_string(),
-                title: title.to_string(),
+                title: title.into(),
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
@@ -4647,7 +4649,7 @@ mod tests {
         let shown = titled("sess", "B");
         assert_eq!(
             followed_title(Some(&titled("sess", "A")), &shown),
-            Some("A".to_string())
+            Some("A".into())
         );
         assert_eq!(followed_title(Some(&titled("sess", "B")), &shown), None);
         assert_eq!(followed_title(Some(&titled("other", "A")), &shown), None);
@@ -4675,7 +4677,7 @@ mod tests {
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
                 id: "sess".to_string(),
-                title: "sess".to_string(),
+                title: "sess".into(),
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
@@ -4772,7 +4774,7 @@ mod tests {
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
             id: "sess".to_string(),
-            title: "sess".to_string(),
+            title: "sess".into(),
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),
@@ -4845,7 +4847,7 @@ mod tests {
                 claude_trust_prompt: false,
                 workspace_trust_prompt: false,
                 id: "sess".to_string(),
-                title: "t".to_string(),
+                title: "t".into(),
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
                 invocation: "agent".to_string(),
@@ -4921,7 +4923,7 @@ mod tests {
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
             id: "sess".to_string(),
-            title: "t".to_string(),
+            title: "t".into(),
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
             invocation: "agent".to_string(),

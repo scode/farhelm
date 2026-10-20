@@ -41,12 +41,12 @@ use crate::menu_panel::{
     PanelPlacement, clamp_title, measurement_outcome, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
-use crate::peer::{DetailPart, PeerLine};
+use crate::peer::{DetailPart, PeerLine, PeerText};
 
 /// The bell's accessible name: which session it belongs to, and how many
 /// notifications are unread, since a screen reader cannot hear the loud
 /// colour.
-pub(super) fn bell_label(title: &str, unread: usize) -> String {
+pub(super) fn bell_label(title: &PeerText, unread: usize) -> String {
     format!("{}: {}", list_label(title), unread_phrase(unread))
 }
 
@@ -54,8 +54,8 @@ pub(super) fn bell_label(title: &str, unread: usize) -> String {
 /// start of the bell's. The title is peer text (agents may rename any
 /// session), so the typed `menu_panel::clamp_title` exposes hidden characters
 /// before cutting the accessible name.
-fn list_label(title: &str) -> String {
-    format!("notifications for {}", clamp_title(&title.into()))
+fn list_label(title: &PeerText) -> String {
+    format!("notifications for {}", clamp_title(title))
 }
 
 /// "1 unread", "3 unread" or "none unread", shared by the accessible name
@@ -86,7 +86,7 @@ pub(super) fn BellSlot() -> Element {
 #[component]
 pub(super) fn NotificationBell(
     session_id: String,
-    title: String,
+    title: PeerText,
     notifications: Vec<SessionNotification>,
     unread: usize,
     /// The row's displayed activity age, copied invisibly after the bell so
@@ -259,7 +259,7 @@ pub(super) fn NotificationBell(
 /// list and never the rows.
 #[component]
 fn NotificationList(
-    title: String,
+    title: PeerText,
     notifications: Vec<SessionNotification>,
     read_through: u64,
     on_clear: EventHandler<()>,
@@ -366,14 +366,14 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_bell_name_escapes_the_title_and_counts_unread() {
         const SPOOF: &str = "build\u{200B} \u{202E}lanif";
-        let label = bell_label(SPOOF, 2);
+        let label = bell_label(&SPOOF.into(), 2);
         assert_eq!(
             label,
             format!("notifications for {}: 2 unread", display_peer(SPOOF))
         );
         assert!(!label.contains('\u{202E}') && !label.contains('\u{200B}'));
         assert_eq!(
-            bell_label("plain", 0),
+            bell_label(&"plain".into(), 0),
             "notifications for plain: none unread"
         );
     }
