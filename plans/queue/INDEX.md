@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `structured-settings-dialog.md` — Restructure the Settings dialog into a sidebar of seven sections, like the Templates dialog (1 TODO entry).
 - [complete] `launcher-enter-feedback.md` — Make Enter in the session launcher always launch, pick a visible row, or say why not (1 TODO entry).
-- [complete] `select-newest-on-close.md` — When the open session goes away, open the most recently visited one, from a history kept on the helm (1 TODO entry). (after `host-entry-session-ids.md`)
+- [landing 6f462a] `select-newest-on-close.md` — When the open session goes away, open the most recently visited one, from a history kept on the helm (1 TODO entry). (after `host-entry-session-ids.md`)
 - [complete] `supervisor-request-modes.md` — Declare how every supervisor request type runs in one exhaustive table with one owner for channel ids, test that each keeps the connection moving, and fix the requests that still stall it (creation and the checkout reconciliation before it). (after `tab-attach-no-wait.md`)
 - [complete] `helm-owned-by-default.md` — Run every state-changing helm request on a helm-owned task by default, with an explicit exempt list for routes that must stay cancellable (structural refactor; accidental omissions fixed first). (after `host-entry-session-ids.md`, `transfer-leftover-cleanup.md`)
 - [pending] `helm-ingress-types.md` — Make supervisor-reported session data, parsed agent verbs and the origin of helm errors types that only the checking code can construct (structural refactor, no behavior change). (after `helm-owned-by-default.md`, `launch-sequences.md`)
