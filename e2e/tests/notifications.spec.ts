@@ -9,6 +9,7 @@
 // routes itself, keeping the read and cleared marks the way the helm does.
 // The supervisor's recording and the helm's marks have their own Rust tests.
 import { expect, test } from "./helpers/evidence";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { Locator, Page, Route } from "@playwright/test";
 import { cleanupSession, createSession, forceBuildSkew, openRowMenu, patchPreferences, pinAutoSelect, resetPreferences, stubFeed } from "./helpers/fleet";
 import { replayRecord, waitForReplayReveal, waitForSessionMounted, waitForSessionReady } from "./helpers/terminal-readiness";
@@ -78,18 +79,76 @@ function row(page: Page, id: string): Locator {
 
 const NOW = Math.floor(Date.now() / 1000);
 
+/** Drain this suite's ownership before any release can fail. Inject only its
+ * three release operations so failure tests exercise the same orchestration
+ * as the real hook, including restoration after a route or session failure. */
+async function cleanupNotifications(created: string[], bodyFailed: boolean, cleanup: {
+  routes(): Promise<unknown>;
+  session(id: string): Promise<unknown>;
+  preferences(): Promise<unknown>;
+}) {
+  await cleanupOwnedSteps(bodyFailed, [
+    ["routes", cleanup.routes],
+    ...created.splice(0).reverse().map((id): [string, () => Promise<unknown>] => [
+      `session ${id}`, () => cleanup.session(id),
+    ]),
+    ["preferences", cleanup.preferences],
+  ]);
+}
+
+/** Earlier failures must not strand later sessions or shared preferences.
+ * Inject both route and session failures, with and without a pending body
+ * exception, to distinguish all releases from an ordinary successful teardown. */
+test("notification cleanup attempts every release and preserves a body failure", async () => {
+  for (const bodyFailed of [false, true]) {
+    for (const failAt of ["routes", "two"]) {
+      const created = ["one", "two"];
+      const attempts: string[] = [];
+      const secondary = new Error("injected cleanup failure");
+      const primary = new Error("original body failure");
+      const release = async (name: string) => {
+        attempts.push(name);
+        if (name === failAt) throw secondary;
+      };
+      let thrown: unknown;
+      try {
+        try {
+          if (bodyFailed) throw primary;
+        } finally {
+          await cleanupNotifications(created, bodyFailed, {
+            routes: () => release("routes"),
+            session: release,
+            preferences: () => release("preferences"),
+          });
+        }
+      } catch (error) {
+        thrown = error;
+      }
+      expect(attempts).toEqual(["routes", "two", "one", "preferences"]);
+      expect(created).toEqual([]);
+      if (bodyFailed) expect(thrown).toBe(primary);
+      else {
+        expect(thrown).toBeInstanceOf(AggregateError);
+        expect((thrown as AggregateError).errors[0].cause).toBe(secondary);
+      }
+    }
+  }
+});
+
 test.describe("session notifications", () => {
   const created: string[] = [];
   // The compact choice and the auto-selected row are helm-wide preferences
   // that outlive the page, so a test that changes them must not hand them to
   // the next spec.
-  test.afterEach(async ({ page, request }) => {
+  test.afterEach(async ({ page, request }, testInfo) => {
     // A successful read or clear now requests a fresh listing, so a test can
     // end while that read is still inside a listing stub; its response is
     // disposed with the page and would fail the finished test.
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    while (created.length) await cleanupSession(request, created.pop()!);
-    await resetPreferences(request);
+    await cleanupNotifications(created, testInfo.status !== testInfo.expectedStatus, {
+      routes: () => page.unrouteAll({ behavior: "ignoreErrors" }),
+      session: (id) => cleanupSession(request, id),
+      preferences: () => resetPreferences(request),
+    });
   });
 
   /** A layout dismissal must keep keyboard work at the bell, without
