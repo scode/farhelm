@@ -156,6 +156,13 @@ fn listing_totals(listing: &CheckoutTrashListing) -> ListingTotals {
     }
 }
 
+/// Missing replies, read failures and unknown sizes stay partial regardless of cleanup eligibility.
+fn reply_partial(reply: Option<&Result<CheckoutTrashListing, String>>) -> bool {
+    reply
+        .and_then(|reply| reply.as_ref().ok())
+        .is_none_or(|listing| listing_totals(listing).partial)
+}
+
 /// Collapse repeated diagnostic IDs into one selection, keeping every message
 /// visible separately. Sizes with any unknown checkout remain explicitly partial.
 fn target(host: &Host, state: Option<&HostTrash>) -> Option<Target> {
@@ -602,11 +609,8 @@ pub(super) fn TrashControl(
                 state
                     .read()
                     .get(&host.id)
-                    .is_none_or(|entry| entry.loading || !matches!(&entry.reply, Some(Ok(_))))
-            })
-        || targets
-            .iter()
-            .any(|target| target.partial || target.unchecked > 0);
+                    .is_none_or(|entry| entry.loading || reply_partial(entry.reply.as_ref()))
+            });
     rsx! {
         button {
             class: if full { "btn btn-neutral checkout-trash-button full" } else { "btn btn-neutral checkout-trash-button" },
@@ -939,6 +943,52 @@ mod tests {
                 "0 known archived checkouts, some entries or hosts unchecked".into()
             )
         );
+    }
+
+    /// The cleanup batch cap must not hide unknown bytes in a successful listing.
+    /// This fits within a control reply but exceeds the unique-ID deletion limit;
+    /// measured bytes stay visible and partial independently of cleanup eligibility.
+    #[farhelm_testtrace::test]
+    fn over_limit_listing_keeps_global_measurement_partial() {
+        let host = host();
+        assert!(connected(&host));
+        let mut listing = CheckoutTrashListing {
+            checkouts: (0..=MAX_SELECTION)
+                .map(|id| ArchivedCheckout {
+                    id: id.to_string(),
+                    name: "old".into(),
+                    repository: "fixture/repo".into(),
+                    path: "/work/trash/old".into(),
+                    archived_at: None,
+                    bytes: Some(0),
+                })
+                .collect(),
+            issues: vec![],
+        };
+        listing.checkouts[0].bytes = Some(4096);
+        listing.checkouts[1].bytes = None;
+        assert!(
+            serde_json::to_vec(&listing).unwrap().len() < farhelm_proto::MAX_FRAME_LEN as usize / 2
+        );
+        assert!(selection_size(&listing) > MAX_SELECTION);
+        let mut state = HostTrash {
+            incarnation: host.incarnation,
+            loading: false,
+            reply: Some(Ok(listing)),
+        };
+        assert!(target(&host, Some(&state)).is_none());
+        assert!(reply_partial(state.reply.as_ref()));
+        let totals = listing_totals(state.reply.as_ref().unwrap().as_ref().unwrap());
+        assert_eq!(
+            space(totals.bytes, reply_partial(state.reply.as_ref())),
+            "4.0 KiB measured · partial"
+        );
+        // An over-limit selection alone does not make a complete measurement partial.
+        state.reply.as_mut().unwrap().as_mut().unwrap().checkouts[1].bytes = Some(0);
+        assert!(target(&host, Some(&state)).is_none());
+        assert!(!reply_partial(state.reply.as_ref()));
+        assert!(reply_partial(None));
+        assert!(reply_partial(Some(&Err("unavailable".into()))));
     }
 
     /// A row click must select only its checkout, never a neighbouring archive
