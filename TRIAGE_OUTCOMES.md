@@ -17225,7 +17225,10 @@
 - Completion criteria: cleanup is armed as soon as the session exists. Size gate: about 100 lines of diff (code, tests
   and docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct19.md`.
+- Execution: implemented in change `kpzzmrwzvynqskqxozvovttmvtxvlxny`, bookmark
+  `plan/test-hygiene-oct19/04-own-focus-setup`. Both focus-observer setup calls run inside the session's cleanup scope,
+  which starts immediately after creation. The code and documentation diff totals 10 lines, within the 100-line gate.
+  [PR #2435](https://github.com/scode/farhelm/pull/2435/changes).
 
 ## launcher-retries-ignore-settled-refusal-proof.md
 

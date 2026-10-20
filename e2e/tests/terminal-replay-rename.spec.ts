@@ -1919,9 +1919,10 @@ for (const action of ["delete", "replace"] as const) {
   test(`replay reveal preserves a header ${action} question's keyboard ownership`, async ({ page, request }) => {
     test.setTimeout(120_000);
     const session = await createTabSession(request, `replay-question-${action}-${Date.now()}`);
-    const binary = observeQuestionInput(page, session.id);
-    await installTerminalFocusSpy(page);
+    // The session is already owned, even if observer setup rejects.
     try {
+      const binary = observeQuestionInput(page, session.id);
+      await installTerminalFocusSpy(page);
       await holdCatchUpFromNextLoad(page);
       await page.goto("/");
       await page.locator(`[data-session-id="${session.id}"]`).click();
@@ -1954,9 +1955,10 @@ for (const action of ["delete", "replace"] as const) {
 test("selected tab removal preserves a header delete question's keyboard ownership", async ({ page, request }) => {
   test.setTimeout(120_000);
   const session = await createTabSession(request, `fallback-question-${Date.now()}`);
-  const binary = observeQuestionInput(page, session.id);
-  await installTerminalFocusSpy(page);
+  // The session is already owned, even if observer setup rejects.
   try {
+    const binary = observeQuestionInput(page, session.id);
+    await installTerminalFocusSpy(page);
     await page.goto("/");
     await attachSession(page, session.id);
     const tabId = await addTab(page, 0);
