@@ -352,58 +352,71 @@ passed both reviews of its review gate, and the last code PR removes this plan's
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-10-20 (claim e37b0a).
+### 2026-10-20: answer to a blocked question
 
-### Decision needed: when a disconnected request becomes an action
+The question, as the executor put it:
 
-May the helm start carrying out a valid state-changing request after its caller disconnects, if the request had reached
-authenticated routing but had not finished parsing?
+> Blocked on 2026-10-20 (claim e37b0a).
+>
+> ### Decision needed: when a disconnected request becomes an action
+>
+> May the helm start carrying out a valid state-changing request after its caller disconnects, if the request had
+> reached authenticated routing but had not finished parsing?
+>
+> This plan makes the helm finish accepted actions even when their caller goes away. Today each handler must arrange
+> that itself; forgetting can save a setting without notifying other clients, or remove a tunnel without announcing its
+> removal. The agreed design makes ownership automatic for ordinary authenticated requests, with explicit cancellation
+> exceptions. The maintainer also required preserving behavior except for clear fixes where an accepted action could be
+> left half done.
+>
+> ### What is already built
+>
+> Two separate, fully gated draft fixes are preserved:
+> [trust-setting and hint notifications](https://github.com/scode/farhelm/pull/2443/changes), and
+> [tunnel-close completion and notification](https://github.com/scode/farhelm/pull/2445/changes). Each passed its
+> independent general and no-functional-change reviews on the required model, and focused validation. The automatic
+> routing change and removal of handler wrappers are unimplemented. The plan's TODO entry remains because that
+> structural work is unfinished. Neither draft has been marked ready or merged.
+>
+> ### What execution found
+>
+> The current handlers take ownership after parsing their request. The proposed routing layer takes ownership before
+> parsing. In a minimal real HTTP/1 comparison using the repository's framework versions, a client sent a complete valid
+> JSON body and closed its connection while parsing was pending. Across three sequential comparisons, the current
+> placement started no action; the proposed placement finished parsing and performed the action after the connection
+> ended.
+>
+> This used a stand-in mutation, not a Farhelm settings write. It establishes a possible difference at this boundary,
+> not its frequency in browsers or behavior over HTTP/2. Recorded probe
+> `cargo run --offline --manifest-path <probe>/Cargo.toml`, run `6689cb93-6c59-48e1-8997-f10b2500ca14`, completed with
+> complete retained output; these are observations, not production test counts. The probe source and results are
+> retained privately and described in the plan's working log.
+>
+> The old action never started, so this is outside the approved exception for an accepted action left half done.
+> Ordinary framework middleware cannot take ownership after typed parsing. Keeping both outer and inner ownership does
+> not preserve the earlier cancellation boundary.
+>
+> ### Options and recommendation
+>
+> - **Allow the earlier boundary for ordinary owned routes.** After authentication and entry into the ownership layer,
+>   the helm may finish parsing and carry out a valid request even if the caller disconnects. This permits the small
+>   default routing layer and explicit exceptions originally proposed. Existing authentication, rejection behavior,
+>   transfer cancellation and narrower helper contracts still have to be preserved. I recommend this option because it
+>   achieves the safe default with the smallest implementation, provided this behavior change is explicitly accepted and
+>   documented.
+> - **Preserve the current boundary after parsing.** Keep the two consistent fix drafts and revise the structural design
+>   before continuing. Retaining per-handler ownership preserves that boundary but leaves the recurring omission risk; a
+>   generic adapter after parsing would be a separate mechanism to assess, not an ordinary routing-layer change.
+>
+> This block asks only for that acceptance-boundary decision. It does not request changing uploads, downloads, read-only
+> requests, Stop, tab operations, or the other intentionally cancellable routes.
 
-This plan makes the helm finish accepted actions even when their caller goes away. Today each handler must arrange that
-itself; forgetting can save a setting without notifying other clients, or remove a tunnel without announcing its
-removal. The agreed design makes ownership automatic for ordinary authenticated requests, with explicit cancellation
-exceptions. The maintainer also required preserving behavior except for clear fixes where an accepted action could be
-left half done.
+The maintainer's answer:
 
-### What is already built
+"yes accept", meaning the recommended option, in this agreed restatement:
 
-Two separate, fully gated draft fixes are preserved:
-[trust-setting and hint notifications](https://github.com/scode/farhelm/pull/2443/changes), and
-[tunnel-close completion and notification](https://github.com/scode/farhelm/pull/2445/changes). Each passed its
-independent general and no-functional-change reviews on the required model, and focused validation. The automatic
-routing change and removal of handler wrappers are unimplemented. The plan's TODO entry remains because that structural
-work is unfinished. Neither draft has been marked ready or merged.
-
-### What execution found
-
-The current handlers take ownership after parsing their request. The proposed routing layer takes ownership before
-parsing. In a minimal real HTTP/1 comparison using the repository's framework versions, a client sent a complete valid
-JSON body and closed its connection while parsing was pending. Across three sequential comparisons, the current
-placement started no action; the proposed placement finished parsing and performed the action after the connection
-ended.
-
-This used a stand-in mutation, not a Farhelm settings write. It establishes a possible difference at this boundary, not
-its frequency in browsers or behavior over HTTP/2. Recorded probe
-`cargo run --offline --manifest-path <probe>/Cargo.toml`, run `6689cb93-6c59-48e1-8997-f10b2500ca14`, completed with
-complete retained output; these are observations, not production test counts. The probe source and results are retained
-privately and described in the plan's working log.
-
-The old action never started, so this is outside the approved exception for an accepted action left half done. Ordinary
-framework middleware cannot take ownership after typed parsing. Keeping both outer and inner ownership does not preserve
-the earlier cancellation boundary.
-
-### Options and recommendation
-
-- **Allow the earlier boundary for ordinary owned routes.** After authentication and entry into the ownership layer, the
-  helm may finish parsing and carry out a valid request even if the caller disconnects. This permits the small default
-  routing layer and explicit exceptions originally proposed. Existing authentication, rejection behavior, transfer
-  cancellation and narrower helper contracts still have to be preserved. I recommend this option because it achieves the
-  safe default with the smallest implementation, provided this behavior change is explicitly accepted and documented.
-- **Preserve the current boundary after parsing.** Keep the two consistent fix drafts and revise the structural design
-  before continuing. Retaining per-handler ownership preserves that boundary but leaves the recurring omission risk; a
-  generic adapter after parsing would be a separate mechanism to assess, not an ordinary routing-layer change.
-
-This block asks only for that acceptance-boundary decision. It does not request changing uploads, downloads, read-only
-requests, Stop, tab operations, or the other intentionally cancellable routes.
+Accepted: for routes the new default owns, the helm may carry out a valid, authenticated request whose caller
+disconnected before parsing finished. Document this boundary in SPEC_impl.md, "Who owns an accepted action". This
+changes nothing else: exempt routes stay cancellable, and rejection behavior is unchanged.
