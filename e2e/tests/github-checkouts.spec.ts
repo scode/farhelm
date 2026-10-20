@@ -670,8 +670,12 @@ async function assertCheckout(
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);
   // A banner can be replayed from a dead terminal. This attachment must
   // also receive a fresh agent response before preparation counts as live.
+  // Like `assertLive`, this is a byte round trip, not a per-key handling
+  // test: one text input instead of a key press per character, which cost
+  // whole seconds per call on WebKit, where each key is its own protocol
+  // round trip. Enter stays a real key press.
   const probe = `checkout-live-${id}`;
-  await page.keyboard.type(probe);
+  await page.keyboard.insertText(probe);
   await page.keyboard.press("Enter");
   await waitForTermText(page, `echo:${probe}`, 20_000);
   expect(await fs.readFile(path.join(cwd, "checkout-sentinel"), "utf8")).toBe(`${fixture.repo}\n`);
