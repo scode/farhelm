@@ -59,3 +59,78 @@ design, language idioms, the revised acceptance criteria, the full test-authorin
 The mandatory independent resume check passed, and the commit message passed its fresh cold read. A separate
 documentation pass covered every touched code file. No substantial departure from the revised design or repeated
 corrective review required another scope checkpoint.
+
+### Landing
+
+Landed as #2440, with the same content the report describes, rebased onto this round's main. It was the first of six
+plans in this landing round, which stacked every plan in queue order and checked them together before any merged.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained round 108's sixteen plans, a TODO entry, and plan bookkeeping. A fresh-context
+reviewer and I read them and the other five plans of this round against this plan.
+
+- transfer-leftover-cleanup, from round 108, changed how the helm forgets a cancelled download or upload between the
+  helm and the host. This plan changes the desktop app's save into Downloads, in different code; a save still running
+  when Quit cleans up fails to publish because its staging folder is gone, and its transfer bookkeeping is released as
+  before.
+- The cleanup does not touch the helm's shutdown or its state-folder lock, and an ordinary Quit is still an immediate
+  exit, as SPEC.md's "Desktop Quit" requires.
+
+No other plan in the round touches the desktop app's quit path. For context: SPEC_impl.md's "Cleanup on quit" section,
+already on main when this plan ran, is the rule its revised design follows, and the review confirmed the diff matches
+the plan's recorded decision: clean up this process's own staging folders when the app quits, refuse new saves once
+quitting, and add no start-up sweep and no locks or ownership markers. The only conflicts were in the review feedback
+queue's index, where each plan removes its own entries; all removals are kept.
+
+#### Fixes made during the landing
+
+None.
+
+#### Things to know
+
+- The cleanup runs on the app's main thread and can briefly wait while a save is creating its folders in Downloads. The
+  wait is short and bounded; no follow-up is needed.
+- As the report says, the normal macOS Quit path was checked from the pinned framework source and a desktop compile, not
+  by quitting a real Mac app.
+
+#### Checks
+
+Every plan in this round was executed while round 108's sixteen plans were still unlanded, so none had been tested
+against them. Together the six change a menu focus check that every menu uses, which session a page opens on load, the
+desktop app's quit path, helm preferences and storage, and a browser-test helper many specs share. That is why this
+round ran the whole Rust workspace and the full browser suite. All of the following ran on all six plans stacked
+together on main, including the fixes made while landing them:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` and
+  `scripts/check-desktop-assets.sh`: all passed (formatting and the test-sleep check again after the last test fixes).
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `8c534e03-3c81-4f66-99e3-0e6ffdb526e8` (kept): 3951 passed, 3 failed. Two were
+  helm database tests fixed during this landing (see select-newest-on-close's notes); the helm's checkout configuration
+  test module then passed, 28 tests, run `faf4d80d-ec6d-4a36-9220-9d522e8f38d0`. The third was
+  `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay`, a known open flake under load (FLAKES.md and
+  the TODO deflake entry "Shallow pause resets under load"); no plan here changes terminal streaming or the supervisor.
+  Five repeats of that test by itself, with the browser suite running at the same time, gave four passes and one failure
+  (run `e34c4af0-729c-4f62-b1bb-db1c6d9e97e2`, kept).
+- `cargo nextest run -p farhelm-ui --features desktop`, run `03589e5a-0f7e-423b-ab65-5c3bdd33c33c`: 720 passed; this and
+  the desktop compile check above cover the desktop quit change, which lives in the UI crate's desktop code.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `c600b345-76c4-42a8-a879-fce21765c8d6`: 328 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, one worker, no retries, in two parts.
+  The first run, `68484e27-6c23-45a6-aae5-5539e8c275b2` (kept), was cut short part-way by my own mistake: a narrow
+  re-run I started in the same checkout removed files the running suite depends on, so every test it started afterwards
+  failed before testing anything. Its results stand for the 64 projects (one engine and one spec file each) whose tests
+  all started before that point and passed. Every other project, and the spec files changed by later landing fixes, ran
+  again on both engines in run `49ead42e-f608-4e76-a833-6ff945dfb1f8`: 1538 passed, 12 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), and 5 failed. Those 5, and the
+  4 the first run had shown before that point, were all tests that assumed how a page behaves on load (which session it
+  opens, or how many preference reads and saves it makes) before select-newest-on-close changed it. They are 6 distinct
+  tests, all fixed in that plan and passing in narrow runs on both engines (listed in its notes).
+- Skipped: the workspace and desktop doctests (no plan adds or changes a documentation example),
+  `cargo check -p farhelm-desktop` and the desktop smoke test (the desktop app's own crate is unchanged; its quit path
+  change is in the UI crate covered above), the native Mac app (not runnable here) and the installer (unchanged).
+
+The report's checks ran on a main from before round 108's landings, so they no longer describe what landed; the combined
+runs above supersede them. Nothing else in the executor's report became untrue at landing.
