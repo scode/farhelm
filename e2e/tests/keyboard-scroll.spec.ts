@@ -67,20 +67,23 @@ test("help menu keeps keyboard focus through a late terminal reveal", async ({ p
 /**
  * Preserve the real local host while adding one connected display fixture.
  * No SSH connection or registry mutation is needed to render its dialogs.
+ * Return the owned row so a controlled successful write can update later reads.
  */
 async function stubRemote(page: Page) {
+  const remote = {
+    id: HOST_ID, kind: "ssh", destination: HOST, name: HOST,
+    identity: "keyboard-scroll-identity", incarnation: 1, yolo_without_asking: false,
+    remote_farhelm: null, remote_state_dir: null,
+    state: { phase: "connected", identity: "keyboard-scroll-identity", build_version: "0.1.0",
+      refresh: { status: "ok", sessions: 0 } },
+  };
   await page.route("**/api/hosts", async (route) => {
     const response = await route.fetch();
     const listing = await response.json();
-    listing.hosts = [...listing.hosts.filter((host: any) => host.kind === "local"), {
-      id: HOST_ID, kind: "ssh", destination: HOST, name: HOST,
-      identity: "keyboard-scroll-identity", incarnation: 1,
-      remote_farhelm: null, remote_state_dir: null,
-      state: { phase: "connected", identity: "keyboard-scroll-identity", build_version: "0.1.0",
-        refresh: { status: "ok", sessions: 0 } },
-    }];
+    listing.hosts = [...listing.hosts.filter((host: any) => host.kind === "local"), remote];
     await route.fulfill({ response, json: listing });
   });
+  return remote;
 }
 
 for (const state of ["loading", "error", "no hosts", "no commands"] as const) {
@@ -222,6 +225,123 @@ test("host settings remain keyboard-scrollable while every setting is saving", a
     await page.unrouteAll({ behavior: "wait" });
   }
 });
+
+for (const outcome of ["refused destination", "successful checkbox"] as const) {
+  /**
+   * Saving temporarily makes the body a tab stop. Once it loses that role,
+   * both a refused field write and a successful switch write must recover a
+   * real control before the next key, rather than letting isolation consume it.
+   */
+  test(`host settings keep usable focus after a ${outcome} save`, async ({ page }) => {
+    const remote = await stubRemote(page);
+    const destination = outcome === "refused destination";
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let submitted: unknown;
+    await page.route(`**/api/hosts/${HOST_ID}/${destination ? "destination" : "yolo-without-asking"}`, async (route) => {
+      submitted = route.request().postDataJSON();
+      await held;
+      if (destination) {
+        await fulfillAsHelm(route, { status: 409, contentType: "text/plain", body: "fixture refuses the destination" });
+      } else {
+        remote.yolo_without_asking = true;
+        await fulfillAsHelm(route, { json: remote });
+      }
+    });
+    try {
+      await page.goto("/");
+      const row = hostRowByName(page, HOST);
+      await openHostMenu(row);
+      await row.locator(".host-settings").click();
+      const dialog = page.locator(".host-settings-refreshed");
+      const body = dialog.locator(".host-settings-body");
+      const toggle = dialog.locator(".host-yolo-without-asking-toggle");
+      const input = dialog.locator(".host-destination-input");
+      if (destination) {
+        await dialog.locator(".host-edit").click();
+        await input.fill("changed.example.invalid");
+        await expect(input).toBeFocused();
+        await page.keyboard.press("Enter");
+      } else {
+        await expect(toggle).not.toBeChecked();
+        await toggle.focus();
+        await expect(toggle).toBeFocused();
+        await page.keyboard.press("Space");
+      }
+      await expect.poll(() => submitted, { message: "the selected save is held before completing" })
+        .toEqual(destination ? { ssh: "changed.example.invalid" } : { yolo_without_asking: true });
+      await expect(toggle).toBeDisabled();
+      await expect(body).toHaveAttribute("tabindex", "0");
+      await dialog.locator(".host-settings-dismiss").focus();
+      await expect(dialog.locator(".host-settings-dismiss")).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(body).toBeFocused();
+      release();
+      await expect(body).not.toHaveAttribute("tabindex", "0");
+      if (destination) {
+        await expect(input).toBeEnabled();
+        await expect(input).toBeFocused();
+        await page.keyboard.type("x");
+        await expect(input).toHaveValue("changed.example.invalidx");
+      } else {
+        await expect(toggle).toBeEnabled();
+        await expect(toggle).toBeChecked();
+        await expect(toggle).toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(dialog.locator(".host-commands-without-asking-toggle")).toBeFocused();
+      }
+    } finally {
+      release();
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
+}
+
+for (const focus of ["body", "dismiss"] as const) {
+  /**
+   * Command arrival removes the loading body's tab stop. Recover Close when
+   * that body held focus, but preserve a usable control the user already chose;
+   * a native Tab then proves the next key was not used to repair lost focus.
+   */
+  test(`SSH command arrival keeps usable focus from ${focus}`, async ({ page }) => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let requested = false;
+    await page.route("**/api/ssh-connections", async (route) => {
+      requested = true;
+      await held;
+      await fulfillAsHelm(route, { json: { unavailable: [], extra: null, hosts: [{
+        name: HOST, destination: HOST, sessions: "ssh sessions.example.invalid", setup: "ssh setup.example.invalid",
+      }] } });
+    });
+    try {
+      await page.goto("/");
+      const dialog = await openHelpDialog(page, "ssh needs 2FA?");
+      const body = dialog.locator(".ssh-help-body");
+      const dismiss = dialog.locator(".host-settings-dismiss");
+      await expect.poll(() => requested).toBe(true);
+      await expect(body.getByRole("status")).toHaveText("loading connection commands…");
+      await expect(body).toHaveAttribute("tabindex", "0");
+      await dismiss.focus();
+      await expect(dismiss).toBeFocused();
+      if (focus === "body") {
+        await page.keyboard.press("Tab");
+        await expect(body).toBeFocused();
+      }
+      release();
+      await expect(dialog.getByRole("button", { name: "copy setup and updates connection", exact: true })).toBeVisible();
+      await expect(body).not.toHaveAttribute("tabindex", "0");
+      await expect(focus === "body" ? dialog.locator(".ssh-help-close") : dismiss).toBeFocused();
+      await page.keyboard.press(focus === "body" ? "Shift+Tab" : "Tab");
+      await expect(dialog.getByRole("button", {
+        name: focus === "body" ? "copy setup and updates connection" : "copy sessions connection", exact: true,
+      })).toBeFocused();
+    } finally {
+      release();
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  });
+}
 
 /**
  * Sent replaces the editors with prose for only 1.5 seconds. Freeze that timer

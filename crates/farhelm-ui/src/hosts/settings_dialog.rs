@@ -319,6 +319,9 @@ pub(crate) fn install_dialog_with_focus(
 /// two frames late so that `focus_edit_button`, which handles a field that
 /// closed on success, gets there first; if focus is already on one of the
 /// dialog's controls by then, this leaves it alone.
+/// The busy body's temporary tab stop is not a usable return target after
+/// saving ends, even if the engine has not blurred it yet. Test both current
+/// and remembered focus against the same keyboard-focusable contract.
 ///
 /// `reset_checkbox` is set after a refused checkbox toggle. That leaves the
 /// box showing the user's click while the setting never changed, and since
@@ -337,11 +340,12 @@ fn refocus_after_write(reset_checkbox: bool) {
             const dialog = document.querySelector({dialog});
             if (!dialog) return;
             {reset}
-            const active = document.activeElement;
-            if (active && active !== dialog && dialog.contains(active)) return;
+            const usable = (element) => element instanceof HTMLElement && element.isConnected
+                && dialog.contains(element) && !element.disabled && element.tabIndex >= 0
+                && element.getClientRects().length > 0;
+            if (usable(document.activeElement)) return;
             const last = dialog.__farhelmLastFocus;
-            const usable = last instanceof Element && last.isConnected && dialog.contains(last) && !last.disabled;
-            const target = usable
+            const target = usable(last)
                 ? last
                 : (dialog.querySelector('.host-destination-input')
                     ?? dialog.querySelector('.host-yolo-without-asking-toggle')

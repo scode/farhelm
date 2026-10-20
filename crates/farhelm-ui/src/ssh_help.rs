@@ -62,6 +62,24 @@ pub(crate) fn SshHelpDialog(destination: Option<String>, on_close: EventHandler<
                 .chain(help.extra.iter().filter(|_| extra_requested))
                 .any(|host| host.sessions.is_some() || host.setup.is_some())
         });
+    // Command arrival removes the text body's temporary tab stop. Recover
+    // focus after that render, before modal isolation has to consume a key.
+    // A still-focusable control keeps focus; this is not an opening handoff.
+    use_effect(use_reactive((&has_commands,), move |(has_commands,)| {
+        if has_commands {
+            document::eval(&format!(
+                r#"requestAnimationFrame(() => {{
+                    const dialog = document.querySelector('{SELECTOR}');
+                    if (!dialog) return;
+                    const usable = (element) => element instanceof HTMLElement && element.isConnected
+                        && dialog.contains(element) && !element.disabled && element.tabIndex >= 0
+                        && element.getClientRects().length > 0;
+                    if (!usable(document.activeElement))
+                        dialog.querySelector('.ssh-help-close')?.focus({{preventScroll: true}});
+                }})"#
+            ));
+        }
+    }));
     rsx! {
         div { class: "host-settings-backdrop", role: "presentation",
             div { class: "app-settings-dialog ssh-help-dialog host-dialog-framed", role: "dialog",
