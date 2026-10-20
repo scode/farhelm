@@ -61,3 +61,43 @@ The required fresh-context gpt-6.1-sol reviewer at high effort reviewed correctn
 the complete outcome and agreed scope. No findings. Commit and PR wording passed a separate fresh cold read. A
 documentation pass covered every touched file. The final amendment adds only the PR link to the outcome record. The
 report passed its independent cold read.
+
+### Landing
+
+Landed as #2364, unchanged from what the report describes. It was the last of eight plans in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the PR's base, main gained link-hover-covers, workspace-trust-destination, session-header-and-row-fixes,
+queued-launch-snapshot, payload-lock-reproduction, triage-discards-oct18, supervisor-colon-path-refusal and plan
+bookkeeping. The only one near tunnels is link-hover-covers, which changed where the Mac app's tunnel-error notice is
+drawn and made links refuse clicks while that notice covers them. This plan changes only the wording of the separate
+one-time tunnel consent warning, so the two do not interact; a fresh-context reviewer and I read them together.
+
+The only conflicts were in the review feedback queue's index, where every plan in the round removes its own entries; all
+removals are kept. The landed code is identical to what the landing's checks below tested.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+Run now, on one tree holding this plan together with the round's other landing plans (launch-enters-working-dir removed
+after it failed its checks):
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, `dprint check` on every changed file including the two docs pages,
+  `python3 releasing/check-changelog.py format`, and the website build: all passed.
+- The UI's desktop-only Rust tests, where the consent warning's code lives: 706 passed, run
+  `4926be34-2adf-40e5-a588-663695e00161`. The whole UI library, among the other libraries: 3489 passed, run
+  `cdabc40d-ecaa-418e-938f-01f2cbe4da64`.
+- Skipped: browser tests (the consent warning exists only in the Mac app) and the native Mac app itself, as in the
+  report.
+
+The report's statements that the PR was an open draft and that its checks ran on the main it was based on were true when
+it was delivered; main then moved as described above, and the PR has now merged. Nothing else in the report became
+untrue at landing.
+
+Changed docs pages, for review: Using Farhelm, "Work in a session", section "Open a remote localhost link", and How it
+works, "Security model".
