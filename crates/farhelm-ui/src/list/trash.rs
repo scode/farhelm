@@ -186,7 +186,8 @@ fn target(host: &Host, state: Option<&HostTrash>) -> Option<Target> {
     Some(Target {
         host: host.id,
         incarnation: host.incarnation,
-        name: host.name.clone(),
+        // Confirmation helpers escape this frozen name when they build their labels.
+        name: host.name.raw().to_owned(),
         ids,
         count: totals.count,
         unchecked: totals.unchecked,
@@ -663,7 +664,7 @@ pub(super) fn TrashControl(
                             let action_host = host.clone();
                             let deleting = progress.as_ref().is_some_and(|run| run.pending.contains(&host.id));
                             let show = deleting || !connected(host) || pending || listing.is_none_or(|listing| !listing.checkouts.is_empty() || !listing.issues.is_empty()) || !host_notices.is_empty();
-                            let name = display_peer(&host.name);
+                            let name = host.name.escaped();
                             let totals = listing.map(listing_totals);
                             let host_count = totals.as_ref().map_or_else(|| "count unknown".into(), ListingTotals::count_label);
                             let host_size = if connected(host) && hosts_known && pending { "measuring…".into() } else { totals.as_ref().map_or_else(|| "size unknown".into(), |totals| space(totals.bytes, totals.partial)) };

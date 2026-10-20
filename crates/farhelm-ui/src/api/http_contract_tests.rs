@@ -194,13 +194,27 @@ fn the_helm_host_list_fixture_decodes_every_phase_as_recognized() {
     assert_eq!(local.alias, Some(None));
     let ssh = &listing.hosts[1];
     assert_eq!(ssh.kind, HostKind::Ssh);
-    assert_eq!(ssh.destination.as_deref(), Some("user@host2"));
-    assert_eq!(ssh.alias, Some(Some("alias2".to_string())));
-    assert_eq!(ssh.name, "host2");
-    assert_eq!(ssh.identity.as_deref(), Some("identity2"));
-    assert_eq!(ssh.remote_farhelm.as_deref(), Some("~/.local/bin/farhelm"));
     assert_eq!(
-        ssh.remote_state_dir.as_deref(),
+        ssh.destination.as_ref().map(|value| value.raw()),
+        Some("user@host2")
+    );
+    assert_eq!(
+        ssh.alias
+            .as_ref()
+            .map(|alias| alias.as_ref().map(|value| value.raw())),
+        Some(Some("alias2"))
+    );
+    assert_eq!(ssh.name.raw(), "host2");
+    assert_eq!(
+        ssh.identity.as_ref().map(|value| value.raw()),
+        Some("identity2")
+    );
+    assert_eq!(
+        ssh.remote_farhelm.as_ref().map(|value| value.raw()),
+        Some("~/.local/bin/farhelm")
+    );
+    assert_eq!(
+        ssh.remote_state_dir.as_ref().map(|value| value.raw()),
         Some("~/.local/state/farhelm")
     );
     assert_eq!(ssh.incarnation, 4);
