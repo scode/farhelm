@@ -7,6 +7,97 @@
 import { expect, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { clickDialogGap } from "./helpers/dialog-gap";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { cleanupSession, createSession, openRowMenu } from "./helpers/fleet";
+
+/** Clone must offer the typed name visibly before a separate Enter launches.
+ * A real fake-agent source and successor distinguish setting a draft from an
+ * accidental immediate create, and the source must remain unchanged.
+ */
+test("Clone search Enter picks an unmatched name before a second Enter launches", async ({ page, request }) => {
+  let sourceId: string | undefined;
+  let childId: string | undefined;
+  let bodyFailed = false;
+  try {
+    const source = await createSession(request, { title: `enter-source-${Date.now()}` });
+    sourceId = source.id;
+    await page.goto("/");
+    const row = page.locator(`.session-row[data-session-id="${source.id}"]`);
+    await expect(row).toBeVisible();
+    await openRowMenu(row);
+    await row.locator(".session-row-clone").click();
+    const form = page.locator(".create-session-form");
+    const search = form.locator(".launch-composer-search input");
+    await expect(search).toBeFocused();
+    const creates: Record<string, unknown>[] = [];
+    page.on("request", (sent) => {
+      if (sent.method() === "POST" && sent.url().endsWith("/api/sessions")) creates.push(sent.postDataJSON());
+    });
+    await search.fill("asdf");
+    await expect(form.getByRole("option", { name: "Set session name: asdf", exact: true, selected: true })).toBeVisible();
+    await search.press("Enter");
+    await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue("asdf");
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+    expect(creates, "accepting a name must not create the clone").toEqual([]);
+    const [response] = await Promise.all([
+      page.waitForResponse((reply) => reply.request().method() === "POST" && reply.url().endsWith("/api/sessions")),
+      search.press("Enter"),
+    ]);
+    expect(response.ok(), await response.text()).toBe(true);
+    childId = (await response.json()).id as string;
+    expect(childId).not.toBe(source.id);
+    expect(creates).toHaveLength(1);
+    expect(creates[0].title).toBe("asdf");
+    await expect(form).toHaveCount(0);
+    await expect(row).toContainText(source.title);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["cloned session", async () => { if (childId) await cleanupSession(request, childId); }],
+      ["source session", async () => { if (sourceId) await cleanupSession(request, sourceId); }],
+    ]);
+  }
+});
+
+/** Live messages and result rows share one dismissible area. Reopening with
+ * Enter must never accept a hidden row or silently launch the unfinished form.
+ */
+test("launcher search explains empty results and Enter reopens before picking", async ({ page }) => {
+  let creates = 0;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() === "POST") creates += 1;
+    await route.continue();
+  });
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  const search = form.locator(".launch-composer-search input");
+  const area = form.locator("#launch-composer-search-results");
+  await search.fill("host:no-such-host-for-enter");
+  await expect(area).toHaveText("no host matches");
+  await search.press("Escape");
+  await expect(area).toHaveCount(0);
+  await expect(search).toBeFocused();
+  await search.press("Enter");
+  await expect(area).toHaveText("no host matches");
+  await search.press("Enter");
+  await expect(area).toHaveText("no host matches");
+  await search.fill("asdf");
+  await expect(form.getByRole("option", { name: "Set session name: asdf", exact: true })).toBeVisible();
+  await search.press("Escape");
+  await expect(area).toHaveCount(0);
+  await search.press("Enter");
+  await expect(form.getByRole("option", { name: "Set session name: asdf", exact: true })).toBeVisible();
+  await expect(search).toHaveValue("asdf");
+  await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue("");
+  await search.press("Enter");
+  await expect(search).toHaveValue("");
+  await expect(form.getByLabel("name (optional)", { exact: true })).toHaveValue("asdf");
+  expect(creates).toBe(0);
+});
 
 /** Pin the reason inside the initial dialog viewport, directly after its actions. */
 async function expectReasonByLaunch(form: Locator, text: string) {
