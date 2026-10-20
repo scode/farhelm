@@ -102,6 +102,10 @@ the lock could not classify, when the app could have removed its own downloads' 
 one such case. It describes cleanup that already exists; it is not a reason to choose a start-up sweep over cleanup on
 quit.
 
+The desktop event loop's `LoopDestroyed` hook closes native-download admission and removes this process's live staging
+directories before hard exit. Weak directory registrations preserve ordinary save cleanup; no transfer is awaited and
+completed files outside staging remain. Earlier-build, crash and force-quit leftovers are not reclaimed.
+
 ## Session IDs in logs
 
 Session IDs must not inject log lines or use invisible or direction-changing characters to disguise the ID shown in

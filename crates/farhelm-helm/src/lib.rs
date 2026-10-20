@@ -123,7 +123,7 @@ mod browser;
 /// an embedding shell registered a [`ClipboardSink`].
 mod clipboard;
 pub use browser::LinkOpener;
-pub use downloads::{FileOpener, NativeDownloads};
+pub use downloads::{FileOpener, NativeDownloads, cleanup_native_downloads};
 
 /// The web UI tree a release build compiles into this binary (D12/D13) —
 /// `build.rs`'s counterpart. Public so `farhelm-desktop` (Step 4) can reach
