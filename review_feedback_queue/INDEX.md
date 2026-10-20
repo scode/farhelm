@@ -22,9 +22,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
   — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
 
-- [`automatic-notification-dismissal-loses-focus.md`](automatic-notification-dismissal-loses-focus.md) — Automatic
-  notification-list dismissal has no focus handoff to its session bell.
-
 - [`notification-popup-drifts-after-local-delete.md`](notification-popup-drifts-after-local-delete.md) — A notification
   popup can remain at its former position after a session above it is deleted.
 

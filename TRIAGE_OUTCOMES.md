@@ -16858,7 +16858,8 @@
 - Completion criteria: any close of the list while focus is inside it returns focus to its bell (handled in the bell
   itself, so every automatic close is covered, including the hosts-panel one); a browser test. Size gate: about 100
   lines; over it, discard. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/sidebar-bell-follows-row.md`.
+- Execution: complete in change `ppouqqkkwpltkploustymuumlnvrvknl`, bookmark
+  `plan/sidebar-bell-follows-row/01-bell-focus-handoff`, [PR #2427](https://github.com/scode/farhelm/pull/2427/changes).
 
 ## notification-popup-drifts-after-local-delete.md
 
