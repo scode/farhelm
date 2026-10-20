@@ -13,7 +13,9 @@ use dioxus::prelude::*;
 const SELECTOR: &str = r#".ssh-help-dialog[role="dialog"]"#;
 
 /// Release the child modal before returning focus to its opener. Add host
-/// remains mounted with its draft intact; it must regain isolation too.
+/// remains mounted with its draft intact; it must regain isolation too. A probe
+/// can replace the opener with a setup offer while help is open, so Cancel is
+/// the safe surviving target when that happens.
 pub(crate) fn return_focus(add_host: bool) {
     let parent = if add_host {
         modal_isolation::install_js(
@@ -24,7 +26,7 @@ pub(crate) fn return_focus(add_host: bool) {
         String::new()
     };
     let target = if add_host {
-        ".add-host-ssh-help"
+        ".add-host-ssh-help, .host-add-dialog .add-host-cancel"
     } else {
         ".app-help-toggle"
     };

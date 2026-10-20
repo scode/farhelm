@@ -16816,7 +16816,9 @@
 - Completion criteria: closing help falls back to a surviving control in the Add dialog when its opener is gone; a test.
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or the changelog
   fragment); over it, discard. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/app-dialog-focus.md`.
+- Execution: complete in change `wxnkuowokqrutyqpxworrwprzvnplqmn`, bookmark `plan/app-dialog-focus/02-ssh-help-focus`;
+  [PR #2407](https://github.com/scode/farhelm/pull/2407/changes). Closing help falls back to the setup offer's Cancel;
+  44 counted lines, below the 100-line gate.
 
 ## automatic-notification-dismissal-loses-focus.md
 
