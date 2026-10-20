@@ -27,6 +27,9 @@
 //! direction-isolated peer text (`peer::display_peer`), and the only prose is
 //! this module's own labels and buttons. Host names are rendered the same way:
 //! they are user data the helm relays, not this UI's words.
+//! Session IDs use the stricter identity spelling so literal escape notation
+//! and whitespace cannot make different references look alike. Copying keeps
+//! the complete raw reference; the displayed escapes never become target bytes.
 
 use std::collections::{HashMap, HashSet};
 
@@ -501,9 +504,12 @@ fn Row(label: &'static str, value: String) -> Element {
 /// Commands and identities need the whole card width; short facts share the
 /// grid. The row model still owns content and trust distinctions, so visual
 /// compactness cannot turn peer text into Farhelm's own verdict.
+/// A copyable identity shares that strict display path but retains its raw
+/// reference for the clipboard; presentation escapes never become target bytes.
 #[component]
 fn CardDetail(row: CardRow) -> Element {
     let full = full_width_row(&row);
+    let copyable = matches!(&row, CardRow::CopyIdentity(..));
     let class = if full {
         "approval-card-row approval-card-full"
     } else {
@@ -532,10 +538,23 @@ fn CardDetail(row: CardRow) -> Element {
                 dd { class: "approval-card-note", "{words}" }
             }
         },
-        CardRow::Identity(label, identity) => rsx! {
+        CardRow::Identity(label, identity) | CardRow::CopyIdentity(label, identity) => rsx! {
             div { class,
-                dt { "{label}" }
-                dd { span { class: "peer-value", dir: "ltr", "{display_identity(&identity)}" } }
+                dt { "{compact_label(label)}" }
+                dd {
+                    span { class: "peer-value", dir: "ltr", "{display_identity(&identity)}" }
+                    if copyable {
+                        " "
+                        button {
+                            r#type: "button",
+                            class: "btn btn-neutral",
+                            aria_label: "copy {compact_label(label)}",
+                            "data-tooltip": "copy: the complete session ID, including characters shown as escapes",
+                            onclick: move |_| crate::session_view::copy_to_clipboard(&identity),
+                            "copy"
+                        }
+                    }
+                }
             }
         },
         CardRow::Permission(glyph) => rsx! {
@@ -555,7 +574,10 @@ fn CardDetail(row: CardRow) -> Element {
 fn full_width_row(row: &CardRow) -> bool {
     matches!(
         row,
-        CardRow::Block(..) | CardRow::Identity(..) | CardRow::Value("folder" | "URL", _)
+        CardRow::Block(..)
+            | CardRow::Identity(..)
+            | CardRow::CopyIdentity(..)
+            | CardRow::Value("folder" | "URL", _)
     )
 }
 
@@ -580,7 +602,8 @@ fn compact_label(label: &'static str) -> &'static str {
 /// Decision content before presentation separates facts from full-width text.
 ///
 /// These variants preserve the distinction between peer text, fixed UI words,
-/// and install identities regardless of which grid position they occupy.
+/// and identities regardless of which grid position they occupy. Copyable
+/// identities retain raw bytes separately from their render-time spelling.
 #[derive(Debug, Clone, PartialEq)]
 enum CardRow {
     /// A labelled peer fact, allowed to wrap to fit the available width.
@@ -592,6 +615,9 @@ enum CardRow {
     /// An install identity, shown the way the hosts panel shows identities
     /// (`peer::display_identity`), which is stricter than ordinary peer text.
     Identity(&'static str, String),
+    /// A full session reference, rendered as an identity and copied exactly.
+    /// The copy path receives this raw value, never the displayed escape text.
+    CopyIdentity(&'static str, String),
     /// The same classified shield as the session list, with audible wording.
     Permission(PermissionGlyph),
 }
@@ -1156,6 +1182,9 @@ fn yolo_words(yolo: Option<bool>) -> &'static str {
 /// `host_label` names the host row; `None` leaves it out, for the asking
 /// session, whose host the card already names as the one the request came
 /// from.
+/// The full ID remains raw in the copyable identity row. Display escaping is
+/// applied only by CardDetail, and the existing clipboard writer copies the
+/// same raw reference without dropping its entry prefix or opaque suffix.
 fn session_rows(
     label: &'static str,
     id_label: &'static str,
@@ -1167,7 +1196,7 @@ fn session_rows(
         Some(title) => rows.push(CardRow::Value(label, title.clone())),
         None => rows.push(CardRow::Note(label, "title unknown")),
     }
-    rows.push(CardRow::Value(id_label, session.id.clone()));
+    rows.push(CardRow::CopyIdentity(id_label, session.id.clone()));
     if let Some(host_label) = host_label {
         match &session.host_name {
             Some(host) => rows.push(CardRow::Value(host_label, host.clone())),
@@ -1189,6 +1218,208 @@ fn word<T: serde::Serialize>(value: &T) -> String {
 mod tests {
     use super::*;
     use farhelm_proto::CommandLaunch;
+
+    const ENTRY: &str = "7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d";
+
+    /// Use the public formatter so every presentation fixture also establishes
+    /// that its full-looking or unusual suffix fits the helm's actual ID bounds.
+    fn session_reference(bare: &str) -> String {
+        farhelm_proto::SessionRef::new(ENTRY, bare)
+            .unwrap()
+            .to_string()
+    }
+
+    /// Both roles must use the same identity/copy path: fixing only targets
+    /// would still let the requesting session impersonate another ID on a card.
+    fn session_identity_rows(id: &str) -> Vec<CardRow> {
+        let session = ApprovalSession {
+            id: id.to_string(),
+            title: Some("a session title".into()),
+            host_name: Some("a host".into()),
+        };
+        let mut asking = Vec::new();
+        session_rows(
+            "asked by session",
+            "asking session id",
+            None,
+            &session,
+            &mut asking,
+        );
+        asking.extend(action_rows(&ApprovalAction::Stop { target: session }));
+        asking
+            .into_iter()
+            .filter(|row| matches!(row, CardRow::CopyIdentity(..)))
+            .collect()
+    }
+
+    /// Literal escape text and formatting characters used to share one visible
+    /// spelling. Each asking/target row must now stay distinct, including spaces,
+    /// while the clipboard descriptor keeps the complete original full reference.
+    #[test]
+    fn asking_and_target_session_ids_keep_distinct_spellings_and_exact_copy_values() {
+        let pairs = [
+            ("peer<U+200B>", "peer\u{200b}"),
+            ("peer", "peer "),
+            ("peer", " peer"),
+            ("peer id", "peer  id"),
+        ];
+        for (left, right) in pairs {
+            let left = session_reference(left);
+            let right = session_reference(right);
+            assert_ne!(left, right, "premise: these are different full references");
+            let left_rows = session_identity_rows(&left);
+            let right_rows = session_identity_rows(&right);
+            assert_eq!(
+                left_rows.len(),
+                2,
+                "requester and target must both be identities"
+            );
+            assert_eq!(right_rows.len(), 2);
+            for (left_row, right_row) in left_rows.iter().zip(&right_rows) {
+                let (
+                    CardRow::CopyIdentity(left_label, left_raw),
+                    CardRow::CopyIdentity(right_label, right_raw),
+                ) = (left_row, right_row)
+                else {
+                    unreachable!("the helper keeps only copyable identities");
+                };
+                assert_eq!(left_label, right_label);
+                assert_eq!(left_raw, &left, "copy retains the complete raw reference");
+                assert_eq!(right_raw, &right);
+                assert_ne!(display_identity(left_raw), display_identity(right_raw));
+                assert!(full_width_row(left_row) && full_width_row(right_row));
+            }
+        }
+        assert_eq!(compact_label("asking session id"), "from session id");
+        assert_eq!(compact_label("session id"), "session id");
+    }
+
+    /// Render the production row so tests catch accidental reuse of ordinary
+    /// peer escaping, which would reintroduce the literal-escape collision.
+    #[test]
+    fn session_identity_rows_render_full_escaped_ids_and_keep_prefix_looking_suffixes() {
+        fn render(rows: Vec<CardRow>) -> Element {
+            rsx! { for (index, row) in rows.into_iter().enumerate() { CardDetail { key: "{index}", row } } }
+        }
+        let nested = session_reference("x");
+        for bare in ["peer<U+200B>", "peer\u{200b}", " peer ", nested.as_str()] {
+            let id = session_reference(bare);
+            let rows = session_identity_rows(&id);
+            assert!(
+                rows.iter()
+                    .all(|row| matches!(row, CardRow::CopyIdentity(_, raw) if raw == &id)),
+                "copy keeps the outer entry prefix and the complete opaque suffix"
+            );
+            let mut dom = VirtualDom::new_with_props(render, rows);
+            let edits = dom.rebuild_to_vec().edits;
+            let texts: Vec<_> = edits
+                .iter()
+                .filter_map(|edit| match edit {
+                    dioxus::core::Mutation::CreateTextNode { value, .. }
+                    | dioxus::core::Mutation::SetText { value, .. } => Some(value.as_str()),
+                    _ => None,
+                })
+                .collect();
+            let expected = display_identity(&id);
+            assert_eq!(
+                texts.iter().filter(|text| **text == expected).count(),
+                2,
+                "both roles render the complete strict identity spelling: {texts:?}"
+            );
+            assert!(
+                edits.iter().any(|edit| matches!(edit,
+                dioxus::core::Mutation::SetAttribute {
+                    name: "class", value: dioxus::core::AttributeValue::Text(value), ..
+                } if value == "approval-card-row approval-card-full")),
+                "identity rows must occupy a full line"
+            );
+        }
+    }
+
+    /// Answer dispatch must stay tied to the random request ID while identity
+    /// rows display/copy session references. Reuse the desktop build's existing
+    /// serialized event adapter, as the updater's headless button test does.
+    #[cfg(native_desktop)]
+    #[farhelm_testtrace::test]
+    fn answering_a_card_sends_its_approval_id_instead_of_either_session_reference() {
+        use std::{cell::RefCell, rc::Rc};
+
+        fn render(
+            (card, answers): (PendingApproval, Rc<RefCell<Vec<(String, ApprovalAnswer)>>>),
+        ) -> Element {
+            // Render the production card in the app scope so its own answer
+            // listeners can be inspected independently of child copy buttons.
+            ApprovalCard(ApprovalCardProps {
+                card,
+                waiting: 1,
+                busy: false,
+                error: None,
+                on_answer: EventHandler::new(move |answer| answers.borrow_mut().push(answer)),
+            })
+        }
+        let approval_id = uuid::Uuid::new_v4().to_string();
+        let asking_id = session_reference("peer<U+200B>");
+        let target_id = session_reference("peer\u{200b}");
+        let card = PendingApproval {
+            id: approval_id.clone(),
+            host_id: 7,
+            host_name: "a host".into(),
+            expires_at_ms: 1,
+            session: ApprovalSession {
+                id: asking_id.clone(),
+                title: None,
+                host_name: None,
+            },
+            action: ApprovalAction::Stop {
+                target: ApprovalSession {
+                    id: target_id.clone(),
+                    title: None,
+                    host_name: None,
+                },
+            },
+        };
+        let answers = Rc::new(RefCell::new(Vec::new()));
+        let mut dom = VirtualDom::new_with_props(render, (card, answers.clone()));
+        dom.rebuild_to_vec();
+        // Deny is the final control in ApprovalCard. Choosing it also avoids
+        // any clipboard or native link side effect while exercising the real
+        // answer closure after both session copy controls were rendered.
+        let vnode = dom
+            .get_scope(ScopeId::APP)
+            .expect("the app scope rendered")
+            .root_node();
+        let deny_attribute = vnode
+            .dynamic_attrs
+            .iter()
+            .enumerate()
+            .filter_map(|(index, attributes)| {
+                attributes
+                    .iter()
+                    .any(|attr| attr.name == "onclick")
+                    .then_some(index)
+            })
+            .next_back()
+            .expect("the card renders answer controls");
+        let deny = vnode
+            .mounted_dynamic_attribute(deny_attribute, &dom)
+            .expect("the answer button is mounted");
+        assert!(
+            answers.borrow().is_empty(),
+            "premise: rendering never answers a card"
+        );
+        dioxus::html::set_event_converter(Box::new(dioxus::html::SerializedHtmlEventConverter));
+        let data: Rc<dyn std::any::Any> = Rc::new(dioxus::html::PlatformEventData::new(Box::new(
+            dioxus::html::SerializedMouseData::default(),
+        )));
+        dom.runtime()
+            .handle_event("click", dioxus::core::Event::new(data, true), deny);
+        assert_eq!(
+            answers.borrow().as_slice(),
+            &[(approval_id.clone(), ApprovalAnswer::Deny)]
+        );
+        assert_ne!(approval_id, asking_id);
+        assert_ne!(approval_id, target_id);
+    }
 
     /// A running-agent card must show the whole message as isolated data,
     /// retain line breaks and explain concurrent input without trusting the

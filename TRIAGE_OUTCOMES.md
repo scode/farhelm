@@ -16185,7 +16185,11 @@
 - Completion criteria: session IDs on approval cards use the identity rendering (keeping the shortened labels), with a
   test that two IDs colliding today render differently while the action still sends the raw ID. Complexity gate: if not
   cheap, discard instead. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/host-entry-session-ids.md`.
+- Execution: implemented in change `lsxumytpsztovpuwmzkltxmvmlszwptu`, bookmark
+  `plan/host-entry-session-ids/05-approval-session-identities`, draft
+  [#2370](https://github.com/scode/farhelm/pull/2370/changes). The cheap gate holds: session rows reuse the existing
+  identity renderer, full-width layout and clipboard writer; no new validation or copy subsystem. Full IDs are shown and
+  copied per the plan's later answer, retaining compact labels. The feedback file and index entry are removed.
 
 ## agent-approval-omits-workspace-trust.md
 

@@ -5165,7 +5165,10 @@ The GUI keeps one expanded request id locally, preserves it across listing refre
 remaining request when it leaves. The other requests are header buttons below it, including requests from other hosts.
 The listing's id sequence and the expanded id together trigger the 700ms arm delay; a generation check prevents an older
 delay from arming buttons after a more recent switch. Existing decision rows are regrouped into requester, short facts,
-and full-width text, preserving the peer-text distinction and showing real commands in full.
+and full-width text, preserving the peer-text distinction and showing real commands in full. Session-reference rows
+reuse `peer::display_identity` and the existing full-width identity layout, with a Copy button calling the existing
+clipboard writer on the unmodified full reference. Escaped display text is never copied or used as an action target; the
+card's answer handlers retain its random approval ID.
 
 The approval region stays beside the shell so modal isolation leaves it live. While mounted, its small geometry observer
 follows the actual main-pane rectangle and the terminal area's top, falling back to the top row's bottom when no

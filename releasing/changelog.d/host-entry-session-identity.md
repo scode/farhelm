@@ -11,3 +11,6 @@ the upgrade also clears viewer state and the last selection where Farhelm cannot
 An approval card already waiting during the update may get no answer.
 
 Matching local session IDs on different hosts remain separately listed and addressable.
+
+Approval cards show distinct spellings for session IDs containing spaces, formatting characters or literal escape
+notation, and their Copy buttons copy the complete original ID.
