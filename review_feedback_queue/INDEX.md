@@ -14,10 +14,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## High priority: material UX degradation
 
-- [`abandoned-planners-exhaust-global-planning-slots.md`](abandoned-planners-exhaust-global-planning-slots.md) —
-  Repeated update or removal planning can leave adding, updating, and removing hosts stuck until the helm restarts, even
-  after the pages close.
-
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`agent-checkout-test-compares-lexical-tmp.md`](agent-checkout-test-compares-lexical-tmp.md) — New agent checkout

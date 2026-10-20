@@ -1842,12 +1842,17 @@ pub(super) async fn terminate_child(child: &mut tokio::process::Child) {
 ///
 /// Probe stdout belongs to the framed handshake, so this is the common cleanup
 /// half for the independently drained diagnostic stream.
+/// An escaped helper may retain stderr after the child dies; a two-second
+/// bound keeps that reader from retaining a host planning slot forever.
 async fn stop_probe(
     child: &mut tokio::process::Child,
-    stderr_task: tokio::task::JoinHandle<ProbeStderr>,
+    mut stderr_task: tokio::task::JoinHandle<ProbeStderr>,
 ) -> ProbeStderr {
     terminate_child(child).await;
-    stderr_task.await.unwrap_or_default()
+    let drained = tokio::time::timeout(Duration::from_secs(2), &mut stderr_task).await;
+    // Aborting a joined task is harmless; a timed-out reader must not outlive the probe.
+    stderr_task.abort();
+    drained.ok().and_then(Result::ok).unwrap_or_default()
 }
 
 /// Only transport failures are eligible for positive-absence exit
@@ -2065,9 +2070,7 @@ impl ProvisioningBackend for SystemBackend {
                 // Bounded even so, because this probe runs on a helm-owned
                 // task that nothing cancels: a helper that left the group (one
                 // that started its own session or process group) could
-                // otherwise hold stderr open. The
-                // other exit paths kill the group and then wait on stderr
-                // unbounded, as before; only this one waited without killing.
+                // otherwise hold stderr open, just as in `stop_probe`.
                 let mut stderr_task = stderr_task;
                 let stderr =
                     match tokio::time::timeout(Duration::from_secs(2), &mut stderr_task).await {
@@ -3064,4 +3067,68 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
         needs_tmux: !tmux_ok,
         host_tmux: tmux_ok.then_some(tmux_path),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reap an isolated child before pausing time, so OS scheduling cannot
+    /// consume the virtual deadline meant only for its diagnostic reader.
+    async fn reaped_probe() -> tokio::process::Child {
+        let mut command = tokio::process::Command::new("true");
+        command.kill_on_drop(true);
+        isolate_process_group(&mut command);
+        let mut child = command.spawn().expect("spawn isolated probe fixture");
+        assert!(child.wait().await.expect("reap probe fixture").success());
+        child
+    }
+
+    /// An open diagnostic stream must not retain planning capacity after
+    /// the probe child is gone. EOF on the peer proves the reader was
+    /// cancelled, rather than detached to keep waiting after the timeout.
+    #[farhelm_testtrace::test]
+    async fn stop_probe_bounds_and_cancels_an_open_stderr_reader() {
+        let mut child = reaped_probe().await;
+        let (mut producer, consumer) = tokio::io::duplex(64);
+        let (signal, _failures) = tokio::sync::mpsc::unbounded_channel();
+        let stderr_task = tokio::spawn(drain_probe_stderr(consumer, signal));
+        assert!(
+            !stderr_task.is_finished(),
+            "the producer still holds stderr open"
+        );
+        tokio::time::pause();
+        let started = tokio::time::Instant::now();
+        let drained =
+            tokio::time::timeout(Duration::from_secs(3), stop_probe(&mut child, stderr_task))
+                .await
+                .expect("an open stderr pipe must not keep the probe alive");
+        // Timer ticks can round up: require the two-second wait without
+        // reaching the three-second failure guard, rather than exact precision.
+        assert_eq!(started.elapsed().as_secs(), 2);
+        assert!(drained.prefix.is_empty());
+        assert!(child.try_wait().unwrap().is_some());
+        let mut byte = [0];
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), producer.read(&mut byte))
+                .await
+                .expect("the cancelled reader must release its pipe")
+                .expect("read peer EOF"),
+            0
+        );
+    }
+
+    /// Normal cleanup still returns completed diagnostics; adding a bound
+    /// must not turn an ordinary probe failure into an empty explanation.
+    #[farhelm_testtrace::test]
+    async fn stop_probe_retains_completed_stderr() {
+        let mut child = reaped_probe().await;
+        let (mut producer, consumer) = tokio::io::duplex(64);
+        producer.write_all(b"retained diagnostic").await.unwrap();
+        producer.shutdown().await.unwrap();
+        let (signal, _failures) = tokio::sync::mpsc::unbounded_channel();
+        let stderr_task = tokio::spawn(drain_probe_stderr(consumer, signal));
+        let drained = stop_probe(&mut child, stderr_task).await;
+        assert_eq!(drained.prefix, b"retained diagnostic");
+    }
 }
