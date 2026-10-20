@@ -9,10 +9,11 @@
 //! one way in the GUI and another way from the CLI would make "applying a
 //! template is exactly making its edits by hand" false on one of them.
 //!
-//! Nothing here decides whether a launch is valid as a whole; that is the
+//! Nothing here validates a launch as a whole; that is the
 //! helm's compiler for an agent launch and [`crate::CommandLaunch::validate`]
-//! for a command launch. A template is only ever checked for whether each of
-//! its fields APPLIES to the launcher it is applied to.
+//! for a command launch. Quick-launch eligibility only checks whether the active
+//! kind has its required agent or command. Applying a template checks whether
+//! each of its fields APPLIES to the launcher it is applied to.
 
 use serde::{Deserialize, Serialize};
 
@@ -300,14 +301,43 @@ pub struct TemplateFields {
 
 /// Whether one saved template can carry the direct quick-launch mark.
 ///
-/// This rule is shared by the editor and agent template writes. A key may
-/// still name a partial template; only the ⚡ mark promises a direct launch.
+/// The editor and agent template writes use the same active-kind check as a
+/// sequence containing just this template. A key may still name a partial
+/// template; the mark requires enough choices to attempt direct launch, whose
+/// full validation still belongs to the launcher and helm.
 pub fn quick_launch_eligible(fields: &TemplateFields) -> bool {
-    fields.agent.is_some()
-        || fields
-            .command
-            .as_ref()
-            .is_some_and(|command| !command.trim().is_empty())
+    stacked_quick_launch_eligible(std::iter::once(fields))
+}
+
+/// Estimate whether ordered template edits supply the active launch kind.
+///
+/// Like a fresh New draft, the fold starts on Agent with no selected agent.
+/// Each supplied kind or command replaces its previous value; an agent choice
+/// updates the agent draft only while Agent is active. An agent declared for a
+/// command cannot fill that draft. Dormant choices survive later tab switches.
+/// This knows no catalog or hosts: applying every template and validating the
+/// resulting launch remain the launcher's and helm's responsibility.
+pub fn stacked_quick_launch_eligible<'t>(
+    templates: impl IntoIterator<Item = &'t TemplateFields>,
+) -> bool {
+    let mut kind = LauncherKind::Agent;
+    let mut agent = None;
+    let mut command = None;
+    for fields in templates {
+        if let Some(next) = fields.kind {
+            kind = next;
+        }
+        if kind == LauncherKind::Agent && fields.agent.is_some() {
+            agent = fields.agent;
+        }
+        if let Some(next) = &fields.command {
+            command = Some(next);
+        }
+    }
+    match kind {
+        LauncherKind::Agent => agent.is_some(),
+        LauncherKind::Command => command.is_some_and(|command| !command.trim().is_empty()),
+    }
 }
 
 impl TemplateFields {
@@ -853,6 +883,101 @@ pub fn apply_templates<'t>(
 
 #[cfg(test)]
 mod tests {
+    /// A shortcut must have the choice required by its active tab. A command's
+    /// declared agent cannot substitute for its missing command, and kindless
+    /// stored templates retain New's Agent default rather than inferring a tab.
+    #[test]
+    fn quick_launch_requires_the_active_kinds_choice() {
+        let agent = TemplateFields {
+            agent: Some(LaunchHarness::Claude),
+            ..Default::default()
+        };
+        let command = TemplateFields {
+            kind: Some(LauncherKind::Command),
+            command: Some("run-task".into()),
+            ..Default::default()
+        };
+        assert!(!quick_launch_eligible(&TemplateFields::default()));
+        assert!(!quick_launch_eligible(&TemplateFields {
+            kind: Some(LauncherKind::Agent),
+            ..Default::default()
+        }));
+        assert!(quick_launch_eligible(&agent));
+        assert!(quick_launch_eligible(&command));
+        assert!(!quick_launch_eligible(&TemplateFields {
+            kind: Some(LauncherKind::Command),
+            ..agent.clone()
+        }));
+        assert!(!quick_launch_eligible(&TemplateFields {
+            agent: agent.agent,
+            command: Some(" \t".into()),
+            ..command.clone()
+        }));
+        assert!(!quick_launch_eligible(&TemplateFields {
+            kind: None,
+            ..command.clone()
+        }));
+        assert!(!quick_launch_eligible(&TemplateFields {
+            kind: Some(LauncherKind::Agent),
+            ..command
+        }));
+    }
+
+    /// Composition judges the final active tab and retains dormant choices.
+    /// Omissions keep earlier values, while an explicit blank command replaces
+    /// a runnable one. Command-only agent declarations never fill Agent's draft.
+    #[test]
+    fn stacked_quick_launch_tracks_order_and_dormant_choices() {
+        let agent = TemplateFields {
+            agent: Some(LaunchHarness::Codex),
+            ..Default::default()
+        };
+        let modifier = TemplateFields {
+            model: Some(Some("custom".into())),
+            ..Default::default()
+        };
+        let command_tab = TemplateFields {
+            kind: Some(LauncherKind::Command),
+            agent: Some(LaunchHarness::Claude),
+            ..Default::default()
+        };
+        let command = TemplateFields {
+            command: Some("run-task".into()),
+            ..Default::default()
+        };
+        let blank_command = TemplateFields {
+            command: Some(" \t".into()),
+            ..Default::default()
+        };
+        let agent_tab = TemplateFields {
+            kind: Some(LauncherKind::Agent),
+            ..Default::default()
+        };
+        assert!(!stacked_quick_launch_eligible([]));
+        assert!(!stacked_quick_launch_eligible([&modifier]));
+        assert!(stacked_quick_launch_eligible([&agent, &modifier]));
+        assert!(!stacked_quick_launch_eligible([&command_tab]));
+        assert!(!stacked_quick_launch_eligible([&agent, &command_tab]));
+        assert!(stacked_quick_launch_eligible([&command_tab, &command]));
+        assert!(!stacked_quick_launch_eligible([
+            &command_tab,
+            &command,
+            &blank_command,
+        ]));
+        assert!(!stacked_quick_launch_eligible([&command_tab, &agent_tab]));
+        assert!(stacked_quick_launch_eligible([
+            &agent,
+            &command_tab,
+            &agent_tab,
+        ]));
+        assert!(stacked_quick_launch_eligible([
+            &command_tab,
+            &command,
+            &agent_tab,
+            &command_tab,
+        ]));
+    }
+
     /// Existing named templates become bases without rewriting their JSON.
     /// Stacking must keep name and policy together: a template that leaves the
     /// name alone cannot turn a fixed name into a base or pin a base to Fixed.

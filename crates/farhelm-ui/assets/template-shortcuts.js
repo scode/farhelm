@@ -160,8 +160,13 @@
     // Rust drains one snapshot for each relay that dispatches a batch. Keep
     // the physical press's modal epoch even while an earlier read is pending.
     root.farhelmTakeTemplateShortcutPress = () => presses.shift();
-    const capturePress = context => presses.push({
+    const capturePress = (context, sequence = false) => presses.push({
       context, modal_opening: root.__farhelmModalOpening || 0,
+      // This projection is published in the same render as the pill's names.
+      // Copy at physical Enter; a newer Rust signal may not be on screen yet.
+      sequence_bindings: sequence
+        ? document.querySelector(".launch-sequence-bindings")?.getAttribute("data-bindings") ?? null
+        : null,
     });
     function cancel() {
       if (!armed) return;
@@ -238,7 +243,7 @@
       } else {
         if (result.action === "launch") {
           armed = false;
-          if (armedHasEntry) capturePress(context);
+          if (armedHasEntry) capturePress(context, true);
           armedHasEntry = false;
         } else if (result.action === "digit" || result.action === "bolt") {
           armedHasEntry = true;

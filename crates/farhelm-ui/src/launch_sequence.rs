@@ -242,6 +242,69 @@ pub(crate) enum TemplateReference {
     Unbound(Option<String>),
 }
 
+/// Keep the initiating gesture through dispatch so a fallback explains the
+/// action the user actually took. Only physical shortcuts own a JS press snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum QuickLaunchOrigin {
+    Number,
+    Bolt,
+    TemplateList,
+    QuickSwitcher,
+    Sequence,
+}
+
+impl QuickLaunchOrigin {
+    /// Physical relays have queued the press-time DOM snapshot; picker rows
+    /// instead observe ownership after their dialog has finished closing.
+    pub(crate) fn keyboard(self) -> bool {
+        matches!(self, Self::Number | Self::Bolt | Self::Sequence)
+    }
+
+    /// Incomplete sequences already used the prefix; telling them to use it
+    /// again conceals the actual problem, the combined setup still lacking a choice.
+    /// Dispatch supplies a nonempty resolved batch; non-sequence origins hold one template.
+    pub(crate) fn incomplete_banner(self, templates: &[LaunchTemplate]) -> PartialTemplateBanner {
+        match self {
+            Self::Sequence => PartialTemplateBanner::Sequence,
+            Self::Number => PartialTemplateBanner::Number(templates[0].name.clone()),
+            Self::Bolt | Self::TemplateList | Self::QuickSwitcher => {
+                PartialTemplateBanner::Template(templates[0].name.clone())
+            }
+        }
+    }
+}
+
+/// An opening-owned hint, separate from launch refusal or remembered draft state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PartialTemplateBanner {
+    Number(String),
+    Template(String),
+    Sequence,
+}
+
+impl PartialTemplateBanner {
+    /// Render peer names visibly without letting their formatting impersonate
+    /// the app's explanation. The existing banner owns expiry and dismissal.
+    pub(crate) fn text(&self) -> String {
+        match self {
+            Self::Number(name) => format!(
+                "{} cannot launch on its own. Use {} to combine template keys, then Enter to launch, or complete this setup below.",
+                display_peer(name),
+                TEMPLATE_SHORTCUTS
+                    .prefix
+                    .label(TEMPLATE_SHORTCUTS.mac_desktop)
+            ),
+            Self::Template(name) => format!(
+                "{} needs more choices before it can launch; complete it below.",
+                display_peer(name)
+            ),
+            Self::Sequence => {
+                "This sequence doesn't make a complete setup; complete it below.".into()
+            }
+        }
+    }
+}
+
 impl TemplateReference {
     /// Read the binding used by the indicator and by sequence capture alike.
     /// An explicitly unbound reference cannot gain authority from newer settings.
@@ -289,6 +352,23 @@ pub(crate) fn capture_sequence_bindings(
 pub(crate) struct ShortcutContextSnapshot {
     pub(crate) context: String,
     pub(crate) modal_opening: u64,
+    /// JSON copied from the indicator's DOM at physical Enter, before Rust
+    /// can observe a preference read whose render has not reached the page.
+    pub(crate) sequence_bindings: Option<String>,
+}
+
+impl ShortcutContextSnapshot {
+    /// Missing publication grants no sequence authority. Direct shortcuts
+    /// never call this: they intentionally resolve fresh bindings instead.
+    pub(crate) fn capture_sequence(
+        &self,
+        references: &[TemplateReference],
+    ) -> Option<Vec<TemplateReference>> {
+        let preferences =
+            serde_json::from_str::<crate::api::Preferences>(self.sequence_bindings.as_deref()?)
+                .ok()?;
+        Some(capture_sequence_bindings(references, &preferences))
+    }
 }
 
 /// Take the listener's snapshot from the physical shortcut press.
@@ -352,13 +432,20 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
     let sequence = use_context::<LaunchSequence>().0;
     let in_launcher = use_context::<LaunchSequenceInLauncher>().0;
     let preferences = use_context::<SharedPreferences>();
-    let Some(references) = sequence() else {
-        return rsx! {};
-    };
+    let references = sequence();
+    // One render publishes both names and their raw bindings. A separate
+    // component could publish newer bindings before these labels arrived.
+    let preferences = preferences.0.read();
+    let bindings = serde_json::json!({
+        "quick_launch_template": preferences.quick_launch_template,
+        "template_shortcuts": preferences.template_shortcuts,
+    })
+    .to_string();
     let names = references
+        .as_deref()
+        .unwrap_or_default()
         .iter()
         .map(|reference| {
-            let preferences = preferences.0.read();
             reference
                 .name(&preferences)
                 .map(|name| display_peer(name))
@@ -371,6 +458,10 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
         })
         .collect::<Vec<_>>();
     rsx! {
+        // Remain mounted while idle: rapid prefix/digit/Enter can complete
+        // before the first pill render, using the last published bindings.
+        span { class: "launch-sequence-bindings", hidden: true, "data-bindings": bindings }
+        if let Some(references) = references {
         div { class: "launch-sequence-indicator", role: "status",
             if references.is_empty() {
                 if in_launcher() {
@@ -390,12 +481,91 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
                 }
             }
         }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A press carries only the two published preference fields, not the whole
+    /// settings model. Later dispatch reads cannot bind a key the page showed
+    /// as unbound, and a missing or malformed projection grants no authority.
+    #[test]
+    fn press_captures_only_published_bindings() {
+        let press = ShortcutContextSnapshot {
+            context: "page".into(),
+            modal_opening: 0,
+            sequence_bindings: Some(
+                r#"{"quick_launch_template":"shown-bolt","template_shortcuts":{"1":"shown-one"}}"#
+                    .into(),
+            ),
+        };
+        let references = [
+            TemplateReference::Number("1".into()),
+            TemplateReference::Bolt,
+            TemplateReference::Number("2".into()),
+        ];
+        assert_eq!(
+            press.capture_sequence(&references),
+            Some(vec![
+                TemplateReference::Name("shown-one".into()),
+                TemplateReference::Name("shown-bolt".into()),
+                TemplateReference::Unbound(Some("2".into())),
+            ])
+        );
+        for projection in [None, Some("not-json".into())] {
+            assert!(
+                ShortcutContextSnapshot {
+                    sequence_bindings: projection,
+                    ..press.clone()
+                }
+                .capture_sequence(&references)
+                .is_none()
+            );
+        }
+    }
+
+    /// The same incomplete template needs different advice for a number key,
+    /// an ordinary picker, and a sequence that already used the prefix.
+    #[test]
+    fn incomplete_hints_explain_the_initiating_action() {
+        let templates = [LaunchTemplate {
+            name: "model-only".into(),
+            fields: Default::default(),
+        }];
+        let number = QuickLaunchOrigin::Number
+            .incomplete_banner(&templates)
+            .text();
+        assert!(number.starts_with("model-only cannot launch on its own. Use "));
+        assert!(
+            number.contains(
+                &TEMPLATE_SHORTCUTS
+                    .prefix
+                    .label(TEMPLATE_SHORTCUTS.mac_desktop)
+            )
+        );
+        for origin in [
+            QuickLaunchOrigin::Bolt,
+            QuickLaunchOrigin::TemplateList,
+            QuickLaunchOrigin::QuickSwitcher,
+        ] {
+            assert_eq!(
+                origin.incomplete_banner(&templates).text(),
+                "model-only needs more choices before it can launch; complete it below."
+            );
+        }
+        for batch in [
+            templates.to_vec(),
+            vec![templates[0].clone(), templates[0].clone()],
+        ] {
+            assert_eq!(
+                QuickLaunchOrigin::Sequence.incomplete_banner(&batch).text(),
+                "This sequence doesn't make a complete setup; complete it below."
+            );
+        }
+    }
 
     /// Moving keys or modifiers in the definition must move every displayed chord.
     /// A literal label elsewhere would let the listener and interface disagree.

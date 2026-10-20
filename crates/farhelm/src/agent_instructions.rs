@@ -184,7 +184,8 @@ fn render(agent: &Command) -> String {
          Edit sets only the fields you give and\n\
          cannot unset one or change a template between agent and command launches, so delete\n\
          and recreate a template to do either. --command always needs --yolo or --no-yolo. The\n\
-         --quick-launch flag marks a template that chooses an agent or a nonblank command;\n\
+         --quick-launch flag marks a template: an agent launch needs an agent, and a command\n\
+         launch needs a nonblank command. With no launch kind, judge it as an agent launch.\n\
          --key DIGIT assigns any template a number key (1–9 or 0). Both move an existing\n\
          mark or key from another template, and the approval card names the move. On edit,\n\
          --no-quick-launch and --no-key clear this template's own assignments. You can edit\n\

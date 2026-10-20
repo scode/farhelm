@@ -981,7 +981,8 @@ pub(crate) fn ListView(
     // names against another fetch could compose a different setup mid-opening.
     let mut initial_quick_templates =
         use_signal(Vec::<farhelm_proto::launcher::LaunchTemplate>::new);
-    let mut initial_partial_template = use_signal(|| None::<String>);
+    let mut initial_partial_template =
+        use_signal(|| None::<crate::launch_sequence::PartialTemplateBanner>);
     // Quick launch owns one fetch/mount/submit handoff. New still composes the
     // request; this flag only keeps its fields hidden until a fallback is needed.
     let mut quick_launch_pending = use_signal(|| false);
@@ -992,7 +993,7 @@ pub(crate) fn ListView(
         std::collections::VecDeque::<(
             u64,
             Vec<crate::launch_sequence::TemplateReference>,
-            bool,
+            crate::launch_sequence::QuickLaunchOrigin,
             bool,
         )>::new,
     );
@@ -1002,6 +1003,9 @@ pub(crate) fn ListView(
     let mut launch_sequence = use_context::<crate::launch_sequence::LaunchSequence>().0;
     let mut launch_sequence_in_launcher =
         use_context::<crate::launch_sequence::LaunchSequenceInLauncher>().0;
+    // A cancelled sequence must not let its late preference read rewrite the
+    // indicator of a later one. Enter still captures only what was displayed.
+    let mut sequence_generation = use_signal(|| 0_u64);
     let mut auto_launch = use_signal(|| false);
     // One opening generation fences the fresh read and any queued DOM submit.
     // Ordinary New, Clone/Replace and Templates revoke it synchronously.
@@ -3469,11 +3473,14 @@ pub(crate) fn ListView(
     // still opens New once; a visible launcher receives captured batches in
     // press order without a second resolver or a second template apply path.
     let quick_launch = use_callback(
-        move |(references, keyboard): (Vec<crate::launch_sequence::TemplateReference>, bool)| {
+        move |(references, origin): (
+            Vec<crate::launch_sequence::TemplateReference>,
+            crate::launch_sequence::QuickLaunchOrigin,
+        )| {
             let blocked = (*quick_launch_pending.peek() && !*show_create.peek())
                 || *templates_open.peek()
                 || ops.busy_now();
-            if blocked && !keyboard {
+            if blocked && !origin.keyboard() {
                 return;
             }
             let opening = if blocked || *show_create.peek() {
@@ -3484,7 +3491,7 @@ pub(crate) fn ListView(
             };
             shortcut_dispatch_queue
                 .write()
-                .push_back((opening, references, keyboard, blocked));
+                .push_back((opening, references, origin, blocked));
             if *shortcut_dispatch_running.peek() {
                 return;
             }
@@ -3496,13 +3503,13 @@ pub(crate) fn ListView(
                     // Drop the signal's write guard before any await: a second
                     // shortcut must be able to join the queue during this read.
                     let next = { shortcut_dispatch_queue.write().pop_front() };
-                    let Some((opening, references, keyboard, blocked)) = next else {
+                    let Some((opening, references, origin, blocked)) = next else {
                         break;
                     };
                     // The capture listener and dispatch ask the same DOM rule.
                     // Its epoch revokes a press when a different dialog opened
                     // during the awaited read, even if that dialog then closed.
-                    let entry = if keyboard {
+                    let entry = if origin.keyboard() {
                         crate::launch_sequence::take_shortcut_press_snapshot().await
                     } else {
                         crate::launch_sequence::shortcut_context_snapshot().await
@@ -3519,6 +3526,15 @@ pub(crate) fn ListView(
                     if !matches!(entry.context.as_str(), "page" | "launcher") {
                         continue;
                     }
+                    let references =
+                        if origin == crate::launch_sequence::QuickLaunchOrigin::Sequence {
+                            let Some(captured) = entry.capture_sequence(&references) else {
+                                continue;
+                            };
+                            captured
+                        } else {
+                            references
+                        };
                     let result = async {
                         let fresh = crate::api::fetch_preferences(&base).await?;
                         let templates = crate::api::fetch_templates(&base).await?;
@@ -3588,23 +3604,31 @@ pub(crate) fn ListView(
                                 if let Some(templates) = resolved {
                                     if open_new.call(None) {
                                         let launchable =
-                                            super::templates::stacked_quick_launch_eligible(
-                                                &templates,
+                                            farhelm_proto::launcher::stacked_quick_launch_eligible(
+                                                templates.iter().map(|template| &template.fields),
                                             );
                                         auto_launch.set(launchable);
-                                        if !launchable && templates.len() == 1 {
+                                        if !launchable {
                                             initial_partial_template
-                                                .set(Some(templates[0].name.clone()));
+                                                .set(Some(origin.incomplete_banner(&templates)));
                                         }
                                         initial_quick_templates.set(templates);
                                     }
-                                } else if let [
-                                    crate::launch_sequence::TemplateReference::Name(name),
-                                ] = references.as_slice()
+                                } else if let Some(name) =
+                                    references.iter().find_map(|reference| match reference {
+                                        crate::launch_sequence::TemplateReference::Name(name)
+                                            if !templates
+                                                .iter()
+                                                .any(|template| &template.name == name) =>
+                                        {
+                                            Some(name)
+                                        }
+                                        _ => None,
+                                    })
                                 {
-                                    // The row came from an earlier switcher snapshot. New
-                                    // keeps the ordinary quick-launch refusal visible when
-                                    // another window has since renamed or deleted it.
+                                    // Pickers and sequences retain names from an earlier
+                                    // snapshot. A missing name belongs in New's refusal,
+                                    // rather than an unrelated binding hint in Templates.
                                     if open_new.call(None) {
                                         initial_create_error.set(Some(format!(
                                             "template {name} is no longer available"
@@ -3687,14 +3711,16 @@ pub(crate) fn ListView(
                     restore = !open_new.call(Some(action));
                 }
                 Some(super::quick_switcher::SwitcherPick::QuickLaunch) => {
-                    quick_launch
-                        .call((vec![crate::launch_sequence::TemplateReference::Bolt], false));
+                    quick_launch.call((
+                        vec![crate::launch_sequence::TemplateReference::Bolt],
+                        crate::launch_sequence::QuickLaunchOrigin::QuickSwitcher,
+                    ));
                     restore = false;
                 }
                 Some(super::quick_switcher::SwitcherPick::TemplateLaunch(name)) => {
                     quick_launch.call((
                         vec![crate::launch_sequence::TemplateReference::Name(name)],
-                        false,
+                        crate::launch_sequence::QuickLaunchOrigin::TemplateList,
                     ));
                     restore = false;
                 }
@@ -3718,6 +3744,7 @@ pub(crate) fn ListView(
     // old title must never let this shortcut rename the previous selection.
     let rename_target =
         use_memo(move || open_session_title().filter(|(id, _)| selected().as_ref() == Some(id)));
+    let sequence_base = base.clone();
     rsx! {
         // Relays remain enabled while armed state catches up in the DOM.
         // Their live signal guards preserve prefix/digit/Enter event order
@@ -3731,6 +3758,22 @@ pub(crate) fn ListView(
                     && !*templates_open.peek() && !ops.busy_now() {
                     launch_sequence_in_launcher.set(*show_create.peek());
                     launch_sequence.set(Some(Vec::new()));
+                    sequence_generation += 1;
+                    let generation = *sequence_generation.peek();
+                    let base = sequence_base.clone();
+                    spawn(async move {
+                        // Refresh on the prefix, never at Enter: a binding that
+                        // the pill showed as unbound must not acquire authority
+                        // from dispatch's later read.
+                        if let Ok(fresh) = crate::api::fetch_preferences(&base).await
+                            && *sequence_generation.peek() == generation
+                            && launch_sequence.peek().is_some()
+                        {
+                            let fresh = crate::api::template_bindings_after_read(fresh);
+                            preferences.0.write().quick_launch_template = fresh.quick_launch_template;
+                            preferences.0.write().template_shortcuts = fresh.template_shortcuts;
+                        }
+                    });
                 }
             },
         }
@@ -3759,12 +3802,10 @@ pub(crate) fn ListView(
             onclick: move |_| {
                 let queued = launch_sequence.write().take();
                 if let Some(queue) = queued.filter(|queue| !queue.is_empty()) {
-                    // Capture from the indicator's settings before the worker's
-                    // fresh read can observe a shortcut moved by another client.
-                    let captured = crate::launch_sequence::capture_sequence_bindings(
-                        &queue, &preferences.0.peek(),
-                    );
-                    quick_launch.call((captured, true));
+                    // JS has already copied the indicator's published bindings
+                    // at physical Enter. The worker pairs them with this raw
+                    // queue before its fresh reads can observe another binding.
+                    quick_launch.call((queue, crate::launch_sequence::QuickLaunchOrigin::Sequence));
                 }
             },
         }
@@ -3789,14 +3830,14 @@ pub(crate) fn ListView(
             "data-opening-generation": "{opening_generation()}",
             "data-read-completed-generation": "{quick_read_completed()}",
             disabled: (quick_launch_pending() && !show_create()) || templates_open() || busy,
-            onclick: move |_| quick_launch.call((vec![crate::launch_sequence::TemplateReference::Bolt], true)),
+            onclick: move |_| quick_launch.call((vec![crate::launch_sequence::TemplateReference::Bolt], crate::launch_sequence::QuickLaunchOrigin::Bolt)),
         }
         for key in crate::launch_sequence::TEMPLATE_SHORTCUTS.number.keys.iter().map(|key| key.value) {
             button {
                 key: "number-{key}", class: "template-number-trigger", r#type: "button",
                 hidden: true, tabindex: "-1", "data-number-key": "{key}",
                 disabled: (quick_launch_pending() && !show_create()) || templates_open() || busy,
-                onclick: move |_| quick_launch.call((vec![crate::launch_sequence::TemplateReference::Number(key.into())], true)),
+                onclick: move |_| quick_launch.call((vec![crate::launch_sequence::TemplateReference::Number(key.into())], crate::launch_sequence::QuickLaunchOrigin::Number)),
             }
         }
         // Status sounds follow the very replies these rows display. Keeping
@@ -4065,7 +4106,7 @@ pub(crate) fn ListView(
                     initial_action: if clone_prefill().is_none() { initial_create_action() } else { None },
                     initial_templates: if clone_prefill().is_none() { initial_quick_templates() } else { Vec::new() },
                     shortcut_requests: shortcut_apply_requests,
-                    partial_template_name: if clone_prefill().is_none() { initial_partial_template() } else { None },
+                    partial_template_banner: if clone_prefill().is_none() { initial_partial_template() } else { None },
                     // The "replace with" source as the sidebar currently
                     // lists it, so the launcher's warning follows a source
                     // that starts or stops while it is open. While the

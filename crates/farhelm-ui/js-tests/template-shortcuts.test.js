@@ -194,6 +194,12 @@ function page(client = clients[2], definition = defaultDefinition) {
   window.farhelmOpenQuickSwitcher = trigger => trigger.click();
   const modals = [];
   document.form = null;
+  // The indicator publishes this node even when no visible pill has mounted.
+  document.publishedBindings = { quick_launch_template: null, template_shortcuts: {} };
+  document.bindings = { getAttribute: name => {
+    assert.equal(name, "data-bindings");
+    return JSON.stringify(document.publishedBindings);
+  } };
   document.hidden = false;
   document.selection = { isCollapsed: true };
   window.getSelection = () => document.selection;
@@ -203,6 +209,7 @@ function page(client = clients[2], definition = defaultDefinition) {
   };
   document.querySelector = selector => {
     if (selector === ".create-session-form") return document.form;
+    if (selector === ".launch-sequence-bindings") return document.bindings;
     if (selector === ".quick-launch-trigger") return direct.get("bolt") || null;
     if (selector === ".quick-switcher-template-trigger") return document.templateList || null;
     if (selector.startsWith(".template-number-trigger")) {
@@ -258,6 +265,28 @@ for (const client of clients) {
     assert.equal(direct, 1, "Launch must synchronously retire keyboard ownership");
   });
 }
+
+/** The DOM projection, not a newer Rust read or a later render, owns Enter.
+ * The idle projection also covers fast relays without mounting a visible pill.
+ */
+test("sequence Enter copies published bindings and preserves displayed unbound keys", () => {
+  const p = page();
+  p.document.publishedBindings = { quick_launch_template: "shown-bolt", template_shortcuts: { "1": "shown-one" } };
+  p.prefix();
+  p.press({ code: "Digit1" });
+  p.press({ code: "Digit2" });
+  p.press({ code: "Enter", key: "Enter" });
+  // A newer preference read/render cannot rewrite a press already queued for Rust.
+  p.document.publishedBindings = { quick_launch_template: "new-bolt", template_shortcuts: { "1": "new-one", "2": "new-two" } };
+  const first = p.window.farhelmTakeTemplateShortcutPress();
+  assert.deepEqual(JSON.parse(first.sequence_bindings), {
+    quick_launch_template: "shown-bolt", template_shortcuts: { "1": "shown-one" },
+  });
+  p.prefix();
+  p.press({ code: "Digit2" });
+  p.press({ code: "Enter", key: "Enter" });
+  assert.deepEqual(JSON.parse(p.window.farhelmTakeTemplateShortcutPress().sequence_bindings), p.document.publishedBindings);
+});
 
 test("missing Begin leaves every key alone; disabled Begin consumes without arming", () => {
   for (const missing of [true, false]) {

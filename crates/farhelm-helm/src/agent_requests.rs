@@ -2442,7 +2442,10 @@ fn apply_template_shortcuts(
     if after.quick_launch.as_deref() == Some(name)
         && !farhelm_proto::launcher::quick_launch_eligible(fields)
     {
-        return Err("⚡ needs a template that chooses an agent or a nonblank command".into());
+        return Err(
+            "⚡ needs an agent for an agent launch or a nonblank command for a command launch"
+                .into(),
+        );
     }
     let current_key = before
         .keys
@@ -11021,9 +11024,11 @@ mod tests {
     /// This keeps the card's account of a move tied to the preference
     /// snapshot that the write transaction later compares. An agent should
     /// not get a successful empty clear or take ⚡ with an unusable template.
+    /// A previously marked template that fails the active-kind rule can still
+    /// clear its own mark, so the stricter rule does not trap an old assignment.
     #[test]
     fn shortcut_edits_obey_the_template_and_binding_rules() {
-        use farhelm_proto::launcher::TemplateFields;
+        use farhelm_proto::launcher::{LauncherKind, TemplateFields};
 
         let before = TemplateBindings {
             quick_launch: Some("old".into()),
@@ -11071,7 +11076,7 @@ mod tests {
             )
             .is_ok()
         );
-        assert!(
+        assert_eq!(
             apply_template_shortcuts(
                 "partial",
                 &partial,
@@ -11082,8 +11087,19 @@ mod tests {
                 true,
                 &before,
             )
-            .unwrap_err()
-            .contains("nonblank command")
+            .unwrap_err(),
+            "⚡ needs an agent for an agent launch or a nonblank command for a command launch"
+        );
+        let empty_command_with_agent = TemplateFields {
+            kind: Some(LauncherKind::Command),
+            agent: Some(farhelm_proto::LaunchHarness::Codex),
+            command: Some(" \t".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            apply_template_shortcuts("new", &empty_command_with_agent, &edit, false, &before,)
+                .unwrap_err(),
+            "⚡ needs an agent for an agent launch or a nonblank command for a command launch"
         );
         let already_marked = TemplateBindings {
             quick_launch: Some("new".into()),
@@ -11100,6 +11116,19 @@ mod tests {
             .unwrap_err()
             .contains("nonblank command")
         );
+        let (cleared, card) = apply_template_shortcuts(
+            "new",
+            &empty_command_with_agent,
+            &TemplateShortcutEdit {
+                quick_launch: Some(false),
+                ..Default::default()
+            },
+            false,
+            &already_marked,
+        )
+        .unwrap();
+        assert_eq!(cleared.quick_launch, None);
+        assert_eq!(card.unwrap().quick_launch, Some(QuickLaunchCard::Clear));
         assert!(
             apply_template_shortcuts(
                 "new",

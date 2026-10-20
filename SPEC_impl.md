@@ -4945,7 +4945,9 @@ read check, so a dialog that appears during the read cannot receive its result a
 definitions to ordinary New, replaying one through the existing template/search acceptance path per effect pass. A
 refusal stops the remaining replay. Automatic submission waits for a render after the final replay, so its captured
 readiness and refusal describe the resulting draft. A coarse fold over launch kind, agent and command decides whether to
-attempt direct launch; the mounted form retains full validation, catalog, host and admission authority.
+attempt direct launch; the mounted form retains full validation, catalog, host and admission authority. That fold lives
+in the protocol crate and also judges a single template for ⚡ marking, its hints, and agent writes. Only the active
+kind counts: Agent needs an agent, Command a nonblank command, and omitted kind starts on Agent.
 
 The same dispatch serializes fresh reads when shortcuts arrive in a visible New, Clone or Replace with launcher. Each
 press or completed sequence becomes its own captured batch in a form-owned FIFO, fenced by the opening generation and
@@ -4965,14 +4967,20 @@ guard and before other command listeners, consuming with stopImmediatePropagatio
 otherwise still run. Pointer/click, blur, visibility, modal focus and the existing modal-opening hook cancel both state
 owners. A launcher-owned text field admits the prefix only without selected text; other editors keep their usual key
 action. Hidden quick-launch preparation consumes recognized keys without enqueuing a relay. The relays stay mounted and
-enabled across render-delayed armed state; Enter takes the queue and captures its displayed bindings synchronously
-before starting the existing generation-fenced quick-launch read.
+enabled across render-delayed armed state. The indicator publishes its raw binding projection beside the visible names
+in the same render, retaining a hidden projection while idle for rapid input before the first pill render. Physical
+Enter copies that DOM projection into the existing press snapshot; the worker pairs it with the raw reference queue
+before starting the existing generation-fenced quick-launch read. Starting the prefix refreshes shared bindings once; a
+cancelled or superseded sequence cannot publish its late preference read. Enter never refreshes the captured bindings.
+Missing captured names reveal New with its existing named-template refusal, including within multi-template sequences.
 
 Number bindings accept partial templates; the bolt keeps its runnable-template affordance. A single partial-template key
-passes its name to New for a prominent alert. The form starts one component-owned six-second expiry only after initial
-application finishes, so a slow catalog read cannot spend the viewing interval. Form input, changes and deliberate
-search choices dismiss the hint; Clone/Replace reseeding withdraws it. Nothing stores the hint or changes launch
-admission.
+passes a number-key banner to New for a prominent alert explaining the prefix. Dispatch carries an explicit origin:
+number key, bolt chord, template list, quick switcher, or sequence. Incomplete bolt/list/switcher choices instead say
+the template needs more choices; any incomplete sequence says its combined setup is incomplete. The form starts one
+component-owned six-second expiry only after initial application finishes, so a slow catalog read cannot spend the
+viewing interval. Form input, changes and deliberate search choices dismiss the hint; Clone/Replace reseeding withdraws
+it. Nothing stores the hint or changes launch admission.
 
 A template is stored by the helm in `helm.db` (schema 38, table `launch_templates`): its unique name, and its fields as
 the JSON of `farhelm_proto::launcher::TemplateFields`. The fields stay one JSON value rather than a column each because
