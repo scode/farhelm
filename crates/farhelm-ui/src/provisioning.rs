@@ -1009,7 +1009,8 @@ pub(crate) fn PlanConfirmation(
 /// Render the three answers for an initial or rerun host setup offer.
 ///
 /// Both callers place these header, body and footer siblings directly in the
-/// host dialog frame, so only the plan scrolls. The helm supplies the plan;
+/// host dialog frame; a very short window scrolls the whole card instead of
+/// pinning chrome that cannot fit. The helm supplies the plan;
 /// this component owns presentation, never its actions or authorization. The
 /// caller supplies an already escaped display name and its cancel lifecycle.
 /// The plan body has its own named tab stop: WebKit does not make
@@ -1087,10 +1088,11 @@ pub(crate) fn SetupPlanConfirmation(
 /// stays. The confirm button is in the danger tier
 /// because the removal cannot be undone from Farhelm. Confirm takes initial
 /// focus when enabled so a new Enter accepts the requested plan. These frame siblings
-/// pin the actual host identity and answers around the scrollable plan. Header
+/// normally pin the host identity and answers around the scrollable plan; a
+/// very short window scrolls the whole card to keep every part reachable. Header
 /// dismissal uses the caller's Cancel path, including its row-focus return.
 /// The plan's named tab stop lets keyboard users scroll its steps in WebKit
-/// without moving the pinned answers or accepting the uninstall.
+/// without accepting the uninstall or moving answers that still fit pinned.
 #[component]
 pub(crate) fn UninstallConfirmation(
     confirmation: String,

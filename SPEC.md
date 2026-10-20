@@ -1358,6 +1358,10 @@ the edge to reset it, or focus the separator and use Left and Right to step by 1
 like terminal text size: it is about the screen in front of the user, rather than a preference all clients should share.
 The main pane keeps its 320px floor; a narrower window scrolls horizontally.
 
+Host setup, removal, uninstall and refusal dialogs normally pin their header and answers. A window too short to fit them
+scrolls the whole card, so every explanation and control stays reachable. A shortened heading retains the full
+destination in the body.
+
 Every scrollable region in the GUI can be reached and scrolled with the keyboard alone in every engine Farhelm ships on,
 WebKit included. A region whose content holds nothing focusable gets its own tab stop with an accessible name. Pop-up
 suggestion lists and menus use their own arrow keys, the pointer-only file hover cannot be scrolled by anyone, and the

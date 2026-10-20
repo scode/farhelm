@@ -29,9 +29,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`introduction-omits-automatic-install-prerequisites.md`](introduction-omits-automatic-install-prerequisites.md) — The
   automatic-installation claim omits architecture and systemd user-manager prerequisites.
 
-- [`pinned-host-dialog-chrome-can-hide-content.md`](pinned-host-dialog-chrome-can-hide-content.md) — Fixed host-dialog
-  headings and answers can exceed the available height, hiding controls, plan content or a refusal's explanation.
-
 - [`update-check-replacement-loses-focus.md`](update-check-replacement-loses-focus.md) — Installing an update replaces
   the keyboard-focused check button without transferring focus to the restart control.
 

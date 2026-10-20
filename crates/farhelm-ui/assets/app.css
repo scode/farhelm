@@ -3384,10 +3384,12 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .host-settings-mark .host-kind-icon { width: 24px; height: 24px; }
 .host-settings-heading { flex: 1; min-width: 0; }
 /* Destinations and peer-reported versions are unbounded. The pinned heading
-   must not grow with them; the full destination remains in Connection and
-   the dialog's accessible name. */
+   must not grow with them; the full destination remains in Connection, the
+   plan, or the action dialog's body. */
 .host-settings-refreshed .host-settings-title,
-.host-settings-refreshed .host-settings-version {
+.host-dialog-framed .host-settings-title,
+.host-settings-refreshed .host-settings-version,
+.host-dialog-framed .host-settings-version {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3518,7 +3520,8 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
 .host-settings-footer > span { color: var(--fg-1); font-size: 11px; }
 /* Only the body gives up height. Keeping the identifying header and closing
    controls outside its scroll region also makes keyboard scrolling reveal
-   fields without moving the controls needed to leave the dialog. */
+   fields without moving the controls needed to leave the dialog. Action
+   dialogs fall back to whole-card scrolling when the chrome cannot fit. */
 .host-settings-refreshed > .host-settings-header,
 .host-settings-refreshed > .host-settings-footer,
 .host-dialog-framed > .host-settings-header,
@@ -3529,6 +3532,10 @@ html:has(.sidebar-resize-handle[data-resizing]) * {
   min-height: 0;
   overflow: auto;
 }
+/* Reserve readable body space. When chrome plus that space exceeds the card,
+   outer scrolling reveals its siblings without depending on a viewport cutoff. */
+.host-settings-dialog.host-dialog-framed { overflow: auto; }
+.host-settings-dialog.host-dialog-framed > .host-settings-body { min-height: 3em; }
 /* Keep the scroll region's keyboard ring inside its own scrollport so the
    dialog frame cannot clip it, including when a plan has a copy control. */
 .host-settings-refreshed > .host-settings-body[tabindex="0"]:focus-visible,

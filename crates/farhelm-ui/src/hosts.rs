@@ -135,6 +135,8 @@ fn HostRefusalDialog(
     on_remove: EventHandler<()>,
 ) -> Element {
     let name = gui_host_name(&host.name, host.kind.is_this_machine());
+    // The shortened heading must leave the complete destination readable.
+    let destination = display_peer(host.destination.as_deref().unwrap_or(&host.name));
     let action = match refusal.action {
         HostRefusalAction::Setup => "set up host",
         HostRefusalAction::Update => "update host",
@@ -170,6 +172,7 @@ fn HostRefusalDialog(
                     on_dismiss: on_close,
                 }
                 div { class: "host-settings-body", tabindex: "0", role: "region", aria_label: "reason for refusal",
+                    p { class: "host-settings-value peer-value host-dialog-destination", dir: "ltr", "{destination}" }
                     PeerLine {
                         class: "host-refusal-reason",
                         parts: vec![DetailPart::Peer(refusal.reason)],

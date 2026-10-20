@@ -879,13 +879,15 @@ test.describe("multi-host", () => {
     await assertFullyPaintedAndHitTestable(page, remove);
   });
 
-  // F1/COR-CONFIRM-CLIP: the removal question is a modal, so its controls
-  // must remain fully painted and reachable even for a long host name. The
-  // test follows the real menu click path rather than asserting only that the
-  // dialog exists in the DOM.
-  test("host-remove-dialog-fits: both prompt buttons stay reachable", async ({
+  // A destination cannot consume the pinned header; small cards must scroll.
+  // Whole-control hit tests catch clipped answers. Long text may exceed the
+  // body, so prove its scrollport paints and native keys reach both ends.
+  // Real wheel input distinguishes outer recovery from hidden overflow.
+  test("host-remove-dialog-fits: long headings and short windows keep answers reachable", async ({
     page,
   }) => {
+    const destination = "layout-" + "a".repeat(1024);
+    await page.setViewportSize({ width: 360, height: 420 });
     await page.route("**/api/hosts", async (route) => {
       const response = await route.fetch();
       const body = await response.json();
@@ -894,11 +896,8 @@ test.describe("multi-host", () => {
         {
           id: 9006,
           kind: "ssh",
-          // Long enough that the old single-line layout could never have
-          // fit it plus the warning sentence plus both buttons — the exact
-          // condition F1 describes, not merely a name at the edge of it.
-          destination: "user@a-rather-long-manageable-hostname.example.internal",
-          name: "user@a-rather-long-manageable-hostname.example.internal",
+          // SSH aliases have no product length cap; the header must yield.
+          destination, name: destination,
           identity: "identity-manageable",
           remote_farhelm: null,
           remote_state_dir: null,
@@ -915,7 +914,7 @@ test.describe("multi-host", () => {
 
     await page.goto("/");
     await openHostsPanel(page);
-    const row = hostRowByName(page, "user@a-rather-long-manageable-hostname.example.internal");
+    const row = hostRowByName(page, destination);
     await openHostMenu(row);
     await row.locator(".host-remove").click();
 
@@ -928,8 +927,30 @@ test.describe("multi-host", () => {
     await expect(confirm).toBeVisible();
     await expect(cancel).toBeVisible();
 
-    await assertFullyPaintedAndHitTestable(page, confirm);
-    await assertFullyPaintedAndHitTestable(page, cancel);
+    await expect(dialog.getByRole("heading")).toHaveText(`remove host · ${destination}`);
+    await expect(dialog.locator(".host-dialog-destination")).toHaveText(destination);
+    expect(await dialog.getByRole("heading").evaluate((node) => node.getBoundingClientRect().height)).toBeLessThan(32);
+    await page.setViewportSize({ width: 360, height: 160 });
+    await dialog.hover();
+    // Hidden overflow can scroll through focus or script. Actual wheel input
+    // distinguishes reachable card contents from that misleading recovery.
+    await page.mouse.wheel(0, -100_000);
+    await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBe(0);
+    await page.mouse.wheel(0, 100_000);
+    await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+    const body = dialog.getByRole("region", { name: "host removal details", exact: true });
+    await body.focus();
+    await assertFullyPaintedAndHitTestable(page, body);
+    await body.press("Home");
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBe(0);
+    await body.press("End");
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+    for (const part of [dialog.locator(".host-dialog-permanent-hint"), confirm, cancel,
+      dialog.getByRole("button", { name: "remove, don't ask again", exact: true }),
+      dialog.locator(".host-settings-dismiss")]) {
+      await part.scrollIntoViewIfNeeded();
+      await assertFullyPaintedAndHitTestable(page, part);
+    }
   });
 
   /**
@@ -3987,6 +4008,12 @@ test.describe("multi-host", () => {
     await expect(dialog.locator(".host-refusal-close")).toBeFocused();
     await expect(page.locator(".host-details-toggle")).toHaveJSProperty("checked", detailsInitiallyChecked);
     await expect(row.locator(".host-error")).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 160 });
+    await dialog.hover();
+    await page.mouse.wheel(0, -100_000);
+    await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBe(0);
+    await page.mouse.wheel(0, 100_000);
+    await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
   });
 
   /**
@@ -4285,6 +4312,12 @@ test.describe("multi-host", () => {
       }
       await page.setViewportSize({ width: 390, height: 420 });
       await expectKeyboardScroll(page, dialog.locator(".host-settings-dismiss"), dialog.getByRole("region", { name: "host uninstall plan", exact: true }));
+      await page.setViewportSize({ width: 390, height: 160 });
+      await dialog.hover();
+      await page.mouse.wheel(0, -100_000);
+      await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBe(0);
+      await page.mouse.wheel(0, 100_000);
+      await expect.poll(() => dialog.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
       await page.setViewportSize({ width: 1100, height: 850 });
       await expectCancelTooltipReturns(page, dialog.locator(".uninstall-cancel"), dialog.locator(".uninstall-confirm"));
       await dialog.getByRole("button", { name: "cancel Farhelm uninstall", exact: true }).click();
