@@ -25,7 +25,8 @@ paste back. `scripts/todo-picker.py` renders and serves the page; its header cov
 - Start `python3 scripts/todo-picker.py serve --summaries <file>` as a background command and give the maintainer
   `http://127.0.0.1:14003/`. The script refuses a summaries file that no longer matches the bucket's unplanned entries,
   which catches TODO.md moving since the skeleton: rerun the skeleton and fill it in again. If something else holds the
-  port, say so and ask which port to use (`--port`); never stop a process you did not start.
+  port (another agent's picker, say), serve on the next free port above it (`--port`) and give the maintainer that URL
+  instead, without asking; never stop a process you did not start.
 - When the maintainer pastes a `todo-plan` line, stop the server, map each slug back to its entry through the summaries
   file, and run "plan to implement" (`plans/.agents/planning.md`, "Planning: "plan to implement <TODO items>"") on
   exactly those entries. The pasted line is that request, so do not ask for confirmation; anything the maintainer writes
@@ -127,8 +128,8 @@ request, served from this machine on loopback only, the way the todo picker is. 
 Write the page in your scratch directory (`AGENTS.md`, "Agent scratch space") and serve it with any static file server
 bound to `127.0.0.1` on port 14003, the todo picker's port, after stopping the picker; the maintainer keeps that one URL
 open in a browser. For example, `python3 -m http.server 14003 --bind 127.0.0.1 -d <dir>` as a background command. If
-something else holds the port, say so and ask which port to use; never stop a process you did not start. Put the page's
-URL in the last message of the turn, after every tool call.
+something else holds the port, use the next free port above it and give the maintainer that URL instead, without asking;
+never stop a process you did not start. Put the page's URL in the last message of the turn, after every tool call.
 
 After acting on a pasted block (research, follow-up questions), update the same page in place: the questions still open,
 any new follow-ups, and the settled answers shown read-only, so the maintainer can see what is still needed. A plan
