@@ -71,8 +71,8 @@ function row(page: Page, id: string) {
 // Aborting before the helm sees the request leaves the source available for a
 // real retry. Key equality is the oracle: session count alone cannot prove
 // recovery when the first request never created anything. A subsequent 401
-// without the authentication marker ends that intent, even though the shared
-// HTTP funnel consumes it before the endpoint decodes the reply.
+// without the authentication marker must also retain it: the shared HTTP
+// funnel consumes that refusal without proving any earlier create failed.
 for (const surface of ["sidebar", "header"] as const) {
   test(`plain Replace retries an unknown outcome with the same key (${surface})`, async ({ page, request }) => {
     expect(helmBuild(), "controlled refusals use the live helm's nonempty build stamp").not.toBe("");
@@ -118,8 +118,8 @@ for (const surface of ["sidebar", "header"] as const) {
       expect(keys).toHaveLength(2);
       expect(keys[1]).toBe(keys[0]);
 
-      // This acknowledged refusal is a new boundary: the next attempt must
-      // mint a fresh key, rather than replaying the refused intent forever.
+      // Authentication cannot settle an earlier create, even when this
+      // fixture's first request never reached the helm.
       if (surface === "sidebar") await openRowMenu(sourceRow);
       await replace.click();
       const [response] = await Promise.all([
@@ -130,7 +130,7 @@ for (const surface of ["sidebar", "header"] as const) {
       expect(response.ok()).toBe(true);
       replacementId = (await response.json()).id;
       expect(keys).toHaveLength(3);
-      expect(keys[2]).not.toBe(keys[1]);
+      expect(keys[2]).toBe(keys[1]);
       await expect(sourceRow).toHaveCount(0, { timeout: 20_000 });
       await expect(row(page, replacementId!)).toHaveAttribute("data-session-selected", "true");
     } finally {
@@ -240,7 +240,7 @@ for (const surface of ["sidebar", "header", "new", "clone", "replace-with"] as c
 
 // The first request reaches the real create path, then a deliberately stricter
 // delete guard keeps its live source. Both controls must recover that exact
-// replacement, rather than merely reusing a key after an unaccepted request.
+// replacement even after a consumed 401, not just reuse an unaccepted key.
 for (const first of ["sidebar", "header"] as const) {
   test(`plain Replace shares a committed retry across controls (${first} first)`, async ({ page, request }) => {
     const title = `replace-shared-${first}-${Date.now()}`;
@@ -259,7 +259,8 @@ for (const first of ["sidebar", "header"] as const) {
           expect(response.status()).toBe(500);
           expect(await response.text()).toContain("both sessions still exist");
           await route.fulfill({ response });
-        } else await route.continue();
+        } else if (keys.length === 2) await fulfillAsHelm(route, { status: 401, body: "fixture unauthorized" });
+        else await route.continue();
       });
       await page.goto("/");
       await attachSession(page, source.id);
@@ -278,6 +279,17 @@ for (const first of ["sidebar", "header"] as const) {
       expect(afterFailure.some((one) => one.id === source.id)).toBe(true);
       expect(keys).toHaveLength(1);
       expect(keys[0].length).toBeGreaterThan(0);
+
+      // This 401 is consumed by the HTTP funnel, before Replace decodes a
+      // response. It cannot discard the replacement already created above.
+      if (first === "sidebar") await confirmSidebarReplace(sourceRow);
+      else {
+        await page.locator(".header-replace").click();
+        await page.locator(".header-replace-confirm .btn-danger").click();
+      }
+      await expect(error).toContainText("fixture unauthorized");
+      expect(keys).toEqual([keys[0], keys[0]]);
+      expect((await listSessions(request)).sessions.filter((one) => one.title === title)).toHaveLength(2);
 
       // Keyed session views remount on navigation. The retry is page state,
       // so even leaving and returning must keep the committed create's key.
@@ -303,7 +315,7 @@ for (const first of ["sidebar", "header"] as const) {
       const retried = await response;
       expect(retried.ok(), await retried.text()).toBe(true);
       expect((await retried.json()).id).toBe(replacement.id);
-      expect(keys).toEqual([keys[0], keys[0]]);
+      expect(keys).toEqual([keys[0], keys[0], keys[0]]);
       await expect(sourceRow).toHaveCount(0);
       expect((await listSessions(request)).sessions.filter((one) => one.title === title).map((one) => one.id))
         .toEqual([replacement.id]);

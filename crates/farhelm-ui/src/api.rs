@@ -1780,8 +1780,8 @@ fn send_read(
 #[derive(Debug)]
 enum SendError {
     Unauthenticated,
-    /// A consumed HTTP refusal, even when its body could not be read.
-    /// Plain Replace needs this fact to retire an acknowledged intent.
+    /// A consumed authentication refusal, even when its body could not be read.
+    /// It says nothing about an earlier create under a retained retry key.
     Refused(String),
     Request(String),
 }
@@ -1906,7 +1906,7 @@ fn send_error_text(error: SendError) -> String {
 
 /// The common transport, authentication and build-stamp funnel.
 /// Most endpoints flatten its errors through `send` or `send_read`; plain
-/// Replace retains their origin so a consumed 401 ends its retry intent.
+/// Replace keeps authentication refusals unresolved to recover earlier creates.
 /// Only `send_within` chooses a deadline; other callers use a fixed constant.
 fn send_inner(
     request: reqwest::RequestBuilder,
@@ -2418,8 +2418,8 @@ impl CreateRefusal {
 
 /// A session action's failure, including whether the helm answered it.
 /// Plain Replace preserves response origin through the HTTP funnel: transport
-/// and success-body decoding failures leave the outcome unknown, while an HTTP
-/// refusal answers it even when its explanatory body cannot be read.
+/// failures, authentication refusals and success-body decoding failures leave
+/// an earlier create's outcome unknown. Only definite no-create proof settles it.
 #[derive(Debug, Clone)]
 pub(crate) struct ActionRefusal {
     pub(crate) answered: bool,
@@ -2439,11 +2439,11 @@ impl From<String> for ActionRefusal {
 }
 
 impl From<SendError> for ActionRefusal {
-    /// Preserve a consumed refusal's origin rather than guessing from its text.
-    /// Authentication still runs through the funnel's existing global effects.
+    /// A 401 refuses this request, not an earlier create under the same key.
+    /// The funnel still applies authentication's existing global effects.
     fn from(error: SendError) -> Self {
         Self {
-            answered: !matches!(&error, SendError::Request(_)),
+            answered: false,
             yolo_confirmation: false,
             text: send_error_text(error),
         }
@@ -2453,8 +2453,8 @@ impl From<SendError> for ActionRefusal {
 impl ActionRefusal {
     /// Continue an unresolved Replace or its YOLO question under the same key.
     ///
-    /// Only a refusal that settles the outcome ends the intent: a consumed
-    /// authentication refusal, or a helm reply marked definitely unaccepted.
+    /// Only a helm reply marked definitely unaccepted settles the create.
+    /// Authentication refuses the current request without settling an earlier one.
     /// Any other HTTP refusal may sit on top of a create that already landed
     /// (the helm's reply from a host lost after sending, or "created X but
     /// could not remove the original"), and the helm replays or completes a
@@ -3387,10 +3387,10 @@ fn spawn_seen_writer(base: String, id: String) {
 /// with restart (replace's whole point is a NEW id and a discarded
 /// conversation; restart keeps both).
 ///
-/// The caller owns `intent_key` across unknown outcomes and YOLO confirmation
-/// retries. Minting here would turn a lost reply into a second replacement
-/// instead of recovering the first. Success and other answered refusals end
-/// that intent; a deliberate new Replace must get a new key.
+/// The caller owns `intent_key` across unknown outcomes, authentication refusals
+/// and YOLO confirmation retries. Minting here could start a second replacement
+/// instead of recovering the first. Only success or definite no-create proof
+/// ends an unchanged retry; a deliberate new Replace must get a new key.
 ///
 /// The reply's `id` differs from `id` on success — that is the whole point
 /// of replace, not a surprise for the caller to guard against. A failure
@@ -5112,11 +5112,11 @@ mod tests {
             );
         }
     }
-    /// Unknown outcomes and YOLO continuations must recover the first create;
-    /// an acknowledged refusal ends the intent even if it describes partial success.
-    /// Otherwise a retry either duplicates an agent or replays an intent the user ended.
+    /// Unknown outcomes, authentication refusals and YOLO continuations must
+    /// recover the first create; only definite no-create proof retires the key.
+    /// A 401 after partial Replace must not permit a second replacement.
     #[farhelm_testtrace::test]
-    fn replace_retains_only_unknown_or_yolo_refusals() {
+    fn replace_retains_unknown_authentication_and_yolo_refusals() {
         let unknown = ActionRefusal::from("lost reply".to_string());
         assert!(unknown.retain_replace_key());
         assert!(ActionRefusal::from(SendError::Request("transport".into())).retain_replace_key());
@@ -5125,7 +5125,7 @@ mod tests {
             SendError::Refused("unauthorized".into()),
             SendError::Refused("unreadable refusal body".into()),
         ] {
-            assert!(!ActionRefusal::from(consumed).retain_replace_key());
+            assert!(ActionRefusal::from(consumed).retain_replace_key());
         }
         for yolo_confirmation in [false, true] {
             let refusal = ActionRefusal {
