@@ -57,8 +57,9 @@ flake of that kind — pre-existing, or one that survived past the session that 
 paragraph naming the test and its file (no line numbers), what was observed and where, the cause found or suspected, and
 the disposition (fixed in which PR, ignored with what reason, or open). Fixed ones stay; a fixed flake that recurs gets
 a new dated entry. Do NOT log a test that was written, flaked, and was fixed within the same session: that is ordinary
-development, and logging it buries the tech debt the file exists to show. Open flakes also get a deflake entry in
-TODO.md; the log keeps the history, TODO.md keeps the work.
+development, and logging it buries the tech debt the file exists to show. Open flakes also get a Deflake entry in
+TODO.md and its `deflake/known-flakes.txt` line, as `deflake/AGENTS.md` describes for a deflake run's flakes; this
+covers flakes recorded from now on, not older entries. The log keeps the history, TODO.md keeps the work.
 
 For new entries, follow FLAKES.md's evidence fields and its `Class:` / `Cause:` lines. A guessed cause is a hypothesis,
 even if a later run passed. Do not rewrite older entries to make them fit the new fields.
