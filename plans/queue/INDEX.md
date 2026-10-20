@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 20b519] `launcher-retry-identity.md` — Make every launcher keep a retry's identity until it succeeds or the helm settles it, so retries neither replay a settled refusal nor start duplicate sessions (3 triage outcomes).
 - [complete] `launcher-composer-drafts.md` — Keep what the user typed in the launcher and checkout-folder fields: custom flags, compatible effort, the inline checkout-folder draft, and an unedited folder name (4 triage outcomes).
 - [complete] `terminal-link-and-copy-fixes.md` — Fix six terminal link, hover and copy problems, from unescaped host errors to hovers on frozen snapshots (6 triage outcomes).
 - [complete] `transfer-leftover-cleanup.md` — Release a cancelled download's route and a cancelled upload's admission entry, if each fix is super cheap (2 triage outcomes).
