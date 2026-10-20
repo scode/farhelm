@@ -688,22 +688,24 @@ whose newly mounted dialogs own focus instead, so the teardown retires its retur
 handoff. An item made inert by an in-flight operation stays focusable and refuses on activation (`aria-disabled`) rather
 than going natively `disabled`, because a browser cannot focus a disabled control and a menu that went busy under the
 user would otherwise swallow every navigation key. Arrows step from whichever item actually has focus, including one the
-user focused by pointer or screen reader in the middle of an arrow burst, with one exception that SPEC.md's rule on
-races between controls operated within tens of milliseconds accepts: in the desktop app, an arrow's focus move that has
-already been sent across the webview cannot be recalled, so it can pull focus back to its own target after the user
-moved focus elsewhere, and the next arrow steps from there. Nothing activates without Enter or Space on the visibly
-focused item. The row tint is owned by the menu's open state, not by `:focus-within`: a dismissal may return focus to
-the toggle while the pointer is elsewhere, and that focused toggle must not make the row look as though its menu is
-still open. The focused toggle or menu item retains the normal `:focus-visible` indicator, so pointer-return focus and
-keyboard focus remain visually distinct without changing the dismissal or focus-return contract. **Confirm in place:** a
-destructive item swaps the panel's own contents for the consequence line and a confirm/cancel pair with focus on the
-enabled confirming answer, or Cancel while busy, rather than opening a second surface; that sub-state is a
-`role="dialog"` inside the same positioned box, and it survives the panel closing, which is why it deliberately does not
-answer Escape. The one exception is a pointer going down outside the open menu: that closes the menu and answers a
-showing confirmation with cancel, since a click elsewhere is the user leaving the question, and a prompt kept for the
-next open would greet them with a question they already walked away from. Every other dismissal still preserves it.
-Outside dismissal also never takes focus back from the control the pointer went to: the toggle handback only reclaims
-focus that is on nothing, on the document body, or still inside a row menu.
+user focused by pointer or screen reader in the middle of an arrow burst. A page-side check rejects navigation focus
+moves after independent focus, including requests already sent across the desktop webview. Each request retains the
+page's independent-focus epoch from its key press; a synchronous input relay updates Rust with the current focus event's
+source before the original event, so a user landing at the in-flight target also retires older requested destinations.
+Initial menu focus uses the same function without that check and does not invalidate navigation. Nothing activates
+without Enter or Space on the visibly focused item. The row tint is owned by the menu's open state, not by
+`:focus-within`: a dismissal may return focus to the toggle while the pointer is elsewhere, and that focused toggle must
+not make the row look as though its menu is still open. The focused toggle or menu item retains the normal
+`:focus-visible` indicator, so pointer-return focus and keyboard focus remain visually distinct without changing the
+dismissal or focus-return contract. **Confirm in place:** a destructive item swaps the panel's own contents for the
+consequence line and a confirm/cancel pair with focus on the enabled confirming answer, or Cancel while busy, rather
+than opening a second surface; that sub-state is a `role="dialog"` inside the same positioned box, and it survives the
+panel closing, which is why it deliberately does not answer Escape. The one exception is a pointer going down outside
+the open menu: that closes the menu and answers a showing confirmation with cancel, since a click elsewhere is the user
+leaving the question, and a prompt kept for the next open would greet them with a question they already walked away
+from. Every other dismissal still preserves it. Outside dismissal also never takes focus back from the control the
+pointer went to: the toggle handback only reclaims focus that is on nothing, on the document body, or still inside a row
+menu.
 
 Each session confirmation mount schedules focus on its enabled confirming answer, falling back to Cancel if disabled.
 The script supplements native autofocus because browsers can ignore it after a document's first prompt, including when

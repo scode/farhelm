@@ -1574,9 +1574,14 @@ fn install_composition_guard() {
 /// has completed. Browser builds mount it immediately.
 #[component]
 fn AppBody() -> Element {
+    let mut menu_focus_source = use_signal(|| (0_u64, false));
+    use_context_provider(|| menu_panel::MenuFocusSource(menu_focus_source));
     // This must precede every page shortcut: capture listeners on the same
     // window run in registration order, before Dioxus's root event listener.
     use_hook(install_composition_guard);
+    // First-open arrows can arrive before the desktop's opening focus eval.
+    // Install their observer with the application, before rendering any menu.
+    use_hook(menu_panel::install_menu_focus);
     // Here rather than in `App`: the desktop branch of `App` requires the
     // embedded asset handler to be its first hook, and this is the one
     // component both builds mount, with every animation underneath it.
@@ -1671,6 +1676,14 @@ fn AppBody() -> Element {
     let token_required = *auth::TOKEN_REQUIRED.read();
 
     rsx! {
+        // Capture-phase focus publishes this input before the original focus
+        // event reaches Rust. Mount it before any menu and sync early page focus.
+        input { r#type: "hidden", "data-menu-focus-epoch": "",
+            onmounted: move |_| { document::eval("window.__farhelmMenuFocusSync();"); },
+            oninput: move |event| {
+                if let Ok(source) = serde_json::from_str(&event.value()) { menu_focus_source.set(source); }
+            },
+        }
         document::Link { rel: "stylesheet", href: VENDOR_XTERM_CSS }
         document::Link { rel: "stylesheet", href: APP_CSS }
         document::Script { src: VENDOR_XTERM_JS }

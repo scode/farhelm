@@ -248,7 +248,7 @@ pub(crate) type MenuItemHandles<A> = Signal<HashMap<A, Rc<MountedData>>>;
 
 // ===== Moving focus, one request at a time ===========================
 
-/// One row's serialized pipeline of `MountedData::set_focus` requests.
+/// One row's serialized pipeline of page-side menu focus requests.
 ///
 /// Focus is asynchronous here — on desktop it crosses the WebView bridge
 /// — and a user holding an arrow key down produces requests far faster
@@ -273,26 +273,69 @@ pub(crate) struct MenuFocusQueue {
     /// `Signal::new` internally would silently stop being a hook — a
     /// fresh, un-persisted signal minted on every render — instead of the
     /// row's own per-render-stable hook state.
-    pub(crate) target: Signal<Option<Rc<MountedData>>>,
+    pub(crate) target: Signal<Option<MenuFocusRequest>>,
     /// The one request already sent to the renderer. Keep it through the await:
     /// desktop focus-in is dispatched before that request's reply resolves.
-    /// Any other item's focus-in cancels queued work, but this request itself
-    /// cannot be recalled and may still pull focus back after an independent move.
+    /// Any other item's focus-in cancels queued work. The page guard also
+    /// rejects an already-sent navigation move after independent focus.
     pub(crate) in_flight: Signal<Option<Rc<MountedData>>>,
     /// Whether a task is currently draining `target`. Guards against a
     /// second drainer, which is what would reintroduce the interleaving.
     pub(crate) draining: Signal<bool>,
 }
 
+/// Keep the queued destination tied to its action and this particular opening.
+/// A DOM lookup by position could select another action after item withdrawal;
+/// the retained handle still identifies our own landing to Rust's focus memory.
+pub(crate) struct MenuFocusRequest {
+    handle: Rc<MountedData>,
+    key: String,
+    ungated: bool,
+    epoch: u64,
+}
+
+/// The page's independent-focus epoch and ownership of the current focus event.
+/// Both renderers dispatch the hidden input synchronously, so a key handler
+/// captures its own causal epoch and a same-target user focus cannot look app-owned.
+#[derive(Clone, Copy)]
+pub(crate) struct MenuFocusSource(pub(crate) Signal<(u64, bool)>);
+
+/// Observe navigation before any menu can send its first opening focus request.
+/// Installing on first use would miss arrows typed while that initial desktop
+/// eval is still crossing the bridge, and reject valid queued navigation.
+pub(crate) fn install_menu_focus() {
+    document::eval(include_str!("../assets/menu-focus.js"));
+}
+
+/// Name one action without reusing its marker after a close or a component remount.
+/// The generational signal ID separates menu instances; the open generation
+/// prevents an old bridge request from finding a freshly mounted replacement.
+pub(crate) fn menu_item_focus_key<A: std::fmt::Debug, Id: 'static, const N: usize>(
+    wiring: MenuWiring<A, Id, N>,
+    action: A,
+) -> String {
+    format!(
+        "{:?}-{}-{action:?}",
+        wiring.handles.id(),
+        wiring.generation.peek()
+    )
+}
+
 /// Ask for focus on `handle`, superseding any request not yet delivered.
 ///
-/// The `Result` from `set_focus` is discarded deliberately — see this
+/// The page call's result is discarded deliberately — see this
 /// module's "Moving focus inside the open menu" note (mirrored on each
 /// row) for why a renderer that cannot move focus is an unimproved
 /// keyboard experience rather than a lost safety default.
-pub(crate) fn request_menu_focus(queue: MenuFocusQueue, handle: Rc<MountedData>) {
+fn request_menu_focus(queue: MenuFocusQueue, handle: Rc<MountedData>, key: String, ungated: bool) {
     let mut queue = queue;
-    queue.target.set(Some(handle));
+    let epoch = consume_context::<MenuFocusSource>().0.peek().0;
+    queue.target.set(Some(MenuFocusRequest {
+        handle,
+        key,
+        ungated,
+        epoch,
+    }));
     // A drainer already running will pick the new target up on its next
     // turn; starting a second one is exactly the concurrency this exists
     // to prevent.
@@ -311,8 +354,13 @@ pub(crate) fn request_menu_focus(queue: MenuFocusQueue, handle: Rc<MountedData>)
             let Some(next) = next else {
                 break;
             };
-            queue.in_flight.set(Some(Rc::clone(&next)));
-            let _ = next.set_focus(true).await;
+            queue.in_flight.set(Some(Rc::clone(&next.handle)));
+            let key = serde_json::to_string(&next.key).expect("menu identity is JSON text");
+            let script = format!(
+                "return await window.__farhelmMenuFocus({key}, {}, {});",
+                next.ungated, next.epoch
+            );
+            let _ = document::eval(&script).join::<bool>().await;
             queue.in_flight.set(None);
         }
         queue.draining.set(false);
@@ -322,9 +370,9 @@ pub(crate) fn request_menu_focus(queue: MenuFocusQueue, handle: Rc<MountedData>)
 /// Drop any request that has not been delivered yet.
 ///
 /// Used on close and when another item independently takes focus. The one
-/// request already awaiting the renderer cannot be recalled: on close its
-/// detached node is a browser no-op, but inside a still-open menu it can
-/// pull focus back. Cancelling here only withdraws the unsent destination.
+/// request already awaiting the renderer is rejected by the page guard if
+/// independent focus superseded its navigation key. Cancelling here withdraws
+/// the unsent destination; closing also retires the item's identity marker.
 pub(crate) fn cancel_menu_focus(mut queue: MenuFocusQueue) {
     queue.target.set(None);
 }
@@ -419,6 +467,8 @@ pub(crate) struct MenuWiring<A: 'static, Id: 'static, const N: usize> {
     /// This row's serialized focus-request pipeline — see
     /// [`MenuFocusQueue`]'s own doc for the interleaving it prevents.
     pub(crate) focus: MenuFocusQueue,
+    /// Distinguishes a freshly opened panel from a delayed request for its predecessor.
+    pub(crate) generation: Signal<u64>,
     /// Which item focus is on, or `None` when it is not on one — see each
     /// row's own `menu_focus` for what maintains it and what reads it.
     ///
@@ -494,8 +544,7 @@ impl<A: Copy, Id: 'static, const N: usize> Copy for MenuWiring<A, Id, N> {}
 // Every focus move INSIDE the menu routes through `MenuFocusQueue` rather
 // than spawning its own task; the one that leaves it — each row's own
 // `focus_menu_toggle` call — goes through JS instead, for a reason its own
-// doc gives. All of them are fire-and-forget, discarding the `Result` that
-// `MountedData::set_focus` returns. That is the opposite of what each row
+// doc gives. Each caller discards the page call's result. That is the opposite of what each row
 // does for its own confirm prompt's initial answer (native autofocus plus
 // a scripted mount handoff for repeated appearances, without a dropped Result).
 // The difference is what failure costs. A renderer that cannot move focus
@@ -517,7 +566,7 @@ impl<A: Copy, Id: 'static, const N: usize> Copy for MenuWiring<A, Id, N> {}
 ///
 /// Preferring a signal over `event_origin` at all is the fix for a real
 /// race (F5/COR-FOCUS-BURST): `focus_menu_item` writes synchronously, ahead
-/// of the asynchronous `MountedData::set_focus` request that actually moves
+/// of the asynchronous page request that actually moves
 /// DOM focus — a round trip across the WebView bridge on desktop. A second
 /// arrow pressed before that request lands still arrives as a real
 /// `keydown` on whatever item last held ACTUAL DOM focus, one step behind
@@ -553,10 +602,10 @@ impl<A: Copy, Id: 'static, const N: usize> Copy for MenuWiring<A, Id, N> {}
 ///
 /// A focus-in outside the queue's in-flight target is independent: it clears
 /// `requested` and cancels unsent work, even mid-burst. A request already sent
-/// cannot be recalled and may still pull focus back. Focusing the in-flight
-/// target independently is indistinguishable from its requested landing, and
-/// requesting an already-focused item may produce no event. This narrows the
-/// pending window; it is not a general focus-source fence.
+/// is also checked on the page before it can move focus. The page relays each
+/// focus event's source before the event: even a user moving onto the
+/// in-flight target clears the old destination. An app-owned opening remains
+/// an acknowledgement after independent focus advanced the request's epoch.
 ///
 /// Preferring either signal at all rests on an invariant neither can hold
 /// up alone: both must be EMPTY whenever focus is not inside the panel.
@@ -580,8 +629,8 @@ pub(crate) fn menu_step_origin(
 ///
 /// An older request must not erase a newer destination. Any other item's
 /// focus-in instead owns navigation now: clear the destination and tell the
-/// caller to cancel unsent work. The boolean does not identify who moved focus
-/// to the in-flight target; that remains indistinguishable from our request.
+/// caller to cancel unsent work. The caller combines handle identity with the
+/// relayed source flag, so an independent move onto our target is not an acknowledgement.
 fn requested_after_item_focus(
     requested: Option<usize>,
     position: usize,
@@ -606,12 +655,13 @@ pub(crate) fn record_menu_item_focus<A: Copy + Eq + Hash, Id: 'static, const N: 
     let Some(position) = wiring.order.position(action) else {
         return;
     };
+    let source = consume_context::<MenuFocusSource>().0;
     let at_in_flight_target = wiring
         .handles
         .peek()
         .get(&action)
         .zip(wiring.focus.in_flight.peek().as_ref())
-        .is_some_and(|(handle, target)| Rc::ptr_eq(handle, target));
+        .is_some_and(|(handle, target)| source.peek().1 && Rc::ptr_eq(handle, target));
     let (pending, cancel) =
         requested_after_item_focus(*wiring.requested.peek(), position, at_in_flight_target);
     if cancel {
@@ -642,7 +692,7 @@ pub(crate) fn record_menu_item_focus<A: Copy + Eq + Hash, Id: 'static, const N: 
 /// the timing reason [`MenuKeyAction::Exit`] records, and deliberately
 /// NOT claimed on the toggle, where it is how the browser walks into the
 /// open menu.
-pub(crate) fn handle_menu_key<A: Copy + Eq + Hash, Id: Clone, const N: usize>(
+pub(crate) fn handle_menu_key<A: Copy + Eq + Hash + std::fmt::Debug, Id: Clone, const N: usize>(
     evt: &Event<KeyboardData>,
     current: Option<usize>,
     wiring: MenuWiring<A, Id, N>,
@@ -703,7 +753,11 @@ pub(crate) fn handle_menu_key<A: Copy + Eq + Hash, Id: Clone, const N: usize>(
 /// Takes the signals by value because `Signal` is a `Copy` handle into
 /// shared storage: each item's closure captures its own copy, and they
 /// all write to the one map.
-pub(crate) fn remember_menu_item<A: Copy + Eq + Hash, Id: 'static, const N: usize>(
+pub(crate) fn remember_menu_item<
+    A: Copy + Eq + Hash + std::fmt::Debug,
+    Id: 'static,
+    const N: usize,
+>(
     wiring: MenuWiring<A, Id, N>,
     action: A,
     data: Rc<MountedData>,
@@ -722,7 +776,12 @@ pub(crate) fn remember_menu_item<A: Copy + Eq + Hash, Id: 'static, const N: usiz
     open_intent.set(None);
     let mut focused = wiring.focused;
     focused.set(wiring.order.position(action));
-    request_menu_focus(wiring.focus, data);
+    request_menu_focus(
+        wiring.focus,
+        data,
+        menu_item_focus_key(wiring, action),
+        true,
+    );
 }
 
 /// Move keyboard focus onto the menu item at `position`, if that item is
@@ -745,7 +804,11 @@ pub(crate) fn remember_menu_item<A: Copy + Eq + Hash, Id: 'static, const N: usiz
 /// `next_menu_focus`, bounded by this render's own item count — but a menu
 /// that quietly declines to move focus is a far better failure than one
 /// that panics while the user holds a key down.
-pub(crate) fn focus_menu_item<A: Copy + Eq + Hash, Id: 'static, const N: usize>(
+pub(crate) fn focus_menu_item<
+    A: Copy + Eq + Hash + std::fmt::Debug,
+    Id: 'static,
+    const N: usize,
+>(
     wiring: MenuWiring<A, Id, N>,
     position: usize,
 ) {
@@ -759,7 +822,12 @@ pub(crate) fn focus_menu_item<A: Copy + Eq + Hash, Id: 'static, const N: usize>(
     focused.set(Some(position));
     let mut requested = wiring.requested;
     requested.set(Some(position));
-    request_menu_focus(wiring.focus, handle);
+    request_menu_focus(
+        wiring.focus,
+        handle,
+        menu_item_focus_key(wiring, action),
+        false,
+    );
 }
 
 /// Forget where focus was inside the menu, because the TOGGLE now holds
@@ -1091,7 +1159,7 @@ fn back_off_from_split_escape(s: &str, cut: usize) -> usize {
 // should receive focus, and action to whether the browser's own default
 // survives. The rest — reading the pressed key off a real event, the
 // roving `tabindex` that makes the whole menu one tab stop, and calling
-// `MountedData::set_focus` on the chosen item — stays with each row and
+// page-side focus on the chosen item — stays with each row and
 // is covered by the browser suite.
 
 /// Which way along the item list a key moves focus.
