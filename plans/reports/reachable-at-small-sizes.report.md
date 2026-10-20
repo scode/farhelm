@@ -89,3 +89,83 @@ reassessment found no unnecessary complexity. Dialog review narrowed the fallbac
 whole-paragraph test oracle. No findings remain. Commit and PR wording passed independent cold reads. Documentation
 passes are complete, each outcome ledger names its change, bookmark and PR, all feedback entries are removed, and all
 three PRs remain open drafts.
+
+### Landing
+
+Landed as #2406, #2411 and #2419, merged bottom-up. It was the sixth of sixteen plans in this landing round, after
+launcher-retry-identity, launcher-composer-drafts, terminal-link-and-copy-fixes, transfer-leftover-cleanup and
+trash-unknown-totals. Its content is what the report describes, rebased onto this round's main, with one SPEC.md
+conflict resolution and one browser test fix described below.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained round 107's four plans, the five plans earlier in this round, and documentation and
+plan bookkeeping. A fresh-context reviewer and I read them and the other plans of this round against this plan. Three
+touch the same ground:
+
+- host-entry-session-ids changed how sessions are identified and gave approval cards full-width rows that show which
+  session asked, which session is targeted and which session a clone came from. Both it and this plan's first change
+  edited the same SPEC.md paragraph about approval cards. The landing kept both: this plan's sentences about very short
+  windows, then host-entry-session-ids' sentence about the identity rows. host-entry-session-ids added rows inside each
+  card but did not change how the approval area is sized or placed, which is what this plan changes, and this plan's new
+  browser checks still find the cards and answers they use.
+- hosts-panel-menu-close closes an open host or session menu whenever the hosts panel changes height. The host dialogs
+  this plan makes scrollable are overlays, so opening or closing them does not resize the hosts panel.
+- terminal-link-and-copy-fixes, earlier in this round, refuses link clicks while something covers the terminal. Approval
+  requests that take the full height of a very short window count as covering it, so a link click there is refused with
+  the explanation that the link's destination details are covered, which is correct.
+
+app-dialog-focus, later in this round, changes when host setup, uninstall and refusal dialogs may open, not how they lay
+out. host-settings-focus changes focus in Host Settings, which does not use the whole-card scrolling this plan adds.
+Both compose with this plan. The other conflicts were in the review feedback queue's index, where each plan removes its
+own entries; all removals are kept.
+
+#### Fixes made during the landing
+
+- SPEC.md: the approval-card paragraph conflicted with host-entry-session-ids, as described above; both sides are kept
+  (#2406).
+- The new outage browser check in the two-host test file intercepted the Replace request for a stale session and
+  answered it with a refusal, matching the request by the session's ID. After host-entry-session-ids, that ID is a full
+  reference whose colon the UI encodes in the request address, so the match never fired, the real helm answered instead,
+  and the test would have failed. The check now matches the encoded ID, the way host-entry-session-ids changed every
+  similar check (#2411). The full browser run below, under Checks, ran with this fix and passed the test on both
+  engines.
+
+#### Possible follow-ups
+
+- SPEC_impl.md says the approval region "uses the whole viewport" in a very short window. Only its height grows; its
+  width stays tied to the main pane. SPEC.md's "the window's full height" is accurate. Possible follow-up: say "the
+  viewport's full height" in SPEC_impl.md as well.
+
+#### Checks
+
+Every plan in this round was executed on a main from before round 107's session-identity change, so none had been tested
+against it. That is why this round ran the whole Rust workspace and the full browser suite rather than a selection. All
+of the following ran now, on all sixteen plans of this round stacked together on main, including the fixes made while
+landing plans in this round:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` and its `--self-test`,
+  `python3 releasing/notes-review-page.py --self-test`, `scripts/check-desktop-assets.sh`, and the website build
+  (`bun run build` in `website/`): all passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `40f2b98b-b160-4239-a653-44cd0bcdcf96`: 3948 passed.
+  `cargo nextest run -p farhelm-ui --features desktop`, run `d288b68b-249f-4f21-9fe0-d4d6d1c4a738`: 717 passed.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `f82f83f8-67c9-4e07-99ed-467c9830dc9f`: 317 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, one worker, no retries, run
+  `81d76a96-912f-47ed-8e1f-57423edbeb32` (kept): 2183 passed and 14 skipped. Of the skips, 9 are the WebKit clipboard
+  cases, because Playwright cannot grant WebKit clipboard permissions; 4 run only against a real, signed-in agent; and 1
+  is a pixel capture that runs only on Chromium. One test failed: on WebKit, "model-only number key opens New with a
+  temporary composition explanation" in `templates.spec.ts` timed out at its first step, waiting 60 seconds for the
+  header's Templates button to settle before clicking it. No plan in this round changes that button or that test, and
+  the file's other WebKit tests that open the same dialog passed.
+  `npx playwright test --project=webkit-templates -g 'model-only number key opens New with a temporary composition explanation' --repeat-each=20`
+  then passed all 20 (run `6c382916-77a1-4ecb-b4ee-a1dae8cac848`). The cause is probably machine load during the full
+  run, not something this round broke, but that is not confirmed; on one observation it is not recorded as a flake.
+- Skipped: the native Mac app (not runnable here) and the installer (unchanged).
+
+The report was written on a main from before round 107's session-identity change, so its statement that no rebase was
+needed and its focused checks no longer describe what landed; the combined runs above supersede them. Nothing else in
+the executor's report became untrue at landing.
