@@ -16025,7 +16025,11 @@
   refused and renames nothing; sequential tests show the refusal and that ordinary collision retries still work, with no
   racing supervisors, cancelled startups or pause hooks; within about 200 lines of non-test code and about 500 in total,
   confined to the supervisor's checkout-record code, else block. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/archive-recovery-reproduction.md`.
+- Execution: implemented in change `ywmlrrom`, bookmark
+  `plan/archive-recovery-reproduction/01-guard-archive-destination`. Initial journaling requires an empty destination;
+  pending destination rewrites and rollback compare the previously recorded destination. A changed value refuses the
+  write before another rename. Sequential tests cover this refusal and preserve ordinary collision retries. The
+  startup-ownership cause remains outside this fix. PR: https://github.com/scode/farhelm/pull/2374/changes.
 
 ## orphan-git-outlives-cache-lock.md
 

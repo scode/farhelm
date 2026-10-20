@@ -1620,8 +1620,16 @@ fn archive_move_with_effects(
     }
     let stem = format!("{}-{}", row.original_basename, utc_compact(now_unix()));
     persist_journal(conn, &row.id, &stem, AllocationState::Allocated)?;
-    let final_destination =
-        rename_exclusive_into(conn, &row.id, &archive_root, &source, &stem, &stem, rename)?;
+    let final_destination = rename_exclusive_into(
+        conn,
+        &row.id,
+        &archive_root,
+        &source,
+        &stem,
+        &stem,
+        &stem,
+        rename,
+    )?;
     sync_archive_parent(&archive_root, parent_sync)?;
     sync_archive_parent(&root, parent_sync)?;
     Ok(ArchiveOutcome::Archived {
@@ -1679,7 +1687,8 @@ fn ensure_archive_root(root: &Path) -> Result<PathBuf> {
 
 /// Persist the rename journal: destination + `archive_pending`, refusing
 /// any state other than `expected` so a replay cannot double-journal a row
-/// that already moved on.
+/// that already moved on. Initial journaling also requires an empty destination;
+/// replacing a pending destination belongs to the compare-and-swap below.
 fn persist_journal(
     conn: &Connection,
     id: &str,
@@ -1689,7 +1698,7 @@ fn persist_journal(
     let updated = conn.execute(
         "UPDATE working_copies \
          SET archive_destination = ?2, allocation_state = ?3 \
-         WHERE id = ?1 AND allocation_state = ?4",
+         WHERE id = ?1 AND allocation_state = ?4 AND archive_destination IS NULL",
         rusqlite::params![
             id,
             destination,
@@ -1704,15 +1713,17 @@ fn persist_journal(
 }
 
 /// Return a pending row to `allocated` with no journaled destination, for a
-/// rename that provably did not move anything.
-fn unjournal(conn: &Connection, id: &str) -> Result<()> {
+/// rename that provably did not move anything. Refusing this attempt's rename
+/// does not authorize clearing a destination another attempt has since recorded.
+fn unjournal(conn: &Connection, id: &str, expected_destination: &str) -> Result<()> {
     let updated = conn.execute(
         "UPDATE working_copies SET archive_destination = NULL, allocation_state = ?2 \
-         WHERE id = ?1 AND allocation_state = ?3",
+         WHERE id = ?1 AND allocation_state = ?3 AND archive_destination = ?4",
         rusqlite::params![
             id,
             AllocationState::Allocated.as_str(),
             AllocationState::ArchivePending.as_str(),
+            expected_destination,
         ],
     )?;
     if updated == 0 {
@@ -1754,12 +1765,24 @@ fn rename_refused_without_moving(error: &std::io::Error) -> bool {
 }
 
 /// Update ONLY the journaled destination on an already-pending row (the
-/// collision-retry and unrelated-destination paths).
-fn repoint_journal(conn: &Connection, id: &str, destination: &str) -> Result<()> {
+/// collision-retry and unrelated-destination paths). A stale attempt must not
+/// replace a successor's location: both the state and the destination it read
+/// must still match. Callers stop before rename when this returns `WrongState`.
+fn repoint_journal(
+    conn: &Connection,
+    id: &str,
+    expected_destination: &str,
+    destination: &str,
+) -> Result<()> {
     let updated = conn.execute(
         "UPDATE working_copies SET archive_destination = ?2 \
-         WHERE id = ?1 AND allocation_state = ?3",
-        rusqlite::params![id, destination, AllocationState::ArchivePending.as_str(),],
+         WHERE id = ?1 AND allocation_state = ?3 AND archive_destination = ?4",
+        rusqlite::params![
+            id,
+            destination,
+            AllocationState::ArchivePending.as_str(),
+            expected_destination,
+        ],
     )?;
     if updated == 0 {
         return Err(WorkingCopyError::WrongState(id.to_string()));
@@ -1776,29 +1799,38 @@ fn repoint_journal(conn: &Connection, id: &str, destination: &str) -> Result<()>
 /// a competing directory after recovery's observation but before the syscall.
 /// The stem never includes a prior collision suffix: the 200-byte checkout
 /// name leaves room for a timestamp and ONE UUID, not an accumulating chain.
+/// `expected_destination` is the caller's journal snapshot. Claim the candidate
+/// against that snapshot before any rename, including when its name is unchanged;
+/// each collision retry then compares against the name this attempt last wrote.
+/// This compares journal values, not filesystem observations: a completed move
+/// to the same destination leaves the comparison true.
+#[allow(clippy::too_many_arguments)] // Keep the observed journal distinct from the requested rename name.
 fn rename_exclusive_into(
     conn: &Connection,
     working_copy_id: &str,
     archive_root: &Path,
     source: &Path,
+    expected_destination: &str,
     destination: &str,
     collision_stem: &str,
     rename: &mut dyn FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<String> {
+    repoint_journal(conn, working_copy_id, expected_destination, destination)?;
     let mut destination = destination.to_string();
     for _ in 0..ARCHIVE_ATTEMPTS {
         match rename(source, &archive_root.join(&destination)) {
             Ok(()) => return Ok(destination),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                destination = format!("{}-{}", collision_stem, uuid::Uuid::new_v4().simple());
-                repoint_journal(conn, working_copy_id, &destination)?;
+                let retry = format!("{}-{}", collision_stem, uuid::Uuid::new_v4().simple());
+                repoint_journal(conn, working_copy_id, &destination, &retry)?;
+                destination = retry;
             }
             // Nothing moved, so the journal describes a move that cannot
             // have happened. Left pending, the row would make every later
             // recovery retry the same refused rename, and keep refusing
             // Restart and new sessions in the folder meanwhile.
             Err(e) if rename_refused_without_moving(&e) => {
-                unjournal(conn, working_copy_id)?;
+                unjournal(conn, working_copy_id, &destination)?;
                 return Err(WorkingCopyError::RenameRefused {
                     path: source.to_path_buf(),
                     cause: e,
@@ -2008,6 +2040,7 @@ fn reconcile_archive_with_effects(
                 &archive_root,
                 &source,
                 &journaled,
+                &journaled,
                 &collision_stem,
                 rename,
             )?;
@@ -2045,12 +2078,12 @@ fn reconcile_archive_with_effects(
             // already be archived and still occupy the recorded source.
             // Never overwrite — move under one fresh bounded suffix.
             let retry = format!("{}-{}", collision_stem, uuid::Uuid::new_v4().simple());
-            repoint_journal(conn, &row.id, &retry)?;
             let destination = rename_exclusive_into(
                 conn,
                 &row.id,
                 &archive_root,
                 &source,
+                &journaled,
                 &retry,
                 &collision_stem,
                 rename,
@@ -3948,6 +3981,175 @@ mod tests {
                 "no filesystem mutation on refusal"
             );
         }
+    }
+
+    /// A stale snapshot cannot replace a completed recovery's destination or
+    /// reach the rename boundary. The successor finishes first, sequentially;
+    /// this tests the conditional write without racing supervisors or relying
+    /// on filesystem error precedence when the original source is gone.
+    #[test]
+    fn stale_archive_destination_is_refused_before_any_rename() {
+        let conn = registry_conn();
+        let dir = tempfile::tempdir().unwrap();
+        let row = planned_row(&conn, dir.path(), "bar");
+        let allocated = allocate(&conn, &row.id, None).unwrap();
+        let source = dir.path().join("bar");
+        fs::write(source.join("owned"), b"retained checkout").unwrap();
+        let archive_root = ensure_archive_root(dir.path()).unwrap();
+        let journaled = "bar-occupied";
+        persist_journal(&conn, &row.id, journaled, AllocationState::Allocated).unwrap();
+        fs::create_dir(archive_root.join(journaled)).unwrap();
+        fs::write(archive_root.join(journaled).join("foreign"), b"untouched").unwrap();
+        let stale = get_working_copy(&conn, &row.id).unwrap().unwrap();
+        assert_eq!(stale.allocation_state, AllocationState::ArchivePending);
+        assert_eq!(stale.archive_destination.as_deref(), Some(journaled));
+
+        let ReconcileOutcome::Moved { destination } = reconcile_archive(&conn, &row.id).unwrap()
+        else {
+            panic!("the current attempt must move the checkout before the stale one runs");
+        };
+        let moved = archive_root.join(&destination);
+        assert_ne!(destination, journaled);
+        assert!(!source.exists());
+        assert_eq!(identity_of(&moved).unwrap(), allocated.identity);
+        assert_eq!(
+            get_working_copy(&conn, &row.id)
+                .unwrap()
+                .unwrap()
+                .archive_destination,
+            Some(destination.clone())
+        );
+
+        let error = rename_exclusive_into(
+            &conn,
+            &row.id,
+            &archive_root,
+            &source,
+            stale.archive_destination.as_deref().unwrap(),
+            "bar-stale-candidate",
+            "bar-stale-stem",
+            &mut |_, _| {
+                panic!("a refused journal update must stop before rename");
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, WorkingCopyError::WrongState(_)),
+            "{error:?}"
+        );
+        let current = get_working_copy(&conn, &row.id).unwrap().unwrap();
+        assert_eq!(current.allocation_state, AllocationState::ArchivePending);
+        assert_eq!(current.archive_destination, Some(destination));
+        assert_eq!(identity_of(&moved).unwrap(), allocated.identity);
+        assert_eq!(fs::read(moved.join("owned")).unwrap(), b"retained checkout");
+        assert_eq!(
+            fs::read(archive_root.join(journaled).join("foreign")).unwrap(),
+            b"untouched"
+        );
+        assert!(!archive_root.join("bar-stale-candidate").exists());
+        assert_eq!(entries(&archive_root).len(), 2);
+    }
+
+    /// An old rename result cannot replace or clear a destination recorded
+    /// since that syscall began. Both outcomes are injected sequentially at
+    /// the existing rename seam: collision would retry, while an outright
+    /// refusal would roll back. Neither may erase a newer attempt's journal.
+    #[test]
+    fn stale_rename_results_preserve_the_newer_archive_journal() {
+        for errno in [libc::EEXIST, libc::EACCES] {
+            let conn = registry_conn();
+            let dir = tempfile::tempdir().unwrap();
+            let row = planned_row(&conn, dir.path(), "bar");
+            let allocated = allocate(&conn, &row.id, None).unwrap();
+            let source = dir.path().join("bar");
+            fs::write(source.join("owned"), b"still here").unwrap();
+            let archive_root = ensure_archive_root(dir.path()).unwrap();
+            persist_journal(&conn, &row.id, "bar-first", AllocationState::Allocated).unwrap();
+            let mut attempts = 0;
+            let error = rename_exclusive_into(
+                &conn,
+                &row.id,
+                &archive_root,
+                &source,
+                "bar-first",
+                "bar-first",
+                "bar",
+                &mut |_, _| {
+                    attempts += 1;
+                    assert_eq!(attempts, 1, "a stale result must not retry rename");
+                    repoint_journal(&conn, &row.id, "bar-first", "bar-newer").unwrap();
+                    assert_eq!(
+                        get_working_copy(&conn, &row.id)
+                            .unwrap()
+                            .unwrap()
+                            .archive_destination
+                            .as_deref(),
+                        Some("bar-newer")
+                    );
+                    Err(std::io::Error::from_raw_os_error(errno))
+                },
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, WorkingCopyError::WrongState(_)),
+                "{error:?}"
+            );
+            assert_eq!(attempts, 1);
+            let current = get_working_copy(&conn, &row.id).unwrap().unwrap();
+            assert_eq!(current.allocation_state, AllocationState::ArchivePending);
+            assert_eq!(current.archive_destination.as_deref(), Some("bar-newer"));
+            assert_eq!(identity_of(&source).unwrap(), allocated.identity);
+            assert_eq!(fs::read(source.join("owned")).unwrap(), b"still here");
+            assert!(entries(&archive_root).is_empty());
+        }
+    }
+
+    /// Initial journaling cannot bypass the pending-destination guard, and a
+    /// destination match alone cannot authorize a write after the row leaves
+    /// the pending state. A real archive establishes the retired row's matching
+    /// destination, so only the state predicate can refuse its later writes.
+    #[test]
+    fn journal_writes_require_both_the_expected_state_and_destination() {
+        let conn = registry_conn();
+        let dir = tempfile::tempdir().unwrap();
+        let row = planned_row(&conn, dir.path(), "bar");
+        allocate(&conn, &row.id, None).unwrap();
+        persist_journal(&conn, &row.id, "bar-first", AllocationState::Allocated).unwrap();
+        let error = persist_journal(&conn, &row.id, "bar-stale", AllocationState::ArchivePending)
+            .unwrap_err();
+        assert!(matches!(error, WorkingCopyError::WrongState(_)));
+        assert_eq!(
+            get_working_copy(&conn, &row.id)
+                .unwrap()
+                .unwrap()
+                .archive_destination
+                .as_deref(),
+            Some("bar-first")
+        );
+        assert!(matches!(
+            reconcile_archive(&conn, &row.id).unwrap(),
+            ReconcileOutcome::Moved { destination } if destination == "bar-first"
+        ));
+        remove_member(&conn, "s-bar", &row.id).unwrap();
+        retire(&conn, &row.id).unwrap();
+        let retired = get_working_copy(&conn, &row.id).unwrap().unwrap();
+        assert_eq!(retired.allocation_state, AllocationState::Retired);
+        assert_eq!(
+            retired.archive_destination.as_deref(),
+            Some("bar-first"),
+            "premise: the destination still matches, so only the state can refuse"
+        );
+        assert!(matches!(
+            repoint_journal(&conn, &row.id, "bar-first", "bar-stale"),
+            Err(WorkingCopyError::WrongState(_))
+        ));
+        assert!(matches!(
+            unjournal(&conn, &row.id, "bar-first"),
+            Err(WorkingCopyError::WrongState(_))
+        ));
+        let current = get_working_copy(&conn, &row.id).unwrap().unwrap();
+        assert_eq!(current.allocation_state, AllocationState::Retired);
+        assert_eq!(current.archive_destination.as_deref(), Some("bar-first"));
     }
 
     /// Crash after the journal, before the rename: source present,
