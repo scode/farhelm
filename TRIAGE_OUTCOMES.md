@@ -16875,7 +16875,12 @@
   hovers are suppressed, whichever is cheaper; a test. Size gate: about 100 lines of diff (code, tests and docs, not
   counting this ledger, the queue removal or the changelog fragment); over it, discard. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/terminal-link-and-copy-fixes.md`.
+- Execution: implemented in change `lwymlwulvnntzxmnxwtrrpopllrmyvwx`, bookmark
+  `plan/terminal-link-and-copy-fixes/06-restore-snapshot-link-gestures`. The retained terminal's original gesture
+  observer is restored with its local-copy listeners and removed on disposal; input and transport remain detached. The
+  existing real takeover/reconnect test verifies web opening, drag rejection, file download bytes and continued local
+  copying on the restored screen. Counted code/test/doc diff: 69 lines, within the 100-line gate. PR:
+  https://github.com/scode/farhelm/pull/2403/changes.
 
 ## trash-sidebar-calls-unchecked-archives-empty.md
 

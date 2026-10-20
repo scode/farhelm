@@ -1273,15 +1273,19 @@
   }
 
   /**
-   * Restore only local selection copying on a frozen recovery snapshot.
+   * Restore local selection copying and link gestures on a frozen screen.
    *
    * The old island's listeners are gone. This lifetime belongs to the
    * tombstone instead, with no input, resize or transport callbacks. Keep
    * the live terminal's press-time policy, but omit program-copy guidance
    * and OSC 52 grace: there is no attached program to answer the gesture.
+   * Link providers belong to the retained terminal and need their original
+   * gesture observer back. Input and transport listeners remain detached.
    */
-  function installSnapshotCopyOnSelect(el, term) {
+  function installSnapshotCopyOnSelect(el, term, linkGesture) {
     let pressed = null;
+    const observeLink = event => linkGesture.observe(event,
+      !!event.target?.closest?.('.xterm-screen') && term.element.contains(event.target));
     const mouseDown = (event) => {
       pressed = {
         button: event.button,
@@ -1306,10 +1310,12 @@
         })) enqueueClipboardWrite(selectionText);
       }, 0);
     };
+    for (const type of ['mousedown', 'mousemove', 'mouseup']) document.addEventListener(type, observeLink, true);
     term.element.addEventListener("mousedown", mouseDown);
     document.addEventListener("mouseup", mouseUp);
     return () => {
       pressed = null;
+      for (const type of ['mousedown', 'mousemove', 'mouseup']) document.removeEventListener(type, observeLink, true);
       term.element.removeEventListener("mousedown", mouseDown);
       document.removeEventListener("mouseup", mouseUp);
     };
@@ -1676,6 +1682,7 @@
         // The rendered screen this recovery is trying to get back, held
         // aside by the first attempt — see `runReconnect`.
         snapshot: null,
+        snapshotLinkGesture: null,
       };
       reconnects.set(spec.el, controller);
     }
@@ -1748,6 +1755,7 @@
     if (island && !controller.snapshot) {
       island.keepTerm = true;
       controller.snapshot = island.term;
+      controller.snapshotLinkGesture = island.linkGesture;
     }
     farhelmTerm.unmount(controller.el);
     paintReconnect(controller);
@@ -1797,7 +1805,9 @@
     if (controller.timer !== null) clearTimeout(controller.timer);
     reconnects.delete(el);
     const held = controller.snapshot;
+    const heldLinkGesture = controller.snapshotLinkGesture;
     controller.snapshot = null;
+    controller.snapshotLinkGesture = null;
     if (outcome === "restore" && held) {
       // The unproven replacement goes first, so the element holds only the
       // screen being put back — which then becomes a TOMBSTONE, since the
@@ -1811,7 +1821,7 @@
         term: held,
         path: controller.path,
         gen: controller.gen,
-        stopCopyOnSelect: installSnapshotCopyOnSelect(el, held),
+        stopCopyOnSelect: installSnapshotCopyOnSelect(el, held, heldLinkGesture),
       });
       publishTombstones();
     } else if (held) {
@@ -5772,6 +5782,7 @@
         islands.set(spec.el, {
           ws,
           term,
+          linkGesture,
           // For `stepFontSize`: a new size only takes effect once the
           // terminal is refitted (see the font-swap backstop above).
           fit,
