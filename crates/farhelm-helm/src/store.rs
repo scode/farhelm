@@ -329,7 +329,7 @@ pub struct FolderHistoryEntry {
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 63;
+const SCHEMA_VERSION: i64 = 64;
 
 /// Distinguish host row IDs in this registry from the same IDs in a recovered
 /// or independently created registry. The row is minted with the schema and
@@ -847,7 +847,7 @@ pub struct CacheReplacement {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionFilter {
     host: Option<HostId>,
-    parent: Option<String>,
+    parent: Option<SessionKey>,
     directory: Option<Folded>,
     title: Option<Folded>,
     /// The `state` tag of [`SessionStatus`], as [`status_key`] spells it.
@@ -1010,9 +1010,9 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 /// Every field is `Option` because "never set" is a real state: the
 /// client's default applies. `list_sort` is the bare `?sort=` word
 /// ([`parse_sort_key`]), stored as the word rather than the enum so an
-/// unset value has an honest representation; `last_selected` is a bare
-/// session id, valid for this helm's fleet only, which is why the helm's
-/// own database and not client storage is where it belongs. A `PUT` sends a
+/// unset value has an honest representation; `last_selected` is a full
+/// entry-bound session reference, valid for this helm's fleet only, which is
+/// why the helm's own database and not client storage is where it belongs. A `PUT` sends a
 /// [`PreferencePatch`], not this type: a patch has to tell "leave alone"
 /// from "clear", and a plain `Option` cannot.
 ///
@@ -1054,6 +1054,8 @@ pub struct Preferences {
     pub welcome_seen: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub list_sort: Option<String>,
+    /// Full entry-bound reference. A deleted entry or session may leave this
+    /// stale; readers choose a fallback rather than treating it as routing authority.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_selected: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1174,6 +1176,8 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub list_sort: Option<Option<String>>,
+    /// A full session reference replaces the selection; null clears it and
+    /// omission leaves it alone. Public writes validate syntax, not existence.
     #[serde(
         default,
         deserialize_with = "double_option",
@@ -1309,9 +1313,10 @@ impl SessionFilter {
         self
     }
 
-    /// Narrow to direct children of one session id.
-    pub fn parent(mut self, parent: &str) -> SessionFilter {
-        self.parent = Some(parent.to_string());
+    /// Narrow to direct children on the parent's own host entry. Equal bare
+    /// parent IDs from another entry cannot satisfy this filter.
+    pub fn parent(mut self, parent: &SessionKey) -> SessionFilter {
+        self.parent = Some(parent.clone());
         self
     }
 
@@ -1372,7 +1377,7 @@ impl SessionFilter {
             return false;
         }
         if let Some(parent) = &self.parent
-            && info.parent.as_deref() != Some(parent.as_str())
+            && (parent.host != host || info.parent.as_deref() != Some(parent.session_id.as_str()))
         {
             return false;
         }
@@ -2077,6 +2082,8 @@ pub struct HelmStore {
 ///   or disturbing the foreign-key rows that belong to them.
 /// - 63: bind seen stamps, pins and notification marks to their host entry.
 ///   Legacy rows survive only when exactly one cached membership attributes them.
+/// - 64: qualify the remembered selection with its uniquely cached host entry.
+///   Unowned, ambiguous or unrepresentable legacy selections are cleared.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2402,7 +2409,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 63;",
+              PRAGMA user_version = 64;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -3821,6 +3828,60 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         tx.execute_batch("PRAGMA user_version = 63;")
             .context("migrating helm.db to schema version 63")?;
         version = 63;
+    }
+    if version == 63 {
+        // The old value was always bare, even if it happens to parse as a full
+        // reference. Only persisted membership can attribute it; there is no
+        // restart-persistent evidence for identity-less or contested live rows.
+        // Treat version-only rewinds the same way: guessing from spelling could
+        // silently preserve a legacy value under an entry it never belonged to.
+        let selected: Option<String> = tx
+            .query_row(
+                "SELECT last_selected FROM preferences WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        if let Some(selected) = selected {
+            let qualified = if farhelm_proto::bare_session_id_problem(&selected).is_none() {
+                let owners = {
+                    let mut statement = tx.prepare(
+                        "SELECT host_id FROM session_cache WHERE session_id = ?1 LIMIT 2",
+                    )?;
+                    statement
+                        .query_map([&selected], |row| row.get::<_, HostId>(0))?
+                        .collect::<Result<Vec<_>, _>>()?
+                };
+                match owners.as_slice() {
+                    [host] => {
+                        let entry_uuid: Option<String> = tx
+                            .query_row(
+                                "SELECT entry_uuid FROM hosts WHERE id = ?1",
+                                [host],
+                                |row| row.get(0),
+                            )
+                            .optional()?
+                            .flatten();
+                        entry_uuid.and_then(|entry_uuid| {
+                            farhelm_proto::SessionRef::new(&entry_uuid, &selected)
+                                .ok()
+                                .map(|reference| reference.to_string())
+                        })
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            tx.execute(
+                "UPDATE preferences SET last_selected = ?1 WHERE singleton = 1",
+                [qualified],
+            )?;
+        }
+        tx.execute_batch("PRAGMA user_version = 64;")
+            .context("migrating helm.db to schema version 64")?;
+        version = 64;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -6769,6 +6830,9 @@ impl HelmStore {
         entries: Vec<SessionInfo>,
         truncated: bool,
     ) -> anyhow::Result<CacheReplacement> {
+        for entry in &entries {
+            crate::session_cache::ensure_recordable_session(entry)?;
+        }
         let identity = identity.to_string();
         self.conn.call("replace host sessions task panicked", move |conn: &mut Connection| -> anyhow::Result<CacheReplacement> {
             let tx = conn
@@ -6972,11 +7036,10 @@ impl HelmStore {
     /// [`HostStoreError::SessionOwnerAmbiguous`], because a create cannot be
     /// the thing that resolves a collision — see that variant's docs.
     ///
-    /// The id is checked like every other peer-supplied one
-    /// ([`crate::session_cache::session_id_problem`]'s rule, through
-    /// [`crate::session_cache::ensure_recordable_id`]): a create's reply is a
-    /// peer ingress point exactly as a drain's rows are, and an id no later
-    /// request could address must not enter the cache through either.
+    /// Every session reference is checked through
+    /// [`crate::session_cache::ensure_recordable_session`], including parent
+    /// and working-copy origin. A mutation's reply is peer ingress just like
+    /// a listing; both must remain representable as entry-bound public IDs.
     ///
     /// The cap holds here by EVICTION: a seed that would leave the slice
     /// past `farhelm_proto::LIST_SESSIONS_CAP` rows drops the oldest OTHER
@@ -6995,7 +7058,7 @@ impl HelmStore {
         identity: &str,
         entry: &SessionInfo,
     ) -> anyhow::Result<bool> {
-        crate::session_cache::ensure_recordable_id(&entry.id)?;
+        crate::session_cache::ensure_recordable_session(entry)?;
         let identity = identity.to_string();
         let entry = entry.clone();
         self.conn
@@ -7886,7 +7949,8 @@ impl HelmStore {
     /// slice is at most `farhelm_proto::LIST_SESSIONS_CAP` rows or a
     /// seed's worth more (see [`Self::remember_session`]).
     ///
-    /// SKIP-AND-LOG, not fail-the-whole-read: a row whose `info_json` no
+    /// SKIP-AND-LOG, not fail-the-whole-read: a row whose references no longer
+    /// fit the helm's admission rule, or whose `info_json` no
     /// longer decodes (see `session_cache`'s schema comment in
     /// [`apply_schema`] for how this can legitimately happen across a helm
     /// upgrade) is dropped from the returned list and reported via
@@ -7923,8 +7987,15 @@ impl HelmStore {
                     });
                     Ok(rows
                         .into_iter()
-                        .filter_map(|(session_id, _, json)| match serde_json::from_str(&json) {
-                            Ok(info) => Some(info),
+                        .filter_map(|(session_id, _, json)| match serde_json::from_str::<SessionInfo>(&json) {
+                            Ok(info) => {
+                                if let Err(error) = crate::session_cache::ensure_recordable_session(&info) {
+                                    tracing::warn!(host, session_id, %error, "skipping an unaddressable cached session");
+                                    None
+                                } else {
+                                    Some(info)
+                                }
+                            }
                             Err(error) => {
                                 // See this method's own docs for why a decode
                                 // failure here is skipped-and-logged rather than
@@ -7959,10 +8030,11 @@ impl HelmStore {
     /// wanted shape — the paged, indexed read this replaced existed to
     /// avoid exactly this decode, for fleets the product is not built for.
     ///
-    /// A row is left OUT of the result in two cases, each a `warn!` naming
+    /// A row is left OUT of the result in three cases, each a `warn!` naming
     /// the host and session id: its payload no longer decodes, or it
     /// decodes to a session whose `id` or `created_at` disagrees with the
-    /// columns it is filed under. The second is poison too — the columns
+    /// columns it is filed under, or one of its session references fails the
+    /// current admission rule. The second is poison too — the columns
     /// are what the one-owner index and every lookup here are built on, so
     /// showing such a row would list it under one identity and route it
     /// under another. Neither row reaches the served list or its counts
@@ -8054,6 +8126,10 @@ impl HelmStore {
                             return None;
                         }
                     };
+                    if let Err(error) = crate::session_cache::ensure_recordable_session(&info) {
+                        tracing::warn!(host, session_id, %error, "skipping an unaddressable cached session");
+                        return None;
+                    }
                     Some(CachedRow { host, info })
                 })
                 .collect();
@@ -8066,13 +8142,13 @@ impl HelmStore {
             .await
     }
 
-    /// One host's cached entry for `session_id`, if it has one and it still
-    /// decodes.
+    /// One host's cached entry for `session_id`, if it still decodes with
+    /// matching identity and representable session references.
     ///
     /// The stale-detail read: what `GET /api/sessions/{id}` serves behind
     /// SPEC.md's host-unreachable notice. Scoped to a host rather than
-    /// searching, because the caller has already resolved the owner
-    /// ([`Self::host_of_session`]) and asking again by session id alone
+    /// searching, because the caller has already resolved the entry and checked
+    /// [`Self::has_cached_session`], and asking again by session id alone
     /// would be a second, independently-fallible answer to a question
     /// already settled.
     pub async fn cached_session(
@@ -8109,7 +8185,14 @@ impl HelmStore {
                     );
                     None
                 }
-                Ok(info) => Some(info),
+                Ok(info) => {
+                    if let Err(error) = crate::session_cache::ensure_recordable_session(&info) {
+                        tracing::warn!(host, session_id, %error, "skipping an unaddressable cached session");
+                        None
+                    } else {
+                        Some(info)
+                    }
+                }
                 Err(error) => {
                     tracing::warn!(
                         host,
@@ -8125,19 +8208,38 @@ impl HelmStore {
             .await
     }
 
-    /// Which host holds `session_id` in its cache — the owner lookup every
-    /// session operation routes through (PLAN_M6.md item 5).
+    /// Whether the exact host/session pair has persisted cache membership.
+    /// Routing uses the columns, never the metadata: a corrupt display payload
+    /// must not make a live session unreachable. Admission and public parsing
+    /// enforce the ID contract separately; this is deliberately a raw lookup.
+    pub async fn has_cached_session(&self, session: &SessionKey) -> anyhow::Result<bool> {
+        let session = session.clone();
+        self.conn
+            .call(
+                "cached session membership task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    conn.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM session_cache WHERE host_id = ?1 AND session_id = ?2)",
+                        rusqlite::params![session.host, session.session_id],
+                        |row| row.get(0),
+                    )
+                    .context("checking one host's cached session membership")
+                },
+            )
+            .await
+    }
+
+    /// The legacy cache's unique bare-ID owner, independent of display JSON.
+    /// Public routing uses [`Self::has_cached_session`] on its resolved pair;
+    /// this global query remains only for the cache constraint's tests.
     ///
     /// Deliberately does NOT read `info_json`. Routing is a question about
     /// where to ask, not about what the session is, so a row whose payload
     /// no longer decodes still routes correctly and a live session is never
     /// made unreachable by a corrupt copy of its own metadata.
     ///
-    /// `None` means the cache does not know this session. That is a 404 at
-    /// the REST edge for a session nobody has, and NOT the end of the
-    /// lookup for one that exists: an identity-less connected host caches
-    /// nothing at all, and its sessions are resolved from the manager's
-    /// in-memory list instead (see `crate::route_session`).
+    /// `None` means no persisted cache holds the suffix. It says nothing
+    /// about an identity-less host's in-memory membership.
     ///
     /// FAILS CLOSED on two owners, with [`HostStoreError::SessionOwnerAmbiguous`].
     /// The `session_cache_one_owner` index makes that unconstructible for
@@ -11056,7 +11158,9 @@ mod tests {
             .await
             .unwrap();
         store
-            .update_preferences(patch(r#"{"last_selected":"session-1"}"#))
+            .update_preferences(patch(
+                r#"{"last_selected":"0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-1"}"#,
+            ))
             .await
             .unwrap();
         store
@@ -11075,7 +11179,7 @@ mod tests {
             store.preferences().await.unwrap(),
             Preferences {
                 list_sort: Some("title".to_string()),
-                last_selected: Some("session-1".to_string()),
+                last_selected: Some("0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-1".to_string()),
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
@@ -11109,7 +11213,7 @@ mod tests {
             store.preferences().await.unwrap(),
             Preferences {
                 list_sort: Some("created".to_string()),
-                last_selected: Some("session-1".to_string()),
+                last_selected: Some("0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:session-1".to_string()),
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
@@ -11627,6 +11731,177 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    /// A public row must have representable references throughout, including
+    /// legacy rows that bypassed current ingress. Routing remains a raw paired
+    /// membership question even when a row's metadata cannot be shown.
+    #[farhelm_testtrace::test]
+    async fn cache_admission_and_reads_require_representable_session_references() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "admission.example", "identity").await;
+        let good = session(&"é".repeat(20), 1);
+        store
+            .remember_session(host, "identity", &good)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.cached_sessions(host).await.unwrap(),
+            vec![good.clone()]
+        );
+        let mut parent = session("bad-parent", 2);
+        parent.parent = Some("x".repeat(farhelm_proto::MAX_BARE_SESSION_ID_BYTES + 1));
+        let mut origin = session("bad-origin", 3);
+        origin.working_copy = Some(farhelm_proto::WorkingCopyInfo {
+            id: "copy".into(),
+            repo: farhelm_proto::parse_github_repo("acme/bar").unwrap(),
+            canonical_path: "/checkouts/bar".into(),
+            origin_session_id: "x".repeat(farhelm_proto::MAX_BARE_SESSION_ID_BYTES + 1),
+        });
+        let bad_id = session(&"x".repeat(farhelm_proto::MAX_BARE_SESSION_ID_BYTES + 1), 4);
+        for entry in [&parent, &origin, &bad_id] {
+            assert!(
+                store
+                    .remember_session(host, "identity", entry)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                store
+                    .replace_host_sessions(host, "identity", vec![entry.clone()], false)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                store.cached_rows(&[host]).await.unwrap().len(),
+                1,
+                "a refused wholesale write must keep the previous cache"
+            );
+        }
+        let raw = [parent, origin, bad_id];
+        let planted = raw.clone();
+        store.conn.call("plant legacy oversized references", move |conn: &mut Connection| -> anyhow::Result<()> {
+            for entry in planted {
+                conn.execute(
+                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json) VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![host, entry.id, entry.created_at, serde_json::to_string(&entry)?],
+                )?;
+            }
+            conn.execute(
+                "INSERT INTO session_cache (host_id, session_id, created_at, info_json) VALUES (?1, 'poison', 5, 'malformed')",
+                [host],
+            )?;
+            Ok(())
+        }).await.unwrap();
+        for entry in &raw {
+            assert!(
+                store
+                    .has_cached_session(&SessionKey::new(host, &entry.id))
+                    .await
+                    .unwrap(),
+                "premise: legacy row remains persisted"
+            );
+        }
+        let poison = SessionKey::new(host, "poison");
+        assert!(store.has_cached_session(&poison).await.unwrap());
+        assert_eq!(store.cached_rows(&[host]).await.unwrap().len(), 1);
+        assert_eq!(store.cached_sessions(host).await.unwrap(), vec![good]);
+        for entry in raw {
+            assert!(
+                store
+                    .cached_session(host, &entry.id)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert!(
+            store
+                .cached_session(host, "poison")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            !store
+                .has_cached_session(&SessionKey::new(host + 1, "poison"))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .has_cached_session(&SessionKey::new(host, "absent"))
+                .await
+                .unwrap()
+        );
+    }
+
+    /// Selection migration uses raw cached membership, never decodable metadata
+    /// or the spelling of the old value. In particular, a short full-looking
+    /// bare ID still belongs to its reporting entry; an unowned or oversized
+    /// value cannot acquire provenance merely because a parser accepts it.
+    #[farhelm_testtrace::test]
+    async fn schema_64_qualifies_only_uniquely_owned_representable_selection() {
+        let full_looking_bare = "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:x";
+        let long = "x".repeat(farhelm_proto::MAX_BARE_SESSION_ID_BYTES + 1);
+        let old_full = format!("0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:{}", "s".repeat(36));
+        for (selected, memberships, survives) in [
+            ("owned", 1, true),
+            ("unowned", 0, false),
+            ("duplicate", 2, false),
+            ("..", 1, false),
+            ("bad\nline", 1, false),
+            (long.as_str(), 1, false),
+            (full_looking_bare, 1, true),
+            (full_looking_bare, 0, false),
+            (old_full.as_str(), 0, false),
+        ] {
+            let (dir, store) = fresh_store().await;
+            let first = host_with_identity(&store, "selection-first.example", "first").await;
+            let second = host_with_identity(&store, "selection-second.example", "second").await;
+            let entry_uuid = store.entry_uuid_of(first).await.unwrap().unwrap();
+            let path = dir.path().join("helm.db");
+            drop(store);
+            let conn = Connection::open(&path).unwrap();
+            if memberships == 2 {
+                // Old normal databases forbid this. Remove the invariant
+                // explicitly to exercise historical ambiguous membership.
+                conn.execute_batch("DROP INDEX session_cache_one_owner;")
+                    .unwrap();
+            }
+            for host in [first, second].into_iter().take(memberships) {
+                conn.execute(
+                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json) VALUES (?1, ?2, 1, 'malformed')",
+                    rusqlite::params![host, selected],
+                ).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO preferences (singleton, last_selected, compact) VALUES (1, ?1, 1)",
+                [selected],
+            )
+            .unwrap();
+            assert_eq!(
+                conn.query_row(
+                    "SELECT COUNT(*) FROM session_cache WHERE session_id = ?1",
+                    [selected],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+                memberships as i64,
+                "premise: raw persisted membership for {selected:?}"
+            );
+            conn.execute_batch("PRAGMA user_version = 63;").unwrap();
+            drop(conn);
+            let store = HelmStore::open(&path).await.unwrap();
+            let preferences = store.preferences().await.unwrap();
+            let expected = survives.then(|| format!("{entry_uuid}:{selected}"));
+            assert_eq!(preferences.last_selected, expected, "{selected:?}");
+            assert_eq!(
+                preferences.compact,
+                Some(true),
+                "unrelated preferences survive"
+            );
+        }
     }
 
     /// Legacy viewer facts can be kept only when the cache attributes them
@@ -13444,12 +13719,13 @@ mod tests {
     }
 
     /// Schema 18 adds presentation state to an existing singleton without
-    /// changing either preference older clients already wrote.
+    /// changing older clients' choices at that migration step. Schema 64 later
+    /// clears the fixture's unowned selection when it requires entry provenance.
     ///
     /// This starts from the exact schema-17 difference rather than a fresh
     /// database: the compact column is absent, sort and selection are both
-    /// populated, and opening through [`HelmStore`] must preserve them while
-    /// exposing compact as the old-client default.
+    /// populated. Opening through [`HelmStore`] preserves sort and exposes
+    /// compact as the old-client default; selection needs a cached owner to survive.
     #[farhelm_testtrace::test]
     async fn schema_18_preserves_the_version_17_preference_row() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -13497,7 +13773,7 @@ mod tests {
             migrated.preferences().await.unwrap(),
             Preferences {
                 list_sort: Some("title".to_string()),
-                last_selected: Some("session-before-compact".to_string()),
+                last_selected: None,
                 compact: None,
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
@@ -13519,18 +13795,19 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
-            "the new field defaults absent while both existing choices survive"
+            "compact defaults absent, sort survives, and an unowned legacy selection clears"
         );
     }
 
     /// Schema 26 adds the remembered structured-launch permissions mode to
     /// an existing singleton without disturbing any preference an older
-    /// client already wrote — the same contract `schema_18_preserves_the_
+    /// client already wrote at that step — the same contract `schema_18_preserves_the_
     /// version_17_preference_row` pins for `compact`, one column later.
     ///
     /// This starts from the exact schema-25 difference (the new column
     /// absent, the other three populated) rather than a fresh database,
     /// because the property under test is migration fidelity, not creation.
+    /// Schema 64 subsequently clears the unowned selection in this fixture.
     #[farhelm_testtrace::test]
     async fn schema_26_preserves_the_version_25_preference_row() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -13578,7 +13855,7 @@ mod tests {
             migrated.preferences().await.unwrap(),
             Preferences {
                 list_sort: Some("title".to_string()),
-                last_selected: Some("session-before-permissions-memory".to_string()),
+                last_selected: None,
                 compact: Some(true),
                 remembered_permissions: None,
                 remembered_wrapper_prefixes: Default::default(),
@@ -13600,7 +13877,7 @@ mod tests {
                 pi_trust_hint_dismissed: None,
                 tunnel_consent: None,
             },
-            "the new field defaults absent while every existing choice survives"
+            "permissions defaults absent, other choices survive, and an unowned selection clears"
         );
     }
 
@@ -17923,10 +18200,25 @@ mod tests {
         assert!(!SessionFilter::default().host(2).matches(1, &info));
         assert!(
             SessionFilter::default()
-                .parent("parent-7")
+                .parent(&SessionKey::new(1, "parent-7"))
                 .matches(1, &info)
         );
-        assert!(!SessionFilter::default().parent("parent").matches(1, &info));
+        assert!(
+            !SessionFilter::default()
+                .parent(&SessionKey::new(1, "parent"))
+                .matches(1, &info)
+        );
+        assert!(
+            !SessionFilter::default()
+                .parent(&SessionKey::new(2, "parent-7"))
+                .matches(1, &info)
+        );
+        assert!(
+            !SessionFilter::default()
+                .host(2)
+                .parent(&SessionKey::new(1, "parent-7"))
+                .matches(2, &info)
+        );
 
         // Dimensions AND: adding one can only ever narrow.
         assert!(
@@ -17937,7 +18229,11 @@ mod tests {
         );
         assert!(SessionFilter::default().is_empty());
         assert!(!SessionFilter::default().title("x").is_empty());
-        assert!(!SessionFilter::default().parent("parent-7").is_empty());
+        assert!(
+            !SessionFilter::default()
+                .parent(&SessionKey::new(1, "parent-7"))
+                .is_empty()
+        );
     }
 
     /// Every status the wire can carry has a filter word, and nothing else

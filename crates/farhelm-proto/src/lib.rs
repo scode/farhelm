@@ -148,7 +148,10 @@ pub use session_launch::{CommandLaunch, LaunchKind, LaunchRequest, SessionLaunch
 /// Entry-bound session references at the helm's client boundary. Supervisor messages
 /// continue carrying bare IDs; this module adds no wire fields or protocol change.
 pub mod session_ref;
-pub use session_ref::{SessionRef, SessionRefError};
+pub use session_ref::{
+    MAX_BARE_SESSION_ID_BYTES, MAX_FULL_SESSION_ID_BYTES, SessionRef, SessionRefError,
+    bare_session_id_problem,
+};
 
 /// Owned GitHub checkouts: validated repo identity, deterministic naming,
 /// and the preview/create payload shapes (see the module's own docs).
@@ -2132,12 +2135,12 @@ pub enum AgentReply {
         /// Host discovery is all-or-error; a partial catalog could make a
         /// duplicate name look safe to select.
         complete: bool,
-        /// Stable host identity of the authenticated asking session.
+        /// Helm-assigned entry UUID of the authenticated asking session.
         caller_host_id: String,
     },
     Sessions {
         sessions: Vec<AgentSession>,
-        /// Stable host identity of the authenticated asking session.
+        /// Helm-assigned entry UUID of the authenticated asking session.
         caller_host_id: String,
         /// True when the helm stopped short of the whole fleet, for either
         /// of two reasons: the row cap ([`LIST_SESSIONS_CAP`], the same one
@@ -2160,7 +2163,7 @@ pub enum AgentReply {
     /// Answers `Templates`, in name order.
     Templates {
         templates: Vec<AgentTemplate>,
-        /// Stable host identity of the authenticated asking session.
+        /// Helm-assigned entry UUID of the authenticated asking session.
         caller_host_id: String,
     },
     /// Answers `Rename` with the one freshly recomputed session row.
@@ -2284,7 +2287,7 @@ pub const AGENT_MUTATION_UNKNOWN_REMEDY: &str = "check the session's current sta
 /// remain private to the helm; discovery is not a way to retarget a host.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentHost {
-    /// Stable helm registry identity. It is discovery context, while
+    /// Canonical helm-assigned entry UUID. It is discovery context, while
     /// `name` remains the accepted destination selector.
     pub id: String,
     /// The host's display name — the same string the UI shows and the
@@ -2313,8 +2316,10 @@ pub struct AgentHost {
 /// resume template, conversation locator, or launch command.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentSession {
+    /// Full entry-UUID-prefixed reference supplied by the helm. The typed
+    /// supervisor relay carries it unchanged; authentication remains bare.
     pub id: String,
-    /// Registry identity from the same snapshot or mutation claim as this row.
+    /// Entry UUID from the same snapshot or mutation claim as this row.
     /// Unlike the display name, it distinguishes hosts whose names coincide.
     /// A stale mutation reply retains the claimed id without claiming that
     /// the registry still points at the same supervisor incarnation.

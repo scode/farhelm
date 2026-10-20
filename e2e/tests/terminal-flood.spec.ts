@@ -331,7 +331,7 @@ function drainFloodOffScreen(
           return;
         }
         const ws = new WebSocket(
-          `ws://${location.host}/api/sessions/${id}/term?cols=${cols}&rows=${rows}`,
+          `ws://${location.host}/api/sessions/${encodeURIComponent(id)}/term?cols=${cols}&rows=${rows}`,
           ["farhelm", `farhelm-device-${secret}`],
         );
         ws.binaryType = "arraybuffer";
@@ -1096,7 +1096,7 @@ test("a terminal socket for an unknown session reports why", async ({
           return;
         }
         const ws = new WebSocket(
-          `ws://${location.host}/api/sessions/no-such-session/term`,
+          `ws://${location.host}/api/sessions/00000000-0000-4000-8000-000000000000%3Ano-such-session/term`,
           ["farhelm", `farhelm-device-${secret}`],
         );
         // sleep-ok: fail if the peer never delivers a detach notice; elapsed time is not success.

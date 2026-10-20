@@ -10,7 +10,9 @@
 //! While the helm refuses agent prompts, only the turned-off proof runs; the
 //! delivery proofs are ignored until the re-enable (see the note above them).
 
-use crate::agent_listing_real_stack::{attach_terminal, hosts_until_attached, session_token};
+use crate::agent_listing_real_stack::{
+    attach_terminal, bare_session_id, hosts_until_attached, session_token,
+};
 use crate::harness::*;
 use farhelm_proto::{CommandLaunch, LaunchHarness};
 use std::path::{Path, PathBuf};
@@ -234,7 +236,7 @@ async fn viewer(client: &SupervisorClient, recorder: &Recorder) -> Viewer {
     recorder.assert_alive();
     let (channel, _, stream) = tokio::time::timeout(
         REAL_STACK_SETTLE,
-        client.attach_live(&recorder.session.id, WIDE_COLS, ROWS),
+        client.attach_live(&bare_session_id(&recorder.session.id), WIDE_COLS, ROWS),
     )
     .await
     .expect("attaching the recorder viewer stalled")
@@ -264,7 +266,7 @@ async fn prompt_cli(
         .args(["agent", "prompt", "--session", target, "--prompt", text])
         .env(
             farhelm_supervisor::launch::SESSION_ID_ENV_VAR,
-            &asking.session.id,
+            bare_session_id(&asking.session.id),
         )
         .env(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR, token)
         .env(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR, socket)
@@ -359,7 +361,7 @@ async fn prove_prompt(agent: LaunchHarness, expect: Expect) {
     let current = listing
         .sessions
         .iter()
-        .find(|row| row.id == target.session.id)
+        .find(|row| row.id == bare_session_id(&target.session.id))
         .unwrap();
     assert_eq!(
         current.status,

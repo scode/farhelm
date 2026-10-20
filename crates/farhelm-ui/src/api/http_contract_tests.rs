@@ -25,7 +25,8 @@ const HOST_LIST_JSON: &str = include_str!("../../../farhelm-helm/http-contract/h
 ///
 /// Specification: the helm's fully populated session-list fixture decodes
 /// through the UI's envelope, and every field the mirror declares carries the
-/// fixture's value rather than a default.
+/// fixture's value rather than a default. Session and working-copy origin
+/// references stay complete opaque values, including their entry prefix.
 #[farhelm_testtrace::test]
 fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     let body: SessionListBody = serde_json::from_str(SESSION_LIST_JSON).unwrap();
@@ -35,7 +36,7 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     let [row] = body.sessions.as_slice() else {
         panic!("the fixture holds exactly one row");
     };
-    assert_eq!(row.id, "fh-0123abcd");
+    assert_eq!(row.id, "11111111-1111-4111-8111-111111111111:fh-0123abcd");
     assert_eq!(row.title, "Fix the widget");
     assert_eq!(row.cwd, "~/src/widgets");
     assert_eq!(row.canonical_cwd.as_deref(), Some("/home/user/src/widgets"));
@@ -96,7 +97,10 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
         ("octo", "widgets")
     );
     assert_eq!(working_copy.canonical_path, "/home/user/src/widgets");
-    assert_eq!(working_copy.origin_session_id, "fh-0123abcd");
+    assert_eq!(
+        working_copy.origin_session_id,
+        "11111111-1111-4111-8111-111111111111:fh-0123abcd"
+    );
 }
 
 /// Why this matters: the host panel picks its chip and its remedy from the

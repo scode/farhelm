@@ -1340,7 +1340,7 @@ test.describe("session list ordering", () => {
     expect(await orderOf(page, [a.id, b.id, c.id]), "premise: the old order is held").toEqual([a.id, b.id, c.id]);
 
     let release: (() => void) | undefined;
-    await page.route(`**/api/sessions/${a.id}`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(a.id)}`, async (route) => {
       if (route.request().method() !== "DELETE") {
         await route.fallback();
         return;

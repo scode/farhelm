@@ -177,13 +177,13 @@ export async function fillCreateForm(
  * observable fixture behavior, not part of moving the duplicate helpers.
  */
 export async function cleanupSession(request: APIRequestContext, id: string): Promise<void> {
-  const stopped = await request.post(`/api/sessions/${id}/stop`);
+  const stopped = await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`);
   if (!stopped.ok() && stopped.status() !== 404) {
     throw new Error(
       `cleanup: stopping session ${id} failed (${stopped.status()}): ${await stopped.text()}`,
     );
   }
-  const deleted = await request.delete(`/api/sessions/${id}`);
+  const deleted = await request.delete(`/api/sessions/${encodeURIComponent(id)}`);
   if (!deleted.ok() && deleted.status() !== 404) {
     throw new Error(
       `cleanup: deleting session ${id} failed (${deleted.status()}): ${await deleted.text()}`,

@@ -69,7 +69,7 @@ async function resetTrust(request: APIRequestContext) {
 async function installObservations(page: Page, observations: Map<string, TrustObservation>) {
   await page.route((url) =>
     url.pathname === "/api/sessions" ||
-    observations.has(url.pathname.replace(/^\/api\/sessions\//, "")), async (route) => {
+    observations.has(decodeURIComponent(url.pathname.replace(/^\/api\/sessions\//, ""))), async (route) => {
     if (route.request().method() !== "GET") return route.continue();
     const response = await route.fetch();
     if (!response.ok()) return route.fulfill({ response });

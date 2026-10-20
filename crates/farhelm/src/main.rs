@@ -1728,29 +1728,20 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
     {
         return print_agent_listing(verb, *json);
     }
-    // The acting verbs share one `agent_request`
-    // round trip here, rather than each making its own the way the
-    // listings do. The authenticated caller returned alongside the
-    // reply is retained for attribution even though every
-    // consequential target is now explicit.
-    // A self restart tears down this process's own agent tree. The
-    // session id is already an injected authentication input, so it
-    // is available without a discovery round trip and lets the CLI
-    // warn before it sends the destructive request. There is no
-    // completion claim here: the request may cut this process off
-    // before its acknowledgement returns.
-    if let AgentCmd::Restart { session, .. } = &command {
-        let asking = SessionEnv::from_env()
-            .dial("farhelm agent restart")?
-            .session_id;
-        if session == &asking {
-            eprintln!(
-                "warning: restarting this session can interrupt the invoking CLI; \
-                 acknowledgement can be lost, and resumed task continuation is not guaranteed"
-            );
-        }
+    let env = SessionEnv::from_env();
+    // A restart can kill the CLI carrying this request. Resolve a possible
+    // full self reference before dispatch, while this process can still warn
+    // about the acknowledgement it may never receive. Discovery supplies only
+    // identity here; it must not infer consent or predict whether restart works.
+    if let AgentCmd::Restart { session, .. } = &command
+        && runtime()?.block_on(is_self_restart(&env, session))?
+    {
+        eprintln!(
+            "warning: restarting this session can interrupt the invoking CLI; \
+             acknowledgement can be lost, and resumed task continuation is not guaranteed"
+        );
     }
-    let (_asking, reply) = runtime()?.block_on(agent_request(&SessionEnv::from_env(), verb))?;
+    let (_asking, reply) = runtime()?.block_on(agent_request(&env, verb))?;
     match command {
         AgentCmd::OpenUrl { .. } => {
             let AgentReply::UrlOpened {} = reply else {
@@ -1891,6 +1882,33 @@ fn run_agent(command: AgentCmd) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Recognize a deliberate self restart before sending the request that can kill this CLI.
+///
+/// The supervisor credential stays bare, including when its opaque ID resembles a full
+/// reference: exact equality therefore wins before parsing. Other targets need discovery
+/// only when their bare suffix could be ours. The entry returned by that read-only request
+/// distinguishes a full self reference from another host's session with the same bare ID.
+/// A discovery failure aborts before mutation; it cannot produce an outcome-unknown restart.
+async fn is_self_restart(env: &SessionEnv, target: &str) -> anyhow::Result<bool> {
+    let asking = env.dial("farhelm agent restart")?.session_id;
+    if target == asking {
+        return Ok(true);
+    }
+    let Ok(reference) = target.parse::<farhelm_proto::SessionRef>() else {
+        // The helm owns target refusals and their discovery remedy. A target
+        // that cannot name this caller does not need an extra round trip here.
+        return Ok(false);
+    };
+    if reference.bare_id() != asking {
+        return Ok(false);
+    }
+    let (_, reply) = agent_request(env, farhelm_proto::AgentVerb::Hosts {}).await?;
+    let AgentReply::Hosts { caller_host_id, .. } = reply else {
+        anyhow::bail!("the helm answered hosts with something other than a hosts listing");
+    };
+    Ok(reference == farhelm_proto::SessionRef::new(&caller_host_id, &asking)?)
+}
+
 /// Print discovery as a human table or a versioned JSON envelope.
 ///
 /// JSON retains exact caller identity and the reply's completeness fields
@@ -1906,6 +1924,10 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
             | AgentReply::Templates { caller_host_id, .. } => caller_host_id.clone(),
             _ => anyhow::bail!("only discovery replies can be printed as JSON"),
         };
+        // Authentication remains bare on the unchanged supervisor relay. Only
+        // the helm knows this session's entry, so qualify the caller using the
+        // reply's identity rather than guessing from a session row or marker.
+        let caller_session_id = farhelm_proto::SessionRef::new(&caller_host_id, &asking)?;
         // Bumped whenever a value an agent reads changes meaning or
         // disappears. 3: `restart_offer` lost `fresh_only` and
         // `fallback_template` when restart came to mean resume only; `resume`
@@ -1915,6 +1937,8 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
         // `no_resume_command`, a command launch without a resume command.
         // 6: the templates listing, whose reply is new (nothing earlier
         // changed meaning).
+        // 7: session IDs bind to their host entry, including caller.session_id;
+        // host IDs are the entry UUID rather than the helm's integer row ID.
         // Spell out the default in this discovery view, where an agent needs
         // to know what a named template does. Persistence and write replies
         // still omit Base; changing their normalized shape would dirty editors.
@@ -1929,9 +1953,9 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
             }
         }
         let envelope = serde_json::json!({
-            "schema_version": 6,
+            "schema_version": 7,
             "caller": {
-                "session_id": asking,
+                "session_id": caller_session_id.to_string(),
                 "host_id": caller_host_id,
             },
             "reply": reply,

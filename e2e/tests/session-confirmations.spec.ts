@@ -177,7 +177,7 @@ async function showStatus(page: Page, id: string, state: "running" | "interrupte
   // End the previous page's reads before installing the rewrite. Navigating
   // with route.fetch still active can dispose that response mid-fulfilment.
   await page.goto("about:blank");
-  const matches = (url: URL) => url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${id}`;
+  const matches = (url: URL) => url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${encodeURIComponent(id)}`;
   return drainedRoute(page, matches, async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
     const reply = await route.fetch();
@@ -203,9 +203,9 @@ test("Escape cancels header restart replace and delete questions and restores te
   const lifecycleRequests: string[] = [];
   page.on("request", (candidate) => {
     const path = new URL(candidate.url()).pathname;
-    if ((candidate.method() === "DELETE" && path === `/api/sessions/${session.id}`)
+    if ((candidate.method() === "DELETE" && path === `/api/sessions/${encodeURIComponent(session.id)}`)
       || (candidate.method() === "POST"
-        && ["restart", "replace", "stop"].some((action) => path === `/api/sessions/${session.id}/${action}`))) {
+        && ["restart", "replace", "stop"].some((action) => path === `/api/sessions/${encodeURIComponent(session.id)}/${action}`))) {
       lifecycleRequests.push(`${candidate.method()} ${path}`);
     }
   });
@@ -295,7 +295,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
     await expect(row(first.id).locator(".status-badge")).not.toHaveText(/exited|interrupted|error/);
     await openRowMenu(row(first.id));
     const deleted = page.waitForResponse((reply) => reply.request().method() === "DELETE"
-      && new URL(reply.url()).pathname === `/api/sessions/${first.id}`);
+      && new URL(reply.url()).pathname === `/api/sessions/${encodeURIComponent(first.id)}`);
     await row(first.id).locator(".session-row-delete").click();
     expect((await deleted).ok()).toBe(true);
     await expect(row(first.id)).toHaveCount(0);
@@ -307,7 +307,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
       if (surface === "row") await openRowMenu(row(source.id));
       else await row(source.id).locator(".session-row-open").click();
       const replacement = page.waitForResponse((reply) => reply.request().method() === "POST"
-        && new URL(reply.url()).pathname === `/api/sessions/${source.id}/replace`);
+        && new URL(reply.url()).pathname === `/api/sessions/${encodeURIComponent(source.id)}/replace`);
       await (surface === "row" ? row(source.id).locator(".session-row-replace") : page.locator(".header-replace")).click();
       const reply = await replacement;
       expect(reply.ok(), await reply.text()).toBe(true);
@@ -320,7 +320,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
     }
     await expect(page.locator(".header-delete")).toHaveAttribute("data-tooltip", "delete: remove this session and its state (Ctrl+Shift+Backspace)");
     const headerDeleted = page.waitForResponse((reply) => reply.request().method() === "DELETE"
-      && new URL(reply.url()).pathname === `/api/sessions/${source.id}`);
+      && new URL(reply.url()).pathname === `/api/sessions/${encodeURIComponent(source.id)}`);
     await page.locator(".header-delete").click();
     expect((await headerDeleted).ok()).toBe(true);
     await expect(row(source.id)).toHaveCount(0);
@@ -336,20 +336,20 @@ test("skip session confirmations walks row header interrupted card and tab actio
     await expect(restart).not.toHaveAttribute("aria-disabled", "true");
     await expect(restart).toHaveAttribute("data-confirms", "false");
     const restarted = page.waitForResponse((reply) => reply.request().method() === "POST"
-      && new URL(reply.url()).pathname === `/api/sessions/${resumable.id}/restart`);
+      && new URL(reply.url()).pathname === `/api/sessions/${encodeURIComponent(resumable.id)}/restart`);
     await restart.click();
     const restartReply = await restarted;
     expect(restartReply.request().postDataJSON().stop_if_running).toBe(true);
     expect(restartReply.ok(), await restartReply.text()).toBe(true);
     await expect(page.locator(".restart-confirm")).toHaveCount(0);
     await stopShowingRunning();
-    const tabReply = await request.post(`/api/sessions/${resumable.id}/tabs`);
+    const tabReply = await request.post(`/api/sessions/${encodeURIComponent(resumable.id)}/tabs`);
     expect(tabReply.ok(), await tabReply.text()).toBe(true);
     const { tab } = await tabReply.json();
     expect(tab.id, "the tab-open reply names the actual tab").toEqual(expect.any(String));
     const tabItem = page.locator(`.tab-slot[data-tab-id="${tab.id}"]`);
     await expect(tabItem).toBeVisible();
-    const closesTab = (url: URL) => url.pathname === `/api/sessions/${resumable.id}/tabs/${tab.id}`;
+    const closesTab = (url: URL) => url.pathname === `/api/sessions/${encodeURIComponent(resumable.id)}/tabs/${tab.id}`;
     await page.route(closesTab, async (route) => {
       if (route.request().method() !== "DELETE") return route.fallback();
       await closeGate.wait();
@@ -358,7 +358,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
     const closeReached = page.waitForRequest((candidate) => candidate.method() === "DELETE"
       && closesTab(new URL(candidate.url())));
     const closed = page.waitForResponse((reply) => reply.request().method() === "DELETE"
-      && new URL(reply.url()).pathname === `/api/sessions/${resumable.id}/tabs/${tab.id}`);
+      && new URL(reply.url()).pathname === `/api/sessions/${encodeURIComponent(resumable.id)}/tabs/${tab.id}`);
     await tabItem.locator(".tab-close").click();
     await closeReached;
     // Observe the actual prompt selector while the tab is still listed and
@@ -389,7 +389,7 @@ test("skip session confirmations walks row header interrupted card and tab actio
     await row(interrupted.id).locator(".session-row-open").click();
     await expect(page.locator(".interrupted-card")).toBeVisible();
     const replaced = page.waitForResponse((reply) => reply.request().method() === "POST"
-      && new URL(reply.url()).pathname === `/api/sessions/${interrupted.id}/replace`);
+      && new URL(reply.url()).pathname === `/api/sessions/${encodeURIComponent(interrupted.id)}/replace`);
     await page.locator(".replace-from-notice").click();
     const cardReply = await replaced;
     expect(cardReply.request().postDataJSON().only_if_nothing_alive).toBe(true);

@@ -161,7 +161,7 @@ export async function resetStack(request: APIRequestContext) {
   // polluted original rather than restarting its agent is what actually
   // resets the SCROLLBACK: stop/relaunch would keep the tmux history.
   for (const s of listing.sessions) {
-    const deleted = await request.delete(`/api/sessions/${s.id}`);
+    const deleted = await request.delete(`/api/sessions/${encodeURIComponent(s.id)}`);
     // A failed delete says what the helm actually replied. This assertion is
     // where a setup failure lands for every spec in the family, and naming
     // only the session left the one fact worth having — the helm's own answer
@@ -335,8 +335,8 @@ export async function cleanUpSessionsTitled(request: APIRequestContext, title: s
   const listing = await (await request.get("/api/sessions")).json().catch(() => null);
   for (const session of listing?.sessions ?? []) {
     if (session.title !== title) continue;
-    await request.post(`/api/sessions/${session.id}/stop`).catch(() => {});
-    await request.delete(`/api/sessions/${session.id}`).catch(() => {});
+    await request.post(`/api/sessions/${encodeURIComponent(session.id)}/stop`).catch(() => {});
+    await request.delete(`/api/sessions/${encodeURIComponent(session.id)}`).catch(() => {});
   }
 }
 
@@ -538,7 +538,7 @@ export async function closeTabAndAwaitAgentFallback(
   id: string,
   tabId: string,
 ) {
-  const closed = await request.delete(`/api/sessions/${id}/tabs/${tabId}`);
+  const closed = await request.delete(`/api/sessions/${encodeURIComponent(id)}/tabs/${tabId}`);
   expect(closed.ok(), await closed.text()).toBe(true);
   await expect(page.locator(`.tab-slot[data-tab-id="${tabId}"]`)).toHaveCount(0, {
     timeout: 20_000,

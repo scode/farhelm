@@ -100,6 +100,16 @@ fn render(agent: &Command) -> String {
          Discover first, resolve the exact row, then act. Use hosts --json and sessions --json\n\
          when exact ids and completeness matter. A table's * marks this session or host; it is\n\
          context, never an implicit target.\n\
+         Discovery JSON uses schema_version 7. Its caller.session_id and every listed session\n\
+         id are full ids: a canonical lowercase host-entry UUID, a colon, then the session's\n\
+         own id. Host ids are those entry UUIDs. Copy a full session id literally; do not\n\
+         shorten it, split it at a colon, or rebuild it from a host name. Create, clone and\n\
+         spawn print full ids too. Bare ids remembered from before this update are refused;\n\
+         run farhelm agent sessions to obtain the current full ids.\n\
+         $FARHELM_SESSION_ID stays bare because it is part of this session's credential.\n\
+         Its exact value is accepted only for deliberately targeting yourself. That exact\n\
+         own-bare match wins even if the value itself looks like a full id; every other\n\
+         session target must be a full id from discovery.\n\
          \n\
          Lifecycle commands require an exact session id. Rename also requires the exact old\n\
          title from discovery: --expected-title='old title'. An empty old title is written\n\

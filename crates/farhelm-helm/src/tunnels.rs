@@ -19,7 +19,7 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, JoinSet};
 
 use crate::manager::SessionClaim;
-use crate::store::{HostId, HostKind};
+use crate::store::{HostId, HostKind, SessionKey};
 use crate::{AppState, SupervisorError, http_error};
 
 /// A canonical supervisor target. None asks it to try IPv4 then IPv6 loopback.
@@ -79,9 +79,10 @@ pub(crate) struct OpenedTunnel {
     pub(crate) url: String,
 }
 
+/// The entry/session pair is retained for reuse, close and accepted-socket routing.
 /// A published listener owns its accept task even during a cancelled close request.
 struct Entry {
-    session: String,
+    session: SessionKey,
     owner: SessionClaim,
     target: TunnelTarget,
     info: TunnelInfo,
@@ -131,7 +132,7 @@ impl TunnelManager {
     }
 
     /// List local resources without consulting a supervisor or requiring a live host.
-    fn list(&self, session: &str) -> Vec<TunnelInfo> {
+    fn list(&self, session: &SessionKey) -> Vec<TunnelInfo> {
         self.prune();
         let mut result: Vec<_> = self
             .listeners
@@ -139,7 +140,7 @@ impl TunnelManager {
             .expect("tunnel listeners poisoned")
             .entries
             .values()
-            .filter(|entry| entry.session == session)
+            .filter(|entry| &entry.session == session)
             .map(|entry| entry.info.clone())
             .collect();
         result.sort_by(|a, b| {
@@ -148,25 +149,26 @@ impl TunnelManager {
         result
     }
 
-    /// Retain the owner for listing disconnected identity-less sessions with no cache.
-    fn retained_host(&self, session: &str) -> Option<HostId> {
+    /// Retain the exact pair's owner for disconnected identity-less sessions with no cache.
+    /// Another entry reporting the same suffix cannot lend its retained listener to this list.
+    fn retained_host(&self, session: &SessionKey) -> Option<HostId> {
         self.listeners
             .lock()
             .expect("tunnel listeners poisoned")
             .entries
             .values()
-            .find(|entry| entry.session == session)
+            .find(|entry| &entry.session == session)
             .map(|entry| entry.owner.host)
     }
 
     /// Caller holds mutation through this close and the successful-delete cache tail.
-    pub(crate) async fn close_session_locked(&self, session: &str) {
+    pub(crate) async fn close_session_locked(&self, session: &SessionKey) {
         let entries = {
             let mut listeners = self.listeners.lock().expect("tunnel listeners poisoned");
             let ids: Vec<_> = listeners
                 .entries
                 .iter()
-                .filter(|(_, e)| e.session == session)
+                .filter(|(_, e)| &e.session == session)
                 .map(|(id, _)| id.clone())
                 .collect();
             ids.into_iter()
@@ -217,6 +219,7 @@ impl Drop for TunnelManager {
 /// Hold the original host and every known installation identity across reconnects.
 fn same_owner(expected: &SessionClaim, current: &SessionClaim) -> bool {
     expected.host == current.host
+        && expected.entry_uuid == current.entry_uuid
         && expected
             .identity
             .as_ref()
@@ -235,7 +238,7 @@ async fn bind_listener(port: u16) -> std::io::Result<TcpListener> {
 async fn accept_loop(
     state: Weak<AppState>,
     listener: TcpListener,
-    session: String,
+    session: SessionKey,
     owner: SessionClaim,
     target: TunnelTarget,
     mut cancel: oneshot::Receiver<()>,
@@ -256,7 +259,7 @@ async fn accept_loop(
                     let route = crate::sessions::route_session(&state, &session).await;
                     drop(state);
                     if let Ok((claim, client)) = route && same_owner(&owner, &claim) {
-                        let _ = client.relay_tcp(&session, target.address, target.port, socket).await;
+                        let _ = client.relay_tcp(&session.session_id, target.address, target.port, socket).await;
                     }
                 });
             }
@@ -270,7 +273,7 @@ async fn accept_loop(
 /// Opener failure retains a still-live listener for retry; revocation may close it meanwhile.
 pub(crate) async fn open_url(
     state: &Arc<AppState>,
-    session: &str,
+    session: &SessionKey,
     raw: &str,
 ) -> anyhow::Result<OpenedTunnel> {
     open_from(state, session, raw, None).await
@@ -279,20 +282,22 @@ pub(crate) async fn open_url(
 /// Bind an approved agent link to its requesting host's exact routed connection.
 /// A browser-side route check can precede adoption or reconnect while this call
 /// waits for consent serialization; authorization must use our publication route.
+/// The asking ID is supervisor-local, so its authenticated origin supplies the entry.
 pub(crate) async fn open_agent_url(
     state: &Arc<AppState>,
     origin: crate::agent_requests::AgentOrigin,
     session: &str,
     raw: &str,
 ) -> anyhow::Result<OpenedTunnel> {
-    open_from(state, session, raw, Some(origin)).await
+    let key = SessionKey::new(origin.host, session);
+    open_from(state, &key, raw, Some(origin)).await
 }
 
 /// A terminal gesture authorizes its selected session; an agent grant is host-scoped.
 /// Both paths otherwise share the same consent, publication and opener lifecycle.
 async fn open_from(
     state: &Arc<AppState>,
-    session: &str,
+    session: &SessionKey,
     raw: &str,
     expected: Option<crate::agent_requests::AgentOrigin>,
 ) -> anyhow::Result<OpenedTunnel> {
@@ -346,7 +351,7 @@ async fn open_from(
             if let Some(entry) = listeners
                 .entries
                 .values()
-                .find(|entry| entry.session == session && entry.target == target)
+                .find(|entry| &entry.session == session && entry.target == target)
             {
                 if !same_owner(&entry.owner, &owner) {
                     return Err(refusal(
@@ -372,7 +377,7 @@ async fn open_from(
                 let task = tokio::spawn(accept_loop(
                     Arc::downgrade(state),
                     listener,
-                    session.to_string(),
+                    session.clone(),
                     owner.clone(),
                     target,
                     cancelled,
@@ -386,7 +391,7 @@ async fn open_from(
                     .insert(
                         info.id.clone(),
                         Entry {
-                            session: session.to_string(),
+                            session: session.clone(),
                             owner,
                             target,
                             info: info.clone(),
@@ -425,6 +430,7 @@ pub(crate) async fn list_tunnels(
         return StatusCode::NOT_FOUND.into_response();
     }
     let result: anyhow::Result<_> = async {
+        let session = crate::sessions::resolve_session_ref(&state, &session).await?;
         let host_id = match crate::sessions::resolve_owner(&state, &session).await {
             Ok((host, _)) => host,
             Err(error) if crate::error_kind(&error) == ErrorKind::NotFound => {
@@ -479,6 +485,13 @@ pub(crate) async fn open_tunnel(
     Path(session): Path<String>,
     axum::Json(request): axum::Json<OpenReq>,
 ) -> Response {
+    if state.link_opener.is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let session = match crate::sessions::resolve_session_ref(&state, &session).await {
+        Ok(session) => session,
+        Err(error) => return http_error(error),
+    };
     match open_url(&state, &session, &request.url).await {
         Ok(opened) => axum::Json(opened).into_response(),
         Err(error) => http_error(error),
@@ -493,6 +506,10 @@ pub(crate) async fn close_tunnel(
     if state.link_opener.is_none() {
         return StatusCode::NOT_FOUND.into_response();
     }
+    let session = match crate::sessions::resolve_session_ref(&state, &session).await {
+        Ok(session) => session,
+        Err(error) => return http_error(error),
+    };
     let _mutation = state.tunnels.mutation.lock().await;
     let entry = {
         let mut listeners = state
@@ -533,6 +550,28 @@ fn invalid(message: &str) -> anyhow::Error {
 
 #[cfg(test)]
 mod tests {
+    /// Select the fixture's registered SSH entry without inferring ownership from a session suffix.
+    fn remote_key(harness: &Harness) -> SessionKey {
+        let host = harness
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|host| host.destination.as_deref() == Some("tunnel-fixture"))
+            .expect("the fixture has its SSH entry");
+        SessionKey::new(host.id, "remote-session")
+    }
+
+    /// Capture the known entry's public spelling; a supervisor's bare ID is never parsed here.
+    fn reference(harness: &Harness, key: &SessionKey) -> String {
+        let host = harness
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|host| host.id == key.host)
+            .expect("the fixture entry remains registered");
+        format!("{}:{}", host.entry_uuid, key.session_id)
+    }
+
     use super::*;
     use crate::rest_harness::{self, FleetBuilder, Harness, HostScript};
     use axum::body::{Body, to_bytes};
@@ -631,6 +670,108 @@ mod tests {
         (harness, host)
     }
 
+    /// Equal supervisor suffixes on separate entries must neither reuse nor close each other's
+    /// listeners. Identity-less hosts exercise both pairs before the cache uniqueness retirement.
+    #[farhelm_testtrace::test]
+    async fn identical_suffixes_keep_tunnel_reuse_lists_and_cleanup_entry_scoped() {
+        let script = || HostScript {
+            identity: None,
+            sessions: vec![rest_harness::session("same-session", 1)],
+            ..HostScript::default()
+        };
+        let (builder, first) = FleetBuilder::new()
+            .await
+            .link_opener(Arc::new(|_| Ok(())))
+            .ssh("first.example", script())
+            .await;
+        let (builder, second) = builder.ssh("second.example", script()).await;
+        let harness = builder.start().await;
+        harness.await_refreshed(first).await;
+        harness.await_refreshed(second).await;
+        let first = SessionKey::new(first, "same-session");
+        let second = SessionKey::new(second, "same-session");
+        assert_eq!(
+            crate::sessions::route_session(&harness.state, &first)
+                .await
+                .unwrap()
+                .0
+                .host,
+            first.host
+        );
+        assert_eq!(
+            crate::sessions::route_session(&harness.state, &second)
+                .await
+                .unwrap()
+                .0
+                .host,
+            second.host
+        );
+        let first_ref = reference(&harness, &first);
+        let second_ref = reference(&harness, &second);
+        assert_ne!(first_ref, second_ref);
+        consent(&harness, json!(true)).await;
+        let occupied = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let raw = format!(
+            "http://localhost:{}/",
+            occupied.local_addr().unwrap().port()
+        );
+        let one = open_url(&harness.state, &first, &raw).await.unwrap();
+        let two = open_url(&harness.state, &second, &raw).await.unwrap();
+        assert_ne!(one.tunnel.id, two.tunnel.id);
+        assert_ne!(one.tunnel.local_port, two.tunnel.local_port);
+        assert_eq!(
+            open_url(&harness.state, &first, &raw)
+                .await
+                .unwrap()
+                .tunnel
+                .id,
+            one.tunnel.id
+        );
+        for (full, expected) in [(&first_ref, &one.tunnel.id), (&second_ref, &two.tunnel.id)] {
+            let response = harness
+                .router()
+                .oneshot(request(
+                    Method::GET,
+                    &format!("/api/sessions/{full}/tunnels"),
+                    json!(null),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body: serde_json::Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), 16 * 1024).await.unwrap())
+                    .unwrap();
+            assert_eq!(body["tunnels"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                body["tunnels"][0]["id"].as_str().unwrap(),
+                expected.as_str()
+            );
+        }
+        let response = close_tunnel(
+            State(Arc::clone(&harness.state)),
+            Path((second_ref, one.tunnel.id.clone())),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(harness.state.tunnels.list(&first).len(), 1);
+        assert_eq!(harness.state.tunnels.list(&second).len(), 1);
+        {
+            let _mutation = harness.state.tunnels.mutation.lock().await;
+            harness.state.tunnels.close_session_locked(&first).await;
+        }
+        assert!(harness.state.tunnels.list(&first).is_empty());
+        assert_eq!(harness.state.tunnels.list(&second)[0].id, two.tunnel.id);
+        let _released = TcpListener::bind((Ipv4Addr::LOCALHOST, one.tunnel.local_port))
+            .await
+            .unwrap();
+        assert!(
+            TcpListener::bind((Ipv4Addr::LOCALHOST, two.tunnel.local_port))
+                .await
+                .is_err()
+        );
+        harness.state.tunnels.shutdown().await;
+    }
+
     /// Script admission on the real client connection while the fixture owns refresh traffic.
     async fn remote_peer() -> (Harness, HostId, PeerRead, PeerWrite) {
         remote_peer_with_identity(Some("installation".into())).await
@@ -699,7 +840,7 @@ mod tests {
         let port = occupied.local_addr().unwrap().port();
         let opened = open_url(
             &harness.state,
-            "remote-session",
+            &remote_key(harness),
             &format!("http://[::1]:{port}/"),
         )
         .await
@@ -787,7 +928,10 @@ mod tests {
             .router()
             .oneshot(request(
                 Method::GET,
-                "/api/sessions/remote-session/tunnels",
+                &format!(
+                    "/api/sessions/{}/tunnels",
+                    reference(harness, &remote_key(harness))
+                ),
                 json!(null),
             ))
             .await
@@ -807,10 +951,14 @@ mod tests {
         });
         let (harness, _) = remote(Arc::clone(&opener), Some("installation".into())).await;
         assert!(!list(&harness).await["consent"].as_bool().unwrap());
-        let error = open_url(&harness.state, "remote-session", "http://localhost:1234/")
-            .await
-            .err()
-            .unwrap();
+        let error = open_url(
+            &harness.state,
+            &remote_key(&harness),
+            "http://localhost:1234/",
+        )
+        .await
+        .err()
+        .unwrap();
         assert_eq!(crate::error_kind(&error), ErrorKind::Conflict);
         consent(&harness, json!(true)).await;
         for raw in [
@@ -819,16 +967,26 @@ mod tests {
             "file:///localhost/",
         ] {
             assert!(
-                open_url(&harness.state, "remote-session", raw)
+                open_url(&harness.state, &remote_key(&harness), raw)
                     .await
                     .is_err()
             );
         }
         let local = rest_harness::idle_helm_with_link_opener(opener).await;
+        let local_key = SessionKey::new(
+            local
+                .manager
+                .snapshots()
+                .into_iter()
+                .find(|host| host.kind == HostKind::Local)
+                .unwrap()
+                .id,
+            "sess-1",
+        );
         consent(&local, json!(true)).await;
         assert_eq!(
             crate::error_kind(
-                &open_url(&local.state, "sess-1", "http://localhost/")
+                &open_url(&local.state, &local_key, "http://localhost/")
                     .await
                     .err()
                     .unwrap()
@@ -859,8 +1017,8 @@ mod tests {
                 StatusCode::NOT_FOUND
             );
         }
-        assert!(harness.state.tunnels.list("remote-session").is_empty());
-        assert!(local.state.tunnels.list("sess-1").is_empty());
+        assert!(harness.state.tunnels.list(&remote_key(&harness)).is_empty());
+        assert!(local.state.tunnels.list(&local_key).is_empty());
         assert!(openings.lock().unwrap().is_empty());
     }
 
@@ -874,7 +1032,7 @@ mod tests {
         let remote_port = occupied.local_addr().unwrap().port();
         let first = open_url(
             &harness.state,
-            "remote-session",
+            &remote_key(&harness),
             &format!("http://localhost:{remote_port}/one"),
         )
         .await
@@ -885,7 +1043,7 @@ mod tests {
         );
         let second = open_url(
             &harness.state,
-            "remote-session",
+            &remote_key(&harness),
             &format!("http://a.localhost:{remote_port}/two?q=1#part"),
         )
         .await
@@ -899,22 +1057,28 @@ mod tests {
         );
         let response = close_tunnel(
             State(Arc::clone(&harness.state)),
-            Path(("other-session".into(), first.tunnel.id.clone())),
+            Path((
+                reference(
+                    &harness,
+                    &SessionKey::new(remote_key(&harness).host, "other-session"),
+                ),
+                first.tunnel.id.clone(),
+            )),
         )
         .await;
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert!(TcpListener::bind(local).await.is_err());
         close_tunnel(
             State(Arc::clone(&harness.state)),
-            Path(("remote-session".into(), first.tunnel.id)),
+            Path((reference(&harness, &remote_key(&harness)), first.tunnel.id)),
         )
         .await;
         let reclaimed = TcpListener::bind(local).await.unwrap();
         drop(reclaimed);
-        assert!(harness.state.tunnels.list("remote-session").is_empty());
+        assert!(harness.state.tunnels.list(&remote_key(&harness)).is_empty());
         let again = open_url(
             &harness.state,
-            "remote-session",
+            &remote_key(&harness),
             &format!("http://localhost:{remote_port}/"),
         )
         .await
@@ -926,7 +1090,7 @@ mod tests {
         assert!(
             open_url(
                 &harness.state,
-                "remote-session",
+                &remote_key(&harness),
                 &format!("http://localhost:{remote_port}/")
             )
             .await
@@ -954,29 +1118,29 @@ mod tests {
             occupied.local_addr().unwrap().port()
         );
         assert!(
-            open_url(&harness.state, "remote-session", &url)
+            open_url(&harness.state, &remote_key(&harness), &url)
                 .await
                 .is_err()
         );
-        let first = harness.state.tunnels.list("remote-session");
+        let first = harness.state.tunnels.list(&remote_key(&harness));
         assert_eq!(first.len(), 1);
         assert!(
-            open_url(&harness.state, "remote-session", &url)
+            open_url(&harness.state, &remote_key(&harness), &url)
                 .await
                 .is_err()
         );
         assert_eq!(
-            harness.state.tunnels.list("remote-session")[0].id,
+            harness.state.tunnels.list(&remote_key(&harness))[0].id,
             first[0].id
         );
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
         consent(&harness, json!(null)).await;
-        assert!(harness.state.tunnels.list("remote-session").is_empty());
+        assert!(harness.state.tunnels.list(&remote_key(&harness)).is_empty());
         let _reclaimed = TcpListener::bind((Ipv4Addr::LOCALHOST, first[0].local_port))
             .await
             .unwrap();
         assert!(
-            open_url(&harness.state, "remote-session", &url)
+            open_url(&harness.state, &remote_key(&harness), &url)
                 .await
                 .is_err()
         );
@@ -1005,12 +1169,18 @@ mod tests {
             occupied.local_addr().unwrap().port()
         );
         let state = Arc::clone(&harness.state);
-        let opening = tokio::spawn(async move { open_url(&state, "remote-session", &raw).await });
+        let key = remote_key(&harness);
+        let opening = tokio::spawn(async move { open_url(&state, &key, &raw).await });
         tokio::time::timeout(std::time::Duration::from_secs(10), entered_rx)
             .await
             .expect("native opener must be reached")
             .unwrap();
-        let tunnel = harness.state.tunnels.list("remote-session").pop().unwrap();
+        let tunnel = harness
+            .state
+            .tunnels
+            .list(&remote_key(&harness))
+            .pop()
+            .unwrap();
         // Always release the blocking fixture even if the revocation assertion fails.
         let revoked = tokio::time::timeout(
             std::time::Duration::from_secs(10),
@@ -1020,7 +1190,7 @@ mod tests {
         release_tx.send(()).unwrap();
         opening.await.unwrap().unwrap();
         revoked.expect("revocation must not wait for the OS opener");
-        assert!(harness.state.tunnels.list("remote-session").is_empty());
+        assert!(harness.state.tunnels.list(&remote_key(&harness)).is_empty());
         let _reclaimed = TcpListener::bind((Ipv4Addr::LOCALHOST, tunnel.local_port))
             .await
             .unwrap();
@@ -1034,7 +1204,7 @@ mod tests {
         let occupied = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let opened = open_url(
             &harness.state,
-            "remote-session",
+            &remote_key(&harness),
             &format!(
                 "http://localhost:{}/",
                 occupied.local_addr().unwrap().port()
@@ -1062,7 +1232,7 @@ mod tests {
         assert_eq!(listing["tunnels"][0]["id"], opened.tunnel.id);
         close_tunnel(
             State(Arc::clone(&harness.state)),
-            Path(("remote-session".into(), opened.tunnel.id)),
+            Path((reference(&harness, &remote_key(&harness)), opened.tunnel.id)),
         )
         .await;
         assert!(
@@ -1085,7 +1255,7 @@ mod tests {
                 "close" => {
                     close_tunnel(
                         State(Arc::clone(&harness.state)),
-                        Path(("remote-session".into(), opened.tunnel.id)),
+                        Path((reference(&harness, &remote_key(&harness)), opened.tunnel.id)),
                     )
                     .await;
                 }
@@ -1120,10 +1290,11 @@ mod tests {
         let (opened, mut socket, channel) = live_socket(&harness, &mut reader, &mut writer).await;
         for successful in [false, true] {
             let state = Arc::clone(&harness.state);
+            let key = remote_key(&harness);
             let deleting = tokio::spawn(async move {
                 crate::sessions::do_delete_session(
                     &state,
-                    "remote-session",
+                    &key,
                     farhelm_proto::DeleteGuard::Unconditional,
                     None,
                 )
@@ -1150,7 +1321,7 @@ mod tests {
             assert_eq!(deleting.await.unwrap().is_ok(), successful);
             if !successful {
                 assert_eq!(
-                    harness.state.tunnels.list("remote-session")[0].id,
+                    harness.state.tunnels.list(&remote_key(&harness))[0].id,
                     opened.tunnel.id
                 );
                 writer
@@ -1177,7 +1348,7 @@ mod tests {
             control(&mut reader).await,
             ControlMsg::CloseTcpRelay { channel }
         );
-        assert!(harness.state.tunnels.list("remote-session").is_empty());
+        assert!(harness.state.tunnels.list(&remote_key(&harness)).is_empty());
         assert_eq!(
             harness
                 .store
@@ -1201,10 +1372,11 @@ mod tests {
             .unwrap();
         let (opened, mut socket, channel) = live_socket(&harness, &mut reader, &mut writer).await;
         let state = Arc::clone(&harness.state);
+        let key = remote_key(&harness);
         let replacing = tokio::spawn(async move {
             crate::sessions::do_replace_session(
                 &state,
-                "remote-session",
+                &key,
                 None,
                 None,
                 farhelm_proto::DeleteGuard::Unconditional,
@@ -1234,7 +1406,7 @@ mod tests {
         };
         assert_eq!(session_id, "remote-session");
         assert_eq!(
-            harness.state.tunnels.list("remote-session")[0].id,
+            harness.state.tunnels.list(&remote_key(&harness))[0].id,
             opened.tunnel.id,
             "creation alone is not deletion"
         );
@@ -1260,7 +1432,7 @@ mod tests {
             control(&mut reader).await,
             ControlMsg::CloseTcpRelay { channel }
         );
-        assert!(harness.state.tunnels.list("remote-session").is_empty());
+        assert!(harness.state.tunnels.list(&remote_key(&harness)).is_empty());
         assert_eq!(
             harness
                 .store
@@ -1289,7 +1461,7 @@ mod tests {
         drop(reservation);
         let opened = open_url(
             &harness.state,
-            "remote-session",
+            &remote_key(&harness),
             &format!("http://localhost:{port}/"),
         )
         .await
@@ -1320,6 +1492,7 @@ mod tests {
     fn ownership_checks_preserve_identityless_recovery_without_retargeting() {
         let original = SessionClaim {
             host: 1,
+            entry_uuid: "00000000-0000-4000-8000-000000000001".into(),
             incarnation: 1,
             identity: Some("one".into()),
         };
@@ -1398,7 +1571,7 @@ mod tests {
             let (mut new_reader, mut new_writer) = peer.await.unwrap();
             let reused = open_url(
                 &harness.state,
-                "remote-session",
+                &remote_key(&harness),
                 &format!("http://[::1]:{}/again", opened.tunnel.remote_port),
             )
             .await
@@ -1461,7 +1634,7 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            harness.state.tunnels.list("remote-session")[0].id,
+            harness.state.tunnels.list(&remote_key(&harness))[0].id,
             opened.tunnel.id
         );
         writer
@@ -1502,7 +1675,8 @@ mod tests {
         .await;
         consent(&harness, json!(true)).await;
         let gate = harness.state.tunnels.mutation.lock().await;
-        let opening = open_url(&harness.state, "remote-session", "http://localhost/");
+        let key = remote_key(&harness);
+        let opening = open_url(&harness.state, &key, "http://localhost/");
         tokio::pin!(opening);
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         assert!(opening.as_mut().poll(&mut context).is_pending());
@@ -1514,7 +1688,7 @@ mod tests {
         drop(gate);
         let error = opening.await.err().unwrap();
         assert_eq!(crate::error_kind(&error), ErrorKind::Conflict);
-        assert!(harness.state.tunnels.list("remote-session").is_empty());
+        assert!(harness.state.tunnels.list(&remote_key(&harness)).is_empty());
     }
 
     /// Dropping the HTTP caller must not cancel a revocation already handed to
@@ -1545,7 +1719,7 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            harness.state.tunnels.list("remote-session")[0].id,
+            harness.state.tunnels.list(&remote_key(&harness))[0].id,
             opened.tunnel.id
         );
         writer
@@ -1569,7 +1743,7 @@ mod tests {
             harness.store.preferences().await.unwrap().tunnel_consent,
             Some(false)
         );
-        assert!(harness.state.tunnels.list("remote-session").is_empty());
+        assert!(harness.state.tunnels.list(&remote_key(&harness)).is_empty());
         assert_eq!(
             control(&mut reader).await,
             ControlMsg::CloseTcpRelay { channel }
@@ -1621,7 +1795,8 @@ mod tests {
         harness.await_refreshed(first).await;
         harness.await_refreshed(second).await;
         consent(&harness, json!(true)).await;
-        let (owner, client) = crate::sessions::route_session(&harness.state, "remote-session")
+        let key = SessionKey::new(first, "remote-session");
+        let (owner, client) = crate::sessions::route_session(&harness.state, &key)
             .await
             .unwrap();
         assert_eq!(owner.host, first);
@@ -1630,7 +1805,7 @@ mod tests {
             connection: client.connection_id(),
         };
         assert!(
-            crate::browser::tunnel_origin_matches(&harness.state, origin, "remote-session")
+            crate::browser::tunnel_origin_matches(&harness.state, origin, &key)
                 .await
                 .unwrap()
         );
@@ -1657,8 +1832,17 @@ mod tests {
         harness.manager.refresh_now(second);
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             loop {
-                if let Ok((claim, _)) =
-                    crate::sessions::route_session(&harness.state, "remote-session").await
+                // Pair routing no longer lets the second host's presence prove the first
+                // has withdrawn its own session. Establish both sides of the movement.
+                let first_withdrawn = crate::sessions::route_session(&harness.state, &key)
+                    .await
+                    .is_err_and(|error| crate::error_kind(&error) == ErrorKind::NotFound);
+                if first_withdrawn
+                    && let Ok((claim, _)) = crate::sessions::route_session(
+                        &harness.state,
+                        &SessionKey::new(second, "remote-session"),
+                    )
+                    .await
                     && claim.host == second
                 {
                     break;
@@ -1667,7 +1851,7 @@ mod tests {
             }
         })
         .await
-        .expect("the second host must become the coherent session owner");
+        .expect("the first entry must withdraw the suffix and the second must report it");
         assert!(
             crate::agent_requests::origin_is_live(&harness.state, origin),
             "the old connection must still be alive"
@@ -1680,9 +1864,9 @@ mod tests {
                     .err()
                     .expect("the old grant cannot authorize host B")
             ),
-            ErrorKind::Conflict
+            ErrorKind::NotFound
         );
-        assert!(harness.state.tunnels.list("remote-session").is_empty());
+        assert!(harness.state.tunnels.list(&key).is_empty());
         assert_eq!(opened.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }

@@ -1,7 +1,7 @@
 //! The mock supervisor `farhelm spawn` and `farhelm agent` are tested
-//! against: one Unix socket that accepts one connection, checks the
-//! session-authenticated handshake, reads one request, and answers it as
-//! the test says.
+//! against: one Unix socket that checks each session-authenticated handshake,
+//! reads one request per connection, and answers it as the test says. Most
+//! cases expect one connection; restart identity checks can discover first.
 //!
 //! Shared by `agent_cli.rs` and `spawn_cli.rs`, which each used to carry
 //! their own copy, and included by path from those two only: `cli_support`
@@ -60,6 +60,29 @@ pub fn mock_supervisor_frames(
     std::sync::mpsc::Receiver<Result<(), String>>,
     farhelm_teststate::thread::FixtureThread,
 ) {
+    let mut respond = Some(respond);
+    mock_supervisor_frames_sequence(socket, session_id, 1, move |request| {
+        respond.take().expect("one request per mock")(request)
+    })
+}
+
+/// Serve a bounded sequence of independently authenticated CLI requests.
+///
+/// A possible full self restart discovers its host entry before opening a second
+/// connection for the mutation. Keeping one listener alive across those requests
+/// lets tests observe the ordering without racing socket-file removal and rebinding.
+/// Cancellation, thread ownership and the six-second aggregate deadline cover the
+/// whole sequence, including an unexpected missing second connection.
+pub fn mock_supervisor_frames_sequence(
+    socket: &std::path::Path,
+    session_id: &'static str,
+    requests: usize,
+    mut respond: impl FnMut(ControlMsg) -> Option<Frame> + Send + 'static,
+) -> (
+    std::sync::mpsc::Receiver<Result<(), String>>,
+    farhelm_teststate::thread::FixtureThread,
+) {
+    assert!(requests > 0, "a mock must expect at least one request");
     let std_listener = std::os::unix::net::UnixListener::bind(socket).expect("bind socket");
     std_listener.set_nonblocking(true).unwrap();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
@@ -84,41 +107,43 @@ pub fn mock_supervisor_frames(
                                 let exchange = async move {
                                     let listener =
                                         tokio::net::UnixListener::from_std(std_listener).unwrap();
-                                    let (stream, _) =
-                                        tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                                    for _ in 0..requests {
+                                        let (stream, _) =
+                                            tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                                                .await
+                                                .expect("the CLI did not connect")
+                                                .expect("accept the CLI");
+                                        let (read, write) = tokio::io::split(stream);
+                                        let mut reader = FrameReader::new(read);
+                                        let mut writer = FrameWriter::new(write);
+                                        let hello = handshake(&mut reader, &mut writer, "supervisor")
                                             .await
-                                            .expect("the CLI did not connect")
-                                            .expect("accept the CLI");
-                                    let (read, write) = tokio::io::split(stream);
-                                    let mut reader = FrameReader::new(read);
-                                    let mut writer = FrameWriter::new(write);
-                                    let hello = handshake(&mut reader, &mut writer, "supervisor")
+                                            .expect("handshake");
+                                        let ControlMsg::Hello {
+                                            role,
+                                            auth: Some(auth),
+                                            ..
+                                        } = hello
+                                        else {
+                                            panic!("the CLI must authenticate in its hello: {hello:?}");
+                                        };
+                                        // Every session-authenticated CLI command
+                                        // sends the one role spelling
+                                        // `handshake_with_session_auth` has.
+                                        assert_eq!(role, "spawn");
+                                        assert_eq!(auth.session_id, session_id);
+                                        assert_eq!(auth.token, "secret");
+                                        let frame = tokio::time::timeout(
+                                            Duration::from_secs(5),
+                                            reader.read_frame(),
+                                        )
                                         .await
-                                        .expect("handshake");
-                                    let ControlMsg::Hello {
-                                        role,
-                                        auth: Some(auth),
-                                        ..
-                                    } = hello
-                                    else {
-                                        panic!("the CLI must authenticate in its hello: {hello:?}");
-                                    };
-                                    // Every session-authenticated CLI command
-                                    // sends the one role spelling
-                                    // `handshake_with_session_auth` has.
-                                    assert_eq!(role, "spawn");
-                                    assert_eq!(auth.session_id, session_id);
-                                    assert_eq!(auth.token, "secret");
-                                    let frame = tokio::time::timeout(
-                                        Duration::from_secs(5),
-                                        reader.read_frame(),
-                                    )
-                                    .await
-                                    .expect("the CLI did not send a request")
-                                    .unwrap()
-                                    .expect("the CLI's request");
-                                    if let Some(reply) = respond(parse_control(&frame).unwrap()) {
-                                        writer.write_frame(&reply).await.unwrap();
+                                        .expect("the CLI did not send a request")
+                                        .unwrap()
+                                        .expect("the CLI's request");
+                                        if let Some(reply) = respond(parse_control(&frame).unwrap()) {
+                                            writer.write_frame(&reply).await.unwrap();
+                                        }
                                     }
                                 };
                                 tokio::select! {

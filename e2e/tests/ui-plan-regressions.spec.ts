@@ -42,7 +42,7 @@ test("header restart and replace refresh the sidebar under build skew", async ({
     await expect(page.locator("#term-banner")).toBeHidden();
     await expect(sourceRow.locator(".status-badge")).not.toHaveClass(/\bexited\b/, { timeout: 20_000 });
     await page.locator(".header-replace").click();
-    const reply = page.waitForResponse((r) => r.url().endsWith(`/api/sessions/${source.id}/replace`) && r.request().method() === "POST");
+    const reply = page.waitForResponse((r) => r.url().endsWith(`/api/sessions/${encodeURIComponent(source.id)}/replace`) && r.request().method() === "POST");
     await page.locator(".header-replace-confirm").getByRole("button", { name: "replace", exact: true }).click();
     const response = await reply;
     expect(response.ok()).toBe(true);
@@ -105,7 +105,7 @@ test("rename shows hidden title characters and preserves an untouched seed", asy
   const raw = `rename-${Date.now()}-\u202Ereverse\u200B`;
   const session = await createSession(request, { title: raw, invocation: "sleep 300" });
   const sent: string[] = [];
-  await page.route(`**/api/sessions/${session.id}/rename`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/rename`, async (route) => {
     if (route.request().method() === "POST") sent.push(route.request().postDataJSON().title);
     await route.fallback();
   });

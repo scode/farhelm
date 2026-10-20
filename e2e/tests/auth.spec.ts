@@ -332,7 +332,7 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
       });
     const [feed, terminal] = await Promise.all([
       open("/api/events"),
-      open(`/api/sessions/${id}/term?cols=80&rows=24`),
+      open(`/api/sessions/${encodeURIComponent(id)}/term?cols=80&rows=24`),
     ]);
     (window as any).__rawAuthSockets = { feed, terminal };
   }, { id: sessionId, secretKey: DEVICE_SECRET_KEY });
@@ -367,7 +367,7 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   // auto-select would have picked on a cold load.
   const detailRead = page.waitForResponse((response) => {
     const url = new URL(response.url());
-    return url.pathname === `/api/sessions/${sessionId}` && response.status() === 200;
+    return url.pathname === `/api/sessions/${encodeURIComponent(sessionId)}` && response.status() === 200;
   });
   let replacementSecret: string | undefined;
   const advanceContextHeader = async (route: Route) => {
@@ -423,7 +423,8 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   await persistCredential(baseURL!, replacementSecret, cookies);
   await detailRead;
   // The EXACT session, not whichever one auto-select would pick: the
-  // titlebar shows its title and the live terminal socket carries its id.
+  // titlebar shows its title and the live socket carries its full reference
+  // percent-encoded as one URL segment, rather than as raw DOM identity text.
   const expectedTitle = await page
     .locator(`[data-session-id="${sessionId}"] .session-title`)
     .textContent();
@@ -433,10 +434,11 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   await expect
     .poll(() => page.evaluate(() => (window as any).__farhelmWs?.readyState))
     .toBe(1);
+  const socketUrl = await page.evaluate(() => (window as any).__farhelmWs?.url ?? "");
   expect(
-    await page.evaluate(() => (window as any).__farhelmWs?.url ?? ""),
+    new URL(socketUrl).pathname,
     "recovery must reattach the session that was open, not a fallback",
-  ).toContain(sessionId);
+  ).toBe(`/api/sessions/${encodeURIComponent(sessionId)}/term`);
   const storedSecret = await page.evaluate(
     (key) => localStorage.getItem(key),
     DEVICE_SECRET_KEY,

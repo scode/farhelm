@@ -47,6 +47,10 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct HostView {
     pub(crate) id: HostId,
+    /// Agent discovery uses this captured entry identity; ordinary host JSON keeps
+    /// its existing integer IDs and display labels.
+    #[serde(skip)]
+    pub(crate) entry_uuid: String,
     /// `"local"` for the one reserved row, `"ssh"` for a registered
     /// destination. The distinction is not cosmetic: it is what tells a
     /// client which rows offer edit and remove at all.
@@ -412,6 +416,7 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
             let registry = rows.get(&snapshot.id);
             HostView {
                 id: snapshot.id,
+                entry_uuid: snapshot.entry_uuid.clone(),
                 kind: match snapshot.kind {
                     HostKind::Local => "local",
                     HostKind::Ssh => "ssh",
@@ -2123,7 +2128,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|row| row["id"] == "aliased-session")
+            .find(|row| row["id"] == harness.session_ref(host, "aliased-session").as_str())
             .expect("the aliased host's session is listed");
         assert_eq!(row["host_name"], "Session Host");
     }
@@ -2390,9 +2395,10 @@ mod tests {
             .iter()
             .map(|row| row["id"].as_str().unwrap())
             .collect();
+        let expected = harness.session_ref(host, "from-the-new-install");
         assert_eq!(
             ids,
-            vec!["from-the-new-install"],
+            vec![expected.as_str()],
             "the superseded identity's cached sessions describe a dead install and must be gone"
         );
     }
@@ -2954,6 +2960,7 @@ mod tests {
         // The claim a mutation would have captured, taken now.
         let stale = crate::manager::SessionClaim {
             host,
+            entry_uuid: harness.manager.status(host).expect("connected").entry_uuid,
             incarnation: harness.manager.status(host).expect("connected").incarnation,
             identity: Some("identity-reborn".to_string()),
         };

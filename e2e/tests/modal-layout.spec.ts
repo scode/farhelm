@@ -111,7 +111,7 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
   const row = page.locator(`[data-session-id="${SESSION}"]`);
   await expect(row).toBeVisible({ timeout: 20_000 });
   if (family === "rename") {
-    await page.route(`**/api/sessions/${SESSION}/rename`, (route) =>
+    await page.route(`**/api/sessions/${encodeURIComponent(SESSION)}/rename`, (route) =>
       fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: LONG_REFUSAL }));
     await openRowMenu(row);
     await row.locator(".session-row-rename").click();
@@ -121,7 +121,7 @@ async function openTallDialog(page: Page, family: string): Promise<Locator> {
     await expect(dialog.locator(".rename-error")).toContainText("cannot be saved");
     return dialog;
   }
-  await page.route(`**/api/sessions/${SESSION}/restart`, (route) =>
+  await page.route(`**/api/sessions/${encodeURIComponent(SESSION)}/restart`, (route) =>
     fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: LONG_REFUSAL }));
   await row.locator(".session-row-open").click();
   await page.locator(".restart-with-trigger").click();

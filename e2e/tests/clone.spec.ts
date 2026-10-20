@@ -17,6 +17,7 @@ import {
   openRowMenu,
   setLocalYoloWithoutAsking,
   type SessionRow,
+  supervisorSessionId,
 } from "./helpers/fleet";
 import {
   armFocusGate,
@@ -157,7 +158,7 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
     // The create reply is admission evidence. Re-reading both the live detail
     // route and the fleet list makes the persisted projection a separate
     // assertion rather than trusting that reply to have been painted back.
-    const detail = await request.get(`/api/sessions/${childId}`);
+    const detail = await request.get(`/api/sessions/${encodeURIComponent(childId)}`);
     expect(detail.ok(), `reading structured successor: ${await detail.text()}`).toBe(true);
     expect((await detail.json()).launch.selection).toEqual(selection);
     const listed = await request.get("/api/sessions");
@@ -167,7 +168,7 @@ test("a structured GUI clone pre-fills without launching, then starts its ready 
     expect(live.launch.selection).toEqual(selection);
 
     await attachSession(page, childId);
-    await waitForTermText(page, `STRUCTURED-LAUNCH-GENERATION:${childId}:1`, 20_000);
+    await waitForTermText(page, `STRUCTURED-LAUNCH-GENERATION:${supervisorSessionId(childId)}:1`, 20_000);
     const output = await termText(page);
     expect(output).toContain("STRUCTURED-LAUNCH-ARGV: -m gpt-6-astra");
     expect(output).toContain("model_reasoning_effort=high");

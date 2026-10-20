@@ -9,11 +9,29 @@
 // `term.buffer.active`, and readiness globals — because terminal assertions
 // rely on that surface across spec files. Genuinely one-off snippets still
 // stay local.
+//
+// Session IDs from the helm are full entry-bound references. Keep them opaque in
+// fixtures and DOM checks; encode the whole ID when placing it in a URL segment,
+// including route matchers that observe the browser's encoded request path.
 import { APIRequestContext, expect, Locator, Page, Route, WebSocketRoute } from "@playwright/test";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { recordPage } from "./timeline";
 import { cleanupOwnedSteps } from "./cleanup";
+
+/**
+ * The supervisor's own id for a session: the part of the helm's full reference after the host entry's UUID.
+ *
+ * The helm identifies a session as `<host entry UUID>:<supervisor session id>`, but the supervisor and everything it
+ * produces (`$FARHELM_SESSION_ID` in the session, its per-session attachments directory) know only the local part.
+ * Compare such values with this, never with the full reference. The entry UUID has no colon, so the first colon
+ * splits them even if a local id contained one.
+ */
+export function supervisorSessionId(fullId: string): string {
+  const colon = fullId.indexOf(":");
+  if (colon < 0) throw new Error(`not a full session reference: ${fullId}`);
+  return fullId.slice(colon + 1);
+}
 
 /** The opt-in registry owns no application work; mounted Rust scopes own its getters. */
 type ReaderRegistry = { version: number; getters: Set<() => string>; error?: string };
@@ -253,6 +271,7 @@ export const SESSION_LISTING = (url: URL) => url.pathname === "/api/sessions";
  * field it never looks at.
  */
 export interface SessionRow {
+  /** The full entry-bound reference returned by the helm, not a supervisor credential ID. */
   id: string;
   title: string;
   status?: { state: string };
@@ -508,7 +527,7 @@ export async function renameSession(
   id: string,
   title: string,
 ): Promise<void> {
-  const response = await request.post(`/api/sessions/${id}/rename`, { data: { title } });
+  const response = await request.post(`/api/sessions/${encodeURIComponent(id)}/rename`, { data: { title } });
   await ok(response, `renaming session ${id}`);
 }
 
@@ -522,7 +541,7 @@ export async function renameSession(
  * disagreeing with the test's expectations.
  */
 export async function stopSession(request: APIRequestContext, id: string): Promise<void> {
-  const response = await request.post(`/api/sessions/${id}/stop`);
+  const response = await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`);
   await ok(response, `stopping session ${id}`);
 }
 
@@ -534,8 +553,8 @@ export async function stopSession(request: APIRequestContext, id: string): Promi
  */
 export async function cleanupSession(request: APIRequestContext, id: string): Promise<void> {
   for (const [what, response] of [
-    ["stopping", await request.post(`/api/sessions/${id}/stop`)],
-    ["deleting", await request.delete(`/api/sessions/${id}`)],
+    ["stopping", await request.post(`/api/sessions/${encodeURIComponent(id)}/stop`)],
+    ["deleting", await request.delete(`/api/sessions/${encodeURIComponent(id)}`)],
   ] as const) {
     if (!response.ok() && response.status() !== 404) {
       throw new Error(

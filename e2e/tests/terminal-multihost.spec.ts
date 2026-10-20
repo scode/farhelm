@@ -48,6 +48,7 @@ import {
   selfSshAvailable,
   stubFeed,
   holdReads,
+  supervisorSessionId,
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
 import path from "node:path";
@@ -2946,7 +2947,7 @@ test.describe("multi-host", () => {
       const card = page.locator(".host-stale-notice");
       await expect(card).toBeVisible({ timeout: 30_000 });
       await expect(page.locator(".terminal-pane.selected")).toHaveJSProperty("inert", true);
-      reads = await holdReads(page, (url) => url.pathname === `/api/sessions/${session.id}`);
+      reads = await holdReads(page, (url) => url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`);
       await reads.waitForCaptures(1);
       await restoreRemoteSupervisor(request);
       await expect.poll(() => page.evaluate(() => {
@@ -3497,10 +3498,13 @@ test.describe("multi-host", () => {
       await expect(rediscovered.locator(".status-badge")).toHaveText(LIVE_BADGE);
       const listing = await (await request.get("/api/sessions")).json();
       const survivor = listing.sessions.find((s: any) => s.title === title);
+      // Re-adding creates a new host entry, so the reference changes while the
+      // supervisor's own session id, and with it the running agent, stays the same.
       expect(
-        survivor.id,
+        supervisorSessionId(survivor.id),
         "the rediscovered session must be the SAME session, not a lookalike relaunched under one name",
-      ).toBe(id);
+      ).toBe(supervisorSessionId(id));
+      expect(survivor.id, "a re-added host is a new entry, so old references cannot reach it").not.toBe(id);
     } finally {
       // The HOST goes back FIRST, and the order is load-bearing rather than
       // tidy. This test can fail while the host is unregistered, and the
@@ -3511,7 +3515,10 @@ test.describe("multi-host", () => {
       // Restoring first puts the session back in the view where the cleanup
       // can actually reach it.
       await restoreFleetRow(request);
-      if (!id) id = await findSessionIdByTitle(request, title);
+      // Re-adding the host (in the test and again in the restore) makes a new
+      // host entry, so the reference captured at creation no longer reaches
+      // the session; look it up again under the current entry.
+      id = (await findSessionIdByTitle(request, title)) ?? id;
       if (id) await cleanupSession(request, id);
     }
   });

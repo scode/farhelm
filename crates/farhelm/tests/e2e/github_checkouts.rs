@@ -7,6 +7,7 @@
 //! and a named fake agent. Recovery deliberately loses the first HTTP reply;
 //! its oracle comes from the supervisor and filesystem, never that response.
 
+use crate::agent_listing_real_stack::bare_session_id;
 use crate::harness::*;
 use crate::structured_launches::{FakeHarness, fake_harness, observed_argv_in_state};
 use farhelm_proto::{
@@ -85,13 +86,17 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
         .unwrap()
         .trim()
         .to_string();
-    let session = await_server_session(stack.supervisor.state.path(), "Fix parser").await;
+    let session = await_server_session(&stack, "Fix parser").await;
     assert_eq!(session.id, id);
     assert_eq!(
         session.cwd,
         stack.root_a.path().join("bar-fix-parser").to_str().unwrap()
     );
-    wait_for_agent_ready(&stack.supervisor.state.path().join("tmux.sock"), &id).await;
+    wait_for_agent_ready(
+        &stack.supervisor.state.path().join("tmux.sock"),
+        &bare_session_id(&id),
+    )
+    .await;
     stack.git.assert_clone(&session.cwd);
     let retained = Path::new(&session.cwd).join("untracked-retry-proof");
     std::fs::write(&retained, "keep this work").unwrap();
@@ -169,10 +174,10 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
         "apply template: {}",
         String::from_utf8_lossy(&from_template.stderr)
     );
-    let automatic = await_server_session(stack.supervisor.state.path(), "bar-1").await;
+    let automatic = await_server_session(&stack, "bar-1").await;
     wait_for_agent_ready(
         &stack.supervisor.state.path().join("tmux.sock"),
-        &automatic.id,
+        &bare_session_id(&automatic.id),
     )
     .await;
     stack.git.assert_clone(&automatic.cwd);
@@ -227,7 +232,7 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
         .unwrap()
         .trim()
         .to_string();
-    let numbered = await_server_session(stack.supervisor.state.path(), "Fix parser-2").await;
+    let numbered = await_server_session(&stack, "Fix parser-2").await;
     assert_eq!(numbered.id, numbered_id);
     assert_eq!(
         numbered.cwd,
@@ -240,7 +245,7 @@ async fn agent_create_checkout_replays_and_templates_use_fresh_admission() {
     );
     wait_for_agent_ready(
         &stack.supervisor.state.path().join("tmux.sock"),
-        &numbered.id,
+        &bare_session_id(&numbered.id),
     )
     .await;
     stack.git.assert_clone(&numbered.cwd);
@@ -907,9 +912,10 @@ async fn supervisor_client(state: &Path) -> Arc<SupervisorClient> {
         .expect("handshake owned supervisor client")
 }
 
-/// Learn the accepted session from the server, independent of its lost reply.
-async fn await_server_session(state: &Path, title: &str) -> SessionInfo {
-    let client = supervisor_client(state).await;
+/// Learn accepted metadata from the supervisor, independent of its lost reply.
+/// Only reference spelling comes from the matching known-entry helm row; content stays supervisor evidence.
+async fn await_server_session(stack: &CheckoutStack, title: &str) -> SessionInfo {
+    let client = supervisor_client(stack.supervisor.state.path()).await;
     let deadline = tokio::time::Instant::now() + REAL_STACK_SETTLE;
     let mut last = None;
     loop {
@@ -932,7 +938,54 @@ async fn await_server_session(state: &Path, title: &str) -> SessionInfo {
                 session.working_copy.is_some(),
                 "fresh session must carry checkout identity"
             );
-            return session.clone();
+            // Keep the independent supervisor metadata oracle, qualifying only its references
+            // from a listing row on this fixture's known entry. A suffix alone is not fleet identity.
+            let listing = wait_for_listing_with(
+                || async {
+                    Ok(get_json(
+                        &stack.client,
+                        &format!("{}/api/sessions", stack.helm().base),
+                    )
+                    .await)
+                },
+                REAL_STACK_SETTLE.as_secs(),
+                "the owned entry publishes its accepted session reference",
+                |listing| {
+                    listing["sessions"].as_array().unwrap().iter().any(|row| {
+                        row["host"] == stack.claim.id
+                            && row["id"]
+                                .as_str()
+                                .and_then(|id| id.parse::<farhelm_proto::SessionRef>().ok())
+                                .is_some_and(|reference| reference.bare_id() == session.id)
+                    })
+                },
+            )
+            .await;
+            let reference = listing["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|row| row["host"] == stack.claim.id)
+                .filter_map(|row| {
+                    row["id"]
+                        .as_str()?
+                        .parse::<farhelm_proto::SessionRef>()
+                        .ok()
+                })
+                .find(|reference| reference.bare_id() == session.id)
+                .unwrap();
+            let qualify = |bare: &str| {
+                farhelm_proto::SessionRef::new(reference.entry_uuid(), bare)
+                    .expect("the owned supervisor reports representable IDs")
+                    .to_string()
+            };
+            let mut session = session.clone();
+            session.id = qualify(&session.id);
+            session.parent = session.parent.map(|id| qualify(&id));
+            if let Some(checkout) = &mut session.working_copy {
+                checkout.origin_session_id = qualify(&checkout.origin_session_id);
+            }
+            return session;
         }
         last = Some(listing.sessions);
         assert!(
@@ -975,10 +1028,15 @@ async fn await_prepared(
     stack.git.assert_clone(&session.cwd);
     wait_for_agent_ready(
         &stack.supervisor.state.path().join("tmux.sock"),
-        &session.id,
+        &bare_session_id(&session.id),
     )
     .await;
-    observed_argv_in_state(stack.supervisor.state.path(), &session.id, generation).await
+    observed_argv_in_state(
+        stack.supervisor.state.path(),
+        &bare_session_id(&session.id),
+        generation,
+    )
+    .await
 }
 
 /// Assert immutable checkout identity and selector-specific launch metadata.
@@ -1061,7 +1119,7 @@ async fn assert_one_agent_execution(stack: &CheckoutStack, case: &AcceptedCase) 
             "-S",
             "-",
             "-t",
-            &format!("fh-{}", case.session.id),
+            &format!("fh-{}", bare_session_id(&case.session.id)),
         ],
     )
     .await;
@@ -1256,7 +1314,7 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
             &selector,
         );
         let unread = send_unread_create(&stack, &body).await;
-        let session = await_server_session(stack.supervisor.state.path(), label).await;
+        let session = await_server_session(&stack, label).await;
         let generation = u32::try_from(index + 1).unwrap();
         let case = AcceptedCase::new(label, selector, generation, body, accepted, session);
         assert_case_metadata(&case.session, &case);
@@ -1289,7 +1347,7 @@ async fn lost_fresh_checkout_success_replays_after_settings_change_and_helm_rest
         assert_case_metadata(&replayed, case);
         let argv = observed_argv_in_state(
             stack.supervisor.state.path(),
-            &case.session.id,
+            &bare_session_id(&case.session.id),
             case.generation,
         )
         .await;

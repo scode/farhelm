@@ -33,7 +33,7 @@ test("Claude trust hint preserves the terminal and opens the opt-in caveats", as
       }
       : row;
     const installSeed = async (target: typeof page) => {
-      await target.route((url) => url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${session.id}`, async (route) => {
+      await target.route((url) => url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${encodeURIComponent(session.id)}`, async (route) => {
         if (route.request().method() !== "GET") return route.continue();
         const response = await route.fetch();
         if (!response.ok()) return route.fulfill({ response });

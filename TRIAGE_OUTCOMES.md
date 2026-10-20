@@ -16265,7 +16265,9 @@
   `plan/host-entry-session-ids/01-entry-identities`, draft [#2366](https://github.com/scode/farhelm/pull/2366/changes).
   Paired viewer state in change `vluozkmkxyzwqkqsymlokuovlpzuvrtu`, bookmark
   `plan/host-entry-session-ids/02-paired-viewer-state`, draft
-  [#2367](https://github.com/scode/farhelm/pull/2367/changes). Public session routing remains to be implemented under
+  [#2367](https://github.com/scode/farhelm/pull/2367/changes). Public session references and entry-bound routing in
+  change `qnzykzxvyspoxvyrxlrxkkkzlyymklks`, bookmark `plan/host-entry-session-ids/03-public-session-references`, draft
+  [#2368](https://github.com/scode/farhelm/pull/2368/changes). Cache uniqueness retirement remains under
   `plans/queue/host-entry-session-ids.md`; both feedback files remain until the redesign is complete.
 
 ## summary-card-omits-observed-yolo.md

@@ -118,7 +118,7 @@ for (const linkKind of ['plain', 'OSC']) {
       let statRequests = 0;
       let bodyFailed = false;
       try {
-        await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
+        await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, async route => {
           statRequests++;
           const response = await route.fetch();
           await gate.wait();
@@ -200,10 +200,10 @@ test('changed OSC display text starts a fresh hover at the same cells', async ({
   let arrived = false;
   let routeDone = false;
   let statRequests = 0;
-  page.on('request', req => { if (req.url().endsWith(`/sessions/${session.id}/files/stat`)) statRequests++; });
+  page.on('request', req => { if (req.url().endsWith(`/sessions/${encodeURIComponent(session.id)}/files/stat`)) statRequests++; });
   let bodyFailed = false;
   try {
-    await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, async route => {
       const response = await route.fetch();
       arrived = true;
       await gate.wait();
@@ -218,7 +218,7 @@ test('changed OSC display text starts a fresh hover at the same cells', async ({
     expect((await peer())?.status?.state, 'initial gated peer must be alive before input').toMatch(/running|idle/);
     await page.keyboard.press('Enter');
     await waitForTermText(page, 'TARGET OLD-LABEL');
-    const cancelled = page.waitForEvent('requestfailed', req => req.url().endsWith(`/sessions/${session.id}/files/stat`));
+    const cancelled = page.waitForEvent('requestfailed', req => req.url().endsWith(`/sessions/${encodeURIComponent(session.id)}/files/stat`));
     await hoverPath(page, 'OLD-LABEL');
     const tooltip = page.locator('#terminal .terminal-file-target');
     await expect(tooltip).toContainText('checking…');
@@ -325,7 +325,7 @@ for (const kind of ['local', 'ssh']) {
     let received: any;
     let bodyFailed = false;
     try {
-      await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
+      await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, async route => {
         statRequests++;
         const response = await route.fetch();
         received = await response.json();
@@ -484,7 +484,7 @@ test('leaving cancels lookup and the next hover checks again', async ({ page, re
   let routeDone = false;
   let bodyFailed = false;
   try {
-    await page.route(`**/api/sessions/${session.id}/files/stat`, async route => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, async route => {
       const response = await route.fetch();
       arrived = true;
       await gate.wait();

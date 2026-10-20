@@ -114,7 +114,7 @@ async function injectInterruptedSession(
   // as a session and exercise the error line instead). The listing route
   // above keeps reporting the row interrupted, which is exactly the
   // window the view has to bridge on its own after a restart.
-  await page.route(`**/api/sessions/${sessionId}/restart`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(sessionId)}/restart`, async (route) => {
     counter.restartRequests++;
     await fulfillAsHelm(route, {
       status: 200,
@@ -132,7 +132,7 @@ async function injectInterruptedSession(
       }),
     });
   });
-  await page.route(`**/api/sessions/${sessionId}/replace`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(sessionId)}/replace`, async (route) => {
     counter.replaceRequests++;
     replaced = true;
     await fulfillAsHelm(route, {
@@ -355,7 +355,7 @@ test("Replace confirms inline, can cancel, selects the fresh session, and surfac
   const refusedId = "11111111-2222-3333-4444-888888888888";
   const refusedTitle = `interrupted-replace-refused-${Date.now()}`;
   const refused = await injectInterruptedSession(page, refusedId, refusedTitle);
-  await page.route(`**/api/sessions/${refusedId}/replace`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(refusedId)}/replace`, async (route) => {
     refused.replaceRequests++;
     await fulfillAsHelm(route, {
       status: 409,
@@ -438,7 +438,7 @@ async function injectYoloReplaceSession(
   });
   const sequence: string[] = [];
   const replaceBodies: any[] = [];
-  await page.route(`**/api/sessions/${sessionId}/replace`, async (route) => {
+  await page.route(`**/api/sessions/${encodeURIComponent(sessionId)}/replace`, async (route) => {
     const body = route.request().postDataJSON();
     replaceBodies.push(body);
     sequence.push(body.confirm_yolo ? "replace+override" : "replace");
@@ -701,7 +701,7 @@ test("restart-keeps-a-badge-on-screen-throughout", async ({ page, request }) => 
     // since the window this is about — the gap between the relaunch and
     // the first classification of the new run — opens after the request
     // returns, not during it.
-    const restarted = await request.post(`/api/sessions/${id}/restart`, {
+    const restarted = await request.post(`/api/sessions/${encodeURIComponent(id)}/restart`, {
       data: { stop_if_running: true },
     });
     expect(restarted.ok(), `restarting ${id}`).toBe(true);

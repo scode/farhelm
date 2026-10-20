@@ -213,14 +213,13 @@ this Rust funnel and are unaffected. No helm or protocol change is involved, and
 last-writer-wins.
 
 The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the selection is
-a bare session id (the browser's old `{helm, id}` record was keyed by helm identity only because origin-scoped storage
-could outlive a state-directory swap, and a row in the helm's own database cannot describe another helm's fleet). An
-absent or unrecognized sort word still reads as the UI default (`activity`) on the client, because the row outlives the
-build that validated it. Nothing is kept per client: no localStorage key, no field in `desktop-client.json` (which holds
-no credentials either, only the webview readiness counter the desktop smoke reads and the desktop app's
-automatic-updates setting, which is a setting of that app installation rather than one of these shared preferences), no
-eval round trip. The visible consequences are the ones SPEC.md names — one answer shared by every client, and a second
-client attaching to whatever was selected most recently anywhere.
+the full entry-bound session reference. Its entry UUID prevents a remembered selection from following a removed host's
+bare session ID to another entry. An absent or unrecognized sort word still reads as the UI default (`activity`) on the
+client, because the row outlives the build that validated it. Nothing is kept per client: no localStorage key, no field
+in `desktop-client.json` (which holds no credentials either, only the webview readiness counter the desktop smoke reads
+and the desktop app's automatic-updates setting, which is a setting of that app installation rather than one of these
+shared preferences), no eval round trip. The visible consequences are the ones SPEC.md names — one answer shared by
+every client, and a second client attaching to whatever was selected most recently anywhere.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
@@ -1888,14 +1887,16 @@ unknown session, a disconnected host, a title the owning supervisor rejects — 
 have shown, and a session an agent creates is seeded into the helm's cache and published exactly as one the create
 dialog made.
 
-The equivalence covers that shared path and stops there, deliberately, in two places, besides the user's approval, which
-every acting agent verb passes first, and the stricter YOLO rule create, clone and spawn also pass (see "Permission
-prompts for agent actions"). The relay adds a doorway check of its own (`validate_agent_verb`) that the REST surface has
-no counterpart for, since only the relay puts an attacker-chosen target, title, directory and host name onto two
-byte-unbounded queues before anything downstream can look at them; its refusals are relay-specific by construction. And
-the agent CLI escapes and caps a refusal before printing it, because the destination is a terminal rather than a browser
-— so the WORDING is the UI's, while the bytes may be escaped and the tail cut. Both divergences are one-directional:
-they can refuse something the UI would have allowed through to the same shared code, never the reverse.
+The equivalence covers that shared path and stops there, deliberately, besides the user's approval, which every acting
+agent verb passes first, and the stricter YOLO rule create, clone and spawn also pass (see "Permission prompts for agent
+actions"). The relay adds a doorway check of its own (`validate_agent_verb`) that the REST surface has no counterpart
+for, since only the relay puts an attacker-chosen target, title, directory and host name onto two byte-unbounded queues
+before anything downstream can look at them; its refusals are relay-specific by construction. The helm's agent doorway
+also accepts the exact asking session's bare ID on its requesting entry and points other bare or malformed targets to
+`farhelm agent sessions`; REST requires a full ID and tells stale browsers to reload. And the agent CLI escapes and caps
+a refusal before printing it, because the destination is a terminal rather than a browser — so a shared operation's
+WORDING is the UI's, while the bytes may be escaped and the tail cut. The relay's bounds can refuse a request before the
+shared operation; they do not relax that operation's checks.
 
 `Created` is a distinct reply tag from `Session` even though the payload is identical, because the tag is the only thing
 separating "what your creating verb produced" from "the row you changed" and the CLI checks it before printing an id. It
@@ -1929,25 +1930,27 @@ kinds.
 `Clone` resolves the explicitly named source's live owner, drains that owner's pinned connection, and rechecks the owner
 before dispatching to the destination. It does not use the helm's cache: a clone built from a cached row could copy a
 title or directory the session no longer has, or read from a host that stopped owning it. It refuses a result whose id
-is either the SOURCE or the ASKING session: a keyed replay must never be reported as a new child. Both verbs take the
-fence on `agent_request_locks` that the lifecycle verbs take, since a create that completes while the asking credential
-is being invalidated would otherwise leave a session running that nobody was told about.
+and reporting entry together identify either the SOURCE or the ASKING session: a keyed replay must never be reported as
+a new child. Equal bare suffixes on different entries are distinct sessions. Both verbs take the fence on
+`agent_request_locks` that the lifecycle verbs take, since a create that completes while the asking credential is being
+invalidated would otherwise leave a session running that nobody was told about.
 
 A KEYED RETRY IS MATCHED BY THE REQUEST AS THE AGENT SENT IT, not by the launch it resolves to: a clone retried after
 its source's launch, folder or title changed replays the first copy, and the same key with a different request conflicts
 (see "Agent launches from the CLI").
 
-The relay's own doorway bound treats the host name SEPARATELY from the create payload (`AGENT_HOST_NAME_CAP`, the same
-number every session id is held to). It is routing metadata the helm consumes and no supervisor ever sees, so charging
-it against SPEC.md's 64 KiB create-field allowance would let a long registered host name make an otherwise-legal create
-fail through the agent surface alone. What the aggregate covers is exactly what a create carries: directory, selector
-and title, summed.
+The relay's own doorway bound treats the host name SEPARATELY from the create payload (`AGENT_HOST_NAME_CAP`, 1024
+bytes). This unchanged wire bound is independent of the helm's 40-byte bare session-ID admission limit. A host name is
+routing metadata the helm consumes and no supervisor ever sees, so charging it against SPEC.md's 64 KiB create-field
+allowance would let a long registered host name make an otherwise-legal create fail through the agent surface alone.
+What the aggregate covers is exactly what a create carries: directory, selector and title, summed.
 
-And a created session's id is checked at INGRESS, where the reply enters the helm — non-empty, control-free, and inside
-the same length cap `manager::drain_sessions` holds every listed id to. That id is the one value on this path with a
-machine consumer: it is printed on the CLI's stdout as the answer, and an id carrying a newline forges a second line in
-whatever captured it. A reply that fails the check is refused rather than sanitized, because a scrubbed id is not the
-session's id and everything done with it afterwards would address something that does not exist.
+And a created session's references are checked at INGRESS, where the reply enters the helm — its ID, parent and working
+copy origin each satisfy the same non-empty, control-free, 40-byte bare-ID rule used for listed rows, including the
+refusal of `.` and `..`. The created ID is the value on this path with a machine consumer: it is printed on the CLI's
+stdout as the answer, and an id carrying a newline forges a second line in whatever captured it. A reply that fails the
+check is refused rather than sanitized, because a scrubbed id is not the session's id and everything done with it
+afterwards would address something that does not exist.
 
 One deliberate difference from `farhelm spawn` is worth stating rather than discovering. Spawn's `intent_key` gets a
 session-lifetime reservation scope, because the child lives on the asking session's own host, whose supervisor knows the
@@ -3196,6 +3199,16 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   mints a different UUID. Migration backfills existing entries in the same transaction as the schema change and adds a
   unique index. It appends the column without rebuilding `hosts`, whose deletion would cascade into host-owned state.
   Reads refuse a missing or noncanonical UUID instead of inventing a replacement identity.
+- Session identity inside the helm is `SessionKey { host, session_id }`: the never-reused integer entry number and the
+  supervisor's bare ID. Public REST paths and replies, agent replies, selection and approval descriptions use
+  `SessionRef`, formatted as the entry UUID plus `:` plus the bare ID. Parsing splits at byte 36, never the first colon.
+  The shared admission predicate permits at most 40 bare UTF-8 bytes (77 full), rejects empty, control-containing and
+  dot-segment suffixes, and also validates parent and checkout-origin IDs. Every list/create/mutation ingress uses it;
+  old unrepresentable cache payloads are skipped from public rows and counts without deleting raw membership. Supervisor
+  wire IDs and credentials remain bare under their existing larger relay limit. Host snapshots and mutation claims carry
+  the entry UUID with their connection provenance. Projection uses that captured prefix even if removal wins after a
+  successful reply, and always qualifies a peer suffix rather than parsing it as full. Parent filters compare the
+  host/session pair alongside any independently supplied host filter.
 - A host alias is nullable display data: when set it replaces the derived SSH destination or local `this machine` label.
   Input is trimmed; an empty result clears the alias. Nonempty aliases reject control characters and are limited to 64
   Unicode characters. The browser mirrors these syntax checks, while the helm owns collision checks and remains the
@@ -3382,38 +3395,27 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   `matching` describe rows a client can see and "showing 4 of 5" never appears over a row nobody can render (the
   corruption is for the log). The ordinary list reads as unfiltered — "M sessions" — and the filtered wording belongs to
   filters a person applied.
-- At most one HOST may cache a given session id, as a schema invariant. Session ids are supervisor-minted UUIDs, so two
-  hosts naming one is either a bug or a hostile supervisor claiming a session it does not own — and the consequence is a
-  routing decision, not a display one: owner lookup would resolve one host while the list showed another's row, so a
-  stop aimed at one machine could land on a different one. The first claim holds and the later claimant's row is
-  dropped, so the LIST stays coherent; but while both hosts keep reporting the id, ROUTING fails closed naming both,
-  because the helm has no basis for choosing which one the user meant. SPEC.md's "Remote input, session defaults, and
-  availability" accepts the resulting loss of access as a deliberate exception to its availability rule, and says why
-  first-claim-wins routing is not the answer. That contest is per-host REFRESH STATE, reconstructed from each drain's
-  own evidence rather than remembered: it clears itself when a claimant stops reporting the id, goes with the host when
-  it is removed, goes with the cache when an adoption purges it, and needs no schema to survive a restart — a restart
-  forgets the marker and the next drains re-observe the collision if it is still real, which costs one refresh interval
-  in which a genuine collision routes to the cached owner. A host that lists one session id twice in a single reply is a
-  different failure: a list that contradicts itself is refused whole, and the previous cache is kept.
+- The cache still enforces at most one host per bare ID through its existing unique index. The first cached claim
+  remains and a later claimant is omitted; refresh state still records that contest for cache publication. Routing no
+  longer consults those global observations: full references choose the entry, and raw paired cache membership or that
+  entry's coherent identity-less live list proves membership. Equal suffixes cannot redirect a request. A host listing
+  one ID twice still contradicts itself and its whole refresh is refused, keeping the previous cache.
 - The order a supervisor lists in is neither validated nor relied on. The helm sorts the union of every host's rows —
   cached and in-memory alike — per request, so an unsorted or differently sorted reply costs nothing and the one host
   that serves from memory rather than from the cache needs no special handling. Session ids are still bounded at every
-  peer ingress, for a reason that survived the cursors: every later request naming the session embeds its id in a frame
-  head, and an id near the frame limit is one no such request could carry.
+  peer ingress by the shared small reference bound above, independently of the unchanged supervisor relay allowance.
 - Every mutation whose result changes what the helm has RECORDED records it before answering: a create seeds its new
   session, a restart and a rename store the reply's fresh `SessionInfo`, and a delete forgets the row. The merged list
   and the owner lookup are both served from those records, so a mutation that recorded nothing leaves the list
   contradicting the answer the caller just got — a session that cannot be operated on, a restart that still reads
   `exited`, a deleted row sitting beside its replacement. All of it is best effort and none of it can fail the mutation:
   the operation succeeded, and reporting a success as a failure is the one outcome SPEC.md's creation contract rules
-  out. The one exception is a create whose reply names a session id another host already caches: there is then no honest
-  owner, and until the creating host's next refresh marks the id contested, routing would send operations on it to the
-  other host's session. That create fails with a conflict naming the creating host and the id, the creating host is
-  refreshed at once, and nothing is rolled back on it; only a buggy or compromised supervisor replies this way. Each
-  write carries the CLAIM its operation was routed under — a manager-wide connection token that is never reused, plus
-  the identity — and is dropped if the connection has changed since, so a delayed reply cannot file one install's
-  session under another's name. Writes are serialized against the host's own refresh, and a refresh whose drain predates
-  one of them declines to commit rather than erasing it.
+  out. The current cache's uniqueness constraint still refuses a create whose bare ID another host caches; the creating
+  host is refreshed and nothing is rolled back on it. A create reply cannot select the other entry: output is always
+  qualified with its own immutable operation claim. Each write carries the CLAIM its operation was routed under — a
+  manager-wide connection token that is never reused, plus the identity — and is dropped if the connection has changed
+  since, so a delayed reply cannot file one install's session under another's name. Writes are serialized against the
+  host's own refresh, and a refresh whose drain predates one of them declines to commit rather than erasing it.
 - One field of such a reply is NOT taken as given: a status of `unknown` never overwrites a definite one. The protocol
   is explicit that list and rename replies compute fresh pane liveness, while create and restart replies' `unknown`
   means "not yet known" rather than "not running" — a create's and a restart's replies carry it deliberately, because at
@@ -3435,19 +3437,19 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   one would be worse than offering none: nothing was presented, so there is nothing to ADOPT, and the ways out are
   fixing the host, retargeting the entry, or removing it. Re-probed automatically, unlike a mismatch, because there is
   no human decision available to wait for.
-- Session operations route by OWNER LOOKUP in that merged view — from the cache's COLUMNS, never from the stored
-  metadata, so a row whose payload no longer decodes still routes and a live session is never made unreachable by a
-  corrupt copy of its own details. A session whose host is in any non-connected state is refused with the state named
-  and nothing queued. Unreachable is not special-cased; a version-skewed, identity- mismatched, duplicate, or retired
-  host refuses identically, because a caller that handled four of six would silently mis-handle the rest. The routing
-  decision reads the host's state and its live connection from a SINGLE borrow of the actor's published status — split
-  across two reads it could pair a fresh `Connected` with a dead connection, which is precisely how an operation gets
-  routed onto a corpse. Creation takes the target host in the body (defaulting to the local row, the tail of SPEC.md's
-  own creation default) and refuses a non-connected one as a precondition failure. Reading a session's DETAIL is the one
-  route a non-connected host does not refuse: SPEC.md requires a stale session's metadata to remain available beside the
-  calm card naming the cause, so that read is served from the cache and marked stale, while a reachable host's detail is
-  always fetched live — the cache exists for the stale list, not as a general serving layer. The live path reads the
-  owner's whole list, which is the only list the wire serves.
+- Session operations parse the full reference, resolve its entry UUID and check only that entry's membership — from the
+  cache's COLUMNS, never from the stored metadata, so a row whose payload no longer decodes still routes and a live
+  session is never made unreachable by a corrupt copy of its own details. A session whose host is in any non-connected
+  state is refused with the state named and nothing queued. Unreachable is not special-cased; a version-skewed,
+  identity- mismatched, duplicate, or retired host refuses identically, because a caller that handled four of six would
+  silently mis-handle the rest. The routing decision reads the host's state and its live connection from a SINGLE borrow
+  of the actor's published status — split across two reads it could pair a fresh `Connected` with a dead connection,
+  which is precisely how an operation gets routed onto a corpse. Creation takes the target host in the body (defaulting
+  to the local row, the tail of SPEC.md's own creation default) and refuses a non-connected one as a precondition
+  failure. Reading a session's DETAIL is the one route a non-connected host does not refuse: SPEC.md requires a stale
+  session's metadata to remain available beside the calm card naming the cause, so that read is served from the cache
+  and marked stale, while a reachable host's detail is always fetched live — the cache exists for the stale list, not as
+  a general serving layer. The live path reads the owner's whole list, which is the only list the wire serves.
 - `POST /api/sessions/{id}/replace` (SPEC.md's "replace") is a composition of the create and delete this section already
   describes, not a third code path: it routes the source by owner lookup exactly like any other lifecycle operation,
   reads the source's row live from the owning host (the same live read `clone_for_agent`'s agent-CLI clone performs, and
@@ -3625,6 +3627,12 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   contest forgotten at restart. Each table is rebuilt in the schema transaction; hosts and their cache are retained.
   Store APIs carry the pair from the caller's resolved or snapshotted host, and batch results use the pair as their key.
   Equal bare IDs on different entries cannot share viewer state.
+
+- Helm schema 64 migrates `preferences.last_selected` alongside the public ID switch. Every old value is bare, including
+  text that happens to parse as a full ID. Exactly one raw cached membership and a representable suffix qualify it with
+  that entry's UUID; unowned, ambiguous or unrepresentable values clear. Spelling alone never supplies provenance. New
+  public writes require full-reference syntax but permit stale references; null and sparse updates keep their existing
+  meanings. A version-only synthetic rewind may clear an already-qualified selection rather than guess.
 
 - Shared pins live in the presence-only `session_pins` table, keyed by `(host_id, session_id)` since helm schema 63.
   Like `session_seen`, it cascades on host removal, survives retarget/adoption, is cleared explicitly on deletion, and
@@ -3863,27 +3871,31 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm agent hosts|sessions|templates [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected
   credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a
   refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a
-  model quoting its own shell output. The JSON form uses schema version 6, includes exact IDs, caller identity, and
+  model quoting its own shell output. The JSON form uses schema version 7, includes exact IDs, caller identity, and
   completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration.
-  Version 6 adds the templates listing; nothing earlier changed meaning. The templates listing carries each template's
-  fields except a command line or resume command, which appear only as `sets_command` and `sets_resume_command` (in the
-  table, `command (set)`), and names the host a template's install identity currently resolves to. Named templates show
-  their effective `name_kind` explicitly in JSON, including `base` when the wire reply omits it; the table labels the
-  quoted title as a base or fixed name. This additive discovery default leaves schema version 6 unchanged. It does not
-  change the normalized storage or write replies, which omit Base. Version 3 is the restart-only-resumes change:
-  `restart_offer` lost `fresh_only` and `fallback_template`, while `resume` kept its spelling and meaning. Version 4 is
-  the profile removal: a session's `agent` is always its agent type's word or `custom`, never a profile name, and the
-  profiles listing is gone. Version 5 is launch kinds: `restart_offer` gained `no_resume_command`, for a command launch
-  with no resume command. `farhelm agent profiles` is still parsed, hidden, only so it can be refused with a message
-  saying profiles were removed and naming `farhelm agent templates`. A session row's non-secret `OFFER` cell is `resume`
-  when restart can resume the session's conversation, otherwise the reason it cannot (`not-captured`, `no-reporting`,
-  `no-resume-command`; `not_captured`, `no_conversation_reporting` and `no_resume_command` in JSON); it does not
-  disclose the template, captured conversation locator, or a live-stop recommendation. Every dynamic table cell is
-  escaped to one printable line and every non-final column is capped at 48 characters: these values are fleet-wide user
-  text printed straight to a terminal, so a raw newline forges a row, an ESC drives the terminal, and one long title
-  would otherwise be padded onto every other row. A cut listing prints its rows on stdout and one warning on stderr, so
-  a script capturing stdout still gets nothing but the table. It has no timeout of its own: the supervisor bounds the
-  relay and is the only party that can distinguish its two failures (see the transport section's version-20 paragraph).
+  Version 7 makes session IDs and `caller.session_id` full entry-bound references, and host IDs and `caller_host_id`
+  canonical entry UUIDs. The supervisor still relays the same typed fields; the CLI formats caller identity from the
+  existing caller-host field and its bare credential. Version 6 added the templates listing. The templates listing
+  carries each template's fields except a command line or resume command, which appear only as `sets_command` and
+  `sets_resume_command` (in the table, `command (set)`), and names the host a template's install identity currently
+  resolves to. Named templates show their effective `name_kind` explicitly in JSON, including `base` when the wire reply
+  omits it; the table labels the quoted title as a base or fixed name. This additive discovery default does not change
+  the schema version. It does not change the normalized storage or write replies, which omit Base. Version 3 is the
+  restart-only-resumes change: `restart_offer` lost `fresh_only` and `fallback_template`, while `resume` kept its
+  spelling and meaning. Version 4 is the profile removal: a session's `agent` is always its agent type's word or
+  `custom`, never a profile name, and the profiles listing is gone. Version 5 is launch kinds: `restart_offer` gained
+  `no_resume_command`, for a command launch with no resume command. `farhelm agent profiles` is still parsed, hidden,
+  only so it can be refused with a message saying profiles were removed and naming `farhelm agent templates`. A session
+  row's non-secret `OFFER` cell is `resume` when restart can resume the session's conversation, otherwise the reason it
+  cannot (`not-captured`, `no-reporting`, `no-resume-command`; `not_captured`, `no_conversation_reporting` and
+  `no_resume_command` in JSON); it does not disclose the template, captured conversation locator, or a live-stop
+  recommendation. Every dynamic table cell is escaped to one printable line and non-final descriptive columns are capped
+  at 48 characters: these values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row,
+  an ESC drives the terminal, and one long title would otherwise be padded onto every other row. Exact host, session and
+  template selector columns print whole; a session reference is bounded at 77 bytes before display escaping. A cut
+  listing prints its rows on stdout and one warning on stderr, so a script capturing stdout still gets nothing but the
+  table. It has no timeout of its own: the supervisor bounds the relay and is the only party that can distinguish its
+  two failures (see the transport section's version-20 paragraph).
 - `farhelm agent delete --session <id> [--stop-if-running]` — removes an explicitly named session, refusing self-delete.
   Success prints `deleted <id>` on stdout and any checkout notice on stderr. The relay and helm both refuse self-delete;
   the helm derives a delete guard from the target state shown on its approval card and passes it unchanged to the
@@ -3905,7 +3917,9 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   `--mode` flag earlier releases required is still parsed, hidden, only so it can be refused with a message saying every
   restart resumes and to drop the flag. An explicit self-stop or self-restart may terminate the CLI before its line is
   printed because it belongs to the process tree being ended. Self restart prints its interruption/outcome-unknown
-  warning before dispatch and treats a lost reply as unknown rather than success.
+  warning before dispatch and treats a lost reply as unknown rather than success. Exact own-bare equality wins before
+  parsing; for a full target with the caller's bare suffix, a read-only Hosts discovery distinguishes the caller's entry
+  before the mutation. A discovery failure stops before dispatch and retains read-only failure semantics.
 - `farhelm agent create [--host <name>] [--cwd <dir>] <launch flags> [--title ...] [--idempotency-key ...]` and
   `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...] [--idempotency-key ...]` — the
   in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
@@ -3928,7 +3942,7 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   repeat.
 
   `--host` takes a NAME from `farhelm agent hosts`, printed there WHOLE: the NAME column is exempt from the truncation
-  every other non-final column takes, because that column is a selector rather than a description and a name cut at 48
+  non-final descriptive columns take, because that column is a selector rather than a description and a name cut at 48
   characters is a host an agent can see and can never target. Duplicate names remain separate rows and are refused as
   ambiguous targets. What `create` needs (a folder, a host, a launch, and for a command launch its YOLO assertion) may
   come from a template, so clap requires none of it and the helm refuses what is still missing, naming the flag;
@@ -4679,9 +4693,9 @@ wire format:
   does not turn these variables into a contract for users, which SPEC.md limits to the session id and credential.
 - What agents were taught: `farhelm spawn` and the `farhelm agent` verbs, with their flags and aliases, and the output
   the instructions tell agents to read (for example the `--json` fields and values they name, the `*` that marks the
-  agent's own session or host, the bare session id that spawn, create and clone print, and the flags a refusal tells
-  them to add). The instructions pointer and `farhelm agent instructions` put that text in the agent's context, and in a
-  resumed conversation's, so the agent keeps typing and parsing what it was told after the binary behind it has changed.
+  agent's own session or host, the session id that spawn, create and clone print, and the flags a refusal tells them to
+  add). The instructions pointer and `farhelm agent instructions` put that text in the agent's context, and in a resumed
+  conversation's, so the agent keeps typing and parsing what it was told after the binary behind it has changed.
 - In the Mac app's side-by-side layout (see "Side-by-side versions inside Farhelm.app"): the forwarder at
   `Contents/MacOS/farhelm`, which every session's paths above lead to, and the Running record `running-version` beside
   the supervisor socket, one line naming the running version. A forwarder written by a newer installer reads records
@@ -4731,6 +4745,16 @@ replaced them). `farhelm spawn --inherit-agent` no longer works without the helm
 user. And a keyed `--inherit-agent` spawn retried across the update is not replayed: its key used to be reserved by the
 session's own supervisor and is now reserved through the helm like every other agent create, so the retry is a new
 request, shown on a card, which creates a second child if allowed.
+
+Entry-bound session identity is one further explicit exception. Spawn, create and clone now print full session IDs;
+other bare targets learned before the update are refused with `farhelm agent sessions` as the remedy. The exact
+authenticated own-bare ID remains accepted on its requesting entry, with equality checked before full parsing.
+Self-Delete and self-Prompt compare resolved pairs. Discovery host IDs become entry UUIDs, the JSON envelope becomes
+schema version 7 with a full caller ID, and own-session and own-host markers derive from entry-bound identity rather
+than global bare ownership. This exception covers those taught fields, values and markers together. Supervisors,
+credentials and their typed relay remain unchanged; sessions keep running across the helm update. Approval targets,
+asking keys and deletion counters carry the internal pair through waits, so removed entries cannot redirect consent to a
+re-added entry. A card waiting during the update may get no answer.
 
 ### Restart only resumes
 

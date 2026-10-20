@@ -62,7 +62,7 @@ for (const operation of ["create", "replace"] as const) {
       feed.notify(2);
       await expect.poll(() => oldCaptured, { message: "the pre-mutation snapshot must be held" }).toBe(true);
       const mutation = page.waitForResponse((response) => response.request().method() === "POST"
-        && new URL(response.url()).pathname === (operation === "create" ? "/api/sessions" : `/api/sessions/${source.id}/replace`));
+        && new URL(response.url()).pathname === (operation === "create" ? "/api/sessions" : `/api/sessions/${encodeURIComponent(source.id)}/replace`));
       await submit.click();
       const response = await mutation;
       expect(response.ok()).toBe(true);

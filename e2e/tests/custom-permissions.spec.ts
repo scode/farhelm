@@ -131,7 +131,7 @@ for (const action of ["clone", "replace-with"] as const) {
       await route.fulfill({ response, json: listing });
     });
     const bodies: any[] = [];
-    await page.route(action === "clone" ? "**/api/sessions" : `**/api/sessions/${id}/replace`, async route => {
+    await page.route(action === "clone" ? "**/api/sessions" : `**/api/sessions/${encodeURIComponent(id)}/replace`, async route => {
       if (route.request().method() !== "POST") return route.continue();
       bodies.push(route.request().postDataJSON());
       await fulfillAsHelm(route, { status: 400, contentType: "text/plain", body: "controlled custom refusal" });

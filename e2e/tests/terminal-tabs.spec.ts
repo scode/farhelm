@@ -356,7 +356,7 @@ test("closing a tab confirms in-page, then kills its shell and drops it from the
 
     // ...and the server agrees the tab is gone, which is what a client
     // opening this session later will see.
-    const detail = await (await request.get(`/api/sessions/${id}`)).json();
+    const detail = await (await request.get(`/api/sessions/${encodeURIComponent(id)}`)).json();
     expect(detail.tabs ?? []).toEqual([]);
   } finally {
     if (id) await cleanupSession(request, id);
@@ -387,7 +387,7 @@ test("a tab opened from another client appears in the strip without a reload", a
     await attachSession(page, id);
     await expect(page.locator(".tab-slot")).toHaveCount(0);
 
-    const opened = await request.post(`/api/sessions/${id}/tabs`);
+    const opened = await request.post(`/api/sessions/${encodeURIComponent(id)}/tabs`);
     expect(opened.status(), await opened.text()).toBe(200);
     const tabId = (await opened.json()).tab.id;
 
@@ -404,7 +404,7 @@ test("a tab opened from another client appears in the strip without a reload", a
 
     // The counterpart: a tab closed from another client leaves the strip
     // the same way, with no reload and nothing left pointing at it.
-    const closed = await request.delete(`/api/sessions/${id}/tabs/${tabId}`);
+    const closed = await request.delete(`/api/sessions/${encodeURIComponent(id)}/tabs/${tabId}`);
     expect(closed.status(), await closed.text()).toBe(200);
     await expect(page.locator(".tab-slot")).toHaveCount(0, { timeout: 15_000 });
   } finally {
@@ -953,8 +953,8 @@ test("a tab whose mount fails is rolled back and bannered while its siblings sta
     // page ever loads and BOTH mount in the same `sync()` — which is what
     // makes "the sibling survived" a statement about that sync rather than
     // about two unrelated mounts at different times.
-    const doomed = (await (await request.post(`/api/sessions/${id}/tabs`)).json()).tab.id;
-    const healthy = (await (await request.post(`/api/sessions/${id}/tabs`)).json()).tab.id;
+    const doomed = (await (await request.post(`/api/sessions/${encodeURIComponent(id)}/tabs`)).json()).tab.id;
+    const healthy = (await (await request.post(`/api/sessions/${encodeURIComponent(id)}/tabs`)).json()).tab.id;
 
     await page.goto("/");
     await page.addInitScript((bad) => {
@@ -1043,14 +1043,14 @@ test("a pending tab mount is cancelled when the tab leaves the desired set", asy
       });
     });
 
-    const opened = await request.post(`/api/sessions/${id}/tabs`);
+    const opened = await request.post(`/api/sessions/${encodeURIComponent(id)}/tabs`);
     const tabId = (await opened.json()).tab.id;
     await expect(page.locator(".tab-slot")).toHaveCount(1, { timeout: 15_000 });
     expect(await mountedIslands(page)).toEqual(["terminal"]);
     await expect.poll(() => page.evaluate(() => (window as any).__terminalReadCount)).toBeGreaterThan(1);
 
     // Gone again before it could ever mount.
-    const closed = await request.delete(`/api/sessions/${id}/tabs/${tabId}`);
+    const closed = await request.delete(`/api/sessions/${encodeURIComponent(id)}/tabs/${tabId}`);
     expect(closed.ok()).toBe(true);
     await expect(page.locator(".tab-slot")).toHaveCount(0, { timeout: 20_000 });
 
@@ -1105,7 +1105,7 @@ test("repeated activations while an open is in flight produce exactly one tab", 
   try {
     const session = await createTabSession(request, title);
     id = session.id;
-    await page.route(`**/api/sessions/${session.id}/tabs`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/tabs`, async (route) => {
       if (route.request().method() !== "POST") {
         await route.continue();
         return;
@@ -1204,7 +1204,7 @@ test("a confirmed close sends one DELETE per tab, and a sibling can close alongs
     const session = await openSessionWithTabs(page, request, title, 2);
     id = session.id;
     const [a, b] = session.tabs;
-    await page.route(`**/api/sessions/${session.id}/tabs/*`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/tabs/*`, async (route) => {
       if (route.request().method() === "DELETE") {
         const tab = new URL(route.request().url()).pathname.split("/").pop()!;
         deletes.push(tab);
@@ -1265,7 +1265,7 @@ test("retargeting an open tab-close question focuses the new answer", async ({ p
   const deletes: string[] = [];
   let bodyFailed = false;
   try {
-    await page.route(`**/api/sessions/${session.id}/tabs/*`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/tabs/*`, async (route) => {
       if (route.request().method() === "DELETE") deletes.push(new URL(route.request().url()).pathname.split("/").pop()!);
       await route.continue();
     });
@@ -1306,7 +1306,7 @@ test("cancel and confirm in the same tick close nothing", async ({ page, request
   try {
     const session = await openSessionWithTabs(page, request, title, 1);
     id = session.id;
-    await page.route(`**/api/sessions/${session.id}/tabs/*`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/tabs/*`, async (route) => {
       if (route.request().method() === "DELETE") deletes++;
       await route.continue();
     });
@@ -1348,7 +1348,7 @@ test("a failed close surfaces on that tab and leaves it attached", async ({
     const session = await openSessionWithTabs(page, request, title, 2);
     id = session.id;
     const [failing, other] = session.tabs;
-    await page.route(`**/api/sessions/${session.id}/tabs/${failing}`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/tabs/${failing}`, async (route) => {
       if (route.request().method() !== "DELETE") {
         await route.continue();
         return;
@@ -1710,7 +1710,7 @@ test("a tab closed elsewhere is torn down here, leaving its sibling untouched", 
       (window as any).__goneWs = (window as any).__farhelmIslands[el].ws;
     }, `terminal-${gone}`);
 
-    const closed = await request.delete(`/api/sessions/${id}/tabs/${gone}`);
+    const closed = await request.delete(`/api/sessions/${encodeURIComponent(id)}/tabs/${gone}`);
     expect(closed.ok(), await closed.text()).toBe(true);
 
     await expect(page.locator(`.tab-slot[data-tab-id="${gone}"]`)).toHaveCount(0, {
@@ -1765,7 +1765,7 @@ test("a failing detail read leaves the tabs and their terminals alone", async ({
 
     let failures = 0;
     let failReads = true;
-    await page.route(`**/api/sessions/${session.id}`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}`, async (route) => {
       if (route.request().method() !== "GET" || !failReads) {
         await route.continue();
         return;
@@ -1830,7 +1830,7 @@ test("a session the helm stops listing is reported as stale, not torn down", asy
     await expect(page.locator(".refresh-stale")).toHaveCount(0);
 
     let missing = true;
-    await page.route(`**/api/sessions/${session.id}`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}`, async (route) => {
       if (route.request().method() !== "GET" || !missing) {
         await route.continue();
         return;
@@ -1917,7 +1917,7 @@ test("a tab whose shell exits is reaped: strip entry, island, and selection", as
     await expect
       .poll(
         async () => {
-          const detail = await (await request.get(`/api/sessions/${id}`)).json();
+          const detail = await (await request.get(`/api/sessions/${encodeURIComponent(id)}`)).json();
           return (detail.tabs ?? []).map((t: any) => t.id);
         },
         { timeout: 20_000, message: "an exited tab must stop being listed" },
@@ -1975,7 +1975,7 @@ test("a tab opened after closing another starts with a clean island", async ({
     // Server-side close, like a remote client's x: the strip's own
     // confirm flow is covered elsewhere, and the supervisor-side close is
     // identical either way.
-    const closed = await request.delete(`/api/sessions/${id}/tabs/${first}`);
+    const closed = await request.delete(`/api/sessions/${encodeURIComponent(id)}/tabs/${first}`);
     expect(closed.ok(), await closed.text()).toBe(true);
     await expect(page.locator(`.tab-slot[data-tab-id="${first}"]`)).toHaveCount(0, {
       timeout: 20_000,
@@ -2039,9 +2039,9 @@ test("a tab the supervisor cannot attach explains itself instead of showing a bl
     // test below spells out: a per-request `route.fetch()` on a route the
     // view polls leaves several `APIResponse`s in flight, and Playwright
     // disposes them as their routes complete.
-    const detail = await (await request.get(`/api/sessions/${session.id}`)).json();
+    const detail = await (await request.get(`/api/sessions/${encodeURIComponent(session.id)}`)).json();
     detail.tabs = [...(detail.tabs ?? []), { id: phantom }];
-    await page.route(`**/api/sessions/${session.id}`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}`, async (route) => {
       if (route.request().method() !== "GET") {
         await route.continue();
         return;
@@ -2109,7 +2109,7 @@ test("a confirm prompt renumbers with the strip while still targeting its own ta
     const session = await openSessionWithTabs(page, request, title, 2);
     id = session.id;
     const [first, second] = session.tabs;
-    await page.route(`**/api/sessions/${session.id}/tabs/*`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/tabs/*`, async (route) => {
       if (route.request().method() === "DELETE") {
         deleted.push(new URL(route.request().url()).pathname.split("/").pop()!);
       }
@@ -2121,7 +2121,7 @@ test("a confirm prompt renumbers with the strip while still targeting its own ta
     await page.locator(`.tab-slot[data-tab-id="${second}"] .tab-close`).click();
     await expect(page.locator(".tab-confirm .confirm-title")).toHaveText("Terminal 2");
 
-    const closed = await request.delete(`/api/sessions/${id}/tabs/${first}`);
+    const closed = await request.delete(`/api/sessions/${encodeURIComponent(id)}/tabs/${first}`);
     expect(closed.ok(), await closed.text()).toBe(true);
     await expect(page.locator(".tab-confirm .confirm-title")).toHaveText("Terminal 1", {
       timeout: 20_000,
@@ -2196,7 +2196,7 @@ test("a tab opened and closed before any poll observes it does not come back", a
     const appliedTitle = `${title}-reconciled`;
     const detailHeld = new Promise<void>((resolve) => { releaseDetail = resolve; });
     const laterDetailHeld = new Promise<void>((resolve) => { releaseLaterDetail = resolve; });
-    await page.route((url) => url.pathname === `/api/sessions/${id}`, async (route) => {
+    await page.route((url) => url.pathname === `/api/sessions/${encodeURIComponent(id)}`, async (route) => {
       if (route.request().method() !== "GET") {
         await route.continue();
         return;
@@ -2238,7 +2238,7 @@ test("a tab opened and closed before any poll observes it does not come back", a
     releaseLaterDetail();
     await expect(page.locator(".session-details .title")).toHaveText(appliedTitle, { timeout: 15_000 });
     expect(await page.locator(".tab-slot").count(), "post-close reconciliation must not revive the optimistic tab").toBe(0);
-    const detail = await (await request.get(`/api/sessions/${id}`)).json();
+    const detail = await (await request.get(`/api/sessions/${encodeURIComponent(id)}`)).json();
     expect(detail.tabs ?? []).toEqual([]);
   } finally {
     releaseDetail();
@@ -2276,7 +2276,7 @@ test("a tab closed elsewhere before this view ever listed it stops being shown",
     const tabId = await addTab(page, 0);
     // Closed from elsewhere immediately, so this view's own state never
     // learns about it except through polling.
-    const closed = await request.delete(`/api/sessions/${id}/tabs/${tabId}`);
+    const closed = await request.delete(`/api/sessions/${encodeURIComponent(id)}/tabs/${tabId}`);
     expect(closed.ok(), await closed.text()).toBe(true);
 
     await expect(page.locator(".tab-slot")).toHaveCount(0, { timeout: 20_000 });
@@ -2323,9 +2323,9 @@ test("a tab list past the island cap is listed in full but only partly attached"
     // complete, so a later handler can find the object it is reading
     // already gone. Nothing in this test needs the reply to stay live; it
     // needs the tab list to be a fixed, oversized fixture.
-    const detail = await (await request.get(`/api/sessions/${session.id}`)).json();
+    const detail = await (await request.get(`/api/sessions/${encodeURIComponent(session.id)}`)).json();
     detail.tabs = phantoms.map((tabId) => ({ id: tabId }));
-    await page.route(`**/api/sessions/${session.id}`, async (route) => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}`, async (route) => {
       if (route.request().method() !== "GET") {
         await route.continue();
         return;

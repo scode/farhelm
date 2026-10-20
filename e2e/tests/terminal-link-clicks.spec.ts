@@ -42,10 +42,10 @@ test("mouse-reporting drags never open web or file links", async ({ page, reques
     await patchPreferences(request, { terminal_link_click: "both" });
     const session = await createSession(request, { title: `link-drag-${Date.now()}`, cwd: "/tmp", invocation });
     sessionId = session.id;
-    await page.route(`**/api/sessions/${session.id}/files/stat`, route => route.fulfill({
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, route => route.fulfill({
       json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
     }));
-    await page.route(`**/api/sessions/${session.id}/files/download`, route => {
+    await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/download`, route => {
       transfers++;
       return route.fulfill({ status: 403, body: "fixture transfer observed" });
     });
@@ -116,10 +116,10 @@ test("a clipped file disclosure refuses a click until the window fits", async ({
   await page.setViewportSize({ width: 900, height: 350 });
   const session = await createSession(request, { title: `file-fit-${Date.now()}`, cwd: "/tmp", invocation });
   let transfers = 0;
-  await page.route(`**/api/sessions/${session.id}/files/stat`, route => route.fulfill({
+  await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, route => route.fulfill({
     json: { status: "ready", host: "fixture", path: "/" + "directory/".repeat(300) + "report.txt", size: 8, can_open: true },
   }));
-  await page.route(`**/api/sessions/${session.id}/files/download`, route => {
+  await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/download`, route => {
     transfers++;
     return route.fulfill({ status: 403, body: "fixture transfer observed" });
   });
@@ -192,10 +192,10 @@ test("file disclosure and transfer messages preserve path differences", async ({
   const session = await createSession(request, { title: `file-text-${Date.now()}`, cwd: "/tmp", invocation });
   const raw = "/output/a  b\u034F<U+034F>.txt";
   const shown = "a  b<U+034F><U+003C>U+034F>.txt";
-  await page.route(`**/api/sessions/${session.id}/files/stat`, route => route.fulfill({
+  await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, route => route.fulfill({
     json: { status: "ready", host: "fixture", path: raw, size: 8, can_open: true },
   }));
-  await page.route(`**/api/sessions/${session.id}/files/download`, route => route.fulfill({ status: 403, body: raw }));
+  await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/download`, route => route.fulfill({ status: 403, body: raw }));
   try {
     await page.goto("/");
     await attachSession(page, session.id);
@@ -803,12 +803,12 @@ test.describe("covered terminal disclosures", () => {
       sessionId = session.id;
       await stageCoveringApproval(page);
       page.on("request", request => {
-        if (new URL(request.url()).pathname === `/api/sessions/${session.id}/files/download`) transfers++;
+        if (new URL(request.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}/files/download`) transfers++;
       });
-      await page.route(`**/api/sessions/${session.id}/files/stat`, route => fulfillAsHelm(route, {
+      await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, route => fulfillAsHelm(route, {
         json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
       }));
-      await page.route(`**/api/sessions/${session.id}/files/download`, route => fulfillAsHelm(route, {
+      await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/download`, route => fulfillAsHelm(route, {
         status: 200, contentType: "application/octet-stream", body: "fixture\n",
       }));
       await page.goto("/");
@@ -919,12 +919,12 @@ test.describe("covered terminal disclosures", () => {
       const session = await createSession(request, { title: `file-tunnel-covered-${Date.now()}`, cwd: "/tmp", invocation });
       sessionId = session.id;
       page.on("request", request => {
-        if (new URL(request.url()).pathname === `/api/sessions/${session.id}/files/download`) transfers++;
+        if (new URL(request.url()).pathname === `/api/sessions/${encodeURIComponent(session.id)}/files/download`) transfers++;
       });
-      await page.route(`**/api/sessions/${session.id}/files/stat`, route => fulfillAsHelm(route, {
+      await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/stat`, route => fulfillAsHelm(route, {
         json: { status: "ready", host: "fixture", path: "/output/report.txt", size: 8, can_open: true },
       }));
-      await page.route(`**/api/sessions/${session.id}/files/download`, route => fulfillAsHelm(route, {
+      await page.route(`**/api/sessions/${encodeURIComponent(session.id)}/files/download`, route => fulfillAsHelm(route, {
         status: 200, contentType: "application/octet-stream", body: "fixture\n",
       }));
       await page.goto("/");

@@ -45,7 +45,7 @@
 //! for the marker that separates replayed scrollback from live output.
 
 use crate::auth::AuthenticatedSocket;
-use crate::sessions::{default_cols, default_rows, route_session};
+use crate::sessions::{default_cols, default_rows, resolve_session_ref, route_session};
 use crate::{AppState, SupervisorClient, SupervisorError, TermEvent, TermStream};
 use axum::Extension;
 use axum::extract::{Path as AxPath, Query, State, WebSocketUpgrade, ws};
@@ -177,31 +177,33 @@ fn resolve_attach_request(q: &TermQuery) -> anyhow::Result<(TerminalSelector, &s
 ///
 /// The client is returned alongside the attachment because `serve_term`
 /// must keep talking to the SAME connection for the socket's whole life —
-/// input, resize, pause/resume, detach. Re-routing per message would let a
-/// mid-session reconnect silently move a live terminal's writes to a
-/// different connection than the one its attachment lives on.
+/// input, resize, pause/resume, detach. The resolved bare ID travels with it,
+/// because later resize messages must never send the public full reference.
+/// Re-routing per message would let a mid-session reconnect silently move a live
+/// terminal's writes to a different connection than the one its attachment lives on.
 async fn attach_from_query(
     state: &AppState,
     session_id: &str,
     q: &TermQuery,
     if_unowned: bool,
-) -> anyhow::Result<(Arc<SupervisorClient>, u32, TermStream)> {
+) -> anyhow::Result<(Arc<SupervisorClient>, String, u32, TermStream)> {
     let (terminal, lease) = resolve_attach_request(q)?;
-    let (_claim, client) = route_session(state, session_id).await?;
+    let key = resolve_session_ref(state, session_id).await?;
+    let (_claim, client) = route_session(state, &key).await?;
     // Which of the two attach contracts this socket wants, decided by the
     // query the browser sent: an unattended reconnect refuses rather than
     // displaces (see `TermQuery::if_unowned`), everything else is the
     // ordinary last-attach-wins attach.
     let (channel, stream) = if if_unowned {
         client
-            .attach_terminal_if_unowned(session_id, q.cols, q.rows, terminal, lease)
+            .attach_terminal_if_unowned(&key.session_id, q.cols, q.rows, terminal, lease)
             .await?
     } else {
         client
-            .attach_terminal(session_id, q.cols, q.rows, terminal, lease)
+            .attach_terminal(&key.session_id, q.cols, q.rows, terminal, lease)
             .await?
     };
-    Ok((client, channel, stream))
+    Ok((client, key.session_id, channel, stream))
 }
 
 /// Terminal WebSocket: binary frames are terminal bytes in both
@@ -514,14 +516,14 @@ async fn serve_term(
     // instead of two copies of the same three lines.
     let attached = attach_from_query(&state, &session_id, &q, if_unowned);
     tokio::pin!(attached);
-    let (client, channel, mut events) = tokio::select! {
+    let (client, bare_session_id, channel, mut events) = tokio::select! {
         biased;
         _ = auth.revoked() => {
             // The request may already have crossed into the supervisor. Drop
             // the browser first, then wait only long enough to learn whether
             // admission completed and needs an explicit detach.
             drop(socket);
-            if let Ok(Ok((client, channel, _events))) =
+            if let Ok(Ok((client, _bare_session_id, channel, _events))) =
                 tokio::time::timeout(WS_TEARDOWN_GRACE, &mut attached).await
             {
                 detach_bounded(&client, channel).await;
@@ -670,7 +672,8 @@ async fn serve_term(
     });
 
     let client_inbound = Arc::clone(&client);
-    let session_id_inbound = session_id.clone();
+    // Resizes belong to this attachment's original connection and bare wire ID.
+    let session_id_inbound = bare_session_id;
     let inbound = tokio::spawn(async move {
         while let Some(msg) = ws_rx.next().await {
             match msg {
@@ -824,6 +827,31 @@ async fn settle_outbound(
 
 #[cfg(test)]
 mod tests {
+    /// Keep a qualified URL alive through the connection future, including concurrent peer setup.
+    async fn connect_session(
+        harness: &crate::rest_harness::Harness,
+        addr: std::net::SocketAddr,
+        path: &str,
+    ) -> WsTestClient {
+        WsTestClient::connect(addr, &session_path(harness, path)).await
+    }
+
+    /// Build this fixture's public reference from its registered entry, keeping wire IDs bare.
+    fn session_path(harness: &crate::rest_harness::Harness, path: &str) -> String {
+        let prefix = "/api/sessions/";
+        let Some(suffix) = path.strip_prefix(prefix) else {
+            return path.to_string();
+        };
+        let entry = harness
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|host| host.kind == crate::store::HostKind::Local)
+            .expect("the fixture has a local host")
+            .entry_uuid;
+        format!("{prefix}{entry}:{suffix}")
+    }
+
     use crate::BUILD_STAMP_HEADER;
     use crate::client::SupervisorClient;
     use crate::rest_harness::{self, WsTestClient};
@@ -834,6 +862,95 @@ mod tests {
     use std::time::Duration;
     use tower::ServiceExt;
 
+    /// A terminal from an old browser tab must explain its stale reference on the socket,
+    /// without attaching the live session whose bare suffix happens to match.
+    #[farhelm_testtrace::test]
+    async fn bare_terminal_target_is_refused_before_supervisor_dispatch() {
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let (observe, peer) = rest_harness::silent_supervisor(server);
+        let mut harness = rest_harness::spliced_helm(client).await;
+        let host = harness
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|host| host.kind == crate::store::HostKind::Local)
+            .unwrap()
+            .id;
+        crate::sessions::route_session(
+            &harness.state,
+            &crate::store::SessionKey::new(host, "sess-1"),
+        )
+        .await
+        .expect("premise: the matching bare suffix is routable");
+        let addr = harness.serve().await;
+        let mut ws = WsTestClient::connect(addr, "/api/sessions/sess-1/term").await;
+        let (opcode, bytes) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("a refused attach must explain why")
+            .unwrap();
+        assert_eq!(opcode, 1);
+        let notice: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(notice["type"], "detached");
+        assert!(
+            notice["reason"]
+                .as_str()
+                .unwrap()
+                .contains("full session ID")
+        );
+        observe.send(()).unwrap();
+        peer.await.unwrap();
+    }
+
+    /// Public references stop at attachment admission. A later browser resize must use the
+    /// same connection and bare ID, or an initially working terminal fails only after resizing.
+    #[farhelm_testtrace::test]
+    async fn qualified_terminal_attach_and_later_resize_keep_bare_wire_ids() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let mut peer = rest_harness::FakeSupervisor::accept(peer_side).await;
+            let ControlMsg::Attach {
+                req_id,
+                session_id,
+                channel,
+                ..
+            } = peer.recv().await
+            else {
+                panic!("expected terminal admission");
+            };
+            assert_eq!(session_id, "sess-1");
+            peer.send(&ControlMsg::Attached { req_id, channel }).await;
+            peer.send_frame(&Frame::data(channel, b"ready".to_vec()))
+                .await;
+            let ControlMsg::Resize {
+                session_id,
+                channel: resized,
+                cols,
+                rows,
+            } = peer.recv().await
+            else {
+                panic!("expected resize on the attached connection");
+            };
+            assert_eq!(session_id, "sess-1");
+            assert_eq!(resized, channel);
+            assert_eq!((cols, rows), (101, 43));
+        });
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let mut ws = connect_session(&harness, addr, "/api/sessions/sess-1/term").await;
+        let (opcode, bytes) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("attached terminal must deliver its live bytes")
+            .unwrap();
+        assert_eq!(opcode, 2);
+        assert_eq!(bytes, b"ready");
+        ws.send_text(r#"{"type":"resize","cols":101,"rows":43}"#)
+            .await;
+        tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("resize must reach the attached supervisor")
+            .unwrap();
+    }
+
     /// A browser that forgets to request an upgrade must receive Axum's
     /// ordinary missing-upgrade response, not an internal error naming the
     /// authentication extension. The authenticated request matters: without
@@ -842,7 +959,7 @@ mod tests {
     async fn an_authenticated_plain_terminal_get_is_not_an_internal_error() {
         let harness = rest_harness::idle_helm().await;
         let request = Request::builder()
-            .uri("/api/sessions/sess-1/term")
+            .uri(session_path(&harness, "/api/sessions/sess-1/term"))
             .header("host", "127.0.0.1:7433")
             .body(axum::body::Body::empty())
             .unwrap();
@@ -1025,7 +1142,7 @@ mod tests {
 
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
-        let mut ws = WsTestClient::connect(addr, "/api/sessions/sess-1/term").await;
+        let mut ws = connect_session(&harness, addr, "/api/sessions/sess-1/term").await;
         attach_seen_rx.await.unwrap();
         harness.state.auth.rotate().await.unwrap();
         release_tx.send(()).unwrap();
@@ -1062,7 +1179,7 @@ mod tests {
         // awaiting it first would be waiting on something this test has
         // not caused yet.
         let (mut ws, peer) = tokio::join!(
-            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            connect_session(&harness, addr, "/api/sessions/sess-1/term"),
             peer
         );
         let (mut reader, _writer, channel) = peer.unwrap();
@@ -1111,7 +1228,7 @@ mod tests {
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
         let (mut ws, peer) = tokio::join!(
-            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            connect_session(&harness, addr, "/api/sessions/sess-1/term"),
             peer
         );
         let (_reader, mut writer, channel) = peer.unwrap();
@@ -1170,7 +1287,7 @@ mod tests {
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
         let (mut ws, peer) = tokio::join!(
-            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            connect_session(&harness, addr, "/api/sessions/sess-1/term"),
             peer
         );
         let (_reader, _writer, _channel) = peer.unwrap();
@@ -1216,7 +1333,7 @@ mod tests {
         let addr = harness.serve().await;
         // Concurrently, for the same reason as the test above.
         let (mut ws, peer) = tokio::join!(
-            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            connect_session(&harness, addr, "/api/sessions/sess-1/term"),
             peer
         );
         let (mut reader, mut writer, channel) = peer.unwrap();
@@ -1299,7 +1416,7 @@ mod tests {
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
         let (mut ws, peer) = tokio::join!(
-            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            connect_session(&harness, addr, "/api/sessions/sess-1/term"),
             peer
         );
         let (mut reader, _writer, channel) = peer.unwrap();
@@ -1381,7 +1498,7 @@ mod tests {
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
         let (mut ws, peer) = tokio::join!(
-            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            connect_session(&harness, addr, "/api/sessions/sess-1/term"),
             peer
         );
         let (mut reader, _writer, channel) = peer.unwrap();
@@ -1449,7 +1566,7 @@ mod tests {
             });
             let mut harness = rest_harness::spliced_helm(client_side).await;
             let addr = harness.serve().await;
-            let (_ws, asked) = tokio::join!(WsTestClient::connect(addr, path), peer);
+            let (_ws, asked) = tokio::join!(connect_session(&harness, addr, path), peer);
             assert_eq!(
                 asked.unwrap(),
                 expected,
@@ -1492,7 +1609,7 @@ mod tests {
         ] {
             let mut builder = axum::http::Request::builder()
                 .method("GET")
-                .uri(uri)
+                .uri(session_path(&harness, uri))
                 .header("host", "127.0.0.1:7433");
             if let Some(origin) = origin {
                 builder = builder.header("origin", origin);
@@ -1569,7 +1686,7 @@ mod tests {
             let mut harness = rest_harness::spliced_helm(client_side).await;
             let addr = harness.serve().await;
             let path = format!("/api/sessions/sess-1/term{query}");
-            let (_ws, peer) = tokio::join!(WsTestClient::connect(addr, &path), peer);
+            let (_ws, peer) = tokio::join!(connect_session(&harness, addr, &path), peer);
             peer.unwrap();
         }
     }
@@ -1615,7 +1732,11 @@ mod tests {
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
         let (_ws, peer) = tokio::join!(
-            WsTestClient::connect(addr, "/api/sessions/sess-1/term?tab=tab-1&lease=client-abc"),
+            connect_session(
+                &harness,
+                addr,
+                "/api/sessions/sess-1/term?tab=tab-1&lease=client-abc"
+            ),
             peer
         );
         peer.unwrap();
@@ -1678,7 +1799,7 @@ mod tests {
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
         let (mut ws, peer) = tokio::join!(
-            WsTestClient::connect(addr, "/api/sessions/sess-1/term?tab=no-such-tab"),
+            connect_session(&harness, addr, "/api/sessions/sess-1/term?tab=no-such-tab"),
             peer
         );
         peer.unwrap();
@@ -1742,7 +1863,7 @@ mod tests {
 
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
-        let (mut ws, peer) = tokio::join!(WsTestClient::connect(addr, path), peer);
+        let (mut ws, peer) = tokio::join!(connect_session(&harness, addr, path), peer);
         peer.unwrap();
         let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
             .await
@@ -1825,7 +1946,11 @@ mod tests {
 
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
-        let mut ws = WsTestClient::connect(addr, "/api/sessions/sess-1/term?lease=").await;
+        let mut ws = WsTestClient::connect(
+            addr,
+            &session_path(&harness, "/api/sessions/sess-1/term?lease="),
+        )
+        .await;
 
         let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
             .await

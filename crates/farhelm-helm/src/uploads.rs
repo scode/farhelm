@@ -35,7 +35,7 @@
 //! `UploadStep` is what lets one loop wait on all of those at once
 //! without any of them being able to starve the others.
 
-use crate::sessions::route_session;
+use crate::sessions::{resolve_session_ref, route_session};
 use crate::{AppState, SupervisorError, http_error};
 use axum::extract::{Path as AxPath, Query, State};
 use axum::response::IntoResponse;
@@ -175,15 +175,23 @@ pub(crate) async fn upload_attachment(
             .into_response();
     };
 
+    // The public reference selects one entry; only its bare suffix crosses the wire.
     // Routed BEFORE the body is touched, like every other session
     // operation: an upload to a session on a non-connected host must be
     // refused with that host's state named, not half-relayed and then
     // abandoned.
-    let (_claim, client) = match route_session(&state, &id).await {
+    let key = match resolve_session_ref(&state, &id).await {
+        Ok(key) => key,
+        Err(error) => return http_error(error),
+    };
+    let (_claim, client) = match route_session(&state, &key).await {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };
-    let mut upload = match client.begin_upload(&id, &q.filename, size).await {
+    let mut upload = match client
+        .begin_upload(&key.session_id, &q.filename, size)
+        .await
+    {
         Ok(upload) => upload,
         Err(e) => return http_error(e),
     };
@@ -366,9 +374,67 @@ enum UploadStep {
 
 #[cfg(test)]
 mod tests {
+    /// Build this fixture's public reference from its registered entry, keeping wire IDs bare.
+    fn session_path(harness: &crate::rest_harness::Harness, path: &str) -> String {
+        let prefix = "/api/sessions/";
+        let Some(suffix) = path.strip_prefix(prefix) else {
+            return path.to_string();
+        };
+        let entry = harness
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|host| host.kind == crate::store::HostKind::Local)
+            .expect("the fixture has a local host")
+            .entry_uuid;
+        format!("{prefix}{entry}:{suffix}")
+    }
+
     use crate::BUILD_STAMP_HEADER;
     use crate::rest_harness::{self, FakeSupervisor};
     use std::time::Duration;
+
+    /// A stale bare target must fail before upload admission, even with valid framing and
+    /// a live matching suffix. The peer stays connected to make local refusal observable.
+    #[farhelm_testtrace::test]
+    async fn bare_upload_target_is_refused_before_supervisor_dispatch() {
+        use tower::ServiceExt;
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let (observe, peer) = rest_harness::silent_supervisor(server);
+        let harness = rest_harness::spliced_helm(client).await;
+        let host = harness
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|host| host.kind == crate::store::HostKind::Local)
+            .unwrap()
+            .id;
+        crate::sessions::route_session(
+            &harness.state,
+            &crate::store::SessionKey::new(host, "sess-1"),
+        )
+        .await
+        .expect("premise: the matching bare suffix is routable");
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/attachments")
+            .header("host", "127.0.0.1:7433")
+            .header("content-length", "0")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = harness.router().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8(body.to_vec())
+                .unwrap()
+                .contains("full session ID")
+        );
+        observe.send(()).unwrap();
+        peer.await.unwrap();
+    }
 
     /// `POST /api/sessions/{id}/attachments` happy path (PLAN_M4.md item
     /// 5, the pinned attachment REST contract): a body larger than one
@@ -454,7 +520,10 @@ mod tests {
 
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments?filename=screenshot.png")
+            .uri(session_path(
+                &harness,
+                "/api/sessions/sess-1/attachments?filename=screenshot.png",
+            ))
             .header("host", "127.0.0.1:7433")
             .header("content-length", total.to_string())
             .body(axum::body::Body::from(content))
@@ -562,7 +631,7 @@ mod tests {
             futures_util::stream::iter(pieces.into_iter().map(Ok::<Vec<u8>, std::io::Error>));
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", total.to_string())
             .body(axum::body::Body::from_stream(body_stream))
@@ -591,7 +660,10 @@ mod tests {
         let app = harness.unauthenticated_router();
         let request = axum::http::Request::builder()
             .method("OPTIONS")
-            .uri("/api/sessions/sess-1/attachments?filename=shot.png")
+            .uri(session_path(
+                &harness,
+                "/api/sessions/sess-1/attachments?filename=shot.png",
+            ))
             .header("host", "127.0.0.1:7433")
             .header("origin", "dioxus://index.html")
             .header("access-control-request-method", "POST")
@@ -625,7 +697,10 @@ mod tests {
 
         let post = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments?filename=shot.png")
+            .uri(session_path(
+                &harness,
+                "/api/sessions/sess-1/attachments?filename=shot.png",
+            ))
             .header("host", "127.0.0.1:7433")
             .header("origin", "dioxus://index.html")
             .body(axum::body::Body::empty())
@@ -692,7 +767,10 @@ mod tests {
         let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments?filename=shot.png")
+            .uri(session_path(
+                &harness,
+                "/api/sessions/sess-1/attachments?filename=shot.png",
+            ))
             .header("host", "127.0.0.1:7433")
             .header("origin", "wry://localhost")
             .header("content-length", content.len().to_string())
@@ -751,7 +829,10 @@ mod tests {
         let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments?filename=shot.png")
+            .uri(session_path(
+                &harness,
+                "/api/sessions/sess-1/attachments?filename=shot.png",
+            ))
             .header("host", "127.0.0.1:7433")
             .header("origin", "dioxus://index.html")
             .header("content-length", "4")
@@ -802,7 +883,10 @@ mod tests {
         let app = harness.router();
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments?filename=shot.png")
+            .uri(session_path(
+                &harness,
+                "/api/sessions/sess-1/attachments?filename=shot.png",
+            ))
             .header("host", "127.0.0.1:7433")
             .header("origin", "https://attacker.example")
             .header("content-length", "4")
@@ -866,7 +950,10 @@ mod tests {
 
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments?filename=empty.txt")
+            .uri(session_path(
+                &harness,
+                "/api/sessions/sess-1/attachments?filename=empty.txt",
+            ))
             .header("host", "127.0.0.1:7433")
             .header("content-length", "0")
             .body(axum::body::Body::empty())
@@ -939,7 +1026,7 @@ mod tests {
         ]);
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", declared.to_string())
             .body(axum::body::Body::from_stream(body_stream))
@@ -1022,7 +1109,7 @@ mod tests {
                 futures_util::stream::iter(vec![Ok::<Vec<u8>, std::io::Error>(vec![7u8; 4])]);
             let request = axum::http::Request::builder()
                 .method("POST")
-                .uri("/api/sessions/sess-1/attachments")
+                .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
                 .header("host", "127.0.0.1:7433")
                 .header("content-length", "10")
                 .body(axum::body::Body::from_stream(body_stream))
@@ -1079,7 +1166,7 @@ mod tests {
 
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", total.to_string())
             .body(axum::body::Body::from(content))
@@ -1199,7 +1286,7 @@ mod tests {
         });
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", total.to_string())
             .body(axum::body::Body::from_stream(body_stream))
@@ -1330,7 +1417,7 @@ mod tests {
         ]);
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", declared_size.to_string())
             .body(axum::body::Body::from_stream(body_stream))
@@ -1393,7 +1480,7 @@ mod tests {
 
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", total.to_string())
             .body(axum::body::Body::from(content))
@@ -1473,7 +1560,7 @@ mod tests {
         });
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", "4096")
             .body(axum::body::Body::from_stream(body_stream))
@@ -1556,7 +1643,7 @@ mod tests {
         // abort, leaving the commit reply unresolved for the whole observation.
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", "4")
             .body(axum::body::Body::from(vec![3u8; 4]))
@@ -1634,7 +1721,7 @@ mod tests {
         });
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", "4096")
             .body(axum::body::Body::from_stream(body_stream))
@@ -1702,7 +1789,7 @@ mod tests {
         });
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", "4096")
             .body(axum::body::Body::from_stream(body_stream))
@@ -1758,7 +1845,7 @@ mod tests {
 
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", total.to_string())
             .body(axum::body::Body::from(vec![5u8; total]))
@@ -1847,7 +1934,7 @@ mod tests {
 
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", "3")
             .body(axum::body::Body::from(vec![1u8, 2, 3]))
@@ -1906,7 +1993,7 @@ mod tests {
 
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .header("content-length", "3")
             .body(axum::body::Body::from(vec![1u8, 2, 3]))
@@ -1957,7 +2044,7 @@ mod tests {
         // for.
         let request = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/sessions/sess-1/attachments")
+            .uri(session_path(&harness, "/api/sessions/sess-1/attachments"))
             .header("host", "127.0.0.1:7433")
             .body(axum::body::Body::from(vec![1u8, 2, 3]))
             .unwrap();
