@@ -72,3 +72,43 @@ checked the installed Dioxus resource/signal implementations: the refresh does n
 writes, and its task is canceled when the dialog unmounts. It confirmed the 80-line gate and test contracts. Both commit
 titles and bodies passed fresh cold reads; the code message was rewritten once to clarify pending shortcut saves. A
 separate documentation pass covered every touched file.
+
+### Landing
+
+Landed as #2381 and #2382, merged bottom-up, unchanged from what the report describes. It was the last of four plans in
+this landing round, after host-entry-session-ids, helm-lock-outlives-work and hosts-panel-menu-close.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained the three plans above in this round and documentation and plan bookkeeping. A
+fresh-context reviewer and I read them against this plan. The one point of contact is host-entry-session-ids, which made
+the helm refuse a preferences write whose remembered last-selected session is not a full session reference; the new
+label refresh only reads preferences and updates the two cached shortcut fields, never writing preferences back, so that
+refusal cannot affect it. The other two plans touch the helm's shutdown and the hosts panel, not the Cmd-J list. The
+only conflicts were in the review feedback queue's index, where each plan removes its own entries; all removals are
+kept. The landed code is identical to what the landing's checks below tested.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+Run now, on the four plans of this round stacked together on main:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, `dprint check` on every changed file including SPEC.md and
+  SPEC_impl.md, and `python3 releasing/check-changelog.py format`: all passed.
+- The whole Rust workspace through the test recorder with pinned nextest and tmux, four slots and no retries, run
+  `7067248e-06f2-4bd7-90ff-63250d8fff42`: every UI test passed, including this plan's new label-refresh test (the run's
+  four failures were host-entry-session-ids' outdated helm tests, fixed in that plan; the whole helm library then passed
+  in run `cbf11585-1556-4055-ba01-7041b35a4f28`). The UI library built with desktop support: 714 passed, run
+  `1560df43-83f8-4586-87cf-c71d56f481fc`. `node --test` in the UI's JavaScript test directory: 311 passed, run
+  `5f9b15b4-5549-46ed-8f7a-3528415256fa`.
+- The full browser suite (`npx playwright test`) on Chromium and WebKit, one worker, no retries, run
+  `8214f916-6dda-4c7a-9d91-35ed24e150e8`: the Cmd-J template list, quick switcher and template shortcut files passed;
+  the run's failures were all host-entry-session-ids' tests that still expected the old session IDs, fixed and rerun
+  there.
+- Skipped: the native Mac app (not runnable here).
+
+Nothing in the executor's report became untrue at landing.
