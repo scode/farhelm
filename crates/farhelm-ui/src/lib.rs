@@ -1610,6 +1610,9 @@ fn AppBody() -> Element {
     // to the page so retrying from another surface still names the same create.
     use_context_provider(|| list::ReplaceIntent(Signal::new(None)));
     use_context_provider(|| {
+        list::ReplaceYoloQuestions(Signal::new(std::collections::HashSet::new()))
+    });
+    use_context_provider(|| {
         claude_trust::OccurrenceDismissals(Signal::new(std::collections::HashSet::new()))
     });
     use_context_provider(|| {

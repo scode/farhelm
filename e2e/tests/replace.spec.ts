@@ -350,6 +350,7 @@ async function cleanupReplaceFixtures(bodyFailed: boolean, steps: (() => Promise
 
 // Source identity alone is not ownership when the single page slot moves
 // A → B → A. The old YOLO question must not cancel A's newer retry key.
+// Equivalent controls must also leave only one question to answer or cancel.
 for (const surface of ["sidebar", "header"] as const) {
   test(`plain Replace keeps a newer same-source key after old ${surface} YOLO cancellation`, async ({ page, request }) => {
     const source = await createSession(request, { title: `replace-return-${surface}-${Date.now()}` });
@@ -362,13 +363,13 @@ for (const surface of ["sidebar", "header"] as const) {
       await page.setViewportSize({ width: 1280, height: 1100 });
       await page.route(sourceEndpoint, async (route) => {
         keys.push(route.request().postDataJSON().intent_key);
-        if (keys.length === 1) {
+        if (keys.length <= 2 || keys.length >= 5) {
           await fulfillAsHelm(route, {
             status: 409,
             body: "fixture asks for YOLO confirmation",
             headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
           });
-        } else if (keys.length === 2) await route.abort();
+        } else if (keys.length === 3) await route.abort();
         else await fulfillAsHelm(route, { status: 403, body: "new intent answered", headers: UNACCEPTED });
       });
       await page.route(otherEndpoint, (route) => route.abort());
@@ -382,6 +383,18 @@ for (const surface of ["sidebar", "header"] as const) {
       }
       const question = page.locator(".yolo-confirmation");
       await expect(question).toHaveCount(1);
+      const refused = page.waitForResponse((response) =>
+        response.url().includes(`/api/sessions/${encodeURIComponent(source.id)}/replace`) && response.status() === 409
+      );
+      if (surface === "sidebar") {
+        await page.locator(".header-replace").click();
+        await page.locator(".header-replace-confirm .btn-danger").click();
+      } else await confirmSidebarReplace(sourceRow);
+      await refused;
+      await expect(page.locator(".header-replace")).toBeEnabled();
+      await expect(question).toHaveCount(1);
+      expect(keys).toHaveLength(2);
+      expect(keys[1]).toBe(keys[0]);
       await confirmSidebarReplace(row(page, other.id));
       await expect(row(page, other.id).locator(".action-error").first()).toContainText("replace:");
       // Closing this errored menu moves its error back into the row and can
@@ -396,15 +409,26 @@ for (const surface of ["sidebar", "header"] as const) {
       await expect(question).toHaveCount(1);
       await confirmSidebarReplace(sourceRow);
       await expect(sourceRow.locator(".action-error").first()).toContainText("replace:");
-      expect(keys).toHaveLength(2);
-      expect(keys[1]).not.toBe(keys[0]);
+      expect(keys).toHaveLength(3);
+      expect(keys[2]).not.toBe(keys[0]);
       await expect(question).toHaveCount(1);
       await question.getByRole("button", { name: "cancel", exact: true }).click();
       await expect(question).toHaveCount(0);
       await confirmSidebarReplace(sourceRow);
       await expect(sourceRow.locator(".action-error").first()).toContainText("new intent answered");
-      expect(keys).toHaveLength(3);
-      expect(keys[2]).toBe(keys[1]);
+      expect(keys).toHaveLength(4);
+      expect(keys[3]).toBe(keys[2]);
+      // Leaving a header question must release its source for either pane's next question.
+      await page.locator(".header-replace").click();
+      await page.locator(".header-replace-confirm .btn-danger").click();
+      await expect(question).toHaveCount(1);
+      await attachSession(page, other.id);
+      await expect(question).toHaveCount(0);
+      await attachSession(page, source.id);
+      await confirmSidebarReplace(sourceRow);
+      await expect(question).toHaveCount(1);
+      await question.getByRole("button", { name: "cancel", exact: true }).click();
+      await expect(question).toHaveCount(0);
     } catch (error) {
       bodyFailed = true;
       throw error;

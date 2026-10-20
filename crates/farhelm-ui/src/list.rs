@@ -64,5 +64,5 @@ pub(crate) use shared::{
 };
 pub(crate) use view::{
     DeleteNotice, HeaderDeleteRequest, HeaderPrefillRequest, ListView, ReplaceIntent,
-    SharedPreferences, remember_selection,
+    ReplaceYoloQuestions, SharedPreferences, remember_selection,
 };

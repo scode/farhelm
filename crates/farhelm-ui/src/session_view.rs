@@ -716,6 +716,12 @@ pub(crate) fn SessionView(
     // why a "don't ask again" on it failed at its first step, if it did.
     let mut replace_yolo = use_signal(|| None::<PendingYoloReplace>);
     let mut replace_yolo_error = use_signal(|| None::<String>);
+    let mut yolo_questions = use_context::<crate::list::ReplaceYoloQuestions>().0;
+    use_drop(move || {
+        if let Some(pending) = replace_yolo.peek().as_ref() {
+            yolo_questions.write().remove(&pending.source.id);
+        }
+    });
     // One synchronously claimed token covers the restart prompt as well as
     // the request, so two clicks in one render frame cannot authorize
     // operations from two different snapshots. The token
@@ -1593,6 +1599,7 @@ pub(crate) fn SessionView(
                     return;
                 }
                 replace_yolo.set(None);
+                yolo_questions.write().remove(&id);
             }
             let key = match retained {
                 Some(key) => key,
@@ -1636,7 +1643,9 @@ pub(crate) fn SessionView(
                     crate::list::remember_selection(&base, preferences, &new_session.id);
                     on_replaced.call(new_session);
                 }
-                Err(error) if error.yolo_confirmation => {
+                Err(error)
+                    if error.yolo_confirmation && yolo_questions.write().insert(id.clone()) =>
+                {
                     // A new question starts without an earlier one's
                     // "don't ask again" failure.
                     replace_yolo_error.set(None);
@@ -2758,6 +2767,7 @@ pub(crate) fn SessionView(
                         };
                         if let Some(claim) = lifecycle.claim_guard() {
                             replace_yolo.set(None);
+                            yolo_questions.write().remove(&pending.source.id);
                             replace_yolo_error.set(None);
                             yolo_confirm_replace(
                                 claim,
@@ -2796,6 +2806,7 @@ pub(crate) fn SessionView(
                         let pending = replace_yolo.peek().clone();
                         replace_yolo.set(None);
                         if let Some(pending) = pending {
+                            yolo_questions.write().remove(&pending.source.id);
                             let owns_key = replace_key.peek().as_ref().is_some_and(|(source, key)| {
                                 source == &pending.source.id && key.as_ref() == Some(&pending.key)
                             });
