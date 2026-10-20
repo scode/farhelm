@@ -188,8 +188,8 @@ Before the clean-main boundary's starting check, read the planner's list in full
 
 - `scripts/todo-picker.py` (its header)
 
-Fence: if something else holds the picker's port, say so and ask which port to use; never stop a process you did not
-start.
+Fence: if something else holds the picker's port, use the next free port above it and say which, without asking; never
+stop a process you did not start.
 
 ### Triage scheduling ("use the planning system to schedule these", "use the planning system to schedule these for execution")
 
