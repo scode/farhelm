@@ -395,6 +395,10 @@ pub(crate) struct Preferences {
     pub(crate) list_sort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) last_selected: Option<String>,
+    /// Helm-owned visits, newest first. Empty on older replies and immediately
+    /// after migration; only the selection field is sent when recording a visit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) visit_history: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) compact: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -431,6 +435,18 @@ pub(crate) struct Preferences {
     /// Helm-wide web-link ownership; unknown or unset words use interception.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) terminal_link_click: Option<String>,
+}
+
+impl Preferences {
+    /// Mirror the helm's selection update before its best-effort save completes.
+    /// This preserves the current window's visits when a later pre-pick read
+    /// fails, without a second write or any per-client persistent state.
+    pub(crate) fn record_selection(&mut self, id: &str) {
+        self.last_selected = Some(id.to_owned());
+        self.visit_history.retain(|previous| previous != id);
+        self.visit_history.insert(0, id.to_owned());
+        self.visit_history.truncate(32);
+    }
 }
 
 /// The shared terminal web-link gesture, independent of agent URL forwarding.
@@ -478,7 +494,7 @@ impl TerminalLinkClick {
 /// perfectly able to answer.
 const PREFERENCE_SEED_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Read the shared preference once, right after authentication.
+/// Read the shared preference under its short, independent deadline.
 ///
 /// The caller (`PreferencesGate`) holds the whole authenticated tree off
 /// the screen until this answers, which is what makes the first render
@@ -487,7 +503,9 @@ const PREFERENCE_SEED_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 /// fallbacks. A failure — including [`PREFERENCE_SEED_TIMEOUT`] running
 /// out — is the caller's to treat as "nothing remembered": SPEC.md makes
 /// this preference best-effort, and a helm that cannot answer it can still
-/// list sessions.
+/// list sessions. Automatic selection also calls this before choosing, to see
+/// other clients' visits; that caller falls back to its current in-memory row
+/// on failure and refreshes only selection inputs on success.
 pub(crate) async fn fetch_preferences(base: &str) -> Result<Preferences, String> {
     let url = format!("{base}/api/preferences");
     let resp = send_within(client().get(&url), PREFERENCE_SEED_TIMEOUT).await?;
@@ -881,7 +899,7 @@ impl PreferenceValue {
             Self::MuseTrustHintDismissed(value) => seed.muse_trust_hint_dismissed = Some(*value),
             Self::PiTrustHintDismissed(value) => seed.pi_trust_hint_dismissed = Some(*value),
             Self::Sort(value) => seed.list_sort = Some(value.clone()),
-            Self::Selected(value) => seed.last_selected = Some(value.clone()),
+            Self::Selected(value) => seed.record_selection(value),
             Self::Compact(value) => seed.compact = Some(*value),
             Self::HostRemoveConfirmation(value) => {
                 seed.skip_host_remove_confirmation = Some(*value)
@@ -6497,6 +6515,49 @@ mod preference_write_tests {
             queue.dirty(PreferenceField::Sort),
             None,
             "an acknowledged newest value is clean — the helm's row is authority again"
+        );
+    }
+
+    /// The failed-read fallback and credential-recovery overlay must retain
+    /// the same bounded visit order as local selection, without touching sort
+    /// or adding a client-authored history field to the selection request.
+    #[farhelm_testtrace::test]
+    fn selection_mirror_and_recovery_overlay_keep_bounded_visits() {
+        let mut preferences = Preferences {
+            list_sort: Some("title".into()),
+            ..Preferences::default()
+        };
+        for number in 0..35 {
+            preferences.record_selection(&format!("session-{number}"));
+        }
+        assert_eq!(preferences.visit_history.len(), 32);
+        assert_eq!(
+            preferences.visit_history.last().map(String::as_str),
+            Some("session-3")
+        );
+        let selected = PreferenceValue::Selected("session-20".into());
+        selected.overlay(&mut preferences);
+        assert_eq!(preferences.last_selected.as_deref(), Some("session-20"));
+        assert_eq!(
+            preferences.visit_history.first().map(String::as_str),
+            Some("session-20")
+        );
+        assert_eq!(
+            preferences
+                .visit_history
+                .iter()
+                .filter(|id| *id == "session-20")
+                .count(),
+            1
+        );
+        assert_eq!(preferences.visit_history.len(), 32);
+        assert_eq!(preferences.list_sort.as_deref(), Some("title"));
+        assert_eq!(selected.wire_value(), serde_json::json!("session-20"));
+        assert!(
+            serde_json::from_str::<Preferences>("{}")
+                .unwrap()
+                .visit_history
+                .is_empty()
         );
     }
 

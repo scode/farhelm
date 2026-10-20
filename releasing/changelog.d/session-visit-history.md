@@ -2,6 +2,7 @@
 kind: changed
 ---
 
-Farhelm remembers the sessions you visit on the helm, shared across windows and kept across reloads.
+When the open session goes away, Farhelm returns to the session you visited most recently among the rows currently in
+the sidebar. The choice is shared across windows and remembered across reloads.
 
-Existing installations begin with an empty visit history after the update.
+After updating, the remembered selection still opens if it is listed, while new visits build the shared history.

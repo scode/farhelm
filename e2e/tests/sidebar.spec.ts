@@ -1,5 +1,6 @@
 import { chooseLauncherHost, launcherHostOptions } from "./helpers/host-picker";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
+import { requireHelmBuild } from "./helpers/helm-build";
 /**
  * The two-pane shell itself (BUGS_BURNDOWN.md issue 5): the properties the
  * sidebar redesign claims but no interaction test proves on its own —
@@ -48,6 +49,7 @@ import {
   createSession,
   FAKE_AGENT,
   forceBuildSkew,
+  forgetAutoSelect,
   hideSeenState,
   localHostId,
   listSessions,
@@ -4071,7 +4073,7 @@ test("a click outside an open row menu closes it and leaves focus where it lande
 
 /**
  * The selection policy itself: a clicked session is remembered across a
- * reload, a stale remembered id falls back to the newest-created
+ * reload, stale visits are skipped before falling back to the newest-created
  * session, and the automatic selection ATTACHES — all
  * without any click after load.
  *
@@ -4121,8 +4123,17 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
     // The auto-selection is a real requested-session attachment, not just a view.
     await waitForSessionRevealed(page, older.id);
 
-    // A stale remembered id — a session that no longer exists — falls
-    // back to the newest-created session.
+    // A stale head does not erase the earlier visit: it still restores older.
+    await patchPreferences(request, {
+      last_selected: "00000000-0000-0000-0000-000000000000:missing-session",
+    });
+    await page.reload();
+    await expect(page.locator(".session-details .title")).toContainText("policy-older-", {
+      timeout: 20_000,
+    });
+    // With no surviving visit, the existing newest-created fallback still wins.
+    await forgetAutoSelect(page);
+    expect((await readPreferences(request)).visit_history ?? []).toEqual([]);
     await patchPreferences(request, {
       last_selected: "00000000-0000-0000-0000-000000000000:missing-session",
     });
@@ -4135,6 +4146,141 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
     if (newer) await cleanupSession(request, newer.id);
   }
 });
+
+/** An upgraded preference row has a known selection but no stored visits yet.
+ * Opening that older session, despite a newer listed row, preserves the old
+ * choice; the ordinary automatic save must then create real durable history.
+ * The GET fixture models the migrated row without adding a writable history API.
+ */
+test("empty upgrade history preserves the remembered session and records its visit", async ({ page, request }) => {
+  const owned: string[] = [];
+  let bodyFailed = true;
+  try {
+    await forgetAutoSelect(page);
+    expect((await readPreferences(request)).visit_history ?? []).toEqual([]);
+    const stamp = Date.now();
+    const a = await createSession(request, { title: `upgrade-a-${stamp}`, invocation: "sleep 300" });
+    owned.push(a.id);
+    // sleep-ok: separate second-resolution creation stamps so newest-created cannot select A.
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const c = await createSession(request, { title: `upgrade-c-${stamp}`, invocation: "sleep 300" });
+    owned.push(c.id);
+    expect(c.created_at).toBeGreaterThan(a.created_at);
+    let preferenceReads = 0;
+    await page.route("**/api/preferences", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      preferenceReads += 1;
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      await route.fulfill({
+        response,
+        json: { ...await response.json(), last_selected: a.id, visit_history: [] },
+      });
+    });
+    await page.goto("/");
+    await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, c.id)).toBeVisible({ timeout: 20_000 });
+    await waitForSessionRevealed(page, a.id);
+    expect(preferenceReads, "seed and pre-pick reads both observe the migrated row").toBeGreaterThanOrEqual(2);
+    await expect.poll(async () => (await readPreferences(request)).last_selected).toBe(a.id);
+    await expect.poll(async () => (await readPreferences(request)).visit_history).toEqual([a.id]);
+    await page.unrouteAll({ behavior: "wait" });
+    await page.reload();
+    await waitForSessionRevealed(page, a.id);
+    bodyFailed = false;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["close selecting page", () => page.close()],
+      ...owned.map((id): [string, () => Promise<void>] => ["remove upgrade fixture", () => cleanupSession(request, id)]),
+      ["clear selection history", () => patchPreferences(request, { last_selected: null })],
+    ]);
+  }
+});
+
+for (const mode of ["row", "header with failed preference read", "external with another client's visit"] as const) {
+  /** Visit order must beat creation time after removal, then survive reload.
+   * The ended prior session proves eligibility is not limited to live agents.
+   * Header failure exercises cached visits; external deletion exercises the
+   * existing disappearance detector and a fresh read of another client's visit.
+   */
+  test(`visit history chooses and remembers the next session after ${mode} deletion`, async ({ page, request }) => {
+    const previous = await readPreferences(request);
+    const owned: string[] = [];
+    let bodyFailed = true;
+    try {
+      await patchPreferences(request, { skip_session_confirmations: true });
+      await forgetAutoSelect(page);
+      expect((await readPreferences(request)).visit_history ?? []).toEqual([]);
+      const stamp = Date.now();
+      const a = await createSession(request, { title: `visit-a-${stamp}`, invocation: "sleep 300" });
+      owned.push(a.id);
+      const b = await createSession(request, { title: `visit-b-${stamp}`, invocation: "sleep 300" });
+      owned.push(b.id);
+      await stopSession(request, a.id);
+      await expect.poll(async () =>
+        (await listSessions(request)).sessions.find((session) => session.id === a.id)?.status?.state
+      ).toBe("exited");
+      // sleep-ok: separate second-resolution creation stamps so newest-created provably prefers C.
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      const c = await createSession(request, { title: `visit-c-${stamp}`, invocation: "sleep 300" });
+      owned.push(c.id);
+      expect(c.created_at).toBeGreaterThan(Math.max(a.created_at, b.created_at));
+      await page.goto("/");
+      await expect(row(page, c.id)).toBeVisible({ timeout: 20_000 });
+      for (const id of [a.id, b.id]) {
+        await expect(row(page, id)).toBeVisible({ timeout: 20_000 });
+        await row(page, id).locator(".session-row-open").click();
+        await waitForSessionRevealed(page, id);
+        await expect.poll(async () => (await readPreferences(request)).last_selected).toBe(id);
+      }
+      expect((await readPreferences(request)).visit_history?.slice(0, 2)).toEqual([b.id, a.id]);
+      const external = mode.startsWith("external");
+      const expected = external ? c : a;
+      if (external) {
+        await patchPreferences(request, { last_selected: c.id });
+        await expect(page.locator(".session-details .title")).toHaveText(`visit-b-${stamp}`);
+      }
+      let preferenceReads = 0;
+      const helmBuild = requireHelmBuild(await request.get("/api/preferences"), "visit-history refusal fixture");
+      await page.route("**/api/preferences", async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        preferenceReads += 1;
+        if (mode.startsWith("header")) {
+          // A missing build stamp would latch skew and test a different failure.
+          await route.fulfill({ status: 503, body: "preference fixture unavailable", headers: { "x-farhelm-build": helmBuild } });
+        } else {
+          await route.fallback();
+        }
+      });
+      if (external) {
+        const reply = await request.delete(`/api/sessions/${encodeURIComponent(b.id)}`);
+        expect(reply.ok(), await reply.text()).toBe(true);
+      } else if (mode.startsWith("header")) {
+        await page.locator(".header-delete").click();
+      } else {
+        await openRowMenu(row(page, b.id));
+        await row(page, b.id).locator(".session-row-delete").click();
+      }
+      await expect(row(page, b.id)).toHaveCount(0, { timeout: 20_000 });
+      await waitForSessionRevealed(page, expected.id);
+      expect(preferenceReads, "each automatic pick rereads shared visits").toBeGreaterThan(0);
+      await expect.poll(async () => (await readPreferences(request)).last_selected).toBe(expected.id);
+      await page.unrouteAll({ behavior: "wait" });
+      await page.reload();
+      await waitForSessionRevealed(page, expected.id);
+      bodyFailed = false;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["close selecting page", () => page.close()],
+        ...owned.map((id): [string, () => Promise<void>] => ["remove visit fixture", () => cleanupSession(request, id)]),
+        ["restore selection and confirmation baseline", () => patchPreferences(request, {
+          last_selected: null,
+          skip_session_confirmations: previous.skip_session_confirmations ?? null,
+        })],
+      ]);
+    }
+  });
+}
 
 /**
  * Launching a second client displaces the first WITHOUT any click: the
@@ -4160,8 +4306,8 @@ test("a second client's launch alone takes the terminal over", async ({
     await row(page, session.id).locator(".session-row-open").click();
     await waitForSessionRevealed(page, session.id);
 
-    // Client one's click is the ONLY preference write in this test: the
-    // second client must inherit the selection from the helm's shared row.
+    // The second client must inherit the selection from the helm's shared row;
+    // automatic selection then remembers that same visit itself.
     // Seeding it here (the old pinAutoSelect staging) would let the test
     // pass with client one's click never persisting anything — it would
     // prove client two can read a hand-planted value, not that a click in

@@ -9,7 +9,7 @@
 import { expect, test } from "./helpers/evidence";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { type APIRequestContext, type Page } from "@playwright/test";
-import { cleanupSession, createSession, listHosts, openRowMenu, patchPreferences, readPreferences } from "./helpers/fleet";
+import { cleanupSession, createSession, listHosts, openRowMenu, patchPreferences, pinAutoSelect, readPreferences } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 
 /** Store a template through the helm's API, as the panel would. */
@@ -882,6 +882,8 @@ test("initial prompt survives a recent but clears on Clone and Replace prefills"
       status: 200, headers: { "content-type": "application/json", "x-farhelm-build": build },
       body: JSON.stringify({ folders: [], launches: [{ host: host!.id, canonical_cwd: "/tmp", cwd: "/tmp", selection: { harness: "codex", model: null, effort: "high", permissions: null, workspace_trust: null }, created_at: 1, creation_seq: 1 }] }),
     }));
+    // New starts in the selected session's folder, where the staged recent lives; a page load opens the latest visit.
+    await pinAutoSelect(page, source.id);
     const form = await openNew(page);
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await form.getByLabel("initial prompt", { exact: true }).fill("keep through recent");

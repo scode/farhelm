@@ -493,13 +493,18 @@ test("successful feedback clears contact when reuse is unchecked or the field is
  * Failure and Cancel cannot change shared contact memory. Observe both the
  * actual preference writes and the server row: an attempted clear that later
  * failed would violate this boundary even if the row still looked unchanged.
+ * Only writes touching the contact count: automatic selection saves its own
+ * preference while the page loads, which is outside this boundary.
  */
 test("failed feedback and cancel preserve remembered contact without a preference write", async ({ page, request }) => {
   await patchPreferences(request, { feedback_contact: "remembered@example.test" });
   expect((await readPreferences(request)).feedback_contact).toBe("remembered@example.test");
   const writes: unknown[] = [];
   await page.route("**/api/preferences", async (route) => {
-    if (route.request().method() === "PUT") writes.push(route.request().postDataJSON());
+    if (route.request().method() === "PUT") {
+      const patch = route.request().postDataJSON();
+      if ("feedback_contact" in patch) writes.push(patch);
+    }
     await route.continue();
   });
   await interceptFeedback(page, (route) => route.fulfill({ status: 502, body: "Couldn't send feedback: unavailable." }));

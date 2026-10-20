@@ -9,7 +9,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { cleanupSession, commandLaunch, createSession, FAKE_AGENT, listHosts, localHostId, openRowMenu, patchPreferences, setLocalYoloWithoutAsking, supervisorSessionId } from "./helpers/fleet";
+import { cleanupSession, commandLaunch, createSession, FAKE_AGENT, listHosts, localHostId, openRowMenu, patchPreferences, pinAutoSelect, setLocalYoloWithoutAsking, supervisorSessionId } from "./helpers/fleet";
 import { routeGate } from "./helpers/route-gate";
 import { answerCard, setLocalCommandsWithoutAsking } from "./helpers/approvals";
 
@@ -409,6 +409,9 @@ async function contents(root: string): Promise<Record<string, string>> {
 async function assertLive(page: Page, id: string) {
   // API-driven deletion can leave the page with no selected row. Start a
   // new attachment lifecycle instead of inheriting that deleted selection.
+  // Pin the target first: a page load opens the latest visit, which may be
+  // a session another page is attached to, and would take its terminal.
+  await pinAutoSelect(page, id);
   await page.goto("/");
   await attachSession(page, id);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);

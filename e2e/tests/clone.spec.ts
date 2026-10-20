@@ -15,6 +15,7 @@ import {
   localHostId,
   listSessions,
   openRowMenu,
+  pinAutoSelect,
   setLocalYoloWithoutAsking,
   type SessionRow,
   supervisorSessionId,
@@ -683,6 +684,9 @@ test("composer search survives a held terminal reveal", async ({ page, request }
   const title = `clone-held-reveal-${Date.now()}`;
   const cwd = stackScratchDir("clone-held-reveal-");
   const source = await createSession(request, { title, cwd });
+  // The hold catches the first primary reveal, which must be this source's:
+  // a page load otherwise opens the latest visit, another test's session.
+  await pinAutoSelect(page, source.id);
   // The init script must precede navigation to catch the primary island.
   await holdPrimaryTerminalReveal(page);
   try {
@@ -933,6 +937,8 @@ test("closing a clone without submitting, or submitting it, both leave the next 
     // the browser had anything to clone.
     sourceCwd = stackScratchDir("clone-prefill-cleanup-");
     session = await createSession(request, { title, cwd: sourceCwd });
+    // The selected session supplies New's folder; pin it, since a page load opens the latest visit.
+    await pinAutoSelect(page, session.id);
 
     await page.goto("/");
     const source = row(page, session.id);
