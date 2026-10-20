@@ -52,3 +52,47 @@ under the same name.
 A fresh-context gpt-6.1-sol reviewer at high effort found no correctness, design, idiomaticity, test-authoring or scope
 issues. The commit message's separate cold read matched its intended meaning and found no contradicted claims or
 convention violations. A documentation pass covered every touched file.
+
+### Landing
+
+Landed as #2355, unchanged from what the report describes. It was the fourth of eight plans in this landing round;
+launch-enters-working-dir (which makes sessions enter their folder or fail) failed its checks at landing, was blocked,
+and is not part of what was tested with this plan.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained link-hover-covers (link clicks refused under the Mac app's tunnel-error notice, and
+the desktop file-opening fix), workspace-trust-destination (inherited spawns take trust from their destination, and a
+trust note on approval cards), session-header-and-row-fixes (session questions keep the keyboard during terminal
+recovery; copy warnings; accessible names), and plan bookkeeping. A fresh-context reviewer and I read this plan against
+those and against the other plans in the round: none of them touches quick-launch sequences, number shortcuts, the
+quick-launch mark or how a launcher applies a template, so nothing interacts.
+
+The only conflicts were in the review feedback queue's index, where every plan in the round removes its own entries; all
+removals are kept. The landed code is identical to what the landing's checks below tested.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+Run now, on one tree holding this plan together with the round's other landing plans, before and after it in landing
+order:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed file, and `python3 releasing/check-changelog.py format`: all passed.
+- Through the test recorder with pinned nextest and tmux, four slots and no retries, the whole protocol, helm,
+  supervisor and UI libraries, the `farhelm` binary's tests, the agent command-line tests and the end-to-end tests for
+  launches, tabs, checkouts, agent relay and session lifecycle: 3489 passed, run `cdabc40d-ecaa-418e-938f-01f2cbe4da64`.
+  The UI's desktop-only Rust tests: 706 passed, run `4926be34-2adf-40e5-a588-663695e00161`. `node --test` in the UI's
+  JavaScript test directory: 311 passed, run `fcb2b9cf-4424-4fc2-8148-dede8454a5ea`.
+- After `cargo build` and the release web build, `npx playwright test` on the whole quick-launch and launcher
+  template-shortcut files and nine other files for the round's other plans, on Chromium and WebKit, one worker, no
+  retries: 242 passed, run `1484ba9a-0aab-4e7f-a7a4-716faede7c66`. Those two files cover armed sequences, number
+  shortcuts and the quick-launch mark.
+- Skipped: the rest of the browser suite and the native Mac app; this plan changes only what an armed sequence launches
+  when Enter is pressed.
+
+Nothing in the executor's report became untrue at landing.
