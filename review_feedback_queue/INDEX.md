@@ -61,9 +61,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`shortcut-tests-skip-owned-cleanup.md`](shortcut-tests-skip-owned-cleanup.md) — Early cleanup failures in shortcut
   and naming tests skip remaining owned resources or shared checkout configuration restoration.
 
-- [`release-review-links-allow-page-script.md`](release-review-links-allow-page-script.md) — Draft Markdown links can
-  inject release-review page script; attacker exposure and consequential harm remain unverified.
-
 - [`terminal-focus-tests-arm-cleanup-late.md`](terminal-focus-tests-arm-cleanup-late.md) — A focus-observer setup
   failure can leave a new regression test's live session outside its cleanup scope.
 
