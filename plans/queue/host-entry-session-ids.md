@@ -368,3 +368,51 @@ and PRs (the display-collision outcome may instead be recorded as discarded unde
 `## Decisions` section exists, its latest entry must also be satisfied. Then close the plan per
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-10-20 (claim b966e6).
+
+### What this plan changes
+
+Today the helm identifies sessions fleet-wide by the supervisor's bare ID. Removing and re-adding a host entry can let
+another host claim that ID, so a waiting approval or GUI Delete/Replace confirmation can act on a different entry. The
+maintainer chose a redesign: each session gets a full ID made from its host entry's helm-assigned UUID, a colon, and the
+supervisor's existing session ID. That binds the reference to the entry it showed. They required unchanged supervisors
+and accepted the migration and full-ID compatibility costs listed in the plan.
+
+### The compatibility limit execution found
+
+The plan requires that exact full ID format while leaving supervisors unchanged, including supervisors from older
+releases. It says their agent relay can carry the new full IDs. That is true for ordinary Farhelm sessions, whose bare
+UUID is 36 bytes and full ID is 73 bytes, but not for every session ID the helm currently accepts.
+
+The helm accepts a host-reported bare session ID up to 1,024 bytes. Adding the host prefix costs 37 bytes. Supervisors
+reject an agent's explicit target above 1,024 bytes before forwarding the request to the helm. The current source and
+shipped v0.30.0 have that check and numeric limit. Thus a bare ID of 988–1,024 bytes becomes a full ID the unchanged
+relay refuses. This affects Rename, Stop, Restart, Delete and Clone's source selection; the disabled Prompt verb has the
+same validation. The own-bare-ID exception still lets an agent name itself where the verb permits it; self-Delete and
+self-Prompt remain forbidden. It does not solve another session's target. Browser requests do not pass through this
+relay.
+
+This is established by reading the relay validation and the released source; no runtime reproduction was run. No product
+code or schema has changed, and no PR has been opened. The storage, REST and agent boundary maps are retained in the
+plan's working log for resumption.
+
+### Decision needed
+
+Which limit should the implementation adopt?
+
+- (a) Keep the existing 1,024-byte bare-ID range and leave supervisors unchanged, accepting and documenting that agent
+  commands cannot target another session whose bare ID exceeds 987 bytes. Those sessions remain available through the
+  GUI. Ordinary Farhelm UUIDs are unaffected.
+- (b) Permit a supervisor change that raises the explicit full-target limit to 1,061 bytes. The message format stays the
+  same, but older supervisors retain the limitation in (a) until their normal update. This expands the plan's explicit
+  no-supervisor-change boundary.
+- (c) Leave supervisors unchanged and lower the helm's accepted bare-ID limit to 987 bytes. This makes every accepted
+  full ID fit the relay, but sessions with longer host-reported IDs disappear from the helm's usable session list; that
+  is a new accepted refusal.
+
+Recommendation: (a). It preserves the agreed unchanged-supervisor update path and the current ingress range, with a
+narrow, explicit agent-command limitation for IDs ordinary Farhelm supervisors do not mint. If all currently accepted
+IDs must remain targetable by agents after supervisors update, choose (b) instead.
