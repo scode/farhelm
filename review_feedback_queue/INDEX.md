@@ -20,27 +20,11 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`payload-workers-outlive-state-lock.md`](payload-workers-outlive-state-lock.md) — Old payload work can overlap a
   successor helm after releasing state ownership; the integrity consequence remains unresolved.
 
-- [`tunnel-never-pins-learned-identity.md`](tunnel-never-pins-learned-identity.md) — A tunnel opened before identity is
-  learned can keep following a host entry without binding the subsequently learned installation.
-
-- [`initial-launch-retains-uncanonicalized-path.md`](initial-launch-retains-uncanonicalized-path.md) — Initial launch
-  retains a path spelling that can change meaning after validation; accidental wrong-directory impact remains
-  unverified.
-
 - [`unusable-directory-launches-in-home.md`](unusable-directory-launches-in-home.md) — An existing but unsearchable
   folder can make a session launch in the home directory instead.
 
-- [`restart-abort-admits-old-child-report.md`](restart-abort-admits-old-child-report.md) — An aborted Restart can admit
-  an old child conversation report into the restored run's Resume state.
-
-- [`orphan-git-outlives-cache-lock.md`](orphan-git-outlives-cache-lock.md) — Interrupted checkout preparation can leave
-  Git working after its repository-cache lock is released; completed-checkout damage is unverified.
-
 - [`cancelled-startup-loses-archive-location.md`](cancelled-startup-loses-archive-location.md) — A cancelled startup
   worker can overwrite the recorded archive location after a successor moves the checkout.
-
-- [`capture-marker-collision-misframes-replay.md`](capture-marker-collision-misframes-replay.md) — Terminal text can
-  imitate capture delimiters, truncating replay or entering diagnostics; confidentiality impact is unverified.
 
 - [`approval-session-id-display-collision.md`](approval-session-id-display-collision.md) — Approval cards can display
   distinct session IDs identically; mistaken authorization remains unverified.
