@@ -1,97 +1,100 @@
-# Reproduce: a cancelled supervisor startup losing a trashed checkout's location
+# Guard a trashed checkout's recorded location against a stale recovery attempt
 
-Written against main at 319b286a on 2026-10-18. This is a goal file for an unattended run, executed through the planning
-system in `plans/AGENTS.md`. You, the executing agent, have none of the conversation that produced it; everything you
-need is here or in the repository files it names. SPEC.md and SPEC_impl.md stay authoritative over anything this file
-says.
+Written against main at 6d9615a7 on 2026-10-20, revising the earlier reproduction plan under the same name. This is a
+goal file for an unattended run, executed through the planning system in `plans/AGENTS.md`. You, the executing agent,
+have none of the conversation that produced it; everything you need is here or in the repository files it names. SPEC.md
+and SPEC_impl.md stay authoritative over anything this file says.
 
 This plan has no dependency on another plan.
 
 ## The goal
 
-If Farhelm crashed while deleting a session's managed checkout (moving it to the trash), the supervisor finishes that
-move at its next startup. If that startup is cancelled, the recovery keeps running as blocking work nobody owns, and a
-second supervisor can claim the state folder and run the same recovery. In the branch where a folder already exists
-under the trash name, the old worker can point the record at a fresh name and then fail its rename, leaving the record
-naming a folder that does not exist while the real files sit in the trash where the trash list never shows them. No
-files are lost. The window is artificial on healthy storage. The maintainer asked for this to be reproduced before
-deciding.
+When a session with a managed checkout is deleted, the supervisor moves the checkout's folder into the trash, recording
+the destination first so a crash in the middle can be finished at the next startup. A review found a narrow case where
+that recovery records the wrong place: if a startup is cancelled while its recovery is still running, a second
+supervisor can run the same recovery, move the folder, and record where it went; the first, stale attempt can then
+overwrite that record with a fresh name and fail its own rename. The record then names a folder that does not exist,
+while the files sit in the trash where the trash list never shows them. No files are lost, and the trigger is rare.
 
-This plan runs the reproduction and records what it shows. It does not fix anything and does not decide anything: the
-maintainer reads the evidence and decides fix or discard in a later triage, which is scheduled separately.
+The maintainer first asked for a reproduction. An earlier run of this plan tried that and was stopped after its agent
+was held up by its model's safety safeguards: reproducing meant driving competing supervisors over the state-folder lock
+and pausing one mid-recovery. On 2026-10-20 the maintainer chose instead to fix the harm directly, without reproducing
+the race: make the write of the recorded trash location refuse to overwrite a value it did not read, so a stale attempt
+fails before it renames anything, with a reasonable complexity gate (see Fallbacks).
 
 Carry out this triage outcome, recorded under its own heading in `TRIAGE_OUTCOMES.md`. Read the entry in full first: its
-Assessment says what is wrong and which rule settles it, its Decision holds the maintainer's words, the planned fix and
-any complexity gate, and its Completion criteria are the acceptance criteria for that outcome.
+Assessment says what is wrong, its Decision holds the maintainer's words (the 2026-10-20 decision supersedes the
+2026-10-18 one), and its Completion criteria are the acceptance criteria.
 
-1. `cancelled-startup-loses-archive-location.md` (`other`): A cancelled startup worker can overwrite the recorded
+1. `cancelled-startup-loses-archive-location.md` (`fix code`): A cancelled startup worker can overwrite the recorded
    archive location after a successor moves the checkout.
 
 ### Acceptance criteria
 
-- The reproduction steps in the outcome's Completion criteria were run, through the test recorder: first that a
-  cancelled startup releases ownership while recovery is parked and a second supervisor can claim the state folder; then
-  the collision interleaving driven with a pause before re-journaling, checking whether the moved folder exists on disk
-  while the trash listing omits it and no record names it.
-- One PR (type `chore`, no changelog fragment) updates only the outcome's Execution field in `TRIAGE_OUTCOMES.md`, so
-  the next triage sees it as needing a new decision: what was reproduced, on which main commit, the result of each step,
-  the recorder run IDs, that the window is artificial on healthy storage, and "awaiting a new decision; feedback file
-  kept". The feedback file and its index line stay. Nothing else changes in that PR.
-- The report carries the evidence in product terms, the hook patch as text (it is never committed), and what each
-  plausible decision would involve, so the maintainer can decide from it.
+- Updating a checkout record's journaled trash destination succeeds only when the record still holds the destination the
+  caller last read (or the state the caller expects), so an attempt working from a stale reading is refused and does not
+  go on to rename anything. Every place that rewrites that destination goes through the guard.
+- A refused update leaves the record and the files untouched and surfaces as the existing error for a record in the
+  wrong state, which recovery and Delete already handle; the up-to-date attempt's result stands.
+- Tests show it directly and sequentially: write a pending record, change its destination as a second attempt would,
+  then perform the first attempt's update from its stale reading and confirm it is refused, the record still names the
+  real destination, and no rename was attempted. Ordinary collision retries by a single attempt keep working. No test
+  starts competing supervisors, cancels a startup, contends for the state-folder lock, or adds pause or delay hooks.
+- One PR, type `fix`, with a changelog fragment (`kind: fixed`), that removes
+  `review_feedback_queue/cancelled-startup-loses-archive-location.md` and its `INDEX.md` line and updates the outcome's
+  Execution field. SPEC.md or SPEC_impl.md change only if they describe the journal update in a way this contradicts.
 
 ## Requirement sources
 
-**The user's decisions (2026-10-18):** each outcome's Decision field records the maintainer's own words and the agreed
-scope. Scheduling the 25 outcomes triaged that day as twelve plans, and which outcomes share a plan, was agreed with the
-maintainer. Review gate: a single fresh-context gpt-6.1-sol agent at high effort with the general charter, no swarm.
-No-workhorse mode, which `plans/.agents/planning.md` requires.
+**The user's decisions:** the outcome's Decision field. On 2026-10-18 the maintainer asked for a reproduction first; on
+2026-10-20, after that run was stopped, they chose this direct fix "with a reasonable complexity gate. doesn't have to
+be super simple but it can't explode into thousands of lines of code". Review gate: a single fresh-context Opus 5.5
+agent at high effort with the general charter, no swarm. No-workhorse mode, which `plans/.agents/planning.md` requires.
 
-**Plan-specific answer (2026-10-18):** report and finish. The plan records the evidence in the triage ledger and its
-report, keeps the feedback item in the review queue, and ends; the maintainer decides fix or discard in a later triage,
-and that decision is planned separately. A result that looks alarming is still a report, not a block.
+**Binding repository constraints:** `review_feedback_queue/.agents/execute-outcomes.md`, "Execute triage outcomes";
+`AGENTS.md`, "Changelog fragments", "Conventional Commits" and "Tests and validation", with `.agents/validation.md`;
+`.agents/test-authoring.md` for the tests.
 
-**Binding repository constraints:** the rule each entry's Assessment cites as settling it;
-`review_feedback_queue/.agents/execute-outcomes.md`, "Execute triage outcomes"; `AGENTS.md`, "Changelog fragments",
-"Conventional Commits" and "Tests and validation", with `.agents/validation.md`; `.agents/test-authoring.md` for any
-test change. SPEC.md's 2026-10-10 lifecycle acceptance, which the Assessment says does not cover this.
-
-**Planner proposals:** each entry's planned fix, the PR order above, and the outline below. A planner proposal is not a
-requirement: a smaller design that meets the same completion criteria is fine, logged as a DECISION.
+**Planner proposals:** the outline below. A planner proposal is not a requirement: a smaller design that meets the same
+acceptance criteria is fine, logged as a DECISION.
 
 ## Outline
 
-Facts from the planning session's reading of main (verify them): a cancelled startup is simply dropped
-(`crates/farhelm-supervisor/src/service/core.rs`); archive recovery runs as unowned blocking work (`store.rs`); the
-journal update is guarded only by the row's state, and the collision branch updates the journal before trying the rename
-(`working_copies.rs`). The second step can run at the checkout-records layer: two database connections on one database,
-plus the existing test hook that replaces the rename, and one scratch pause before the journal update in the collision
-branch (the rename hook only runs after that update). The first step needs the full supervisor startup with a stop
-signal, a pause in recovery and a second supervisor, which probably means the pinned tmux setup; existing startup test
-hooks show the pattern.
+Facts from the planning session's reading of main (verify them): the destination is rewritten on an already-pending row
+by `repoint_journal` in `crates/farhelm-supervisor/src/working_copies.rs`, whose `UPDATE` is guarded only by the row id
+and the `archive_pending` state; the collision branch of `rename_exclusive_into` calls it before trying the rename,
+which is where a stale attempt overwrites a successor's destination. The narrowest fix is a compare-and-swap: pass the
+destination the caller believes is current and add it to the `UPDATE`'s condition, so zero rows changed means someone
+else moved the record on. Check the other writers of the destination (the first journal persist and recovery's own
+paths) and guard them the same way where the same stale-reading overwrite is possible.
 
-How to keep the hooks out of history, since jj snapshots every edit: put the pause hooks and the reproduction test on a
-dedicated scratch change off `main@origin` that is never bookmarked or pushed; run it in an isolated jj workspace; save
-the hook patch as text in the scratch directory; abandon the scratch change when done. Before pushing the ledger PR,
-check that its change touches only `TRIAGE_OUTCOMES.md`.
+The underlying cause, a cancelled startup leaving recovery running without owning the state folder, is out of scope: the
+overwrite is the only harm the finding establishes, and fixing ownership is the larger change the maintainer chose not
+to pursue here.
+
+An earlier run of the previous version of this plan (the reproduction) left a working log, described under "Files
+outside the repository", and possibly an unbookmarked scratch change in its own scratch workspace. Nothing from it was
+pushed. Treat that log's earlier entries as history: do not resume, reuse or run the reproduction work.
 
 ### Validation
 
 Per `AGENTS.md`, "Tests and validation", and `.agents/validation.md`, choose the smallest set of checks that would
-expose a regression in what each PR changes, and report checks run, reused and skipped. The reproduction runs through
-`python3 scripts/record-test-run.py` with a narrow selection (`--kind repetition` where it is repeated; the pinned
-nextest and tmux setup when the supervisor starts). Keep every retained run directory; record their paths in the working
-log and the run IDs (never paths) in the ledger and report, per `.agents/test-evidence.md`. The ledger PR changes only
-Markdown: `dprint check` on it.
+expose a regression in what the PR changes, and report checks run, reused and skipped. At least the supervisor's
+working-copy and checkout-trash tests run through `python3 scripts/record-test-run.py` with the pinned nextest and tmux
+setup, plus the tests that exercise Delete of a managed checkout and startup archive recovery.
 
 ## Fallbacks
 
-No complexity gate. If a step cannot be reproduced as described, record which step and why in the ledger and report
-instead of building new machinery to force it; that is the agreed fallback.
+Complexity gate: at most about 200 lines of non-test code and about 500 lines in total including tests, confined to the
+supervisor's checkout-record code (`working_copies.rs` and its direct callers), with no new locks, threads, background
+tasks or ownership machinery. If the fix cannot meet the acceptance criteria within that gate, do not build past it:
+push nothing beyond what is consistent and block with the concrete reason and the size it would take.
 
-Examples of departures that need the scope reassessment: committing any hook, changing product code, or fixing the race.
+Examples of departures that need the scope reassessment: fixing the startup ownership itself, changing the database
+schema, or touching the desktop app's startup.
 
-Decisions to log: where each pause point went, how the second supervisor was simulated, and how each result was judged.
+Decisions to log: which destination writers were guarded and why, how a refused update is reported, and how each test
+establishes its premise.
 
 ## How to run
 
@@ -169,16 +172,15 @@ sampling interval to save turns.
 ### PR discipline
 
 - Follow `review_feedback_queue/.agents/execute-outcomes.md`, "Execute triage outcomes": one reviewable commit, stable
-  bookmark and draft PR for the ledger update, as described under Acceptance criteria. Each PR carries its outcome's
-  agreed change, the removal of its feedback file and `review_feedback_queue/INDEX.md` entry (except where the outline
-  says the feedback file stays), and its `TRIAGE_OUTCOMES.md` Execution update. Record the jj change ID and bookmark in
-  that Execution field before creating the PR, then add the PR's URL (with `/changes` appended) to the same change and
-  push it again; no separate bookkeeping PR. Replace the Execution field's current `planned in ...` text rather than
-  appending to it.
+  bookmark and draft PR, as described under Acceptance criteria. The PR carries the fix, its tests and changelog
+  fragment, the removal of the feedback file and its `review_feedback_queue/INDEX.md` entry, and the
+  `TRIAGE_OUTCOMES.md` Execution update. Record the jj change ID and bookmark in that Execution field before creating
+  the PR, then add the PR's URL (with `/changes` appended) to the same change and push it again; no separate bookkeeping
+  PR. Replace the Execution field's current `planned in ...` text rather than appending to it.
 - Use the `jjstack` skill. The stack's base is `main@origin`, or this plan's own open PRs when it resumes, set up per
   `plans/.agents/executing.md`, "Executing one plan" (step 6); never another plan's PRs. Bookmarks are
   `plan/archive-recovery-reproduction/<nn>-<short-name>` (for example
-  `plan/archive-recovery-reproduction/01-archive-repro-evidence`).
+  `plan/archive-recovery-reproduction/01-guard-archive-destination`).
 - Avoid churn: code added in one PR and deleted in a later one means the stack should have been shaped differently.
   Within this run, a PR that needs correcting is restructured rather than corrected on top, and that applies to PRs an
   earlier run built too.
@@ -197,7 +199,7 @@ sampling interval to save turns.
 ### Review gate
 
 Before finishing each PR, launch a review of its changes yourself and address what it finds before moving on. The user
-demands exactly this reviewer, and no review swarm: a single fresh-context agent on gpt-6.1-sol at high effort, launched
+demands exactly this reviewer, and no review swarm: a single fresh-context agent on Opus 5.5 at high effort, launched
 through `$scode-harness-shellout` when your harness cannot serve that model natively (that skill owns the launch
 mechanics). The prompt carries the full charter, because the reviewer has nothing else:
 
@@ -270,14 +272,14 @@ is either decided by you, taking the option that best fits this file, its Decisi
 DECISION, or it is a block per `plans/AGENTS.md`. Things the maintainer should know and possible follow-ups go into the
 report's "things you should know" and "open questions and possible follow-ups" sections, never into a question.
 
-The review gate's acceptance criteria for the ledger PR include checking that the evidence is stated accurately and that
-the PR touches only the Execution field.
+The review gate's acceptance criteria include the complexity gate under Fallbacks above: ask the reviewer to flag
+anything beyond it, and any test that races supervisors, cancels a startup or adds pause hooks.
 
 ## Done criterion
 
-The plan is complete when the reproduction has run, one draft PR records its evidence in the outcome's Execution field
-(with the change ID, bookmark and PR) while keeping the feedback file, that PR passed its review gate, and the report
-carries the evidence and the hook patch. Open, not merged. If a `## Decisions` section exists, its latest entry must
+The plan is complete when one draft PR carries the guarded destination update, its tests and changelog fragment, the
+removal of the feedback file and its index line, and the outcome's Execution field (with the change ID, bookmark and
+PR), and that PR passed its review gate. Open, not merged. If a `## Decisions` section exists, its latest entry must
 also be satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver
 its report through the queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/`
 yourself.

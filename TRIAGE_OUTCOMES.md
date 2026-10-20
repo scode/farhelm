@@ -15984,7 +15984,7 @@
 
 ## cancelled-startup-loses-archive-location.md
 
-- Outcome: `other`.
+- Outcome: `fix code` (was `other`; superseded 2026-10-20, see Decision).
 - Assessment: still applies on current main (9ba6b0e9). A cancelled supervisor startup leaves archive recovery running
   as blocking work with no ownership (`store.rs` around 3318–3338), and the journal update is guarded only by row state
   (`working_copies.rs` around 1739–1749); in the trash-name collision branch an old worker can point the record at a
@@ -15993,13 +15993,17 @@
   successor finishing recovery inside a microsecond window that only a stalled filesystem widens. SPEC.md's 2026-10-10
   lifecycle acceptance matches the trigger's shape but rules out "similar lasting damage", so it does not cover this
   wrong durable record. No file loss. Not reproduced.
-- Decision: on 2026-10-18 the user kept the 2026-10-11 rule but asked for this one to be reproduced first.
-- Completion criteria: run a focused reproduction in an isolated workspace through the test recorder (scratch-only
-  hooks): first show that a cancelled startup releases ownership while recovery is parked and a second supervisor can
-  claim the state directory; then drive the collision interleaving with a hook before re-journaling and check whether
-  the moved folder exists on disk while the trash listing omits it and no record names it. Report the evidence,
-  including that the window is artificial on healthy storage, to the user for a decision; record the result here. The
-  feedback item stays until that decision is executed.
+- Decision: on 2026-10-18 the user kept the 2026-10-11 rule but asked for this one to be reproduced first. Superseded on
+  2026-10-20: the reproduction run was stopped after its agent was held up by its model's safety safeguards (reproducing
+  meant driving competing supervisors over the state-folder lock and pausing one mid-recovery), and the user chose to
+  fix the harm directly without reproducing it, "with a reasonable complexity gate. doesn't have to be super simple but
+  it can't explode into thousands of lines of code": guard the journaled trash destination so an attempt working from a
+  stale reading is refused before it renames anything. The startup-ownership cause stays out of scope.
+- Completion criteria (2026-10-20, superseding the reproduction steps): every write of an already-pending record's
+  journaled trash destination succeeds only if the record still holds what the caller last read, so a stale attempt is
+  refused and renames nothing; sequential tests show the refusal and that ordinary collision retries still work, with no
+  racing supervisors, cancelled startups or pause hooks; within about 200 lines of non-test code and about 500 in total,
+  confined to the supervisor's checkout-record code, else block. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/archive-recovery-reproduction.md`.
 
 ## orphan-git-outlives-cache-lock.md
