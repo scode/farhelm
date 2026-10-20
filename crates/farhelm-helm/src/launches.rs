@@ -549,9 +549,9 @@ fn workspace_trust_arguments(
 
 /// Replace only a stored agent launch's compiler-owned trust segment.
 ///
-/// Agent clones keep the source's other words, including permission omissions
-/// and models no longer offered by today's catalog. The start command records
-/// the segment immediately before its final Farhelm marker; the resume command
+/// Clones and inherited spawns keep the source's other words, including
+/// permission omissions and models no longer offered by today's catalog. The
+/// start command records the segment immediately before its final Farhelm marker; the resume command
 /// shares that entire prefix before adding its own conversation selector.
 /// This structural boundary keeps custom permission words out of the edit.
 /// Callers must check the original launch against the agent YOLO guard first:

@@ -922,13 +922,15 @@ when opened.
 
 The same Settings section offers separate off-by-default, all-hosts trust switches for Codex, Muse and Pi. Each applies
 only when Farhelm composes an agent launch into a managed checkout, including a checkout an agent requests and an
-existing managed checkout selected for New, Clone, Restart with or Replace with. Codex receives a per-launch trusted
-directory override, Muse receives `--trust-workspace`, and Pi receives `--approve` for project settings and extensions.
-These switches never edit the agent's saved configuration. Their help states that the repository's hooks, settings and
-commands may then run as if the user had approved them. Ordinary user-selected directories receive no trust override,
-even when the client or a cloned source carries an old trust choice. Plain Restart and plain Replace keep their stored
-launch. Settings changes affect newly composed attempts; an accepted fresh-checkout retry retains its original trust
-choice, and an ordinary keyed retry whose resolved launch changes may refuse the reused key.
+existing managed checkout selected for New, Clone, Restart with or Replace with. An inherited spawn recomputes trust for
+its destination under the same rule as clone, rather than retaining its parent's trust choice. Codex receives a
+per-launch trusted directory override, Muse receives `--trust-workspace`, and Pi receives `--approve` for project
+settings and extensions. These switches never edit the agent's saved configuration. Their help states that the
+repository's hooks, settings and commands may then run as if the user had approved them. Ordinary user-selected
+directories receive no trust override, even when the client or a cloned source carries an old trust choice. Plain
+Restart and plain Replace keep their stored launch. Settings changes affect newly composed attempts; an accepted
+fresh-checkout retry retains its original trust choice, and an ordinary keyed retry whose resolved launch changes may
+refuse the reused key.
 
 Codex and Muse show the same nonmodal discovery hint while their recognized trust question is current in a managed
 checkout's agent terminal, their switch is off, and their own hint has not been dismissed. The hint names the agent,
@@ -2262,16 +2264,16 @@ The CLI's contract, since agents will script against it: on success it prints th
 zero, and success means the session exists — a child whose agent then fails to launch still exists, in error or exited
 status. Precondition failures exit nonzero with a message on stderr. `--cwd` is required, and the launch is either
 `--inherit-agent` or the launch flags shared with `farhelm agent create` below. `--inherit-agent` explicitly reuses the
-asking session's stored launch, which the session's own supervisor supplies. The launch flags are resolved by the
-attached helm, which owns templates and composes agent launches. Either is refused with a remedy when no helm is
-attached. The title is generated when omitted. An optional idempotency key makes retries safe: re-running spawn with the
-same key after a timeout or ambiguous outcome returns the existing child rather than creating another. Keys are scoped
-to the asking session on its host and live as long as the child session does: the same key from another session is an
-unrelated request, never a replay of someone else's child, and a replay never returns the asking session itself.
-Confirmed 2026-09-28, the same scoping applies to the idempotency keys of `farhelm agent create` and
-`farhelm agent clone`. Guaranteed Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the
-per-session credential; other Farhelm-specific variables are illustrative, not contract. (The user's login-shell
-environment is separately guaranteed; see Durability.)
+asking session's stored launch, which the session's own supervisor supplies, except that workspace trust follows the
+destination's managed-checkout membership and Settings. The launch flags are resolved by the attached helm, which owns
+templates and composes agent launches. Either is refused with a remedy when no helm is attached. The title is generated
+when omitted. An optional idempotency key makes retries safe: re-running spawn with the same key after a timeout or
+ambiguous outcome returns the existing child rather than creating another. Keys are scoped to the asking session on its
+host and live as long as the child session does: the same key from another session is an unrelated request, never a
+replay of someone else's child, and a replay never returns the asking session itself. Confirmed 2026-09-28, the same
+scoping applies to the idempotency keys of `farhelm agent create` and `farhelm agent clone`. Guaranteed Farhelm-injected
+environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other Farhelm-specific variables are
+illustrative, not contract. (The user's login-shell environment is separately guaranteed; see Durability.)
 
 A session can also ASK, not only create. `farhelm agent <verb>`, run inside a session with the same injected credential
 spawn uses, reaches the helm rather than the session's own supervisor: the supervisor forwards the question to the helm
@@ -2514,13 +2516,14 @@ rule judge a keyed retry by what its request resolves to now, so a retry whose t
 host's YOLO rule refuses is refused even where a replay would have been harmless, and a retry whose first attempt was
 interrupted before its session started is refused, rather than started with what the first attempt resolved to, when its
 launch, folder or title differs. `farhelm spawn --inherit-agent` is the exception: its retry is compared by the launch
-it inherits. `farhelm agent create` requires `--host` with an idempotency key, because the key's record lives only on
-the host the first attempt reached, and a host taken from a template could change between an attempt and its retry. A
-host name that comes to mean another machine between the two (hosts renamed or reassigned) is a known, accepted gap: the
-retry is then a new create on that machine and starts a second session, with every check a fresh create gets.
-`farhelm agent clone` copies its explicitly selected source's stored launch onto an explicitly named host, verbatim.
-Clone carries no translation between hosts: a command written for one machine may name a binary that is absent, a
-different build, or one that takes different flags on another.
+it inherits after destination trust normalization, so a Settings change can refuse the reused key.
+`farhelm agent create` requires `--host` with an idempotency key, because the key's record lives only on the host the
+first attempt reached, and a host taken from a template could change between an attempt and its retry. A host name that
+comes to mean another machine between the two (hosts renamed or reassigned) is a known, accepted gap: the retry is then
+a new create on that machine and starts a second session, with every check a fresh create gets. `farhelm agent clone`
+copies its explicitly selected source's stored launch onto an explicitly named host, changing only destination-dependent
+workspace trust. Clone carries no translation between hosts: a command written for one machine may name a binary that is
+absent, a different build, or one that takes different flags on another.
 
 `farhelm agent create` and ordinary `farhelm spawn` accept `--prompt TEXT` or `--prompt-file PATH`, mutually exclusive;
 `-` reads the file contents from stdin. Templates carry the same prompt field. The prompt shares the 64 KiB launch

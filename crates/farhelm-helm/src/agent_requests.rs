@@ -978,7 +978,8 @@ impl LaunchEditsRequest {
     /// The request fingerprint a keyed create of this request sends, or
     /// `None` for an inheriting spawn, which keeps the resolved-launch
     /// fingerprint: its launch is the asking session's own, copied by its
-    /// supervisor, with no template for an edit to change.
+    /// supervisor, with no template for an edit to change. Destination trust
+    /// is still normalized before the resolved launch is fingerprinted.
     fn request_fingerprint(&self) -> anyhow::Result<Option<String>> {
         if self
             .spawn
@@ -1339,7 +1340,9 @@ fn asker_scoped_intent_key(
 /// resolves (a template deleted, the host unconnected) is refused here
 /// before anything is sent, which never starts a second session. An
 /// inheriting spawn is the exception: it keeps the resolved-launch
-/// fingerprint ([`LaunchEditsRequest::request_fingerprint`]).
+/// fingerprint after destination trust normalization
+/// ([`LaunchEditsRequest::request_fingerprint`]). Changing Settings between
+/// retries can therefore make an inherited key refuse as changed intent.
 ///
 /// A keyed `create` must name its host with `--host`; see the refusal below
 /// for why.
@@ -1450,16 +1453,22 @@ async fn create_for_agent(
         });
     }
     let mut composition_incarnation = None;
-    if !edits
-        .spawn
-        .as_ref()
-        .is_some_and(|placement| placement.inherit_agent)
-        && resolved
-            .resolution
-            .launch
-            .agent_selection()
-            .is_some_and(|selection| selection.harness.offers_workspace_trust())
+    if resolved
+        .resolution
+        .launch
+        .agent_selection()
+        .is_some_and(|selection| selection.harness.offers_workspace_trust())
     {
+        // Inherited launches carry the source supervisor's stored words.
+        // Check those before editing trust, just as clone does: changing
+        // the words first must not hide a forged command/selection pair.
+        crate::yolo_guard::check_agent_wrapper(
+            state,
+            resolved.host,
+            &resolved.resolution.launch,
+            resolved.resolution.agent_wrapper_supplied,
+        )
+        .await?;
         // Resolve trust before the card. The same launch is carried through
         // approval and dispatch, so a Settings change while the card waits
         // cannot silently change what the user approved.
@@ -1811,6 +1820,8 @@ async fn resolve_agent_create(
 /// may ride beside it. The launch is believed as the supervisor sent it: a
 /// spawn acts only on its own host, which the threat model already trusts
 /// (SPEC.md accepts that a compromised supervisor could misreport it).
+/// This only selects the source launch: `create_for_agent` still checks its
+/// original words and recomputes destination trust before approval.
 fn inherited_spawn_resolution(
     views: &[crate::hosts::HostView],
     origin: AgentOrigin,
@@ -9870,6 +9881,224 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// Inheritance must not carry a managed parent's trust to another folder.
+    /// Exercise the real approval and dispatch path for every trust-capable
+    /// harness, including gaining trust at a managed destination. Settings
+    /// changes during approval must leave the card's resolved choice intact.
+    #[farhelm_testtrace::test]
+    async fn inherited_spawn_normalizes_trust_before_approval_and_dispatch() {
+        use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
+        for harness in [LaunchHarness::Codex, LaunchHarness::Muse, LaunchHarness::Pi] {
+            for (enabled, managed, source_trust) in [
+                (false, false, Some(true)),
+                (false, true, Some(true)),
+                (true, false, Some(true)),
+                (true, true, Some(false)),
+            ] {
+                let selection = LaunchSelection {
+                    harness,
+                    model: None,
+                    effort: None,
+                    // Pi offers only YOLO; the other harnesses exercise the
+                    // guarded path. The fixture host permits Pi's offered mode.
+                    permissions: harness.request_permission(Some(LaunchPermission::Guarded)),
+                    permission_flags: None,
+                    wrapper_prefix: None,
+                    workspace_trust: source_trust,
+                };
+                let inherited = crate::launches::compile(selection.clone()).unwrap();
+                assert_eq!(inherited.yolo(), Some(harness.offers_only_yolo()));
+                let mut expected_selection = selection;
+                expected_selection.workspace_trust = (enabled && managed).then_some(true);
+                let expected = crate::launches::compile(expected_selection).unwrap();
+                let (client_side, peer) = tokio::io::duplex(64 * 1024);
+                let (seen, browsed) =
+                    spawn_create_responder_with_membership(peer, None, None, managed);
+                let (h, _local, remote) =
+                    creating_fleet(client_side, vec![session("asker", 1)]).await;
+                h.store.set_agent_trust(harness, enabled).await.unwrap();
+                h.store
+                    .set_yolo_without_asking(remote, harness.offers_only_yolo())
+                    .await
+                    .unwrap();
+                h.store
+                    .set_commands_without_asking(remote, false)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    crate::launches::workspace_trust_enabled(
+                        harness,
+                        &h.store.resolve_checkout_config(None).await.unwrap()
+                    ),
+                    enabled,
+                    "premise: the destination trust setting is installed"
+                );
+                assert!(seen.lock().unwrap().is_empty());
+                assert!(browsed.lock().unwrap().is_empty());
+                let _gui = h.manager.events().admit(1).unwrap();
+                let handler = HelmAgentRequests::for_state(&h.state);
+                let origin = origin_of(&h, remote);
+                let task = tokio::spawn(async move {
+                    handler
+                        .handle(
+                            origin,
+                            "asker",
+                            AgentVerb::Create {
+                                host: None,
+                                templates: Vec::new(),
+                                edits: farhelm_proto::launcher::TemplateFields {
+                                    destination: Some(
+                                        farhelm_proto::launcher::TemplateDestination::Folder(
+                                            "/target-directory".into(),
+                                        ),
+                                    ),
+                                    ..Default::default()
+                                },
+                                intent_key: Some("inherited-trust".into()),
+                                confirm_yolo: false,
+                                spawn: Some(farhelm_proto::SpawnPlacement {
+                                    parent: Some("asker".into()),
+                                    inherit_agent: true,
+                                    inherited_launch: Some(Box::new(inherited)),
+                                }),
+                            },
+                        )
+                        .await
+                });
+                let card = await_card(&h, &task).await;
+                let ApprovalAction::Launch {
+                    verb, launch, cwd, ..
+                } = card.action
+                else {
+                    panic!("inherited spawn approval")
+                };
+                assert_eq!(verb, LaunchVerb::SpawnInherited);
+                assert_eq!(cwd, "/target-directory");
+                assert_eq!(launch, expected, "approval must show destination trust");
+                assert!(seen.lock().unwrap().is_empty(), "no create before Allow");
+                h.store.set_agent_trust(harness, !enabled).await.unwrap();
+                assert_eq!(
+                    answer_card(&h, "allow").await,
+                    axum::http::StatusCode::NO_CONTENT
+                );
+                let outcome = tokio::time::timeout(RESPONDER_JOIN_BUDGET, task)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    matches!(
+                        outcome,
+                        AgentOutcome::Ok {
+                            reply: AgentReply::Created { .. }
+                        }
+                    ),
+                    "{outcome:?}"
+                );
+                let creates = seen.lock().unwrap();
+                assert_eq!(creates.len(), 1);
+                assert_eq!(creates[0].cwd, "/target-directory");
+                assert_eq!(creates[0].launch.as_ref(), Some(&expected));
+                assert_eq!(
+                    creates[0].request_fingerprint, None,
+                    "inherited retries use the normalized launch fingerprint"
+                );
+                assert_eq!(
+                    *browsed.lock().unwrap(),
+                    if enabled {
+                        vec!["/target-directory".to_string()]
+                    } else {
+                        vec![]
+                    }
+                );
+            }
+        }
+    }
+
+    /// A malformed inherited trust segment must never reach dispatch. A host
+    /// that asks before YOLO must reject the original forged command first;
+    /// permitting YOLO leaves the trust normalizer's structural refusal.
+    #[farhelm_testtrace::test]
+    async fn inherited_spawn_checks_original_launch_before_trust_rewrite() {
+        use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch};
+        let mut inherited = crate::launches::compile(LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::Guarded),
+            permission_flags: None,
+            wrapper_prefix: None,
+            workspace_trust: Some(true),
+        })
+        .unwrap();
+        let SessionLaunch::Agent { start, .. } = &mut inherited else {
+            panic!("agent")
+        };
+        *start = vec![
+            "codex".into(),
+            "--dangerously-bypass-approvals-and-sandbox".into(),
+            "{farhelm_args}".into(),
+        ];
+        assert_ne!(
+            inherited,
+            crate::launches::compile(inherited.agent_selection().unwrap().clone()).unwrap(),
+            "premise: safe-looking selection does not vouch for the inherited words"
+        );
+        for (allow_yolo, expected_kind) in [
+            (false, ErrorKind::Unauthorized),
+            (true, ErrorKind::InvalidRequest),
+        ] {
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let (seen, browsed) = spawn_create_responder_with_membership(peer, None, None, false);
+            let (h, _local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+            h.store
+                .set_agent_trust(LaunchHarness::Codex, false)
+                .await
+                .unwrap();
+            h.store
+                .set_yolo_without_asking(remote, allow_yolo)
+                .await
+                .unwrap();
+            let outcome = HelmAgentRequests::for_state(&h.state)
+                .handle(
+                    origin_of(&h, remote),
+                    "asker",
+                    AgentVerb::Create {
+                        host: None,
+                        templates: Vec::new(),
+                        edits: farhelm_proto::launcher::TemplateFields {
+                            destination: Some(
+                                farhelm_proto::launcher::TemplateDestination::Folder(
+                                    "/target-directory".into(),
+                                ),
+                            ),
+                            ..Default::default()
+                        },
+                        intent_key: None,
+                        confirm_yolo: false,
+                        spawn: Some(farhelm_proto::SpawnPlacement {
+                            parent: Some("asker".into()),
+                            inherit_agent: true,
+                            inherited_launch: Some(Box::new(inherited.clone())),
+                        }),
+                    },
+                )
+                .await;
+            assert!(
+                matches!(outcome, AgentOutcome::Err { kind, .. } if kind == expected_kind),
+                "{outcome:?}"
+            );
+            assert!(
+                seen.lock().unwrap().is_empty(),
+                "refused launch must not dispatch"
+            );
+            assert!(
+                browsed.lock().unwrap().is_empty(),
+                "the off switch needs no browse"
+            );
+            assert!(h.state.approvals.list().is_empty());
+        }
     }
 
     /// Spec: `farhelm spawn --inherit-agent`, as its supervisor relays it with
