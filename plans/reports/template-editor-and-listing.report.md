@@ -71,3 +71,91 @@ Each PR received its required single fresh-context gpt-6.1-sol review at high ef
 first name review missed the invalid test-cleanup call; the same reviewer inspected the correction and confirmed it
 resolved. Commit messages and PR wording passed fresh cold reads; the shortcut message was rewritten once to remove an
 ambiguity.
+
+### Landing
+
+Landed as #2428, #2431 and #2433, merged bottom-up. It was the third of six plans in this landing round, after
+download-staging-sweep and sidebar-bell-follows-row. Its content is what the report describes, rebased onto this round's
+main, except for one landing fix to #2431 that changes behavior, described below; please read that one.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the stack's base, main gained round 108's sixteen plans and documentation and plan bookkeeping. A fresh-context
+reviewer and I read them and the other plans of this round against this plan. The one that touches the same code is
+launch-sequences, from round 108:
+
+- It reworded the quick-launch bolt's explanation for a template that cannot be marked, and kept a lit bolt clickable on
+  such a template so that its mark can still be cleared. This plan's #2431 changed the same bolt to read the current
+  shortcuts before writing. The two conflicted textually; the landing kept launch-sequences' wording and this plan's new
+  click handling.
+- The interaction behind the landing fix below also involves launch-sequences: before the fix, a click meant to clear a
+  lit bolt could re-mark a template that launch-sequences had made ineligible for the mark.
+
+menu-arrow-focus-race, later in this round, changes the number-key menu's focus handling in the same file and test; the
+combined test passed on both engines. The other conflicts were in the review feedback queue's index, where each plan
+removes its own entries; all removals are kept.
+
+#### Fixes made during the landing
+
+- #2431, the quick-launch bolt (⚡) in an open Templates dialog. The plan made a bolt click read the current shortcuts
+  before writing, but the click carried only the template's name and toggled whatever it read. So whenever the dialog
+  was out of date, the click did the opposite of what the user saw:
+  - a click on an unlit bolt for a template an agent had just marked cleared that mark;
+  - a click on a lit bolt after an agent had moved the mark elsewhere or cleared it put the mark back on this template,
+    even one launch-sequences had made ineligible for it.
+
+  Both undo an agent's change made while the dialog was open, which your recorded decision for this plan rules out (a
+  GUI write never undoes an agent or command-line change made while the view was open). The plan's own browser check
+  asserted the wrong outcome: that the first click cleared the agent's mark. The fix makes the click carry what the user
+  asked for, mark or unmark, as the bolt showed it, and writes nothing when the freshly read shortcuts already match
+  what the user asked for. The check now expects the agent's mark to survive. The number-key menu already worked this
+  way and is unchanged.
+
+  The plan's rule for this PR was to block if it went over about 100 changed lines. The report's three size figures (66,
+  100 and 30 lines) are one per PR, so #2431 measured exactly 100; with the fix it is 113 (specification, code and
+  tests), mostly the corrected click handling and a comment explaining it. I did not block, because your decision
+  already settles the behavior. Undoing only the fix would bring back the clicks that undo an agent's change; the
+  realistic alternatives are to keep it, or to revert #2431 as a whole, which returns to an open dialog overwriting
+  newer shortcut assignments.
+
+#### Checks
+
+Every plan in this round was executed while round 108's sixteen plans were still unlanded, so none had been tested
+against them. Together the six change a menu focus check that every menu uses, which session a page opens on load, the
+desktop app's quit path, helm preferences and storage, and a browser-test helper many specs share. That is why this
+round ran the whole Rust workspace and the full browser suite. All of the following ran on all six plans stacked
+together on main, including the fixes made while landing them:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop`, the isolated
+  test-sleep check, `dprint check` on every changed Markdown, JSON and TOML file,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py` and
+  `scripts/check-desktop-assets.sh`: all passed (formatting and the test-sleep check again after the last test fixes).
+- `cargo nextest run --workspace --exclude farhelm-desktop` through the test recorder with pinned nextest and tmux, four
+  parallel test slots and no retries, run `8c534e03-3c81-4f66-99e3-0e6ffdb526e8` (kept): 3951 passed, 3 failed. Two were
+  helm database tests fixed during this landing (see select-newest-on-close's notes); the helm's checkout configuration
+  test module then passed, 28 tests, run `faf4d80d-ec6d-4a36-9220-9d522e8f38d0`. The third was
+  `terminal_backpressure::shallow_pause_resumes_without_reset_or_replay`, a known open flake under load (FLAKES.md and
+  the TODO deflake entry "Shallow pause resets under load"); no plan here changes terminal streaming or the supervisor.
+  Five repeats of that test by itself, with the browser suite running at the same time, gave four passes and one failure
+  (run `e34c4af0-729c-4f62-b1bb-db1c6d9e97e2`, kept).
+- `cargo nextest run -p farhelm-ui --features desktop`, run `03589e5a-0f7e-423b-ab65-5c3bdd33c33c`: 720 passed; this and
+  the desktop compile check above cover the desktop quit change, which lives in the UI crate's desktop code.
+  `node --test` in `crates/farhelm-ui/js-tests`, run `c600b345-76c4-42a8-a879-fce21765c8d6`: 328 passed.
+- The full browser suite (`npx playwright test` in `e2e/`) on Chromium and WebKit, one worker, no retries, in two parts.
+  The first run, `68484e27-6c23-45a6-aae5-5539e8c275b2` (kept), was cut short part-way by my own mistake: a narrow
+  re-run I started in the same checkout removed files the running suite depends on, so every test it started afterwards
+  failed before testing anything. Its results stand for the 64 projects (one engine and one spec file each) whose tests
+  all started before that point and passed. Every other project, and the spec files changed by later landing fixes, ran
+  again on both engines in run `49ead42e-f608-4e76-a833-6ff945dfb1f8`: 1538 passed, 12 skipped by design (WebKit
+  clipboard cases and tests that need a real signed-in agent or run on one engine only), and 5 failed. Those 5, and the
+  4 the first run had shown before that point, were all tests that assumed how a page behaves on load (which session it
+  opens, or how many preference reads and saves it makes) before select-newest-on-close changed it. They are 6 distinct
+  tests, all fixed in that plan and passing in narrow runs on both engines (listed in its notes).
+- Skipped: the workspace and desktop doctests (no plan adds or changes a documentation example),
+  `cargo check -p farhelm-desktop` and the desktop smoke test (the desktop app's own crate is unchanged; its quit path
+  change is in the UI crate covered above), the native Mac app (not runnable here) and the installer (unchanged).
+
+The report was written on a main from before round 108's landings, so its statement that no rebase was needed and its
+focused checks no longer describe what landed; the combined runs above supersede them. Apart from the bolt behavior and
+size described above, nothing else in the executor's report became untrue at landing.
