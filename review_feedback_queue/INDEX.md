@@ -62,9 +62,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`noop-shortcut-approval-reports-missing-binding.md`](noop-shortcut-approval-reports-missing-binding.md) — A shortcut
   request can report success after another client moves its initially satisfied binding during approval.
 
-- [`summary-card-clips-lower-facts.md`](summary-card-clips-lower-facts.md) — A tall hover summary can hide its directory
-  and timestamps without scrolling.
-
 - [`shortcut-tests-skip-owned-cleanup.md`](shortcut-tests-skip-owned-cleanup.md) — Early cleanup failures in shortcut
   and naming tests skip remaining owned resources or shared checkout configuration restoration.
 

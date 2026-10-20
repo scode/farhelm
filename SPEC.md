@@ -1445,10 +1445,11 @@ than guessing. Its second line shows the helm-supplied host name (an alias when 
 directory; a legacy row with no host name shows only the directory, rather than inventing a local identity or a dangling
 separator. The second line is hidden when the helm-wide compact preference is on, which defaults off and is shared at
 the next preference seed across clients. The working directory and launch command remain abbreviated only where shown,
-with the full directory in the row's hover summary card and the full invocation on its agent mark on web and desktop; an
+with the directory in the row's hover summary card and the full invocation on its agent mark on web and desktop; an
 abbreviation is never the only place a value is recorded. The same card appears from the title or any unmarked part of
-the open button, in either density and on keyboard focus. It names the full title, status, agent, host, checkout when
+the open button, in either density and on keyboard focus. It names the title, status, agent, host, checkout when
 managed, directory, start and last-activity times, and what a click does; meaningful marks keep their own hover text.
+The summary may clip very long values or whole rows in a short window; the session view provides those details in full.
 Its agent line retains the stored launch facts and adds "YOLO observed" when the shield has status-line evidence,
 including when the launch was already YOLO. The actions-menu header describes only the stored launch. A row's own
 actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread toggle — reachable there or
