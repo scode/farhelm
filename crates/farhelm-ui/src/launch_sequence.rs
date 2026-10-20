@@ -308,10 +308,19 @@ impl PartialTemplateBanner {
 impl TemplateReference {
     /// Read the binding used by the indicator and by sequence capture alike.
     /// An explicitly unbound reference cannot gain authority from newer settings.
-    fn name<'a>(&'a self, preferences: &'a crate::api::Preferences) -> Option<&'a String> {
+    /// Return a raw lookup key; the indicator still escapes this borrowed spelling.
+    fn name<'a>(&'a self, preferences: &'a crate::api::Preferences) -> Option<&'a str> {
         match self {
-            Self::Bolt => preferences.quick_launch_template.as_ref(),
-            Self::Number(key) => preferences.template_shortcuts.get(key),
+            // References are exact lookup keys, including the DOM snapshot
+            // captured at Enter; display escaping must not change that key.
+            Self::Bolt => preferences
+                .quick_launch_template
+                .as_ref()
+                .map(crate::peer::PeerText::raw),
+            Self::Number(key) => preferences
+                .template_shortcuts
+                .get(key)
+                .map(crate::peer::PeerText::raw),
             Self::Name(name) => Some(name),
             Self::Unbound(_) => None,
         }
@@ -330,7 +339,7 @@ pub(crate) fn capture_sequence_bindings(
         .iter()
         .map(|reference| {
             if let Some(name) = reference.name(preferences) {
-                TemplateReference::Name(name.clone())
+                TemplateReference::Name(name.to_owned())
             } else {
                 match reference {
                     TemplateReference::Number(key) | TemplateReference::Unbound(Some(key)) => {
@@ -407,7 +416,7 @@ pub(crate) fn resolve_template_references(
             let name = reference.name(preferences)?;
             templates
                 .iter()
-                .find(|template| &template.name == name)
+                .find(|template| template.name == name)
                 .cloned()
         })
         .collect()
@@ -448,7 +457,7 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
         .map(|reference| {
             reference
                 .name(&preferences)
-                .map(|name| display_peer(name))
+                .map(display_peer)
                 .unwrap_or_else(|| match reference {
                     TemplateReference::Number(key) | TemplateReference::Unbound(Some(key)) => {
                         format!("unbound key {key}")
@@ -488,6 +497,34 @@ pub(crate) fn LaunchSequenceIndicator() -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Physical Enter captures raw template names from the published DOM JSON.
+    /// A visible escape in the indicator must not replace that lookup identity,
+    /// and repeated references must still resolve to repeated applications.
+    #[test]
+    fn dom_binding_snapshot_captures_original_peer_names() {
+        let snapshot = ShortcutContextSnapshot {
+            context: "page".into(),
+            modal_opening: 1,
+            sequence_bindings: Some(
+                r#"{"quick_launch_template":"bolt\u202e","template_shortcuts":{"1":"one\n"}}"#
+                    .into(),
+            ),
+        };
+        let references = [
+            TemplateReference::Number("1".into()),
+            TemplateReference::Bolt,
+            TemplateReference::Number("1".into()),
+        ];
+        assert_eq!(
+            snapshot.capture_sequence(&references),
+            Some(vec![
+                TemplateReference::Name("one\n".into()),
+                TemplateReference::Name("bolt\u{202e}".into()),
+                TemplateReference::Name("one\n".into()),
+            ])
+        );
+    }
 
     /// A press carries only the two published preference fields, not the whole
     /// settings model. Later dispatch reads cannot bind a key the page showed
