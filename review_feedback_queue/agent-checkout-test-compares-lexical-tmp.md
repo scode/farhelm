@@ -20,8 +20,12 @@ expected roots (1082–1088 and 1123–1134). Canonicalize the fixture root befo
 Possible cover: TRIAGE_OUTCOMES.md heading checkout-recovery-compares-canonical-roots-unresolved-fixture.md records a
 completed fix for older assertions. It does not cover these newly introduced assertions.
 
-Current-main status: Persists at pinned main, at the same test lines. git diff between the reviewed commit and pinned
-main for this file is empty; no fixing commit.
+Also reviewed: `3e48dbf8233f854a9744b87df9932c75ef945489`, during the trailing review through
+`bf0935f02fc8fbfc26ab54e1b9fb8e7e6bf5c441`. Its new Base-name CLI checkout assertion in
+`crates/farhelm/tests/e2e/github_checkouts.rs:230–240` repeats the same comparison for `bar-fix-parser-2`, deriving the
+expected path from the lexical `root_a`. Canonicalize this expectation together with the earlier assertions. The
+additional assertion is confirmed by static reading; macOS execution remains unverified. Provenance: separate same-model
+naming reviewer, with the recording parent checking the new assertion.
 
 Review coverage: full commit diff and relevant code paths read. Runtime behavior and harmful reliance were not
 reproduced; the note preserves the reviewer's stated unverified premises.

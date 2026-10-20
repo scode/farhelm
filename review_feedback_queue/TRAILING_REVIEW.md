@@ -1,10 +1,68 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `6a780e2ec502a9711eaa55cb16ab66fd5f1e46a4`
+Last reviewed commit: `bf0935f02fc8fbfc26ab54e1b9fb8e7e6bf5c441`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in [AGENTS.md](AGENTS.md#trailing-code-review), together with any resulting queue updates. A proposed
 checkpoint reaches `main` only when its review-result PR is merged.
+
+## Review through bf0935f0
+
+Reviewed range: `6a780e2ec502a9711eaa55cb16ab66fd5f1e46a4..bf0935f02fc8fbfc26ab54e1b9fb8e7e6bf5c441`, 78 commits. The
+tip and saved checkpoint came from fetched `origin/main`; the checkpoint was verified as an ancestor. Six separate
+same-model adversarial reviewers read every assigned individual patch, including intermediate changes and deletions:
+
+| Ordered commits | Count | Main content                                                       |
+| --------------- | ----: | ------------------------------------------------------------------ |
+| 1–4             |     4 | Template naming, name kinds, CLI and managed-checkout numbering    |
+| 5–15            |    11 | Release notes, docs, screenshot sources, plans and previous review |
+| 16–42           |    27 | Prompt admission, specification decisions and lifecycle reports    |
+| 43–47           |     5 | Link disclosure, refusal layering and download opening hints       |
+| 48–51           |     4 | Inherited trust, approval wording and checkout identity            |
+| 52–78           |    27 | Recovery focus, copy warnings, titles, queued launches and paths   |
+
+All 78 commits are accounted for; no assigned patch lines remain unread. Surrounding source and coverage sources were
+read selectively, not exhaustively across the repository. Historical reports' private runtime evidence, previous review
+provenance, screenshot pixels and release deployment were not independently authenticated.
+
+Three new records were retained and three existing records extended. One new record is provisionally `highest`: Enter
+reads a live template-binding signal separately from the indicator's render, leaving an unverified possibility of
+capturing a new binding before its name repaints. The original indefinitely stale asynchronous-resolution defect is
+fixed. The generic subsecond-redraw acceptance and the user's earlier “IS covered” decision may cover this residual, but
+the new specification also requires the shown snapshot. A fresh independent auditor could not approve exclusion. The
+record calls for resolving that contract and establishing the scheduling premise; it does not claim a demonstrated
+wrong-template launch or prescribe a broader design.
+
+The other new records are `other`: a web-link redraw can lower its refusal explanation beneath a tunnel notice while
+click admission stays safe, and three focus-regression cases create sessions before their cleanup scope. The extensions
+add a repeated lexical/canonical path assertion, naming-test cleanup paths that can skip shared checkout restoration,
+and the Update-confirmation claim's survival into finalized v0.30.0 notes and a screenshot callout. These have
+individual confidence limits; browser geometry, macOS execution, failure injection and consequential reader reliance
+remain unverified.
+
+Five fresh independent auditors checked the proposed exclusions with possible security or user-work consequences. They
+agreed to exact acceptance for same-entry host adoption, template-origin wrappers across agent overrides, prompt-card
+snapshots, later out-of-band checkout replacement, stored Muse trust wording, pending trust choices and refusal-banner
+overlap. They confirmed the scoped source refutations for blank prompts, target-connection fencing, launch validation,
+checkout ancestry, link admission, hover opening hints, focused-question recovery, copied-value warnings, accessible
+titles, colon-bearing program folders and disclosed tunnel-port reuse. They also agreed to duplicate-only exclusions for
+the retained retry-key and payload-ownership findings, and prior-decision coverage for the five explicitly discarded
+records. These conclusions neither close those retained items nor declare entire subsystems safe.
+
+Invisible-only prompt input remains an unverified re-enable caveat in the existing landing report. The independent
+auditor agreed that no current supported agent route establishes the alleged delivery consequence because production
+prompt delivery is disabled before routing; direct full-authority supervisor access is within the accepted same-account
+boundary. The dormant delivery path is not declared fixed or safe for every visually blank string.
+
+A second fetch found main at `3f61bdb2f46dc7b1d7f9f0d5cff89030d999a8e6`, with the same checkpoint and no queue changes.
+Its sole intervening change claims a plan. That complete patch was inspected for rebase interaction, and the review
+records rebased cleanly onto it. It remains outside the reviewed range; this checkpoint advances only to the pinned tip.
+
+This was a static review. No product runtime, browser, native Mac or vendor-agent tests were run, and no previous
+runtime results were reused as current passes. The result changes only feedback records, their index and this
+checkpoint; no fixes or triage outcomes were executed. Validation covers Markdown formatting, whitespace, queue/index
+consistency, commit assignment and instruction pointers. The review-result PR stays a draft for separate manual merging;
+this proposed checkpoint has not advanced on main.
 
 ## Review through 6a780e2e
 
