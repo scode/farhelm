@@ -203,6 +203,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   behavior is to treat bare text as `name:asdf` (what the maintainer meant there); that is decided when the entry is
   planned.
 
+- **Activate the most recently opened session when another closes.** Closing a session should leave the most recently
+  opened session selected and active; today it does not, and what actually gets selected instead is not yet confirmed.
+  Find what selection happens when a session closes, then make the newest session take over.
+
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.
