@@ -56,3 +56,56 @@ layout, JavaScript or desktop lifecycle code. No older executor evidence was reu
 The required single fresh-context gpt-6.1-sol reviewer at high effort found no issues. It checked the acceptance
 criteria, shared evidence condition, rendering regression, feedback removal, specification wording and the 99-line size.
 The commit title and body passed a separate fresh cold read.
+
+### Landing
+
+Landed as #2378 in its own landing round, unchanged from what the report describes.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the PR's base, main gained only plan bookkeeping, and while the landing ran, two documentation changes to the
+review queue's triage instructions and records. None of them touches the UI. The recent UI changes that this plan sits
+next to, session-header-and-row-fixes (session questions, copy warnings and accessible names in the session list) and
+workspace-trust-destination (a trust note on approval cards), were already in its base; a fresh-context reviewer
+confirmed this diff touches none of the code they changed. host-entry-session-ids, still in progress, will change how
+sessions are identified, but this plan does not touch session identity, so at most a small textual conflict in the same
+SPEC.md paragraph is possible when that plan lands. The landed code is identical to what the landing's checks below
+tested.
+
+The reviewer also confirmed that one shared check now decides when the row's shield shows YOLO, the shield's hover and
+screen-reader text, and the card's new suffix, so the three cannot disagree; that launches with no known agent type, and
+agents Farhelm cannot read a status line for, cannot gain the observation; and that the actions-menu header still
+describes only the stored launch.
+
+#### Fixes made during the landing
+
+None.
+
+#### Possible follow-ups
+
+- When a session has an explicit model or effort, the suffix comes at the end of the line, so a guarded Claude session
+  reads `claude · guarded · model: opus · effort: High, YOLO observed`, where the observation can look as if it is about
+  the effort. Putting it straight after the permission (`claude · guarded, YOLO observed · model: …`) would be a small
+  change. The plan's own test covers only the case with no model or effort.
+- The test checks that a session with no launch record gains no observation, but not that an agent Farhelm cannot read a
+  status line for (Codex, say) gains none when the YOLO evidence flag is set. The code handles it correctly by reading;
+  one more test case would pin it.
+
+#### Checks
+
+Run now, on the PR rebased onto main:
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, `dprint check` on the changed Markdown, and
+  `python3 releasing/check-changelog.py format`: all passed.
+- Through the test recorder: the whole UI library, 549 passed, run `3b25dbea-830d-41c5-90ce-eda4cd37e882`; the same UI
+  library built with desktop support, 707 passed, run `079a97d7-69ff-4c76-9bbf-7622a95643f1`; `node --test` in the UI's
+  JavaScript test directory, 311 passed, run `ef285442-edc4-4147-82b4-75ea5f9b1d44`.
+- After `cargo build` and the release web build,
+  `npx playwright test tooltip.spec.ts sidebar.spec.ts yolo-guard.spec.ts guarded-permissions.spec.ts custom-permissions.spec.ts`
+  through the recorder on Chromium and WebKit, one worker, no retries: 286 passed, run
+  `73a3cadc-6111-4dd8-acd9-3b16ca46763a`. These render the hover card, the session rows and the permission shields.
+- Skipped: the helm, supervisor and other Rust libraries (this plan changes only the UI crate), the rest of the browser
+  suite, and the native Mac app.
+
+Nothing in the executor's report became untrue at landing.
