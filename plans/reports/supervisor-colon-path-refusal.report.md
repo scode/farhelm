@@ -69,3 +69,48 @@ decisions, full ledger entry, complexity gate and verbatim test-authoring checkl
 desktop override was fixed and rechecked by that reviewer, with no remaining findings or acceptance gap. It agreed that
 a test merely repeating the standard library's path resolution would add no useful evidence. The commit/PR message cold
 reader found no unclear or contradicted claims or convention violations. The final amend only adds the PR URL.
+
+### Landing
+
+Landed as #2361, unchanged from what the report describes. It was the seventh of eight plans in this landing round.
+
+#### What landed since the stack was based, and whether it interacted
+
+Since the PR's base, main gained link-hover-covers, workspace-trust-destination, session-header-and-row-fixes,
+queued-launch-snapshot, payload-lock-reproduction, triage-discards-oct18 and plan bookkeeping. None of them changes how
+the supervisor starts, the folder it puts on a session's command-search path, or the desktop app's startup of its
+managed supervisor.
+
+The closest work in the round was launch-enters-working-dir, which was blocked at landing and has not merged. It edits
+the same two supervisor files as this plan, in different code: this plan checks the program's folder at startup, while
+that plan makes sessions and terminal tabs enter their own folder. A fresh-context reviewer and I read the two together
+and found no conflict between them. That plan would start terminal tabs through the Farhelm program itself, passing its
+path as a plain argument rather than through the command-search path, so this plan's check is neither needed for it nor
+affected by it. Its blocked question is about its own tests and error wording, not about this plan.
+
+The only conflicts were in the review feedback queue's index, where every plan in the round removes its own entries; all
+removals are kept. The landed code is identical to what the landing's checks below tested.
+
+#### Fixes made during the landing
+
+None.
+
+#### Checks
+
+Run now, on one tree holding this plan together with the round's other landing plans (launch-enters-working-dir removed
+after it failed its checks):
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo clippy -p farhelm --bins -- -D warnings`, `cargo check -p farhelm-ui --features desktop` (the desktop app's
+  startup caller), the isolated test-sleep check, `dprint check` on every changed file, and
+  `python3 releasing/check-changelog.py format`: all passed.
+- Through the test recorder with pinned nextest and tmux, four slots and no retries, the whole protocol, helm,
+  supervisor and UI libraries, the `farhelm` binary's tests, the agent command-line tests and the end-to-end tests for
+  launches, tabs, checkouts, agent relay and session lifecycle: 3489 passed, run `cdabc40d-ecaa-418e-938f-01f2cbe4da64`.
+  The run's output has no runtime `SKIPPED` marker. The UI's desktop-only Rust tests: 706 passed, run
+  `4926be34-2adf-40e5-a588-663695e00161`. The executor had run only this plan's own tests.
+- Skipped: browser tests for this plan (it changes no web UI), and the native Mac app's startup alert, as in the report.
+
+The report's statements that main had not moved since the PR's base and that the PR was still an open draft were true
+when it was delivered; main then moved as described above, and the PR has now merged. Nothing else in the report became
+untrue at landing.
