@@ -14,9 +14,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`create-reply-foreign-id-bypasses-cache-refusal.md`](create-reply-foreign-id-bypasses-cache-refusal.md) — A hostile
   Create reply can select another host's existing session through paths that bypass the ownership refusal.
 
-- [`installation-colon-splits-session-path.md`](installation-colon-splits-session-path.md) — A colon-bearing Mac
-  installation path introduces unintended command-search directories; practical exploitability is unverified.
-
 - [`payload-workers-outlive-state-lock.md`](payload-workers-outlive-state-lock.md) — Old payload work can overlap a
   successor helm after releasing state ownership; the integrity consequence remains unresolved.
 

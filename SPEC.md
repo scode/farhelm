@@ -3327,7 +3327,9 @@ undefined behavior, except where this section says otherwise (other login shells
 aliasing, out-of-band manipulation of managed checkouts and the trash, including uncommon filesystems under them, the
 proxy case below, and hand-edited Farhelm service units under [Supported host setup](#supported-host-setup)). An install
 whose `farhelm` program path contains `$` is unsupported and refused, because systemd does not decode `$$` in a
-service's program position, so a service written for that path could not start.
+service's program position, so a service written for that path could not start. The supervisor also refuses startup when
+the Farhelm program folder put on session `PATH` contains `:`, naming the folder; the desktop app shows the same refusal
+before starting its supervisor, because a colon would split that folder into unintended command-search directories.
 
 Two host aliases that reach the same host, user and port through different `ProxyCommand` routes are unsupported. The
 helm shares SSH connections by OpenSSH's connection hash, which does not include the proxy command, so such aliases may
