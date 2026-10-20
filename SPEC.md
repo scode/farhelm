@@ -3229,9 +3229,10 @@ authority. Choose proportionate remedies rather than assuming a quota or schedul
 
 A session reference binds the host entry's helm-assigned UUID and the supervisor's session ID. Nothing a host reports
 can choose or reuse another entry's prefix, and a reference never reaches a different host entry. The helm resolves the
-entry first and checks membership only there. Its current cache still retains only the first entry reporting a bare ID,
-omitting a later cached claimant until the first withdraws it; that display limitation cannot redirect an operation on
-either full reference. An identity-less entry's live membership is likewise checked only on that entry.
+entry first and checks membership only there. Two entries reporting the same bare ID are two distinct sessions: both
+appear in listings and counts, with separate viewer state and approval authority. An identity-less entry's live
+membership is likewise checked only on that entry. Create, clone and interrupted-create replies can name only a session
+on the entry that made them, even if cache publication fails or the connection ends after the reply.
 
 Confirmed 2026-10-01: removing the host is the general remedy for a misbehaving host whose effect is limited to what the
 helm and the GUI show. A host may crowd or clutter those views so that other sessions are hard to reach, for example by

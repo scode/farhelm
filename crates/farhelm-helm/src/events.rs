@@ -570,180 +570,92 @@ mod tests {
         assert!(*subscriber.borrow_and_update() > before);
     }
 
-    /// A CONTESTED-set change with no change in cardinality still
-    /// invalidates.
-    ///
-    /// The contested set is not diagnostic decoration: it decides where
-    /// `crate::sessions::resolve_owner` routes an operation, including
-    /// refusing to route one at all. So a client holding a stale copy can
-    /// send a stop to a host that must not receive it. A same-size SWAP —
-    /// one collision resolving as another appears — is the case a
-    /// length-or-emptiness comparison misses entirely, which is why it is
-    /// the case this test stages.
+    /// Equal suffixes on two entries publish independent rows and counts.
+    /// A row permutation changes no stored value; changing one entry's row
+    /// must still wake clients even while the other entry reports that suffix.
     #[farhelm_testtrace::test]
-    async fn a_same_size_contested_swap_invalidates() {
-        // The local host caches both ids FIRST, so the rival registered
-        // afterwards is deterministically the one that finds them taken —
-        // without that ordering, which host ends up contesting depends on
-        // whose drain committed first.
+    async fn equal_suffix_entries_publish_independent_rows_and_changes() {
         let harness = rest_harness::helm_listing(vec![
             rest_harness::session("shared-a", 200),
             rest_harness::session("shared-b", 100),
         ])
         .await;
+        let local = rest_harness::local_id(&harness.store).await;
         let rival = harness
             .store
-            .add_ssh_host("user@rival", None, None)
+            .add_ssh_host("rival.example", None, None)
             .await
-            .expect("register the rival host");
+            .unwrap();
         harness.fleet.edit(rival, |script| {
-            script.identity = Some("identity-rival".to_string());
-            script.sessions = vec![rest_harness::session("shared-a", 200)];
-        });
-        harness
-            .manager
-            .sync_registry()
-            .await
-            .expect("start the rival's actor");
-        harness.await_refreshed(rival).await;
-        assert_eq!(
-            harness.manager.contested_claimants("shared-a"),
-            vec![rival],
-            "the later host is the one that finds the id already claimed"
-        );
-
-        let events = std::sync::Arc::clone(harness.manager.events());
-        let before = events.revision();
-        let mut subscriber = events.subscribe();
-        subscriber.mark_unchanged();
-
-        // The SWAP: the contesting host stops reporting the id it was
-        // contesting and reports a different one the local host also holds.
-        // The set goes from {shared-a} to {shared-b} — same size, different
-        // routing answer.
-        harness.fleet.edit(rival, |script| {
-            script.sessions = vec![rest_harness::session("shared-b", 100)];
-        });
-        harness.manager.refresh_now(rival);
-
-        tokio::time::timeout(NOTICE, subscriber.changed())
-            .await
-            .expect("a contested-set swap must invalidate")
-            .expect("the manager outlives this test");
-        assert!(events.revision() > before);
-        assert_eq!(
-            harness.manager.contested_claimants("shared-a"),
-            Vec::<crate::store::HostId>::new(),
-            "the resolved collision must be gone from the routing answer"
-        );
-        assert_eq!(
-            harness.manager.contested_claimants("shared-b"),
-            vec![rival],
-            "and the new one must be in it"
-        );
-    }
-
-    /// A contested set the peer merely REORDERED is not a change.
-    ///
-    /// Spec: a host that reports the same colliding session ids in a
-    /// different order across two refreshes publishes nothing.
-    ///
-    /// The set is compared by value to decide whether to wake every client,
-    /// and its members arrive in whatever order a peer listed its sessions —
-    /// which is peer-controlled and need not be stable. Compared as a
-    /// sequence, a supervisor that simply reordered its reply would look like
-    /// a routing change on every single refresh tick and wake the whole
-    /// fleet on the refresh timer, which is exactly the polling this feed
-    /// replaces. Canonicalizing at the source is what makes the comparison
-    /// about membership.
-    ///
-    /// A pure permutation is staged rather than a reorder alongside some
-    /// other edit, because anything else would also change the set and prove
-    /// nothing about the ordering.
-    #[farhelm_testtrace::test]
-    async fn an_order_only_contested_permutation_does_not_bump() {
-        // The local host claims both ids first, so the rival registered
-        // afterwards deterministically contests both of them.
-        let harness = rest_harness::helm_listing(vec![
-            rest_harness::session("shared-a", 200),
-            rest_harness::session("shared-b", 100),
-        ])
-        .await;
-        let rival = harness
-            .store
-            .add_ssh_host("user@rival", None, None)
-            .await
-            .expect("register the rival host");
-        harness.fleet.edit(rival, |script| {
-            script.identity = Some("identity-rival".to_string());
+            script.identity = Some("rival-install".into());
             script.sessions = vec![
                 rest_harness::session("shared-a", 200),
                 rest_harness::session("shared-b", 100),
             ];
         });
-        harness
-            .manager
-            .sync_registry()
-            .await
-            .expect("start the rival's actor");
+        harness.manager.sync_registry().await.unwrap();
         harness.await_refreshed(rival).await;
-        assert_eq!(harness.manager.contested_claimants("shared-a"), vec![rival]);
-        assert_eq!(harness.manager.contested_claimants("shared-b"), vec![rival]);
-
+        for host in [local, rival] {
+            assert_eq!(
+                harness.store.cached_sessions(host).await.unwrap().len(),
+                2,
+                "premise: both entries admitted their own rows"
+            );
+        }
         let events = std::sync::Arc::clone(harness.manager.events());
         let before = events.revision();
-
-        // The SAME two ids, listed the other way round. Creation times are
-        // swapped with them so the merged order genuinely changes on the
-        // peer's side rather than the reply simply being rewritten.
-        harness.fleet.edit(rival, |script| {
-            script.sessions = vec![
-                rest_harness::session("shared-b", 200),
-                rest_harness::session("shared-a", 100),
-            ];
-        });
-        harness.refresh_to_completion(rival).await;
-
-        assert_eq!(
-            events.revision(),
-            before,
-            "the same collisions in a different order are the same collisions"
-        );
-        assert_eq!(harness.manager.contested_claimants("shared-a"), vec![rival]);
-        assert_eq!(harness.manager.contested_claimants("shared-b"), vec![rival]);
-    }
-
-    /// A refresh that leaves the contested set alone publishes nothing, so
-    /// the fix above is a comparison rather than a bump-on-every-drain.
-    #[farhelm_testtrace::test]
-    async fn an_unchanged_contested_set_does_not_bump() {
-        let harness =
-            rest_harness::helm_listing(vec![rest_harness::session("shared-a", 200)]).await;
-        let rival = harness
-            .store
-            .add_ssh_host("user@rival", None, None)
-            .await
-            .expect("register the rival host");
-        harness.fleet.edit(rival, |script| {
-            script.identity = Some("identity-rival".to_string());
-            script.sessions = vec![rest_harness::session("shared-a", 200)];
-        });
         harness
-            .manager
-            .sync_registry()
-            .await
-            .expect("start the rival's actor");
-        harness.await_refreshed(rival).await;
-        assert_eq!(harness.manager.contested_claimants("shared-a"), vec![rival]);
-
-        let events = std::sync::Arc::clone(harness.manager.events());
-        let before = events.revision();
+            .fleet
+            .edit(rival, |script| script.sessions.reverse());
         harness.refresh_to_completion(rival).await;
-        assert_eq!(
-            events.revision(),
-            before,
-            "a standing collision that is still standing is not news"
-        );
+        assert_eq!(events.revision(), before, "row order alone is not a change");
+
+        let mut subscriber = events.subscribe();
+        subscriber.mark_unchanged();
+        harness.fleet.edit(rival, |script| {
+            script.sessions[0].title = "renamed rival row".into()
+        });
+        harness.manager.refresh_now(rival);
+        tokio::time::timeout(NOTICE, subscriber.changed())
+            .await
+            .expect("a changed row on either entry invalidates")
+            .expect("the manager outlives this test");
+        assert!(events.revision() > before);
+        let response = harness
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/sessions")
+                    .header("host", "127.0.0.1:7433")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["total"], 4);
+        let mut ids: Vec<_> = value["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_owned())
+            .collect();
+        ids.sort();
+        let mut expected: Vec<_> = [local, rival]
+            .into_iter()
+            .flat_map(|host| ["shared-a", "shared-b"].map(|id| harness.session_ref(host, id)))
+            .collect();
+        expected.sort();
+        assert_eq!(ids, expected);
+        let renamed = value["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == harness.session_ref(rival, "shared-b"))
+            .unwrap();
+        assert_eq!(renamed["title"], "renamed rival row");
     }
 
     /// Registry shape changes invalidate — and a reconcile that changed

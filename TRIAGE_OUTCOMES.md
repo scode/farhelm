@@ -15879,8 +15879,16 @@
   of the entry-prefixed session identity redesign recorded under `pending-approval-can-cross-host-entries.md`, which
   makes a Create reply unable to name another host entry's session at all. This item is executed by that outcome; its
   completion criteria above no longer apply.
-- Execution: folded into `pending-approval-can-cross-host-entries.md`; that outcome's change removes this feedback file
-  and its index entry.
+- Execution: implemented with `pending-approval-can-cross-host-entries.md` in changes `ytoksxyppxmkmmvyssxslqnqwtnmwqnz`
+  (`plan/host-entry-session-ids/01-entry-identities`, draft
+  [#2366](https://github.com/scode/farhelm/pull/2366/changes)), `vluozkmkxyzwqkqsymlokuovlpzuvrtu`
+  (`plan/host-entry-session-ids/02-paired-viewer-state`, draft
+  [#2367](https://github.com/scode/farhelm/pull/2367/changes)), `qnzykzxvyspoxvyrxlrxkkkzlyymklks`
+  (`plan/host-entry-session-ids/03-public-session-references`, draft
+  [#2368](https://github.com/scode/farhelm/pull/2368/changes)), and `umnqtysupwpkwrknytwozuowwmlmlyno`
+  (`plan/host-entry-session-ids/04-entry-local-cache`, draft
+  [#2369](https://github.com/scode/farhelm/pull/2369/changes)). The final change removes this feedback file and its
+  index entry.
 
 ## tunnel-error-notice-obscures-link-disclosure.md
 
@@ -16261,14 +16269,17 @@
     the moment of the update may get no answer.
   - SPEC.md and SPEC_impl.md state the principle and the rules above; the agent instructions describe full IDs.
   - Remove this feedback file and `create-reply-foreign-id-bypasses-cache-refusal.md`, with their index entries.
-- Execution: in progress. Entry-identity foundation in change `ytoksxyppxmkmmvyssxslqnqwtnmwqnz`, bookmark
+- Execution: implemented. Entry-identity foundation in change `ytoksxyppxmkmmvyssxslqnqwtnmwqnz`, bookmark
   `plan/host-entry-session-ids/01-entry-identities`, draft [#2366](https://github.com/scode/farhelm/pull/2366/changes).
   Paired viewer state in change `vluozkmkxyzwqkqsymlokuovlpzuvrtu`, bookmark
   `plan/host-entry-session-ids/02-paired-viewer-state`, draft
   [#2367](https://github.com/scode/farhelm/pull/2367/changes). Public session references and entry-bound routing in
   change `qnzykzxvyspoxvyrxlrxkkkzlyymklks`, bookmark `plan/host-entry-session-ids/03-public-session-references`, draft
-  [#2368](https://github.com/scode/farhelm/pull/2368/changes). Cache uniqueness retirement remains under
-  `plans/queue/host-entry-session-ids.md`; both feedback files remain until the redesign is complete.
+  [#2368](https://github.com/scode/farhelm/pull/2368/changes). Entry-local cache and global collision retirement in
+  change `umnqtysupwpkwrknytwozuowwmlmlyno`, bookmark `plan/host-entry-session-ids/04-entry-local-cache`, draft
+  [#2369](https://github.com/scode/farhelm/pull/2369/changes). Both redesign feedback files and index entries are
+  removed. Supervisors retain their existing protocol; full references bind routing, viewer state and waiting approvals
+  to the selected entry.
 
 ## summary-card-omits-observed-yolo.md
 

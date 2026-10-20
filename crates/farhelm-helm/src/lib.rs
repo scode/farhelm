@@ -2200,22 +2200,14 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             store::HostStoreError::InvalidDestination(_)
             | store::HostStoreError::InvalidRemoteFarhelm(_)
             | store::HostStoreError::InvalidRemoteStateDir(_)
-            | store::HostStoreError::InvalidAlias(_) => {
-                ErrorKind::InvalidRequest
-            }
+            | store::HostStoreError::InvalidAlias(_) => ErrorKind::InvalidRequest,
             store::HostStoreError::DuplicateDestination(_)
             | store::HostStoreError::AliasTaken(_)
             | store::HostStoreError::LocalHostImmutable
             | store::HostStoreError::IdentityMismatch { .. }
             | store::HostStoreError::IdentityClaimed { .. }
             | store::HostStoreError::IdentityClaimedBeforeRegistration { .. }
-            | store::HostStoreError::StaleAttempt { .. }
-            // Two hosts claiming one session id: well-formed request,
-            // incoherent fleet. `Conflict` rather than `Internal` because
-            // the user CAN act on it (remove whichever entry does not
-            // belong) and the error names both candidates so they know
-            // which.
-            | store::HostStoreError::SessionOwnerAmbiguous { .. } => ErrorKind::Conflict,
+            | store::HostStoreError::StaleAttempt { .. } => ErrorKind::Conflict,
         };
     }
     if let Some(refusal) = find_cause::<manager::ManagerError>(e) {

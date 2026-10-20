@@ -1212,13 +1212,12 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(
-            harness
+        assert!(
+            !harness
                 .store
-                .host_of_session("remote-session")
+                .has_cached_session(&remote_key(&harness))
                 .await
                 .unwrap(),
-            None,
             "premise: identity-less sessions have no durable cache"
         );
         harness.fleet.take_down(host);
@@ -1349,13 +1348,12 @@ mod tests {
             ControlMsg::CloseTcpRelay { channel }
         );
         assert!(harness.state.tunnels.list(&remote_key(&harness)).is_empty());
-        assert_eq!(
-            harness
+        assert!(
+            !harness
                 .store
-                .host_of_session("remote-session")
+                .has_cached_session(&remote_key(&harness))
                 .await
-                .unwrap(),
-            None
+                .unwrap()
         );
     }
 
@@ -1433,13 +1431,12 @@ mod tests {
             ControlMsg::CloseTcpRelay { channel }
         );
         assert!(harness.state.tunnels.list(&remote_key(&harness)).is_empty());
-        assert_eq!(
+        assert!(
             harness
                 .store
-                .host_of_session("replacement-session")
+                .has_cached_session(&crate::store::SessionKey::new(host, "replacement-session"))
                 .await
-                .unwrap(),
-            Some(host)
+                .unwrap()
         );
         assert!(
             harness

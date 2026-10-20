@@ -9,3 +9,5 @@ Old bare targets are refused except for the caller's exact own `$FARHELM_SESSION
 supervisors keep working. Removing and re-adding a host starts its pins, seen state and notification marks fresh;
 the upgrade also clears viewer state and the last selection where Farhelm cannot attribute the old ID to one host.
 An approval card already waiting during the update may get no answer.
+
+Matching local session IDs on different hosts remain separately listed and addressable.

@@ -619,10 +619,6 @@ async fn session_list_staged(
     // any capped host keeps the conservative any-host rule.
     let counts_toward_notice =
         |host: HostId| filter.host_scope().is_none_or(|scoped| scoped == host);
-    // Every id already in `view`, so the in-memory rows below can honor
-    // the first-claim rule against the cached ones and each other.
-    let mut listed: std::collections::HashSet<String> =
-        view.iter().map(|row| row.info.id.clone()).collect();
     let mut hosts_truncated = slice
         .truncated_hosts
         .iter()
@@ -635,15 +631,9 @@ async fn session_list_staged(
             hosts_truncated = true;
         }
         let identity = identities.get(&snapshot.id).and_then(Option::as_deref);
+        // Equal suffixes on other entries are independent sessions. Duplicate
+        // IDs within this entry were already refused by the shared drain.
         for info in live.iter() {
-            // First claim holds, as it does inside the cache (SPEC_impl.md's
-            // duplicate-id rule): an id another host already listed, cached
-            // or in memory, is dropped here rather than shown twice and
-            // counted twice. Routing refuses both claimants either way; this
-            // only keeps the LIST coherent.
-            if !listed.insert(info.id.clone()) {
-                continue;
-            }
             let key = store::SessionKey::new(snapshot.id, &info.id);
             let seen = seen_activity.get(&key).copied();
             let marks = notification_marks.get(&key).copied().unwrap_or_default();

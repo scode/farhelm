@@ -1352,44 +1352,25 @@ fn create_target(
 /// creation contract rules out. Every such failure is self-healing within
 /// one refresh — the host has the session and will report it.
 ///
-/// The current cache's global bare-ID uniqueness refusal is still returned
-/// for creates, with a refresh requested for the claimant. Pair routing never
-/// substitutes the cached entry for this operation's entry; the refusal is
-/// the cache's publication constraint, not a claim that the reference can
-/// reach another host. Existing-session mutations keep their successful reply.
+/// References remain bound to the captured entry even if seeding fails.
+/// Another entry reporting the same suffix is independent of this operation.
 pub(crate) async fn record_session(
     state: &AppState,
     claim: &manager::SessionClaim,
     session: &farhelm_proto::SessionInfo,
-) -> Result<(), anyhow::Error> {
+) {
     let Err(error) = state.manager.remember_session(claim, session).await else {
-        return Ok(());
+        return;
     };
     // The id is the PEER's text — escaped and bounded before it reaches a
     // log line, like every other peer-supplied value this process writes.
     let session_id = manager::peer_text(&session.id);
-    if let Some(store::HostStoreError::SessionOwnerAmbiguous { first, second, .. }) = error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<store::HostStoreError>())
-    {
-        warn!(
-            host = claim.host,
-            session_id = session_id.as_str(),
-            first,
-            second,
-            "the host reported a session id another host already caches; refreshing its \
-             cache publication state"
-        );
-        state.manager.refresh_now(claim.host);
-        return Err(error);
-    }
     warn!(
         host = claim.host,
         session_id = session_id.as_str(),
         error = %error,
         "could not record the session for routing; it will be picked up at the next refresh"
     );
-    Ok(())
 }
 
 /// Forget a deleted session everywhere the serving path looks for it.
@@ -1777,8 +1758,8 @@ struct CreateAcceptance {
 /// Apply the same source veto, cache, history and default effects to first
 /// replies and reconciled replies. The veto precedes every durable side effect;
 /// best-effort suggestion writes (history, remembered launch settings) never turn an
-/// accepted create into a failure. The one caching outcome that does is an id
-/// another host already caches: see `record_session`.
+/// accepted create into a failure. Cache writes are best effort too: every
+/// accepted reply remains bound to the operation's captured entry.
 async fn accept_created_session(
     state: &AppState,
     claim: &manager::SessionClaim,
@@ -1797,20 +1778,7 @@ async fn accept_created_session(
     if let Some(accept_result) = &accept_result {
         accept_result(&session)?;
     }
-    // The current cache still refuses a bare ID held by another entry.
-    // Public projection always retains this claim's prefix, independently
-    // of whether freshness permits the seed to land.
-    record_session(state, claim, &session)
-        .await
-        .map_err(|error| {
-            error.context(format!(
-                "the session was created on host {}, but its id {} is already cached for another \
-             host, so it cannot be addressed safely; it will show as contested until one of \
-             them stops reporting it",
-                claim.host,
-                manager::peer_text(&session.id)
-            ))
-        })?;
+    record_session(state, claim, &session).await;
     // A fresh request's cwd is not its accepted destination: the target
     // allocated that path. Keep the actual path for diagnostics while repo
     // intent, independently captured from the request, controls reuse.
@@ -2192,7 +2160,7 @@ pub(crate) async fn reconcile_agent_checkout(
     else {
         return Ok(None);
     };
-    record_session(state, claim, &session).await?;
+    record_session(state, claim, &session).await;
     Ok(Some(session))
 }
 
@@ -2209,7 +2177,7 @@ async fn accept_fresh_reconciled(
     origin: CreateOrigin,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
     if matches!(origin, CreateOrigin::Agent { .. }) {
-        record_session(state, claim, &session).await?;
+        record_session(state, claim, &session).await;
         Ok(session)
     } else {
         accept_created_session(state, claim, session, acceptance).await
@@ -2879,9 +2847,8 @@ async fn do_restart_session_named(
     let session = client
         .restart_session_named(id, stop_if_running, with, expected_launch, named_start)
         .await?;
-    // An ambiguity is logged and refreshed inside; this id was already
-    // routed, so the reply stands.
-    let _ = record_session(state, &claim, &session).await;
+    // Cache publication is best effort; the supervisor's successful reply stands.
+    record_session(state, &claim, &session).await;
     Ok((claim, session))
 }
 
@@ -2926,9 +2893,8 @@ pub(crate) async fn do_rename_session(
     let session = client
         .rename_session(&key.session_id, title, expected_title)
         .await?;
-    // An ambiguity is logged and refreshed inside; this id was already
-    // routed, so the reply stands.
-    let _ = record_session(state, &claim, &session).await;
+    // Cache publication is best effort; the supervisor's successful reply stands.
+    record_session(state, &claim, &session).await;
     Ok((claim, session))
 }
 
