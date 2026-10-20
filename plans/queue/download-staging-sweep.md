@@ -269,29 +269,44 @@ bookmark and PR. Open, not merged. If a `## Decisions` section exists, its lates
 close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the
 queue script, write a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-10-20 (claim d6f55f).
+### 2026-10-20: answer to a blocked question
 
-### Interrupted desktop downloads need a decision about older leftovers
+The question, as the executor put it:
 
-Quitting during a desktop download can leave hidden partial files in Downloads. Triage approved removing those leftovers
-at the next launch, within about 100 lines, while never touching a download another running instance still owns.
+> Blocked on 2026-10-20 (claim d6f55f).
+>
+> ### Interrupted desktop downloads need a decision about older leftovers
+>
+> Quitting during a desktop download can leave hidden partial files in Downloads. Triage approved removing those
+> leftovers at the next launch, within about 100 lines, while never touching a download another running instance still
+> owns.
+>
+> The proposed fix gives each new download its own lifetime lock, then reclaims abandoned staging at startup. The
+> implementation, regression test and implementation note total 96 lines. The test distinguishes an abandoned
+> initialized save from a locked active save and an initializing marker, and preserves unrelated files and a directory
+> symlink. Quit still exits promptly.
+>
+> Older builds never wrote ownership markers. An unmarked directory could therefore hold an abandoned download or a
+> download still owned by an older running instance, including one using a different helm state directory. Neither its
+> name nor its age proves which. The prototype safely leaves these older directories alone, but the original completion
+> criterion did not permit that exclusion. Independent review found this unresolved requirement; no fix has been
+> published.
+>
+> Allow recovery to cover only downloads created by builds with ownership markers, leaving older unmarked directories
+> untouched? That is the recommendation: it fixes future interrupted downloads within the size gate and preserves the
+> active-save guarantee, but existing legacy partial files remain. The alternative is to keep legacy recovery required
+> and defer this fix until a safe compatibility approach and any larger scope are agreed; deleting unmarked directories
+> by prefix or age would break the active-save guarantee. The outcome can also be discarded if the narrower fix is not
+> useful enough.
 
-The proposed fix gives each new download its own lifetime lock, then reclaims abandoned staging at startup. The
-implementation, regression test and implementation note total 96 lines. The test distinguishes an abandoned initialized
-save from a locked active save and an initializing marker, and preserves unrelated files and a directory symlink. Quit
-still exits promptly.
+The maintainer's answer:
 
-Older builds never wrote ownership markers. An unmarked directory could therefore hold an abandoned download or a
-download still owned by an older running instance, including one using a different helm state directory. Neither its
-name nor its age proves which. The prototype safely leaves these older directories alone, but the original completion
-criterion did not permit that exclusion. Independent review found this unresolved requirement; no fix has been
-published.
+The maintainer, 2026-10-20: "do the proposed plan you gave me", referring to this restatement, agreed in the review
+session:
 
-Allow recovery to cover only downloads created by builds with ownership markers, leaving older unmarked directories
-untouched? That is the recommendation: it fixes future interrupted downloads within the size gate and preserves the
-active-save guarantee, but existing legacy partial files remain. The alternative is to keep legacy recovery required and
-defer this fix until a safe compatibility approach and any larger scope are agreed; deleting unmarked directories by
-prefix or age would break the active-save guarantee. The outcome can also be discarded if the narrower fix is not useful
-enough.
+Replace the launch sweep and per-download lock with cleanup on quit: track this process's live download staging folders
+in-process and delete them on the event-loop teardown that runs before exit; refuse new downloads once quitting. No
+inter-process locking, no start-up sweep (SPEC_impl.md "Cleanup on quit"). Leftovers from earlier builds, crashes and
+force-quits stay; drop the ledger's "from an earlier run" and "another running instance" criteria.
