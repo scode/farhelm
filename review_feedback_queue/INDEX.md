@@ -16,9 +16,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`agent-checkout-test-compares-lexical-tmp.md`](agent-checkout-test-compares-lexical-tmp.md) — New agent checkout
-  tests compare canonical destinations with lexical /tmp paths and fail on macOS.
-
 - [`notification-test-cleanup-skips-preference-restoration.md`](notification-test-cleanup-skips-preference-restoration.md)
   — A failed notification fixture cleanup can skip later session releases and shared preference restoration.
 

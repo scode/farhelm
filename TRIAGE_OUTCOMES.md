@@ -17174,7 +17174,10 @@
 - Completion criteria: those assertions compare canonical paths. Size gate: about 100 lines of diff (code, tests and
   docs, not counting this ledger, the queue removal or the changelog fragment); over it, block and bring it back. Remove
   the feedback file and its index entry.
-- Execution: planned in `plans/queue/test-hygiene-oct19.md`.
+- Execution: implemented in change `xrsnxnottyqnyrnqyzrnwrkumkotlyuw`, bookmark
+  `plan/test-hygiene-oct19/01-canonical-checkout-paths`. The three named expectations use the canonical fixture root,
+  matching managed admission on systems where the temporary directory has a symlink spelling. The code and documentation
+  diff totals 20 lines, within the 100-line gate. [PR #2429](https://github.com/scode/farhelm/pull/2429/changes).
 
 ## notification-test-cleanup-skips-preference-restoration.md
 
