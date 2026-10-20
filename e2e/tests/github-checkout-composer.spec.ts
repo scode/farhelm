@@ -169,7 +169,9 @@ test("repository keyboard navigation keeps the active suggestion visible through
  * The real supervisor scans a local Git fixture; a greeted, unchanging feed
  * prevents the revision watcher from supplying the refresh under test. No
  * launch or network clone is performed. A later notification exposes an
- * external clear to the same open launcher. Title edits must keep configured
+ * external clear to the same open launcher. An unrelated epoch change must keep
+ * the setup editor's DOM identity, draft and focus through a pending recheck.
+ * Title edits must keep configured
  * discovery idle. A command-line host override then
  * proves the field follows effective host configuration, not the global GET. */
 test("inline checkout folder setup refreshes discovery and preview and respects host overrides", async ({ page, request }, testInfo) => {
@@ -193,6 +195,10 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
   const previousReply = await request.get("/api/checkout-root");
   expect(previousReply.ok(), await previousReply.text()).toBe(true);
   const previous = await previousReply.json();
+  const previousCommandReply = await request.get("/api/checkout-post-clone");
+  expect(previousCommandReply.ok()).toBe(true);
+  const previousCommand = await previousCommandReply.json();
+  let releaseDiscovery: (() => void) | undefined;
   const root = await mkdtemp(path.join(stack.state, "inline-checkouts-"));
   let overrideSet = false;
   let submittedSave: Request | undefined;
@@ -240,10 +246,46 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
 
     // A repository can be selected before setup. Keep its folder editor and
     // refused draft through the failed preview instead of hiding the remedy.
+    const selectedDiscovery = page.waitForResponse(async response =>
+      response.url().endsWith("/api/github-repositories") && response.ok()
+      && (await response.json()).needs_checkout_root === true
+    );
     await selectRepo(page);
+    await selectedDiscovery;
     await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "failed");
     await expect(folder).toHaveValue("relative-folder");
     await expect(form.locator(".create-session-submit")).toBeDisabled();
+    await folder.focus();
+    await expect(folder).toBeFocused();
+    const originalEditor = await folder.elementHandle();
+    expect(originalEditor).not.toBeNull();
+    const held = new Promise<void>(resolve => { releaseDiscovery = resolve; });
+    await page.route("**/api/github-repositories", async route => { await held; await route.continue(); });
+    const rechecking = page.waitForRequest(outgoing => outgoing.url().endsWith("/api/github-repositories"));
+    const historyBefore = await request.get(`/api/launch-history?host=${host.id}`);
+    expect(historyBefore.ok()).toBe(true);
+    const revision = (await historyBefore.json()).checkout_config_revision;
+    const unrelated = await request.put("/api/checkout-post-clone", { data: { command: `true # ${root}` } });
+    expect(unrelated.ok()).toBe(true);
+    const historyAfter = await request.get(`/api/launch-history?host=${host.id}`);
+    expect(historyAfter.ok()).toBe(true);
+    expect((await historyAfter.json()).checkout_config_revision).toBeGreaterThan(revision);
+    expect(await (await request.get("/api/checkout-root")).json()).toEqual({ root: null });
+    expect(feed.openSockets()).toBeGreaterThan(0);
+    feed.notify(2);
+    await rechecking;
+    expect(await originalEditor!.evaluate(element => element.isConnected)).toBe(true);
+    await expect(folder).toHaveValue("relative-folder");
+    await expect(folder).toBeFocused();
+    const refreshed = page.waitForResponse(async response =>
+      response.url().endsWith("/api/github-repositories") && response.ok()
+      && (await response.json()).needs_checkout_root === true
+    );
+    releaseDiscovery!();
+    await refreshed;
+    expect(await originalEditor!.evaluate(element => element.isConnected)).toBe(true);
+    await expect(folder).toHaveValue("relative-folder");
+    await expect(folder).toBeFocused();
     const discoveryAfterSave = page.waitForResponse(async (response) =>
       response.url().endsWith("/api/github-repositories") && response.ok()
       && (await response.json()).needs_checkout_root === false
@@ -282,7 +324,7 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
     // The stub intentionally withheld earlier invalidations to isolate save's
     // explicit refresh. Deliver this external edit only after proving it exists.
     expect(feed.openSockets()).toBeGreaterThan(0);
-    feed.notify(2);
+    feed.notify(3);
     await expect(folder).toBeEditable();
     await expect(folder).toHaveValue("");
     await expect(preview).toHaveAttribute("data-preview-state", "failed");
@@ -313,6 +355,7 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
     // Settle the app-owned save before restoring configuration. A failure in
     // any release is reported, while the remaining restoration still runs.
     await cleanupOwnedSteps(bodyFailed, [
+      ["held discovery", async () => { releaseDiscovery?.(); }],
       ["pending checkout save", async () => {
         const settled = await submittedSave?.response();
         if (settled) await settled.finished();
@@ -323,6 +366,10 @@ test("inline checkout folder setup refreshes discovery and preview and respects 
       ["global checkout folder", async () => {
         const restored = await request.put("/api/checkout-root", { data: previous });
         expect(restored.ok(), await restored.text()).toBe(true);
+      }],
+      ["post-clone command", async () => {
+        const restored = await request.put("/api/checkout-post-clone", { data: previousCommand });
+        expect(restored.ok()).toBe(true);
       }],
       ["checkout fixture directory", () => rm(root, { recursive: true, force: true })],
     ]);
