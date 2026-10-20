@@ -272,6 +272,7 @@ impl BarMenuState {
             order,
             handles: self.item_handles,
             focus: self.focus_queue,
+            generation: self.open_generation,
             focused: self.menu_focus,
             requested: self.menu_requested,
             open_intent: self.open_intent,
@@ -338,7 +339,7 @@ fn use_bar_menu(layout_epoch: ReadSignal<u64>, name: &'static str) -> BarMenuSta
     let mut open_intent = use_signal(|| None::<MenuOpenIntent>);
     let mut item_handles = use_signal(HashMap::new);
     let focus_queue = MenuFocusQueue {
-        target: use_signal(|| None::<Rc<MountedData>>),
+        target: use_signal(|| None),
         in_flight: use_signal(|| None),
         draining: use_signal(|| false),
     };
@@ -495,6 +496,7 @@ fn BarMenuFlyout(
                                 r#type: "button",
                                 class: "btn session-row-menu-item host-row-menu-item bar-menu-item",
                                 "data-bar-menu-item": item.label(),
+                                "data-menu-focus": crate::menu_panel::menu_item_focus_key(wiring, item),
                                 "data-tooltip": item.tooltip(),
                                 role: "menuitem",
                                 tabindex: if tab_stop == Some(item) { "0" } else { "-1" },

@@ -137,6 +137,7 @@ fn NumberShortcutMenu(
         order,
         handles,
         focus,
+        generation,
         focused,
         requested,
         open_intent: intent,
@@ -213,6 +214,7 @@ fn NumberShortcutMenu(
                             for key in order.actions() {
                                 button { r#type: "button", class: "btn session-row-menu-item templates-number-option", role: "menuitem",
                                     tabindex: if focused().and_then(|position| order.get(position)).or(order.get(0)) == Some(key) { "0" } else { "-1" },
+                                    "data-menu-focus": crate::menu_panel::menu_item_focus_key(wiring, key),
                                     "data-tooltip": if let Some(key) = key { format!("give this template {}", TEMPLATE_SHORTCUTS.number_chord(key)) } else { "remove this template's number shortcut".into() },
                                     onmounted: move |element| remember_menu_item(wiring, key, element.data()),
                                     onfocusin: move |_| record_menu_item_focus(wiring, key), onfocusout: move |_| focused.set(None),

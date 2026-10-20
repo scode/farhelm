@@ -1231,7 +1231,7 @@ pub(super) fn SessionRow(
     // The row's serialized focus pipeline — see `MenuFocusQueue` for the
     // interleaving it exists to prevent.
     let focus_queue = MenuFocusQueue {
-        target: use_signal(|| None::<Rc<MountedData>>),
+        target: use_signal(|| None),
         in_flight: use_signal(|| None),
         draining: use_signal(|| false),
     };
@@ -1345,6 +1345,7 @@ pub(super) fn SessionRow(
         order: menu_order,
         handles: item_handles,
         focus: focus_queue,
+        generation: open_generation,
         focused: menu_focus,
         requested: menu_requested,
         open_intent,
@@ -2192,6 +2193,7 @@ pub(super) fn SessionRow(
                                         },
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Rename) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::Rename),
                                         onmounted: move |element| {
                                             remember_menu_item(
                                                 menu_wiring,
@@ -2239,6 +2241,7 @@ pub(super) fn SessionRow(
                                         "data-tooltip": "{mark_seen_tooltip}",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::MarkSeen) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::MarkSeen),
                                         onmounted: move |element| {
                                             remember_menu_item(
                                                 menu_wiring,
@@ -2280,6 +2283,7 @@ pub(super) fn SessionRow(
                                     },
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::TogglePin) { "0" } else { "-1" },
+                                    "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::TogglePin),
                                     onmounted: move |element| remember_menu_item(menu_wiring, MenuAction::TogglePin, element.data()),
                                     onfocusin: move |_| record_menu_item_focus(menu_wiring, MenuAction::TogglePin),
                                     onfocusout: move |_| menu_focus.set(None),
@@ -2310,6 +2314,7 @@ pub(super) fn SessionRow(
                                     aria_describedby: "session-menu-clone-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::Clone) { "0" } else { "-1" },
+                                    "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::Clone),
                                     onmounted: move |element| {
                                         remember_menu_item(menu_wiring, MenuAction::Clone, element.data())
                                     },
@@ -2358,6 +2363,7 @@ pub(super) fn SessionRow(
                                     aria_describedby: "session-menu-replace-with-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::ReplaceWith) { "0" } else { "-1" },
+                                    "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::ReplaceWith),
                                     onmounted: move |element| {
                                         remember_menu_item(menu_wiring, MenuAction::ReplaceWith, element.data())
                                     },
@@ -2404,6 +2410,7 @@ pub(super) fn SessionRow(
                                     aria_describedby: "session-menu-replace-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::Replace) { "0" } else { "-1" },
+                                    "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::Replace),
                                     onmounted: move |element| {
                                         remember_menu_item(menu_wiring, MenuAction::Replace, element.data())
                                     },
@@ -2441,6 +2448,7 @@ pub(super) fn SessionRow(
                                         aria_describedby: "session-menu-stop-description",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Stop) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::Stop),
                                         onmounted: move |element| {
                                             remember_menu_item(
                                                 menu_wiring,
@@ -2489,6 +2497,7 @@ pub(super) fn SessionRow(
                                         aria_describedby: "session-menu-delete-description",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Delete) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::Delete),
                                         onmounted: move |element| {
                                             remember_menu_item(
                                                 menu_wiring,

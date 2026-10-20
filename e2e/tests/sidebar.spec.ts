@@ -1712,6 +1712,247 @@ test("menu arrows follow independent focus during a queued burst (desktop timing
   }
 });
 
+/** A per-page test gate; production still supplies the function it releases. */
+type HeldMenuFocusWindow = Window & {
+  __farhelmMenuFocus: (key: string, ungated: boolean, epoch: number) => boolean | Promise<boolean>;
+  __heldMenuFocus?: {
+    entered: { key: string; ungated: boolean; epoch: number } | null;
+    completed: boolean | null;
+    focusAfterRelease: string[];
+    release: () => void;
+    restore: () => void;
+  };
+};
+
+/**
+ * Hold one real page-side focus call after Rust has sent it. The browser's
+ * synchronous bridge otherwise cannot expose the desktop's in-flight window.
+ * `entered` proves that boundary; `completed` acknowledges the shipped guard
+ * actually ran after release, rather than asserting before stale work lands.
+ */
+async function holdNextMenuFocus(page: Page, holdUngated: boolean): Promise<void> {
+  await page.evaluate((holdUngated) => {
+    const win = window as HeldMenuFocusWindow;
+    const original = win.__farhelmMenuFocus;
+    if (typeof original !== "function" || win.__heldMenuFocus) {
+      throw new Error("menu focus helper must be installed and not already held");
+    }
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => release = resolve);
+    let released = false;
+    const recordFocus = (event: FocusEvent) => {
+      const key = (event.target as HTMLElement).getAttribute("data-menu-focus");
+      if (released && key !== null) state.focusAfterRelease.push(key);
+    };
+    const state = {
+      entered: null as { key: string; ungated: boolean; epoch: number } | null,
+      completed: null as boolean | null,
+      focusAfterRelease: [] as string[],
+      release: () => {
+        released = true;
+        release();
+      },
+      restore: () => {
+        release();
+        document.removeEventListener("focusin", recordFocus, true);
+        win.__farhelmMenuFocus = original;
+        delete win.__heldMenuFocus;
+      },
+    };
+    document.addEventListener("focusin", recordFocus, true);
+    win.__heldMenuFocus = state;
+    win.__farhelmMenuFocus = async (key, ungated, epoch) => {
+      if (state.entered || ungated !== holdUngated) return original(key, ungated, epoch);
+      state.entered = { key, ungated, epoch };
+      await gate;
+      const result = await original(key, ungated, epoch);
+      state.completed = result;
+      return result;
+    };
+  }, holdUngated);
+}
+
+/**
+ * Exercise the already-sent boundary, not only Rust's unsent queue. Independent
+ * focus must reject a held arrow; app-owned focus must preserve queued arrows,
+ * including the ungated first landing of a keyboard-opened menu. None of these
+ * tests relies on a timer to guess when the bridge request is in flight.
+ */
+for (
+  const scenario of [
+    "fourth item",
+    "outside toggle",
+    "arrow burst",
+    "keyboard opening",
+    "same in-flight item",
+    "same in-flight item with fresh arrow",
+    "fourth item with fresh arrow",
+  ] as const
+) {
+  test(`menu in-flight focus respects ${scenario} (desktop timing simulation)`, async ({ page, request }) => {
+    // The default real fake-agent completes attachment, avoiding the reconnect
+    // focus churn of a bare sleep command while this test owns a held bridge.
+    const session = await createSession(request, { title: `menu-sent-focus-${Date.now()}`, cwd: "/tmp" });
+    let bodyFailed = false;
+    try {
+      await hideSeenState(page);
+      await pinAutoSelect(page, session.id);
+      await page.goto("/");
+      const target = row(page, session.id);
+      await expect(target).toBeVisible({ timeout: 20_000 });
+      await waitForHostsListSettled(page);
+      await waitForSessionRevealed(page, session.id);
+      const toggle = target.locator(".session-row-menu");
+      const items = target.getByRole("menuitem");
+      const opening = scenario === "keyboard opening";
+      const sameTarget = scenario.startsWith("same in-flight item");
+      const freshBeforeRelease = scenario.endsWith("with fresh arrow");
+      const heldIndex = opening ? 0 : scenario === "arrow burst" || sameTarget ? 1 : 2;
+
+      if (opening) {
+        // This is the first opening on this page: installing the observer
+        // only in its held eval would miss both following navigation keys.
+        await expect.poll(() => page.evaluate(() => typeof (window as HeldMenuFocusWindow).__farhelmMenuFocus)).toBe("function");
+        await expect(items).toHaveCount(0);
+        await toggle.focus();
+        await expect(toggle).toBeFocused();
+      } else {
+        await openRowMenu(target);
+        await expect(items).toHaveCount(7);
+        await expect(items.nth(0)).toBeFocused();
+        if (heldIndex === 2) {
+          await page.keyboard.press("ArrowDown");
+          await expect(items.nth(1)).toBeFocused();
+        }
+      }
+
+      await holdNextMenuFocus(page, opening);
+      await page.keyboard.press("ArrowDown");
+      await expect(items).toHaveCount(7);
+      await expect(items.nth(3)).toHaveAccessibleName("replace with");
+      await expect(items.nth(4)).toHaveAccessibleName("replace");
+      const heldKey = await items.nth(heldIndex).getAttribute("data-menu-focus");
+      expect(heldKey, "the held destination has an action-and-opening marker").toBeTruthy();
+      await expect.poll(() => page.evaluate(() => (window as HeldMenuFocusWindow).__heldMenuFocus?.entered)).toEqual({
+        key: heldKey,
+        ungated: opening,
+        epoch: expect.any(Number),
+      });
+      await expect(opening ? toggle : items.nth(heldIndex - 1)).toBeFocused();
+
+      const independent = sameTarget || scenario.startsWith("fourth item") || scenario === "outside toggle";
+      if (independent) {
+        if (sameTarget) {
+          // This queued item 2 must be retired even though the independent
+          // landing matches the held item's handle. A fresh Down starts at 1.
+          await page.keyboard.press("ArrowDown");
+          await expect(items.nth(0)).toBeFocused();
+        }
+        const independentFocus = sameTarget ? items.nth(1) : scenario === "outside toggle" ? toggle : items.nth(3);
+        await independentFocus.focus();
+        await expect(independentFocus).toBeFocused();
+        if (freshBeforeRelease) {
+          // A new physical key cannot revalidate the old request's token, or
+          // inherit requested state from before this independent focus change.
+          await page.keyboard.press("ArrowDown");
+          await expect(independentFocus).toBeFocused();
+        }
+      } else {
+        // Both presses arrive while the earlier request is already in flight.
+        // The queue may coalesce their destinations, but must count both keys.
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("ArrowDown");
+        await expect(opening ? toggle : items.nth(0)).toBeFocused();
+      }
+      // A refusal must come from the focus epoch, not a missing/replaced target.
+      await expect(items.nth(heldIndex)).toHaveAttribute("data-menu-focus", heldKey!);
+      await page.evaluate(() => (window as HeldMenuFocusWindow).__heldMenuFocus!.release());
+      await expect.poll(() => page.evaluate(() => (window as HeldMenuFocusWindow).__heldMenuFocus?.completed)).toBe(
+        !independent,
+      );
+
+      const landingIndex = sameTarget ? freshBeforeRelease ? 2 : 1 : opening ? 2 : freshBeforeRelease ? 4 : 3;
+      const landing = scenario === "outside toggle" ? toggle : items.nth(landingIndex);
+      await expect(landing, "released bridge work must respect the actual focus owner").toBeFocused();
+      if (freshBeforeRelease) {
+        // Final focus alone misses a stale intermediate pullback followed by a
+        // valid fresh move. Keep all focus-ins from release through that landing.
+        const focusAfterRelease = await page.evaluate(() =>
+          (window as HeldMenuFocusWindow).__heldMenuFocus!.focusAfterRelease
+        );
+        expect(focusAfterRelease, "the stale destination must never receive focus after release").not.toContain(heldKey);
+      }
+      await page.keyboard.press("ArrowDown");
+      await expect(items.nth(scenario === "outside toggle" ? 0 : landingIndex + 1)).toBeFocused();
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["held menu focus", () => page.evaluate(() => (window as HeldMenuFocusWindow).__heldMenuFocus?.restore())],
+        ["session", () => cleanupSession(request, session.id)],
+      ]);
+    }
+  });
+}
+
+/**
+ * An ungated first landing remains app-owned after independent focus changes
+ * its epoch. It may still land, but cannot cancel a fresh arrow already queued
+ * from the independently focused item while that opening was in flight.
+ */
+test("menu in-flight focus respects keyboard opening with independent focus (desktop timing simulation)", async ({ page, request }) => {
+  const session = await createSession(request, { title: `menu-opening-focus-${Date.now()}`, cwd: "/tmp" });
+  let bodyFailed = false;
+  try {
+    await hideSeenState(page);
+    await pinAutoSelect(page, session.id);
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsListSettled(page);
+    await waitForSessionRevealed(page, session.id);
+    const toggle = target.locator(".session-row-menu");
+    const items = target.getByRole("menuitem");
+    await expect.poll(() => page.evaluate(() => typeof (window as HeldMenuFocusWindow).__farhelmMenuFocus)).toBe("function");
+    await expect(items).toHaveCount(0);
+    await toggle.focus();
+    await expect(toggle).toBeFocused();
+    await holdNextMenuFocus(page, true);
+    await page.keyboard.press("ArrowDown");
+    await expect(items).toHaveCount(7);
+    await expect(items.nth(3)).toHaveAccessibleName("replace with");
+    await expect(items.nth(4)).toHaveAccessibleName("replace");
+    const heldKey = await items.nth(0).getAttribute("data-menu-focus");
+    expect(heldKey, "the first opening has a durable target marker").toBeTruthy();
+    await expect.poll(() => page.evaluate(() => (window as HeldMenuFocusWindow).__heldMenuFocus?.entered)).toEqual({
+      key: heldKey,
+      ungated: true,
+      epoch: expect.any(Number),
+    });
+    await expect(toggle).toBeFocused();
+
+    await items.nth(3).focus();
+    await expect(items.nth(3)).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(items.nth(3), "the fresh arrow waits behind the held opening").toBeFocused();
+    await expect(items.nth(0)).toHaveAttribute("data-menu-focus", heldKey!);
+    await page.evaluate(() => (window as HeldMenuFocusWindow).__heldMenuFocus!.release());
+    await expect.poll(() => page.evaluate(() => (window as HeldMenuFocusWindow).__heldMenuFocus?.completed)).toBe(true);
+    await expect(items.nth(4), "the app-owned opening cannot cancel the fresh destination").toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(items.nth(5)).toBeFocused();
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["held menu focus", () => page.evaluate(() => (window as HeldMenuFocusWindow).__heldMenuFocus?.restore())],
+      ["session", () => cleanupSession(request, session.id)],
+    ]);
+  }
+});
+
 /**
  * Opening the menu ENTERS it, the menu is a single tab stop, and the keys
  * it does not claim stay native.

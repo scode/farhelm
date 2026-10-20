@@ -168,12 +168,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   through. Overhaul it with more structure, such as tabs, so related settings are grouped and any one of them is easy to
   find. The grouping and layout are TBD. Plan: `plans/queue/structured-settings-dialog.md`.
 
-- **Stop rapid menu arrow presses from pulling focus back.** In the desktop app, a focus move already sent to the page
-  cannot be recalled, so a rapid arrow press whose request was already on its way can still pull focus back after the
-  user moved it: Down twice, click the fourth item, Down can still end on the fourth item when the second press's focus
-  move was already sent. The menu focus fix (#2232) narrowed this and removed the earlier TODO entry; this entry tracks
-  the remaining case. Plan: `plans/queue/menu-arrow-focus-race.md`.
-
 - **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
   session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
   request, and the command is hidden from agents. One gap remains where a delivered message could do something the user

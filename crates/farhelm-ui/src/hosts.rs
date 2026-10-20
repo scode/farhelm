@@ -3260,7 +3260,7 @@ fn HostRow(
     let mut previous_menu_order = use_signal(|| menu_order);
     let mut open_intent = use_signal(|| None::<MenuOpenIntent>);
     let focus_queue = MenuFocusQueue {
-        target: use_signal(|| None::<Rc<MountedData>>),
+        target: use_signal(|| None),
         in_flight: use_signal(|| None),
         draining: use_signal(|| false),
     };
@@ -3304,6 +3304,7 @@ fn HostRow(
         order: menu_order,
         handles: item_handles,
         focus: focus_queue,
+        generation: open_generation,
         focused: menu_focus,
         requested: menu_requested,
         open_intent,
@@ -3606,6 +3607,7 @@ fn HostRow(
                                     aria_describedby: "host-menu-retry-description",
                                     aria_disabled: if busy { "true" },
                                     tabindex: if menu_tab_stop == Some(HostMenuAction::Retry) { "0" } else { "-1" },
+                                    "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, HostMenuAction::Retry),
                                     onmounted: move |element| {
                                         remember_menu_item(menu_wiring, HostMenuAction::Retry, element.data())
                                     },
@@ -3641,6 +3643,7 @@ fn HostRow(
                                         aria_describedby: "host-menu-adopt-description",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(HostMenuAction::Adopt) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, HostMenuAction::Adopt),
                                         onmounted: move |element| {
                                             remember_menu_item(menu_wiring, HostMenuAction::Adopt, element.data())
                                         },
@@ -3685,6 +3688,7 @@ fn HostRow(
                                         aria_describedby: "host-menu-rerun-description",
                                         aria_disabled: if rerun_disabled { "true" },
                                         tabindex: if menu_tab_stop == Some(HostMenuAction::Rerun) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, HostMenuAction::Rerun),
                                         onmounted: move |element| {
                                             remember_menu_item(menu_wiring, HostMenuAction::Rerun, element.data())
                                         },
@@ -3735,6 +3739,7 @@ fn HostRow(
                                         aria_describedby: "host-menu-automatic-setup-description",
                                         aria_disabled: if setup_disabled { "true" },
                                         tabindex: if menu_tab_stop == Some(HostMenuAction::AutomaticSetup) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, HostMenuAction::AutomaticSetup),
                                         onmounted: move |element| {
                                             remember_menu_item(
                                                 menu_wiring,
@@ -3781,6 +3786,7 @@ fn HostRow(
                                         aria_describedby: "host-menu-update-description",
                                         aria_disabled: if update_disabled { "true" },
                                         tabindex: if menu_tab_stop == Some(HostMenuAction::Update) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, HostMenuAction::Update),
                                         onmounted: move |element| {
                                             remember_menu_item(menu_wiring, HostMenuAction::Update, element.data())
                                         },
@@ -3836,6 +3842,7 @@ fn HostRow(
                                     aria_describedby: "host-menu-settings-description",
                                     aria_disabled: if settings_disabled { "true" },
                                     tabindex: if menu_tab_stop == Some(HostMenuAction::Settings) { "0" } else { "-1" },
+                                    "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, HostMenuAction::Settings),
                                     onmounted: move |element| {
                                         remember_menu_item(menu_wiring, HostMenuAction::Settings, element.data())
                                     },
@@ -3875,6 +3882,7 @@ fn HostRow(
                                             aria_describedby: "host-menu-uninstall-description",
                                             aria_disabled: if uninstall_disabled { "true" },
                                             tabindex: if menu_tab_stop == Some(HostMenuAction::Uninstall) { "0" } else { "-1" },
+                                            "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, HostMenuAction::Uninstall),
                                             onmounted: move |element| {
                                                 remember_menu_item(menu_wiring, HostMenuAction::Uninstall, element.data())
                                             },
@@ -3919,6 +3927,7 @@ fn HostRow(
                                         aria_describedby: "host-menu-remove-description",
                                         aria_disabled: if busy { "true" },
                                         tabindex: if menu_tab_stop == Some(HostMenuAction::Remove) { "0" } else { "-1" },
+                                        "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, HostMenuAction::Remove),
                                         onmounted: move |element| {
                                             remember_menu_item(menu_wiring, HostMenuAction::Remove, element.data())
                                         },

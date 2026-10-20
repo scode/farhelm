@@ -241,7 +241,9 @@ for (const [field, value] of [
 
 /** Keys move between saved names independently of the bolt. Keyboard Escape
  * closes only the nested menu; rename must retain the key, while delete/Undo
- * retires it permanently. Partial templates retain the same complete key menu.
+ * retires it permanently. The popup's arrows must still move focus while the
+ * surrounding dialog isolates the rest of the page. Partial templates retain
+ * the same complete key menu.
  * An external move made while this dialog stays open must survive its next edit.
  */
 test("number keys move, follow rename, and stay freed after undo", async ({ page, request }) => {
@@ -266,6 +268,10 @@ test("number keys move, follow rename, and stay freed after undo", async ({ page
     await expect(keyButton(a)).toBeFocused();
     await page.keyboard.press("ArrowDown");
     const menu = dialog.getByRole("menu", { name: `number key for ${a}`, exact: true });
+    await expect(menu.getByRole("menuitem", { name: "no shortcut", exact: true })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.getByRole("menuitem", { name: "Ctrl+Shift+1", exact: true })).toBeFocused();
+    await page.keyboard.press("ArrowUp");
     await expect(menu.getByRole("menuitem", { name: "no shortcut", exact: true })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
