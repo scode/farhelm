@@ -17068,7 +17068,9 @@
   catastrophically major with huge user impact.
 - Completion criteria: SPEC.md states that principle, in a place the existing frozen-material rules for published
   release notes can point to. No change to the published notes or shots. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
+- Execution: complete in change `ukpoywtksskkslqsomspnpkxztlzqpms`, bookmark
+  `plan/spec-scope-clarifications/02-keep-published-notes`,
+  [PR #2414](https://github.com/scode/farhelm/pull/2414/changes).
 
 ## draft-release-note-promises-update-confirmation.md
 
@@ -17080,7 +17082,9 @@
 - Completion criteria: covered by the SPEC.md principle recorded under
   `template-screenshot-implies-deletion-needs-save.md` (one spec change for both); no change to the published notes.
   Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/spec-scope-clarifications.md`.
+- Execution: complete in change `ukpoywtksskkslqsomspnpkxztlzqpms`, bookmark
+  `plan/spec-scope-clarifications/02-keep-published-notes`,
+  [PR #2414](https://github.com/scode/farhelm/pull/2414/changes).
 
 ## release-review-links-allow-page-script.md
 
