@@ -11,7 +11,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `trash-unknown-totals.md` — Stop trash summaries calling unchecked archives empty or an over-limit total complete (2 triage outcomes).
 - [complete] `reachable-at-small-sizes.md` — Keep approval cards, the outage card and host dialogs reachable in very small windows (3 triage outcomes).
 - [complete] `app-dialog-focus.md` — Fix focus handoffs for the update and SSH help controls, and keep a delayed host confirmation from freezing another dialog (3 triage outcomes).
-- [pending] `template-editor-and-listing.md` — Escape template names in the editor, stop an open Templates dialog undoing agent shortcut moves, and list custom flags in the CLI table (3 triage outcomes). (after `template-list-current-labels.md`)
+- [in-flight f7fdc1] `template-editor-and-listing.md` — Escape template names in the editor, stop an open Templates dialog undoing agent shortcut moves, and list custom flags in the CLI table (3 triage outcomes). (after `template-list-current-labels.md`)
 - [complete] `replace-yolo-shared-question.md` — Make the header and sidebar Replace controls share one YOLO question per session (1 triage outcome).
 - [complete] `tab-attach-no-wait.md` — Stop a tab attach during Stop from stalling every session on that host (1 triage outcome).
 - [complete] `planning-probe-bound.md` — Bound a host planning probe's output wait so a lingering ssh helper cannot hold a planning slot forever, if super cheap (1 triage outcome).
