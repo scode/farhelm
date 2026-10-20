@@ -5,7 +5,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `download-staging-sweep.md` — Remove hidden partial downloads a desktop Quit left behind, without touching another instance's save (1 triage outcome). (after `helm-lock-outlives-work.md`)
 - [complete] `sidebar-bell-follows-row.md` — Make the notification list hand focus back on every close and close when its row moves (2 triage outcomes). (after `hosts-panel-menu-close.md`)
 - [complete] `template-editor-and-listing.md` — Escape template names in the editor, stop an open Templates dialog undoing agent shortcut moves, and list custom flags in the CLI table (3 triage outcomes). (after `template-list-current-labels.md`)
-- [landing d81ee8] `replace-yolo-shared-question.md` — Make the header and sidebar Replace controls share one YOLO question per session (1 triage outcome).
 - [complete] `tab-attach-no-wait.md` — Stop a tab attach during Stop from stalling every session on that host (1 triage outcome).
 - [complete] `planning-probe-bound.md` — Bound a host planning probe's output wait so a lingering ssh helper cannot hold a planning slot forever, if super cheap (1 triage outcome).
 - [complete] `repository-discovery-git-config.md` — Make repository suggestions ignore an inherited GIT_CONFIG, as the test fixture already does (1 triage outcome).
