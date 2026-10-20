@@ -2621,10 +2621,10 @@ pub(super) fn CreateSessionForm(
     /// The parent resolves names once; this form alone decides whether each
     /// captured definition fits and applies it through ordinary search edits.
     shortcut_requests: Signal<std::collections::VecDeque<ShortcutApplyRequest>>,
-    /// Explain why a single partial-template key opened a visible draft.
+    /// Explain why the initiating quick-launch action opened an incomplete draft.
     /// The notice belongs to this opening, never to a later Clone/Replace seed.
     #[props(default)]
-    partial_template_name: Option<String>,
+    partial_template_banner: Option<crate::launch_sequence::PartialTemplateBanner>,
     /// Quick launch submits this ordinary draft once, after its template and
     /// prerequisites settle. Failures reveal the same mounted form for retry.
     auto_launch: Signal<bool>,
@@ -3121,12 +3121,12 @@ pub(super) fn CreateSessionForm(
         use_signal(move || std::collections::VecDeque::from(initial_templates));
     // This opening's explanation survives automatic replay, then gives way
     // to the user's edits. It is not part of the remembered launcher draft.
-    let has_partial_template = partial_template_name.is_some();
+    let has_partial_template = partial_template_banner.is_some();
     let mut partial_template_hint = use_signal(move || has_partial_template);
     let mut partial_hint_timer_started = use_signal(|| false);
-    let partial_template_label = partial_template_name
-        .as_deref()
-        .map(display_peer)
+    let partial_template_text = partial_template_banner
+        .as_ref()
+        .map(|banner| banner.text())
         .unwrap_or_default();
     // Cloned rather than borrowed into the effect below: `hosts` is this
     // component's own prop (not a `Signal`, so it cannot be `Copy`-captured
@@ -5776,8 +5776,7 @@ pub(super) fn CreateSessionForm(
                             });
                         }
                     },
-                    strong { "{partial_template_label} cannot launch on its own." }
-                    span { " Use {crate::launch_sequence::TEMPLATE_SHORTCUTS.prefix.label(crate::launch_sequence::TEMPLATE_SHORTCUTS.mac_desktop)} to combine template keys, then Enter to launch, or complete this setup below." }
+                    strong { "{partial_template_text}" }
                 }
             }
             if let Some(notice) = permission_escalation() {

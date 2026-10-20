@@ -754,17 +754,21 @@ agent choice is independent of that destination:
   the dialog is open. A launch that revealed New gets no naming dialog, even if a later submission succeeds. A held
   chord starts only once; the chord never reaches the terminal and visible modals other than the launcher keep the
   keyboard. With no usable mark on the page it opens Templates with an explanation. An edited marked template that no
-  longer supplies an agent or command opens New with it applied. A launch refusal or YOLO question reveals New with the
-  same draft, error or confirmation; nothing bypasses host admission, and the shortcut never retries itself. The mark is
-  a nullable template name on the helm's shared preferences, independent of the template fields. Clicking another bolt
-  moves it; clicking the lit bolt clears it. A template that chooses neither an agent nor a nonblank command cannot be
-  marked in the interface. Renaming repoints the mark before deleting the old name; deleting that name clears its mark
-  through the shared delete path, and Undo never restores the mark. The editor says whether its saved template is
-  marked. The shortcut reads the mark and templates fresh on each use, so another window's change takes effect without
-  reloading. Templates' hover and a separate quick-switcher row advertise the chord and marked name. A browser that
-  reserves the chord keeps its behavior; the quick-switcher row remains available. An agent may set or clear the mark
-  through `farhelm agent template create` or `edit`, behind a template approval card. The helm applies the same
-  eligibility rule to an agent's write as the Templates editor does.
+  longer supplies what its active launch kind needs opens New with it applied and a prominent banner saying it needs
+  more choices before it can launch. The same banner accompanies an incomplete Cmd+J or quick-switcher pick, without
+  recommending the sequence prefix. A launch refusal or YOLO question reveals New with the same draft, error or
+  confirmation; nothing bypasses host admission, and the shortcut never retries itself. The mark is a nullable template
+  name on the helm's shared preferences, independent of the template fields. Clicking another bolt moves it; clicking
+  the lit bolt clears it. An agent-launch template needs an agent to be marked; a command-launch template needs a
+  nonblank command. With no launch kind, it is judged as an agent launch. The same rule decides whether a template or
+  combined sequence can launch directly. A marked template that no longer qualifies can still be unmarked. Renaming
+  repoints the mark before deleting the old name; deleting that name clears its mark through the shared delete path, and
+  Undo never restores the mark. The editor says whether its saved template is marked. The shortcut reads the mark and
+  templates fresh on each use, so another window's change takes effect without reloading. Templates' hover and a
+  separate quick-switcher row advertise the chord and marked name. A browser that reserves the chord keeps its behavior;
+  the quick-switcher row remains available. An agent may set or clear the mark through `farhelm agent template create`
+  or `edit`, behind a template approval card. The helm applies the same eligibility rule to an agent's write as the
+  Templates editor does.
 - Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit in
   the Mac desktop app, or Ctrl+Shift+digit everywhere else (including a Mac browser), starts its template through the
   same direct launch path as quick launch on the page, and applies it to an open New, Clone or Replace with draft under
@@ -794,12 +798,15 @@ agent choice is independent of that destination:
   the current draft without launching; each completed sequence is one refusal unit, and the pill says "apply" instead of
   "launch". An unbound key opens Templates at Enter with the binding hint on the page; inside the launcher it shows a
   refusal beneath the search box without changing the draft. A refusal names its template and reveals New with the draft
-  on the page; an incomplete result or YOLO question uses the same fallback. Enter with nothing queued cancels without
-  opening anything. A non-modal status pill floats over the bottom of the terminal area, or the main area with no
-  session open, naming queued templates and saying "Enter launch · Esc cancel". Before any key it says "Launch sequence:
-  press number keys to queue templates, Enter to launch, Esc to cancel." There is no timeout. Escape cancels and is
-  consumed; a click, switching windows or opening a dialog cancels. Any other key cancels and reaches its normal target;
-  Meta, Control and Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
+  on the page; an incomplete result opens New with a prominent banner saying "This sequence doesn't make a complete
+  setup; complete it below", whether one or several templates were queued. A YOLO question uses the same fallback. The
+  banner follows the number-key banner's expiry and dismissal rules. Bindings refresh when the prefix starts; Enter
+  captures the names currently shown in the pill. Enter with nothing queued cancels without opening anything. A
+  non-modal status pill floats over the bottom of the terminal area, or the main area with no session open, naming
+  queued templates and saying "Enter launch · Esc cancel". Before any key it says "Launch sequence: press number keys to
+  queue templates, Enter to launch, Esc to cancel." There is no timeout. Escape cancels and is consumed; a click,
+  switching windows or opening a dialog cancels. Any other key cancels and reaches its normal target; Meta, Control and
+  Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the

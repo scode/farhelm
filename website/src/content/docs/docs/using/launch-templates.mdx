@@ -65,7 +65,8 @@ a command still needs that command to exist on the host you launch on.
 
 Mark a template with **⚡** to start it with Cmd+P on a Mac, or Ctrl+Shift+P elsewhere. The session starts and is selected
 without opening the session launcher. Only one template is marked: another bolt moves the mark, and the lit bolt clears
-it. A template must choose an agent or a command to be marked.
+it. An **agent** template needs an agent to be marked; a **command** template needs a nonblank command. With **don't
+switch**, it is judged as an agent launch.
 
 Choices the template leaves out use **new**'s defaults, including the open session's host and directory. A template can
 start a fresh [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) this way too: marking it
@@ -80,7 +81,8 @@ use that row there. While the session launcher is open, the shortcut applies the
 To start any template by name, press Cmd+J on a Mac or Ctrl+Shift+J elsewhere. This opens a template-only list: type part
 of a name, use ↑ and ↓ to choose, then press Enter. If you type the exact name, that template is highlighted. Each row
 shows its saved choices and any **⚡** or number shortcut. A template that needs more choices opens the session launcher
-for you to finish. Escape closes the list and returns focus to where you were. Cmd+J does nothing while another dialog
+for you to finish, with a banner saying it needs more choices. The same banner appears if your marked template no
+longer has what it needs to launch. Escape closes the list and returns focus to where you were. Cmd+J does nothing while another dialog
 is open, including the session launcher.
 
 The desktop app accepts this shortcut. In a browser, the browser may keep it: [Chrome](https://support.google.com/chrome/answer/157179?hl=en_1), [Edge](https://learn.microsoft.com/en-us/microsoft-edge/devtools/shortcuts/), and [Firefox](https://support.mozilla.org/en-US/kb/keyboard-shortcuts-perform-firefox-tasks-quickly) list Ctrl+Shift+J for a console on Windows and Linux; Firefox lists Cmd+J for Downloads on a Mac. The browser's shortcut lists do not establish whether Farhelm receives the key.
@@ -128,7 +130,8 @@ fields keep Cmd+X for Cut, or the browser's usual Ctrl+Shift+X behavior. In the 
 that normal action; without selected text, the prefix starts a sequence.
 
 The combined setup starts directly, with the same defaults and YOLO questions as [quick launch](#quick-launch). If a
-template does not fit, the session launcher opens and names the template and choice that need attention. An unbound
+template does not fit, the session launcher opens and names the template and choice that need attention. If the combined
+choices still do not make a complete setup, a banner says to complete it there. An unbound
 number opens Templates when you press Enter. With New, Clone or Replace with open, Enter applies the queued templates
 to that draft instead of starting a session. The pill says **apply** there; an unbound key or template that does not fit
 shows a message beneath search and leaves that press's edits unapplied. Single number shortcuts and **⚡** still start
@@ -234,7 +237,8 @@ Create and edit accept `--gh`/`--github` for a managed checkout, or `--cwd` for 
 They can assign **⚡** with `--quick-launch` or a number with `--key 1` (using any digit from 1–9 or 0). An edit can
 remove this template's mark or key with `--no-quick-launch` or `--no-key`, even without changing its other choices.
 Assigning a mark or key that belongs to another template moves it; the card tells you which template loses it.
-The **⚡** mark needs a template that chooses an agent or a nonblank command. A number key can select a partial template.
+The **⚡** mark needs an agent for an **agent** template or a nonblank command for a **command** template; without a
+saved launch kind, it needs an agent. A number key can select a partial template.
 `farhelm agent templates` shows these assignments alongside each template's choices.
 Each change shows you the whole template on a card first, command line included, and happens only if you allow it,
 unless you have told Farhelm not to ask for that agent's host ([Approve what agents

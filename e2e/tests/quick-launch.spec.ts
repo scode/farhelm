@@ -367,6 +367,209 @@ test("launch prefix keeps text fields and resolves an unbound digit only at Ente
   await expect(page.locator(".launch-sequence-indicator")).toHaveCount(0);
 });
 
+/** A sequence's incomplete result needs one explanation regardless of how
+ * many keys contributed. A disabled Launch and no create request distinguish
+ * the intended editable draft from a refused automatic submission. */
+for (const multiple of [false, true]) {
+  test(`an incomplete ${multiple ? "multi-template" : "one-template"} sequence explains the combined setup`, async ({ page, request }) => {
+    const names = [1, 2].map((key) => `sequence-partial-${Date.now()}-${key}`);
+    let creates = 0;
+    let bodyFailed = false;
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      creates++;
+      await fulfillQuickFixture(route, request, 409, "incomplete sequence must not create");
+    });
+    try {
+      for (const name of names) {
+        const saved = await request.put(`/api/templates/${name}`, { data: { effort: "high" } });
+        expect(saved.ok(), await saved.text()).toBe(true);
+      }
+      const listing = await request.get("/api/templates");
+      expect(listing.ok(), await listing.text()).toBe(true);
+      const templates = (await listing.json()).templates;
+      for (const name of names) {
+        expect(templates.find((entry: { name: string }) => entry.name === name)?.fields,
+          "the partial fixture supplies neither an agent nor a command").toEqual({ effort: "high" });
+      }
+      await patchPreferences(request, { template_shortcuts: { "1": names[0], "2": names[1] } });
+      expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": names[0], "2": names[1] });
+      await page.goto("/");
+      await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+      await page.keyboard.press("Control+Shift+KeyX");
+      await page.keyboard.press("Digit1");
+      const indicator = page.locator(".launch-sequence-indicator");
+      await expect(indicator).toContainText(names[0]);
+      if (multiple) {
+        await page.keyboard.press("Digit2");
+        await expect(indicator).toContainText(names[1]);
+      }
+      await page.keyboard.press("Enter");
+      const form = page.locator(".create-session-form");
+      await expect(form).toBeVisible();
+      await expect(form.locator(".partial-template-banner")).toHaveText("This sequence doesn't make a complete setup; complete it below.");
+      await expect(form.locator(".create-session-submit")).toBeDisabled();
+      expect(creates).toBe(0);
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["create route", () => page.unroute("**/api/sessions")],
+        ...names.map((name): [string, () => Promise<void>] => [name, async () => {
+          const removed = await request.delete(`/api/templates/${name}`);
+          expect(removed.ok() || removed.status() === 404).toBe(true);
+        }]),
+      ]);
+    }
+  });
+}
+
+/** Enter captures the names the pill displayed, even if one definition was
+ * deleted after it was queued. A named refusal in New distinguishes this from
+ * an unbound key, which instead opens Templates with its binding hint. */
+test("a sequence naming a deleted template reveals New with the missing name", async ({ page, request }) => {
+  const names = ["missing", "remaining"].map((suffix) => `sequence-deleted-${Date.now()}-${suffix}`);
+  let creates = 0;
+  let bodyFailed = false;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    creates++;
+    await fulfillQuickFixture(route, request, 409, "missing sequence template must not create");
+  });
+  try {
+    for (const name of names) {
+      const saved = await request.put(`/api/templates/${name}`, { data: { effort: "high" } });
+      expect(saved.ok(), await saved.text()).toBe(true);
+    }
+    await patchPreferences(request, { template_shortcuts: { "1": names[0], "2": names[1] } });
+    expect((await readPreferences(request)).template_shortcuts).toEqual({ "1": names[0], "2": names[1] });
+    await page.goto("/");
+    await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+    await page.keyboard.press("Control+Shift+KeyX");
+    await page.keyboard.press("Digit1");
+    await page.keyboard.press("Digit2");
+    const indicator = page.locator(".launch-sequence-indicator");
+    for (const name of names) await expect(indicator).toContainText(name);
+    const removed = await request.delete(`/api/templates/${names[0]}`);
+    expect(removed.ok(), await removed.text()).toBe(true);
+    const listing = await request.get("/api/templates");
+    expect(listing.ok(), await listing.text()).toBe(true);
+    expect((await listing.json()).templates.map((entry: { name: string }) => entry.name)).not.toContain(names[0]);
+    await page.keyboard.press("Enter");
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await expect(form.locator(".create-session-error")).toContainText(`template ${names[0]} is no longer available`);
+    await expect(page.locator(".templates-dialog")).toHaveCount(0);
+    expect(creates).toBe(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["create route", () => page.unroute("**/api/sessions")],
+      ...names.map((name): [string, () => Promise<void>] => [name, async () => {
+        const removed = await request.delete(`/api/templates/${name}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }]),
+    ]);
+  }
+});
+
+/** A prefix refresh must replace this window's loaded bindings before Enter
+ * captures the displayed names. The refused create proves which template was
+ * applied without starting an agent or relying only on the pill's label. */
+for (const bolt of [false, true]) {
+  test(`a sequence honors a ${bolt ? "Bolt mark" : "number binding"} changed after this window loaded`, async ({ page, request }) => {
+    const names = ["old", "new"].map((suffix) => `sequence-refresh-${Date.now()}-${suffix}`);
+    const bodies: Record<string, any>[] = [];
+    let bodyFailed = false;
+    await page.route("**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      bodies.push(route.request().postDataJSON());
+      await fulfillQuickFixture(route, request, 409, "sequence refresh fixture refusal");
+    });
+    try {
+      for (const name of names) await commandTemplate(request, name);
+      await patchPreferences(request, { quick_launch_template: names[0], template_shortcuts: { "1": names[0] } });
+      await page.goto("/");
+      await expect(page.locator(".templates-button")).toHaveAttribute("data-tooltip", new RegExp(names[0]));
+      await patchPreferences(request, bolt ? { quick_launch_template: names[1] } : { template_shortcuts: { "1": names[1] } });
+      const fresh = await readPreferences(request);
+      expect(bolt ? fresh.quick_launch_template : fresh.template_shortcuts?.["1"]).toBe(names[1]);
+      await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+      await page.keyboard.press("Control+Shift+KeyX");
+      if (bolt) await chord(page);
+      else await page.keyboard.press("Digit1");
+      const indicator = page.locator(".launch-sequence-indicator");
+      await expect(indicator).toContainText(names[1]);
+      await expect(indicator).not.toContainText(names[0]);
+      await page.keyboard.press("Enter");
+      const form = page.locator(".create-session-form");
+      await expect(form).toBeVisible();
+      await expect(form.locator(".create-session-error")).toContainText("sequence refresh fixture refusal");
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0]).toMatchObject({ title: `${names[1]}-session`, command: { command: FAKE_AGENT, yolo: false } });
+    } catch (error) {
+      bodyFailed = true;
+      throw error;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["create route", () => page.unroute("**/api/sessions")],
+        ...names.map((name): [string, () => Promise<void>] => [name, async () => {
+          const removed = await request.delete(`/api/templates/${name}`);
+          expect(removed.ok() || removed.status() === 404).toBe(true);
+        }]),
+      ]);
+    }
+  });
+}
+
+/** One unbound number refuses the whole sequence, but its bound Bolt must
+ * not be mistaken for an absent mark. The specific number hint establishes
+ * settlement before asserting the misleading mark hint is absent. */
+test("a bound Bolt and unbound number show only the number binding hint", async ({ page, request }) => {
+  const name = `sequence-bound-bolt-${Date.now()}`;
+  let creates = 0;
+  let bodyFailed = false;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    creates++;
+    await fulfillQuickFixture(route, request, 409, "unbound sequence number must not create");
+  });
+  try {
+    await commandTemplate(request, name);
+    await patchPreferences(request, { quick_launch_template: name, template_shortcuts: {} });
+    const preferences = await readPreferences(request);
+    expect(preferences.quick_launch_template).toBe(name);
+    expect(preferences.template_shortcuts ?? {}).toEqual({});
+    await page.goto("/");
+    await expect(page.locator('.launch-sequence-trigger[data-sequence-action="begin"]')).toBeEnabled();
+    await page.keyboard.press("Control+Shift+KeyX");
+    await chord(page);
+    await page.keyboard.press("Digit9");
+    await expect(page.locator(".launch-sequence-indicator")).toContainText(name);
+    await page.keyboard.press("Enter");
+    const dialog = page.locator(".templates-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator(".templates-number-hint")).toContainText("Give a template a number key");
+    await expect(dialog.locator(".templates-quick-hint")).toHaveCount(0);
+    await expect(page.locator(".create-session-form")).toHaveCount(0);
+    expect(creates).toBe(0);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    await cleanupOwnedSteps(bodyFailed, [
+      ["create route", () => page.unroute("**/api/sessions")],
+      [name, async () => {
+        const removed = await request.delete(`/api/templates/${name}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }],
+    ]);
+  }
+});
+
 /** A completed preparation read belongs to its opening, even if the user
  * opens and cancels New while the read is held. The diagnostic generation
  * proves that the old continuation finished; absence alone is not readiness. */
@@ -1199,7 +1402,8 @@ test(`${numbered ? "number shortcut" : "quick launch"} ${retry === "refusal" ? "
 
 /** Unbound and incomplete number bindings use the existing Templates/New
  * fallbacks, while a visible modal must keep input and launch authority.
- * The disabled primary action pins incompleteness rather than a timed absence.
+ * A number alone recommends the prefix; the disabled primary action pins
+ * incompleteness rather than a timed absence of a create request.
  */
 test("number shortcuts respect modals and explain unbound or incomplete templates", async ({ page, request }) => {
   const name = `number-partial-${Date.now()}`;
@@ -1243,6 +1447,7 @@ test("number shortcuts respect modals and explain unbound or incomplete template
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-submit")).toBeDisabled();
+    await expect(form.locator(".partial-template-banner")).toHaveText(`${name} cannot launch on its own. Use Ctrl+Shift+X to combine template keys, then Enter to launch, or complete this setup below.`);
     expect(creates).toBe(0);
   } finally {
     for (const template of [name, runnable]) await request.delete(`/api/templates/${template}`);
@@ -1296,7 +1501,8 @@ test("quick launch reveals an offline host without dispatching a create", async 
 });
 
 /** Other modals keep the chord, and fresh reads distinguish a stale cached
- * mark from a deleted template or one edited into an incomplete setup. */
+ * mark from a deleted template or one edited into an incomplete setup. Bolt's
+ * incomplete notice asks for choices without recommending a sequence prefix. */
 test("quick launch keeps modal ownership and explains missing or incomplete templates", async ({ page, request }) => {
   const name = `quick-incomplete-${Date.now()}`;
   let creates = 0;
@@ -1327,6 +1533,7 @@ test("quick launch keeps modal ownership and explains missing or incomplete temp
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-submit")).toBeDisabled();
+    await expect(form.locator(".partial-template-banner")).toHaveText(`${name} needs more choices before it can launch; complete it below.`);
     expect(creates).toBe(0);
     await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);

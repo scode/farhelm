@@ -29,32 +29,6 @@ use std::rc::Rc;
 
 const DIALOG_SELECTOR: &str = r#".templates-dialog[role="dialog"]"#;
 
-/// Estimate whether ordered template edits supply the active launch kind.
-/// This intentionally knows no catalog or hosts: the mounted New form still
-/// applies every template and owns all validation and refusal messages. Dormant
-/// agent and command choices survive tab switches, just as they do in New.
-pub(super) fn stacked_quick_launch_eligible(templates: &[LaunchTemplate]) -> bool {
-    let mut kind = LauncherKind::Agent;
-    let mut agent = None;
-    let mut command = None;
-    for template in templates {
-        let fields = &template.fields;
-        if let Some(next) = fields.kind {
-            kind = next;
-        }
-        if kind == LauncherKind::Agent && fields.agent.is_some() {
-            agent = fields.agent;
-        }
-        if let Some(next) = &fields.command {
-            command = Some(next);
-        }
-    }
-    match kind {
-        LauncherKind::Agent => agent.is_some(),
-        LauncherKind::Command => command.is_some_and(|command| !command.trim().is_empty()),
-    }
-}
-
 /// Giving a key to a template moves it from its old owner and releases its
 /// previous key. This whole-map edit preserves one key per template by construction.
 fn bind_number(bindings: &mut BTreeMap<String, String>, name: &str, key: Option<&str>) {
@@ -1287,6 +1261,9 @@ pub(super) fn TemplatesDialog(
     let quick_launch_chord = TEMPLATE_SHORTCUTS
         .bolt
         .label(TEMPLATE_SHORTCUTS.mac_desktop);
+    let sequence_chord = TEMPLATE_SHORTCUTS
+        .prefix
+        .label(TEMPLATE_SHORTCUTS.mac_desktop);
     let list_base = base.clone();
     let mut templates = use_resource(move || {
         let base = list_base.clone();
@@ -1678,7 +1655,7 @@ pub(super) fn TemplatesDialog(
                     button { r#type: "button", class: "btn btn-neutral templates-close", disabled, "data-tooltip": "close templates; unsaved changes ask before leaving", onclick: move |_| depart.call(Departure::Close), "close" }
                 }
                 p { class: "host-settings-help templates-help",
-                    "A template is a named set of launcher edits. In New session, type tl:name to apply one; it changes only the fields it sets. Templates stack, the later one winning: tl:my-claude then tl:webbuilder starts Claude in a managed checkout of acme/web on build-box. ⚡ marks the template {quick_launch_chord} launches directly; a number key launches its template with {number_launch_chord}."
+                    "A template is a named set of launcher edits. In New session, type tl:name to apply one; it changes only the fields it sets. Templates stack, the later one winning: tl:my-claude then tl:webbuilder starts Claude in a managed checkout of acme/web on build-box. ⚡ marks the template {quick_launch_chord} launches directly; a number key launches its template with {number_launch_chord}. A number key can hold a partial template; press {sequence_chord} and then several keys to combine them, Enter to launch."
                 }
                 if quick_launch_hint {
                     p { class: "templates-quick-hint", role: "status", "Mark a template with ⚡ to launch it directly with {quick_launch_chord}." }
@@ -1705,7 +1682,7 @@ pub(super) fn TemplatesDialog(
                                                 disabled: disabled || templates.pending() || (!quick_launch_eligible(&template.fields) && preferences.0.read().quick_launch_template.as_ref() != Some(&template.name)),
                                                 aria_label: "quick launch {display_peer(&template.name)}",
                                                 aria_pressed: preferences.0.read().quick_launch_template.as_ref() == Some(&template.name),
-                                                "data-tooltip": if preferences.0.read().quick_launch_template.as_ref() == Some(&template.name) { format!("{quick_launch_chord} starts a session from this template right away, without opening New. Only one template can hold ⚡. Click to turn off.") } else if !quick_launch_eligible(&template.fields) { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Can't mark this one: it chooses neither an agent nor a command.") } else { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Click to mark this one.") },
+                                                "data-tooltip": if preferences.0.read().quick_launch_template.as_ref() == Some(&template.name) { format!("{quick_launch_chord} starts a session from this template right away, without opening New. Only one template can hold ⚡. Click to turn off.") } else if !quick_launch_eligible(&template.fields) { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Can't mark this one: an agent launch needs an agent; a command launch needs a nonblank command.") } else { format!("{quick_launch_chord} starts a session from the ⚡ template right away, without opening New. Only one template can hold ⚡. Click to mark this one.") },
                                                 onclick: { let name = template.name.clone(); move |_| mark.call(name.clone()) },
                                                 "⚡"
                                             }
@@ -1752,7 +1729,7 @@ pub(super) fn TemplatesDialog(
                                 } else if quick_launch_eligible(&current.fields) {
                                     "Not the quick launch. The ⚡ in the list makes it one."
                                 } else {
-                                    "Can't be the quick launch: it chooses neither an agent nor a command."
+                                    "Can't be the quick launch: an agent launch needs an agent; a command launch needs a nonblank command."
                                 }
                             }
                             div { class: "templates-field",
@@ -2002,10 +1979,10 @@ mod tests {
     }
 
     /// A partial setup cannot become the shortcut's sole launch instruction.
-    /// A kind switch alone or a blank command still needs New; an actual agent
-    /// or command qualifies even when other template fields remain partial.
+    /// A command in an otherwise kindless template cannot satisfy the default
+    /// agent tab; marking and number-key hints must agree with direct launch.
     #[test]
-    fn quick_launch_requires_an_agent_or_nonblank_command() {
+    fn quick_launch_requires_choices_for_the_active_kind() {
         assert!(!quick_launch_eligible(&TemplateFields::default()));
         assert!(!quick_launch_eligible(&TemplateFields {
             kind: Some(LauncherKind::Agent),
@@ -2019,7 +1996,7 @@ mod tests {
             agent: Some(LaunchHarness::Claude),
             ..Default::default()
         }));
-        assert!(quick_launch_eligible(&TemplateFields {
+        assert!(!quick_launch_eligible(&TemplateFields {
             command: Some("agent --flag".into()),
             ..Default::default()
         }));
@@ -2030,6 +2007,11 @@ mod tests {
     /// later blank command must not inherit an earlier runnable command.
     #[test]
     fn stacked_quick_launch_tracks_order_and_dormant_choices() {
+        let stacked_quick_launch_eligible = |templates: &[LaunchTemplate]| {
+            farhelm_proto::launcher::stacked_quick_launch_eligible(
+                templates.iter().map(|template| &template.fields),
+            )
+        };
         let template = |fields| LaunchTemplate {
             name: "setup".into(),
             fields,
