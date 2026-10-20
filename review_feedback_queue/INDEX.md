@@ -84,10 +84,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`template-table-omits-custom-permission-flags.md`](template-table-omits-custom-permission-flags.md) — The default
   template table omits the words that its custom permission setting applies.
 
-- [`delayed-host-confirmation-conflicts-with-other-dialogs.md`](delayed-host-confirmation-conflicts-with-other-dialogs.md)
-  — A delayed host confirmation or action refusal can disable another open dialog's clicks and normal keyboard
-  interaction; Escape recovers.
-
 - [`stale-template-dialog-undoes-agent-shortcut.md`](stale-template-dialog-undoes-agent-shortcut.md) — An open Templates
   dialog can overwrite an approved agent shortcut move with its old bindings.
 

@@ -2271,6 +2271,7 @@ pub(crate) fn HostsPanel(
                 }
             }
             if let Some(entry) = visible_refusal {
+                crate::modal_isolation::HostModal { key: "{entry.host.id}",
                 HostRefusalDialog {
                     key: "{entry.host.id}",
                     host: entry.host.clone(),
@@ -2297,6 +2298,7 @@ pub(crate) fn HostsPanel(
                             on_remove_start.call(id);
                         }
                     },
+                }
                 }
             }
         }

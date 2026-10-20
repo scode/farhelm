@@ -64,6 +64,46 @@
 //! Ordinary New retains its own focus trap. A quick-launch fallback keeps this
 //! isolation through reveal, and releases it before returning focus on close.
 
+use dioxus::prelude::*;
+
+/// Defer host results until the current modal owner leaves; each host can finish planning independently.
+/// A node-local reservation is claimed in JavaScript before Rust renders the child, so two waiters cannot both
+/// see an empty page. It lasts until unmount; no operation token or host result is owned here. The waiting
+/// observer also retires when this wrapper disappears, so cancellation cannot admit a stale result.
+#[component]
+pub(crate) fn HostModal(children: Element) -> Element {
+    let mut ready = use_signal(|| false);
+    let id = format!("host-modal-{}", dioxus::core::current_scope_id().0);
+    let script = format!(
+        r#"return await new Promise(resolve => {{
+            const slot = document.getElementById('{id}');
+            const observer = new MutationObserver(admit);
+            function admit() {{
+                if (!slot?.isConnected) {{ observer.disconnect(); resolve(false); return; }}
+                if (document.querySelector('[role="dialog"][aria-modal="true"], [data-host-modal-admitted]')) return;
+                slot.setAttribute('data-host-modal-admitted', '');
+                observer.disconnect();
+                resolve(true);
+            }}
+            observer.observe(document.body, {{childList: true, subtree: true}});
+            admit();
+        }});"#
+    );
+    rsx! {
+        div { id,
+            onmounted: move |_| {
+                let script = script.clone();
+                spawn(async move {
+                    if matches!(document::eval(&script).join::<bool>().await, Ok(true)) {
+                        ready.set(true);
+                    }
+                });
+            },
+            if ready() { {children} }
+        }
+    }
+}
+
 /// JavaScript that isolates the dialog matched by `dialog_selector`.
 ///
 /// For a visible dialog, run it after initial focus has landed inside it:

@@ -420,6 +420,60 @@ test("Settings waits while an uninstall confirmation is being planned", async ({
   }
 });
 
+/** Delayed results wait for Settings and other hosts' confirmations; independent isolation must not overlap. */
+for (const mode of ["plan", "refusal", "two plans"]) {
+  test(`delayed host dialogs wait for Settings: ${mode}`, async ({ page, request }, testInfo) => {
+    const gate = routeGate();
+    const ids: number[] = [];
+    const action = mode === "refusal" ? "update" : "uninstall";
+    let arrived = 0;
+    for (let index = 0; index < (mode === "two plans" ? 2 : 1); index++) {
+      const accepted = await startAdd(request, destination(testInfo, `modal-${index}`));
+      await waitForProgress(request, accepted.host_id, "completed");
+      ids.push(accepted.host_id);
+      await page.route(`**/api/hosts/${accepted.host_id}/${action}`, async (route) => {
+        arrived++;
+        await gate.wait();
+        await route.fulfill(mode === "refusal"
+          ? { status: 409, headers: { "x-farhelm-build": HELM_BUILD }, body: "held update refusal" }
+          : { headers: { "x-farhelm-build": HELM_BUILD }, json: { probe_id: `held-modal-${index}`, confirmation: "remove fixture Farhelm", plan: { state_dir: "/tmp/fixture-state" } } });
+      });
+    }
+    try {
+      await page.goto("/");
+      await openHostsPanel(page);
+      for (const id of ids) {
+        const row = page.locator(`[data-host-id="${id}"]`);
+        await openHostMenu(row);
+        await row.locator(`.provisioning-${action}`).click();
+        await expect(row.locator('.host-update-pending[data-update-phase="planning"]')).toHaveCount(1);
+      }
+      await expect.poll(() => arrived).toBe(ids.length);
+      await page.locator(".app-settings-toggle").click();
+      const settings = page.locator(".app-settings-dialog");
+      await expect.poll(() => settings.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true);
+      gate.release();
+      for (const id of ids) await expect(page.locator(`[data-host-id="${id}"] .host-update-pending[data-update-phase="planning"]`)).toHaveCount(0);
+      const modal = page.locator(".host-uninstall-dialog, .host-refusal-dialog");
+      await expect(modal).toHaveCount(0);
+      await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(1);
+      await settings.locator(".app-settings-close").first().click();
+      for (const _ of ids) {
+        await expect(modal).toHaveCount(1);
+        const cancel = modal.locator(".uninstall-cancel, .host-refusal-close");
+        await expect(modal.locator(".uninstall-confirm, .host-refusal-close")).toBeFocused();
+        const owner = await modal.evaluate((dialog) => dialog.closest("[data-host-modal-admitted]")!.id);
+        await cancel.click();
+        await expect(page.locator(`[id="${owner}"]`)).toHaveCount(0);
+      }
+      await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(0);
+    } finally {
+      gate.release();
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+    }
+  });
+}
+
 /** Update planning has not acquired the page lock and opens no confirmation.
  * It must exclude its own Settings, including a dispatched click, without
  * blocking another host's dialog. Hold the actual planning request so the
