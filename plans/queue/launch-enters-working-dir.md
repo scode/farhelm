@@ -291,49 +291,76 @@ not merged. If a `## Decisions` section exists, its latest entry must also be sa
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked while landing on 2026-10-20 (claim 89f53d).
+### 2026-10-20: answer to a blocked question
 
-### What this plan does
+The question, as the executor put it:
 
-When a session's folder exists but cannot actually be entered (a permissions problem, say), tmux used to start the agent
-or terminal tab in the home folder instead, while Farhelm still showed the chosen folder. This plan makes every launch
-enter its folder or fail with an error naming it: in its PR, agents enter it just before the agent program starts, and
-terminal tabs start through a small Farhelm helper that enters the folder before starting the user's shell.
+> Blocked while landing on 2026-10-20 (claim 89f53d).
+>
+> ### What this plan does
+>
+> When a session's folder exists but cannot actually be entered (a permissions problem, say), tmux used to start the
+> agent or terminal tab in the home folder instead, while Farhelm still showed the chosen folder. This plan makes every
+> launch enter its folder or fail with an error naming it: in its PR, agents enter it just before the agent program
+> starts, and terminal tabs start through a small Farhelm helper that enters the folder before starting the user's
+> shell.
+>
+> ### What the landing found
+>
+> Nothing of this plan has merged; its one PR (#2363) is still open, and main has none of its changes.
+>
+> 1. The landing's run of the whole supervisor test library failed seven tests that this plan breaks (run
+>    `acae51f5-18dc-4dc0-af71-f9bda72e0a19`). Those tests open terminal tabs on a test supervisor whose Farhelm program
+>    path deliberately points at nothing, so that agent launches fail on purpose. Tabs now need that program to run the
+>    new helper, so every tab in those tests dies at once and the open is refused. The tests cover tab scoping, deleting
+>    a session with tabs, Restart and Replace with tabs, and forged tab markers. The executor ran only the plan's own
+>    launch tests, not these. In this finding nothing outside the tests is wrong, but fixing them means giving those
+>    tests a stand-in program that can run the tab helper, without changing the placeholder the agent-launch tests rely
+>    on. That is new test machinery, not a landing-sized fix.
+> 2. By reading the code (not run): every newly started agent now records its folder, and when the agent fails to start
+>    for any reason, the error starts with "could not launch in working directory <folder>". The most common failure, an
+>    agent program that is not installed, would then point the user at the folder instead of the missing program.
+> 3. Minor, by reading: in the Mac app, the tab helper runs through the app's small forwarder program (the stable entry
+>    point that hands off to the current version) rather than the supervisor's own versioned copy, which adds one extra
+>    process level to every terminal tab there. SPEC_impl.md's section on side-by-side versions reserves that forwarder
+>    for short-lived launch helpers. Switching to the supervisor's own copy is a one-line change.
+>
+> The other seven plans in this landing round do not depend on this one and are landing without it.
+>
+> ### Question
+>
+> How should this plan continue?
+>
+> - (a) Send it back to an executor to fix the seven tests and make the error name the folder only when entering the
+>   folder is what failed, and to switch the Mac tab helper to the supervisor's own program (or document why not). This
+>   keeps the plan's design and costs one more execution.
+> - (b) Send it back for the tests only, and accept the error wording and the Mac forwarder as they are. Faster, but a
+>   missing agent program would be reported as a folder problem.
+> - (c) Abandon the plan and leave the original problem open.
+>
+> Recommendation: (a). The test fix is needed either way, and the misleading error would affect the most common launch
+> failure.
 
-### What the landing found
+The maintainer's answer:
 
-Nothing of this plan has merged; its one PR (#2363) is still open, and main has none of its changes.
+Maintainer's answer (in reply to the question above, before the landing monitor explained it):
 
-1. The landing's run of the whole supervisor test library failed seven tests that this plan breaks (run
-   `acae51f5-18dc-4dc0-af71-f9bda72e0a19`). Those tests open terminal tabs on a test supervisor whose Farhelm program
-   path deliberately points at nothing, so that agent launches fail on purpose. Tabs now need that program to run the
-   new helper, so every tab in those tests dies at once and the open is refused. The tests cover tab scoping, deleting a
-   session with tabs, Restart and Replace with tabs, and forged tab markers. The executor ran only the plan's own launch
-   tests, not these. In this finding nothing outside the tests is wrong, but fixing them means giving those tests a
-   stand-in program that can run the tab helper, without changing the placeholder the agent-launch tests rely on. That
-   is new test machinery, not a landing-sized fix.
-2. By reading the code (not run): every newly started agent now records its folder, and when the agent fails to start
-   for any reason, the error starts with "could not launch in working directory <folder>". The most common failure, an
-   agent program that is not installed, would then point the user at the folder instead of the missing program.
-3. Minor, by reading: in the Mac app, the tab helper runs through the app's small forwarder program (the stable entry
-   point that hands off to the current version) rather than the supervisor's own versioned copy, which adds one extra
-   process level to every terminal tab there. SPEC_impl.md's section on side-by-side versions reserves that forwarder
-   for short-lived launch helpers. Switching to the supervisor's own copy is a one-line change.
+> Okay, I read most of that, but seriously, what is the issue here? Is the issue just that a bunch of tests broke? Is
+> there some fundamental issue? Why is this blocked?
+>
+> Shouldn't we just fix the tests? Is there some reason we wouldn't just fix the tests? Why would we care about tests
+> that are exercising behavior that shouldn't exist to begin with?
+>
+> Please push back on me, but I don't see why this is blocked. What am I missing?
 
-The other seven plans in this landing round do not depend on this one and are landing without it.
+After the explanation that nothing fundamental is wrong (the broken tests cover real tab behavior and fail only because
+their test supervisor's placeholder program cannot run the new tab helper), the maintainer agreed to option (a):
 
-### Question
-
-How should this plan continue?
-
-- (a) Send it back to an executor to fix the seven tests and make the error name the folder only when entering the
-  folder is what failed, and to switch the Mac tab helper to the supervisor's own program (or document why not). This
-  keeps the plan's design and costs one more execution.
-- (b) Send it back for the tests only, and accept the error wording and the Mac forwarder as they are. Faster, but a
-  missing agent program would be reported as a folder problem.
-- (c) Abandon the plan and leave the original problem open.
-
-Recommendation: (a). The test fix is needed either way, and the misleading error would affect the most common launch
-failure.
+- Fix the seven broken supervisor tests by giving them a stand-in program that can run the tab helper, without changing
+  the placeholder that the agent-launch tests rely on to make launches fail on purpose.
+- Make a launch error name the session folder only when entering the folder is what failed; a missing agent program must
+  not be reported as a folder problem.
+- The executor may also switch Mac terminal tabs to start through the supervisor's own versioned program instead of the
+  app's forwarder (the one-line change in finding 3), or document why not.
